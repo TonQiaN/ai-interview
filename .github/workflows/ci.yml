@@ -20,7 +20,7 @@ jobs:
     name: rust
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -37,7 +37,7 @@ jobs:
     name: hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: 音频、权重、密钥、个人信息不进 Git
         run: scripts/verify-repo-hygiene.sh
       - name: shell 语法
