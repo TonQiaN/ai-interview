@@ -1,0 +1,15 @@
+{
+  "sha": "265c6cef07625665d0c28d2faafb1415562379dc",
+  "siblings": [
+    {
+      "rfilename": "semantic_codec/model.safetensors",
+      "blobId": "d8fb89f71594050e263aed319b2440b362e2eeef",
+      "size": 177183712,
+      "lfs": {
+        "sha256": "ec947271175d8cad75ec37e83aa487e27c97a0f72a303393772da5ffa84bddf2",
+        "size": 177183712,
+        "pointerSize": 134
+      }
+    }
+  ]
+}

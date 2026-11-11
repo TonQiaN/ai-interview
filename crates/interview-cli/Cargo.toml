@@ -1,0 +1,20 @@
+[package]
+name = "interview-cli"
+description = "AI 面试的命令行入口"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "ai-interview"
+path = "src/main.rs"
+
+[dependencies]
+interview-tts.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true

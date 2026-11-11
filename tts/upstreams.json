@@ -1,0 +1,14 @@
+[
+  {
+    "directory": "vendor/mlx-indextts2",
+    "url": "https://github.com/groxaxo/mlx-indextts2-inference.git",
+    "commit": "a6d8fef49b3c36fa8bccaf5a780091e9b864f8e7",
+    "lock": "tts/locks/mlx-indextts2.uv.lock"
+  },
+  {
+    "directory": "vendor/breeze-tts-mlx",
+    "url": "https://github.com/rishikksh20/breeze-tts-mlx.git",
+    "commit": "4e045c13c4627b3f1a49ea1172f24efe06d2c16b",
+    "lock": "tts/locks/breeze-tts-mlx.uv.lock"
+  }
+]

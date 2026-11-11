@@ -1,0 +1,42 @@
+# Rust
+/target
+**/*.rs.bk
+
+# 密钥和本机配置
+.env
+.env.*
+!.env.example
+
+# 系统和编辑器
+.DS_Store
+.idea/
+.vscode/
+
+# Mac 上的 TTS 运行环境（见 tts/README.md）：上游代码、权重、音色、生成结果都只留在本机
+# 不带结尾斜杠：目录和指到别处的软链接都忽略
+/vendor
+/models
+/data
+/logs
+/voices
+.venv/
+**/.venv/
+__pycache__/
+*.pyc
+.runtime/
+
+# 音频和模型权重一律不进 Git（仓库是公开的，真人音色属于个人信息）
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.aiff
+*.ogg
+*.opus
+*.safetensors
+*.pth
+*.pt
+*.npz
+*.onnx
+*.gguf
+*.zip

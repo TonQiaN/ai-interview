@@ -1,0 +1,25 @@
+{
+  "sha": "da985ba0987f70aaeb84a80f2851cfac8c697a7b",
+  "siblings": [
+    {
+      "rfilename": "config.json",
+      "blobId": "a383a594dac18459628cd2837168cd276342a31a",
+      "size": 1874
+    },
+    {
+      "rfilename": "model.safetensors",
+      "blobId": "cb7c6d08fe4cc20b2748c5525de64964d50190fa",
+      "size": 2322063736,
+      "lfs": {
+        "sha256": "eb890c9660ed6e3414b6812e27257b8ce5454365d5490d3ad581ea60b93be043",
+        "size": 2322063736,
+        "pointerSize": 135
+      }
+    },
+    {
+      "rfilename": "preprocessor_config.json",
+      "blobId": "5db61951cdf5edab6337fd84ee619500c27aaa3d",
+      "size": 275
+    }
+  ]
+}

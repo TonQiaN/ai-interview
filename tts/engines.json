@@ -1,0 +1,106 @@
+[
+  {
+    "id": "index2",
+    "name": "IndexTTS 2",
+    "short": "INDEX / 2",
+    "family": "IndexTTS",
+    "backend": "MLX · GPT INT8",
+    "model_dir": "models/IndexTTS-2-mlx-8bit",
+    "source_dir": "models/IndexTTS-2-source",
+    "environment": "vendor/mlx-indextts2",
+    "revision": "740dcaff396282ffb241903d150ac011cd4b1ede",
+    "languages": [
+      "zh",
+      "en"
+    ],
+    "capabilities": [
+      "声音克隆",
+      "8 类情绪与混合",
+      "独立情绪参考",
+      "长文分段"
+    ],
+    "license": "bilibili 模型协议",
+    "source": "https://github.com/index-tts/index-tts",
+    "adapter": "https://github.com/groxaxo/mlx-indextts2-inference",
+    "required_files": [
+      "gpt.safetensors",
+      "s2mel.safetensors",
+      "bigvgan.safetensors",
+      "vq2emb.safetensors",
+      "config.json",
+      "tokenizer.model"
+    ],
+    "artifact_revision": "81e890787be1b0b174b9ec3dafd89642f578b286",
+    "artifact_repo": "vanch007/mlx-indextts2-standard-8bit"
+  },
+  {
+    "id": "index25",
+    "name": "IndexTTS 2.5",
+    "short": "INDEX / 2.5",
+    "family": "IndexTTS",
+    "backend": "MLX · GPT INT8 / FP16",
+    "model_dir": "models/IndexTTS-2.5-mlx-8bit",
+    "source_dir": "models/IndexTTS-2.5-source",
+    "environment": "vendor/mlx-indextts2",
+    "revision": "d0aa86e75bb6f3437f3831e95056fa72842d89ef",
+    "languages": [
+      "zh",
+      "en",
+      "ja",
+      "es",
+      "ar"
+    ],
+    "capabilities": [
+      "声音克隆",
+      "情绪解耦",
+      "5 种语言",
+      "读音标注",
+      "分段流式原生入口"
+    ],
+    "license": "bilibili 模型协议",
+    "source": "https://github.com/index-tts/index-tts",
+    "adapter": "https://github.com/groxaxo/mlx-indextts2-inference",
+    "required_files": [
+      "gpt.safetensors",
+      "codec.safetensors",
+      "s2mel.safetensors",
+      "bigvgan.safetensors",
+      "model_manifest.json",
+      "config.json"
+    ],
+    "artifact_revision": "3170ceff8032ab6d0c2945e72068a03ea8c68461",
+    "artifact_repo": "vanch007/mlx-indextts2-2.5-8bit"
+  },
+  {
+    "id": "breeze2",
+    "name": "BreezeTTS2",
+    "short": "BREEZE / 2",
+    "family": "Breeze",
+    "backend": "MLX · INT8 + MPS Codec",
+    "model_dir": "models/Breeze-TTS-2-mlx-int8",
+    "environment": "vendor/breeze-tts-mlx",
+    "revision": "c1c8ca18b70b30822735633991d9ebf4898e47d4",
+    "languages": [
+      "zh",
+      "en"
+    ],
+    "capabilities": [
+      "声音设计",
+      "声音克隆",
+      "自然语言导演",
+      "笑声与叹气"
+    ],
+    "license": "研究与非商业使用",
+    "source": "https://github.com/breezeblue-ai/breeze-tts",
+    "adapter": "https://github.com/rishikksh20/breeze-tts-mlx",
+    "required_files": [
+      "mlx_config.json",
+      "backbone.safetensors",
+      "depth_decoder.safetensors",
+      "text_encoder.safetensors",
+      "audio_tokenizer/model.safetensors"
+    ],
+    "artifact_revision": "92266ef6e15dd4be290be416dd6b0bf9a2bab81b",
+    "artifact_repo": "rishikksh20/Breeze-TTS-2-mlx"
+  }
+]

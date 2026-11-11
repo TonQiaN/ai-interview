@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        # 需要真模型、真 TTS 的测试标了 #[ignore]，这里不跑
+        run: cargo test --workspace
+
+  hygiene:
+    name: hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 音频、权重、密钥、个人信息不进 Git
+        run: scripts/verify-repo-hygiene.sh
+      - name: shell 语法
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done
+
+  # 总闸：分支保护只需要把这一条设成必过。新加的 job 要加进 needs，否则它红了也挡不住合并。
+  all-checks-passed:
+    name: all-checks-passed
+    if: always()
+    needs: [rust, hygiene]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 上面的 job 都要通过
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "各 job 结果：$RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::有检查没通过"
+              exit 1
+            fi
+          done
