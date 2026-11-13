@@ -108,9 +108,15 @@ pub fn multipart_file(field: &str, file_name: Option<&str>, content: &[u8]) -> (
 
 /// 把排着队的后台任务跑完，返回跑了几条。
 pub async fn run_tasks(ctx: &AppContext, llm: Option<Arc<dyn ChatModel>>) -> usize {
+    run_tasks_with(Deps::new(ctx.clone(), llm)).await
+}
+
+/// 同上，任务用给定的设置跑（比如把 PDF 的页数上限调小）。
+pub async fn run_tasks_with(deps: Deps) -> usize {
+    let db = deps.ctx.db.clone();
     let mut registry = interview_platform::tasks::TaskRegistry::new();
-    interview_talent::register_tasks(&mut registry, Deps::new(ctx.clone(), llm));
-    interview_platform::tasks::TaskRunner::new(ctx.db.clone(), registry)
+    interview_talent::register_tasks(&mut registry, deps);
+    interview_platform::tasks::TaskRunner::new(db, registry)
         .run_until_idle()
         .await
         .expect("任务跑得起来")
