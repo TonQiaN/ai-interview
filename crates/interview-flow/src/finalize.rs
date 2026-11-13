@@ -74,8 +74,10 @@ async fn retranscribe(deps: &Deps, row: &InterviewRow) -> Result<Value, sqlx::Er
     if !status.ready {
         return Ok(json!({ "skipped": "语音识别现在用不了" }));
     }
-    // 假后端返回的不是真的识别结果，不拿它覆盖已有的文字
-    let fake = status.backend == "fake";
+    // 假后端返回的是固定的文字，不是候选人说的话：写进记录会让报告评的是编出来的内容
+    if status.backend == "fake" {
+        return Ok(json!({ "skipped": "语音识别用的是假后端" }));
+    }
     let db = &deps.ctx.db;
     let options = TranscribeOptions {
         hotwords: record::hotwords(db, row).await,
@@ -87,10 +89,6 @@ async fn retranscribe(deps: &Deps, row: &InterviewRow) -> Result<Value, sqlx::Er
             continue;
         };
         if turn.speaker != Speaker::Candidate {
-            continue;
-        }
-        if fake && !turn.text.trim().is_empty() {
-            kept += 1;
             continue;
         }
         let audio = match deps.ctx.blobs.get(key).await {

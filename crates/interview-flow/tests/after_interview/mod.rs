@@ -17,7 +17,10 @@ use interview_llm::{
 };
 use interview_platform::tasks::{NewTask, TaskQueue};
 use interview_platform::testing::TestRequest;
-use interview_stt::{FakeTranscriber, Transcriber};
+use interview_stt::{
+    FakeTranscriber, SttError, SttStatus, TranscribeOptions, TranscribeSession, Transcriber,
+    Transcript,
+};
 use interview_tts::FakeBackend;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -349,8 +352,45 @@ impl<'a> Turn<'a> {
     }
 }
 
-fn stt(script: &[&str]) -> Arc<FakeTranscriber> {
-    Arc::new(FakeTranscriber::with_script(script.iter().copied()))
+/// 测试用的语音识别：按脚本依次返回文字，对外报的后端名不是 `fake`
+/// （收尾任务不采用假后端的结果，见 `fake_backend_never_writes_transcripts`）。
+struct ScriptedStt(FakeTranscriber);
+
+impl ScriptedStt {
+    fn calls(&self) -> usize {
+        self.0.calls()
+    }
+}
+
+#[async_trait]
+impl Transcriber for ScriptedStt {
+    async fn status(&self) -> SttStatus {
+        SttStatus {
+            backend: "scripted".into(),
+            ..self.0.status().await
+        }
+    }
+
+    async fn start_session(
+        &self,
+        options: &TranscribeOptions,
+    ) -> Result<Box<dyn TranscribeSession>, SttError> {
+        self.0.start_session(options).await
+    }
+
+    async fn transcribe(
+        &self,
+        audio: &Audio,
+        options: &TranscribeOptions,
+    ) -> Result<Transcript, SttError> {
+        self.0.transcribe(audio, options).await
+    }
+}
+
+fn stt(script: &[&str]) -> Arc<ScriptedStt> {
+    Arc::new(ScriptedStt(FakeTranscriber::with_script(
+        script.iter().copied(),
+    )))
 }
 
 /// 面试前用出题的假模型，面试后换成写报告的假模型和语音识别。
@@ -457,7 +497,7 @@ async fn running_finalize_again_does_not_add_reports(pool: PgPool) {
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
-async fn fake_transcripts_do_not_replace_text_from_the_interview(pool: PgPool) {
+async fn fake_backend_never_writes_transcripts(pool: PgPool) {
     let h = harness(pool).await;
     let id = h.ready_interview().await;
     h.turn(&id, Turn::interviewer(0, "q1", "介绍一下自己。", 0, 4))
@@ -467,16 +507,25 @@ async fn fake_transcripts_do_not_replace_text_from_the_interview(pool: PgPool) {
         Turn::candidate(1, "q1", "面试中已经转写好的回答。", 5, 9).audio(speech(4)),
     )
     .await;
+    h.turn(&id, Turn::interviewer(2, "q2", "你负责哪一块？", 10, 14))
+        .await;
+    // 面试中没转写出文字的回答：假后端编出来的话不能填进去，更不能拿去写报告
+    h.turn(&id, Turn::candidate(3, "q2", "", 15, 19).audio(speech(4)))
+        .await;
     h.finish(&id, "completed").await;
-    let stt = stt(&["假后端编出来的话"]);
-    let h = h.with_review(Some(Arc::new(ReportModel::complete())), Some(stt.clone()));
+    let fake = Arc::new(FakeTranscriber::with_script(["假后端编出来的话"]));
+    let model = Arc::new(ReportModel::complete());
+    let h = h.with_review(Some(model.clone()), Some(fake.clone()));
     assert_eq!(h.run_tasks().await, 2);
 
     let turns = h.transcript(&id).await;
     assert_eq!(turns[1]["text"], "面试中已经转写好的回答。");
     assert_eq!(turns[1]["transcript_source"], "live");
-    assert_eq!(stt.calls(), 0);
+    assert_eq!(turns[3]["text"], "");
+    assert_eq!(turns[3]["transcript_source"], "live");
+    assert_eq!(fake.calls(), 0);
     assert_eq!(h.detail(&id).await["report"]["status"], "done");
+    assert!(!model.everything_sent().contains("假后端编出来的话"));
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
