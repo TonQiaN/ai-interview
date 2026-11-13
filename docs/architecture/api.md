@@ -114,6 +114,14 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `GET /api/v1/interview-templates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` | 配置模板 |
 | `GET /api/v1/interview-config/defaults` | 默认配置和各选项的取值范围，给配置表单用 |
 
+现在已经有的是 `transcript`、`report`、`decision` 之外的那些。几条前端要知道的规则：
+
+- 只有 `draft`、`prepare_failed`、`ready` 三个状态能改配置、改题、点准备，其他状态返回 409，`code` 是 `interview_not_editable`。
+- `PATCH` 改了配置或简历，出好的题目作废，状态回到 `draft`；只换音色的话题目保留，状态也回到 `draft`，再点准备只重新合成语音。
+- `POST .../prepare` 返回 202 和面试详情（状态 `preparing`），之后轮询详情。失败是 `prepare_failed`，原因在 `prepare_error`；语音合成失败时题目会保留，再点一次只补失败的那几句。请求体可以不传；传 `{"regenerate_plan": true}` 会重新出题。没配大模型又需要出题时返回 503。
+- `GET .../plan` 在还没出题时返回 404，`code` 是 `plan_not_ready`。`PUT .../plan` 要传完整的计划，校验不过返回 422，`details` 按位置（比如 `questions[1].text`）列出原因；保存后状态先变 `preparing`，文字变了的那几句重新合成完回到 `ready`。
+- 配置校验不过返回 422，`details` 的键是配置里的字段路径（比如 `answer.max_sec`）。
+
 ### ② 岗位和候选人（interview-talent、interview-raas）
 
 | 方法和路径 | 做什么 |

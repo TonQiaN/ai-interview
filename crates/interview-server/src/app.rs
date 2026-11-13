@@ -30,6 +30,9 @@ use crate::compose::{Composed, Shared, compose};
     modifiers(&SecuritySchemes),
     tags(
         (name = "auth", description = "HR 登录"),
+        (name = "interviews", description = "面试场次：建面试、配置、出题和预合成语音、看题改题"),
+        (name = "interview-templates", description = "面试配置模板"),
+        (name = "positions", description = "岗位"),
         (name = "settings", description = "全局设置"),
         (name = "system", description = "系统状态"),
     )

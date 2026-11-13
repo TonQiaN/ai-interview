@@ -15,6 +15,7 @@ AI 面试：开源的 AI 面试系统。主体语言是 Rust；面试官的语�
 - `crates/interview-core`：各模块共用的状态枚举、任务名、文件键。
 - `crates/interview-llm`：DeepSeek 客户端。思考开关和 low / high / max 三档强度、流式输出、JSON 输出、工具调用、重试和用量统计。
 - `crates/interview-engine`：面试引擎的基础模式。面试配置（时长、轮次定位、HR 的考察要求等）、用大模型出题并复核的出题器、逐题问答的会话状态机、每段回答的即时判断（追问、提前结束）。纯逻辑，不碰数据库和网络，说明见 [crates/interview-engine/README.md](crates/interview-engine/README.md)。
+- `crates/interview-flow`：面试场次。建面试、配置和配置模板、后台出题并预先合成面试官的语音、看题改题、试听。面试结束后的转写和分析报告还没接。说明见 [crates/interview-flow/README.md](crates/interview-flow/README.md)。
 - `crates/interview-audio`：音频工具。WAV 读写、重采样、按能量找说话的段。
 - `crates/interview-tts`：语音合成。三个 TTS 引擎的清单和能力限制、统一的合成请求、缓存、长文分段、批量合成和流式合成。现在只有输出测试音的假后端，接 Mac 上真模型的后端还没接。
 - `crates/interview-stt`：语音识别。转写接口、带逐字时间戳的结果类型、把模型输出拼成词。现在只有假后端，接真模型的后端还没接。
