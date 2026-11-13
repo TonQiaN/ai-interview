@@ -398,7 +398,7 @@ fn request_body(request: &SynthesisRequest, stream: bool) -> serde_json::Value {
             "description": description,
         }),
     };
-    json!({
+    let mut body = json!({
         "engine": request.engine,
         "text": request.text,
         "language": request.language,
@@ -410,7 +410,12 @@ fn request_body(request: &SynthesisRequest, stream: bool) -> serde_json::Value {
         },
         "seed": request.options.seed,
         "stream": stream,
-    })
+    });
+    // 没指定步数就不带这个字段，worker 用引擎默认的
+    if let Some(steps) = request.effective_diffusion_steps() {
+        body["diffusion_steps"] = json!(steps);
+    }
+    body
 }
 
 #[derive(Debug, Deserialize)]
@@ -576,6 +581,27 @@ mod tests {
                 "stream": true,
             })
         );
+    }
+
+    #[test]
+    fn diffusion_steps_are_sent_only_to_engines_that_use_them() {
+        let voice = Voice::Clone {
+            reference: reference(),
+            transcript: Some("参考录音的逐字稿".to_owned()),
+        };
+        let mut request =
+            SynthesisRequest::new(EngineId::Index2, "好的。", Language::Zh, voice.clone());
+        assert!(
+            request_body(&request, true)
+                .get("diffusion_steps")
+                .is_none()
+        );
+        request.diffusion_steps = Some(16);
+        assert_eq!(request_body(&request, true)["diffusion_steps"], json!(16));
+
+        let mut breeze = SynthesisRequest::new(EngineId::Breeze2, "好的。", Language::Zh, voice);
+        breeze.diffusion_steps = Some(16);
+        assert!(request_body(&breeze, true).get("diffusion_steps").is_none());
     }
 
     #[test]

@@ -31,14 +31,14 @@ mod worker;
 pub use backend::{AudioStream, EngineStatus, TtsBackend, TtsError};
 pub use cache::{AudioCache, CacheError, DirCache, MemoryCache, cache_blob_key};
 pub use config::{
-    BACKEND_ENV_VAR, TtsBackendKind, TtsConfig, TtsConfigError, WORKER_TOKEN_ENV_VAR,
-    WORKER_URLS_ENV_VAR, backend_from_env,
+    BACKEND_ENV_VAR, LIVE_DIFFUSION_STEPS_ENV_VAR, TtsBackendKind, TtsConfig, TtsConfigError,
+    WORKER_TOKEN_ENV_VAR, WORKER_URLS_ENV_VAR, backend_from_env, synthesizer_from_env,
 };
 pub use engine::{ENGINE_ENV_VAR, EngineId, EngineSpec, Language, UnknownEngine};
 pub use fake::FakeBackend;
 pub use request::{
-    Emotion, REFERENCE_MAX_MS, REFERENCE_MIN_MS, ReferenceAudio, RequestError, Style,
-    SynthesisOptions, SynthesisRequest, Voice, VoiceSettings,
+    DIFFUSION_STEPS_MAX, DIFFUSION_STEPS_MIN, Emotion, REFERENCE_MAX_MS, REFERENCE_MIN_MS,
+    ReferenceAudio, RequestError, Style, SynthesisOptions, SynthesisRequest, Voice, VoiceSettings,
 };
 pub use segment::split_text;
 pub use synthesizer::{BatchItem, BatchOutcome, Synthesized, Synthesizer};

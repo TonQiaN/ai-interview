@@ -22,7 +22,7 @@ use interview_platform::status::{ComponentStatus, DatabaseProbe, StatusProbe, St
 use interview_platform::tasks::TaskRegistry;
 use interview_stt::{SttConfig, Transcriber};
 use interview_tts::http::BlobAudioCache;
-use interview_tts::{FakeBackend, Synthesizer, backend_from_env};
+use interview_tts::{FakeBackend, Synthesizer, synthesizer_from_env};
 use utoipa_axum::router::OpenApiRouter;
 
 /// 多个模块共用、又不属于平台的东西。
@@ -32,6 +32,7 @@ pub struct Shared {
     pub llm: Option<Arc<dyn ChatModel>>,
     /// 语音合成。后端由 `AI_INTERVIEW_TTS_BACKEND` 决定：默认是输出测试音的假后端，
     /// `worker` 是 Mac 上跑真模型的 worker（见 `tts/worker/README.md`）。
+    /// 实时对话里现场合成的句子可以用 `AI_INTERVIEW_TTS_LIVE_DIFFUSION_STEPS` 少走几步。
     pub synth: Arc<Synthesizer>,
     /// 语音识别。按环境变量建（`AI_INTERVIEW_STT_BACKEND`，默认是假后端）；建不出来时是 `None`，
     /// 服务照常启动，面试后不重新转写。
@@ -68,7 +69,7 @@ impl Shared {
         };
         Self {
             llm,
-            synth: Arc::new(Synthesizer::new(backend_from_env())),
+            synth: Arc::new(synthesizer_from_env()),
             stt,
         }
     }
@@ -173,9 +174,10 @@ impl interview_room::LiveVoice for RoomVoice {
         text: &str,
     ) -> Result<interview_room::SpokenAudio, String> {
         let voice = interview_flow::voice::resolve(&self.ctx, voice_id, language).await?;
+        // 候选人正等着：按配置用更少的步数合成（AI_INTERVIEW_TTS_LIVE_DIFFUSION_STEPS，不设就和预合成一样）
         let spoken = self
             .synth
-            .synthesize(&voice.request(text))
+            .synthesize_live(&voice.request(text))
             .await
             .map_err(|err| err.to_string())?;
         Ok(interview_room::SpokenAudio {

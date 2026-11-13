@@ -72,7 +72,7 @@ export DATABASE_URL=$(scripts/dev-db.sh url)
 cargo test -p interview-server --features sherpa --test live -- --ignored --nocapture
 ```
 
-它会打印题目、每一步等了多久、转写出来的回答、报告结论和大模型的花费。示例录音的内容和题目无关，模型听到三题答非所问就会提前结束面试，这是正常的。在 Mac 上再设 `AI_INTERVIEW_TTS_BACKEND=worker`，就连真的语音合成一起跑。
+它会打印题目、每一步等了多久、转写出来的回答、报告结论和大模型的花费。示例录音的内容和题目无关，模型听到三题答非所问就会提前结束面试，这是正常的。在 Mac 上再设 `AI_INTERVIEW_TTS_BACKEND=worker`，就连真的语音合成一起跑；`AI_INTERVIEW_TTS_LIVE_DIFFUSION_STEPS`（比如 16）让实时对话里现场合成的句子少走几步、早点出声，不设是 25 步（实测见 `tts/worker/README.md`）。
 
 这个测试还认几个变量：`AI_INTERVIEW_LIVE_MODE=conversational` 跑实时对话；`AI_INTERVIEW_LIVE_VOICE_WAV` 指一段参考录音，面试官就用克隆的声音（引擎读 `AI_INTERVIEW_TTS_ENGINE`，BreezeTTS2 还要用 `AI_INTERVIEW_LIVE_VOICE_TEXT_FILE` 给逐字稿），不设是兜底的设计音色；`AI_INTERVIEW_LIVE_QUESTIONS` 改题目数；`AI_INTERVIEW_LIVE_KEEP_AUDIO_DIR` 指一个目录，把面试官说的每一句的语音留下来听（克隆音色的也是真人的声音，只留在本机）；`AI_INTERVIEW_LOG`（比如 `info`）把后端日志也打出来，不设只有测试自己打印的内容。
 
