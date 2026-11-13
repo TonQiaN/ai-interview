@@ -12,7 +12,12 @@ export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 export function Badge({ tone = "neutral", plain, className, ...rest }: BadgeProps) {
   return (
     <span
-      className={clsx("oil-badge", tone !== "neutral" && `oil-badge--${tone}`, plain && "oil-badge--plain", className)}
+      className={clsx(
+        "oil-badge",
+        tone !== "neutral" && `oil-badge--${tone}`,
+        plain && "oil-badge--plain",
+        className,
+      )}
       {...rest}
     />
   );
@@ -124,7 +129,10 @@ export function ScoreBar({ label, value, max = 100, color, className }: ScoreBar
   return (
     <div className={clsx("oil-score", className)}>
       <span className="oil-score__label">{label}</span>
-      <span className="oil-score__value">{value}</span>
+      <span className="oil-score__value">
+        {value}
+        {max !== 100 && <small> / {max}</small>}
+      </span>
       {/* biome-ignore lint/a11y/useSemanticElements: 原生 meter 没法用笔触蒙版画，这里用 div 加 role */}
       <div
         className="oil-score__track"

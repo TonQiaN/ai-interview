@@ -6,7 +6,7 @@ AI 面试的语音只在这三个引擎里选，运行时要能切换。这里�
 
 - 偏向 **IndexTTS 2**（代码里的 `index2`）克隆 **R001** 音色，这是默认引擎。
 - 切换引擎：环境变量 `AI_INTERVIEW_TTS_ENGINE`，或命令行 `--tts-engine`，取值 `index2`、`index25`、`breeze2`。`cargo run -p interview-cli -- tts engines` 会列出三个引擎并标出当前选中的。
-- Rust 这边（`crates/interview-tts`）已经有：引擎清单、统一的合成请求（克隆或文字设计音色、情绪或导演指令）、合成缓存、长文分段、批量合成和流式合成的入口。后端目前只有输出测试音的假后端（云端和 CI 用），接 Mac 上真模型的 worker 后端还没接。
+- Rust 这边（`crates/interview-tts`）已经有：引擎清单、统一的合成请求（克隆或文字设计音色、情绪或导演指令）、合成缓存、长文分段、批量合成和流式合成的入口。后端有两个：输出测试音的假后端（云端和 CI 用），和通过 HTTP 调 Mac 上常驻 worker 的 `WorkerBackend`（`AI_INTERVIEW_TTS_BACKEND=worker`）。worker 的协议和启动方式见 [worker/README.md](worker/README.md)；worker 里三个真引擎的适配还在 Mac 上验证，没有合入。
 
 ## 三个引擎
 

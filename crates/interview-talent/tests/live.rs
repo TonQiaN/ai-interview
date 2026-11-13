@@ -159,3 +159,69 @@ async fn refuses_text_that_is_not_a_resume() {
         "{error}"
     );
 }
+
+/// 自我介绍里夹着姓名和联系方式的简历。
+const RESUME_WITH_CONTACTS_IN_PROSE: &str = "\
+周明远
+后端开发工程师 | 6 年经验 | 成都
+
+个人简介
+我是周明远，6 年后端开发经验，主要做订单和库存系统。有意向请直接联系我：
+手机 138-0000-5678（微信同号），邮箱 zhoumingyuan@example.com，QQ 100000001。
+
+工作经历
+成都示例供应链科技有限公司　后端开发工程师　2020.03 - 至今
+- 负责库存服务的重构，把超卖率从万分之五降到零；
+- 设计订单拆单规则引擎，支撑日均 80 万单。
+
+成都样例软件有限公司　Java 开发工程师　2018.07 - 2020.02
+- 参与仓储管理系统开发，负责入库和盘点模块。
+
+教育经历
+示例理工大学　软件工程　本科　2014.09 - 2018.06
+
+技能
+Java、Go、MySQL、Redis、Kafka
+
+自我评价
+做事踏实，喜欢把问题查到底。家住成都市高新区示例路 100 号，离公司近，可随时到岗。
+期待您的来电：13800005678。";
+
+#[tokio::test]
+#[ignore = "要连真 DeepSeek，会产生费用"]
+async fn contact_details_inside_prose_stay_out_of_the_interview_text() {
+    let model = DeepSeekClient::from_env().expect("需要 DEEPSEEK_API_KEY");
+    let settings = TalentAiSettings::from_env().expect("环境变量格式正确");
+
+    let content = ResumeContent::Text(RESUME_WITH_CONTACTS_IN_PROSE.to_owned());
+    let reading = read_resume(&model, &content, &settings)
+        .await
+        .expect("读得出来");
+    let parsed = &reading.parsed;
+    println!(
+        "—— 结构化 ——\n{}\n",
+        serde_json::to_string_pretty(parsed).expect("能序列化")
+    );
+    let text = parsed.to_interview_text();
+    println!("—— 给面试用的文字 ——\n{text}\n");
+
+    // 联系方式照常读进专门的字段
+    assert_eq!(parsed.name.as_deref(), Some("周明远"));
+    assert_eq!(parsed.phone.as_deref(), Some("13800005678"));
+    assert_eq!(parsed.email.as_deref(), Some("zhoumingyuan@example.com"));
+
+    // 给大模型出题用的文字里一样都不该有
+    for secret in [
+        "周明远",
+        "13800005678",
+        "138-0000-5678",
+        "example.com",
+        "100000001",
+        "示例路 100 号",
+    ] {
+        assert!(!text.contains(secret), "不该带 {secret}");
+    }
+    // 和能力有关的内容还在
+    assert!(text.contains("超卖率"));
+    assert!(text.contains("做事踏实"));
+}

@@ -21,7 +21,8 @@ export function valueNoise(seed, period = 64) {
   const r = rng(seed);
   const grid = new Float32Array(period * period);
   for (let i = 0; i < grid.length; i++) grid[i] = r();
-  const at = (x, y) => grid[(((y % period) + period) % period) * period + (((x % period) + period) % period)];
+  const at = (x, y) =>
+    grid[(((y % period) + period) % period) * period + (((x % period) + period) % period)];
   return (x, y) => {
     const xi = Math.floor(x);
     const yi = Math.floor(y);
@@ -37,7 +38,7 @@ export function valueNoise(seed, period = 64) {
   };
 }
 
-const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 function makeCanvas(w, h) {
   const c = document.createElement("canvas");
@@ -188,7 +189,8 @@ export function paint(o) {
         y += vy * stepLen;
         if (x < -radius || y < -radius || x > w + radius || y > h + radius) break;
         const qi = (clamp(y | 0, 0, h - 1) * w + clamp(x | 0, 0, w - 1)) * 4;
-        const dist = Math.abs(refPx[qi] - br0) + Math.abs(refPx[qi + 1] - bg0) + Math.abs(refPx[qi + 2] - bb0);
+        const dist =
+          Math.abs(refPx[qi] - br0) + Math.abs(refPx[qi + 1] - bg0) + Math.abs(refPx[qi + 2] - bb0);
         if (dist > tol) break;
         const [nx, ny] = dirAt(x, y, Math.max(2, radius * 0.5));
         // 保持方向连续，并做一点惯性平滑
@@ -388,7 +390,9 @@ export function textureTile(o) {
         const weft = Math.sin((y * Math.PI * 2) / period);
         // 平纹：经纬交替压在上面
         const over = ((x / period) | 0) % 2 === ((y / period) | 0) % 2 ? warp : weft;
-        const slub = (n1((x / size) * 64, (y / size) * 64 * 6) - 0.5) * 1.4 + (n2((x / size) * 32 * 5, (y / size) * 32) - 0.5) * 1.2;
+        const slub =
+          (n1((x / size) * 64, (y / size) * 64 * 6) - 0.5) * 1.4 +
+          (n2((x / size) * 32 * 5, (y / size) * 32) - 0.5) * 1.2;
         H[y * size + x] = over * 0.9 + slub + (n3((x / size) * 16, (y / size) * 16) - 0.5) * 1.5;
       }
     }
@@ -399,7 +403,9 @@ export function textureTile(o) {
         const u = (x / size) * 64;
         const v = (y / size) * 64;
         H[y * size + x] =
-          (n1(u * 0.5, v * 4) - 0.5) * 3 + (n2(u * 0.25, v * 2) - 0.5) * 2.4 + (n3(u * 0.25, v * 0.5) - 0.5) * 2;
+          (n1(u * 0.5, v * 4) - 0.5) * 3 +
+          (n2(u * 0.25, v * 2) - 0.5) * 2.4 +
+          (n3(u * 0.25, v * 0.5) - 0.5) * 2;
       }
     }
   }

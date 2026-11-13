@@ -21,11 +21,24 @@ export interface BannerProps extends Omit<HTMLAttributes<HTMLDivElement>, "title
   actions?: ReactNode;
 }
 
-export function Banner({ tone = "info", title, top, actions, className, children, ...rest }: BannerProps) {
+export function Banner({
+  tone = "info",
+  title,
+  top,
+  actions,
+  className,
+  children,
+  ...rest
+}: BannerProps) {
   const Icon = bannerIcon[tone];
   return (
     <div
-      className={clsx("oil-banner", tone !== "info" && `oil-banner--${tone}`, top && "oil-banner--top", className)}
+      className={clsx(
+        "oil-banner",
+        tone !== "info" && `oil-banner--${tone}`,
+        top && "oil-banner--top",
+        className,
+      )}
       role={tone === "danger" ? "alert" : "status"}
       {...rest}
     >
@@ -52,7 +65,12 @@ export function Progress({ value, tone = "primary", small, label, className }: P
   const v = Math.max(0, Math.min(1, value));
   return (
     <div
-      className={clsx("oil-progress", tone !== "primary" && `oil-progress--${tone}`, small && "oil-progress--sm", className)}
+      className={clsx(
+        "oil-progress",
+        tone !== "primary" && `oil-progress--${tone}`,
+        small && "oil-progress--sm",
+        className,
+      )}
       role="progressbar"
       aria-valuemin={0}
       aria-valuemax={100}
@@ -76,7 +94,15 @@ export interface RingProps {
 }
 
 /** 环形进度，中间可以放数字。 */
-export function Ring({ value, size = 96, thickness = 8, color, label, children, className }: RingProps) {
+export function Ring({
+  value,
+  size = 96,
+  thickness = 8,
+  color,
+  label,
+  children,
+  className,
+}: RingProps) {
   const r = (size - thickness) / 2;
   const c = 2 * Math.PI * r;
   const v = Math.max(0, Math.min(1, value));
@@ -88,7 +114,13 @@ export function Ring({ value, size = 96, thickness = 8, color, label, children, 
       aria-label={label ?? `${Math.round(v * 100)}%`}
     >
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
-        <circle className="oil-ring__track" cx={size / 2} cy={size / 2} r={r} strokeWidth={thickness} />
+        <circle
+          className="oil-ring__track"
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          strokeWidth={thickness}
+        />
         <circle
           className="oil-ring__value"
           cx={size / 2}
@@ -112,8 +144,18 @@ export function Spinner({ label = "加载中" }: { label?: string }) {
   return <span className="oil-spinner" role="status" aria-label={label} />;
 }
 
-export function Skeleton({ width, height = 16, className }: { width?: number | string; height?: number | string; className?: string }) {
-  return <div className={clsx("oil-skeleton", className)} style={{ width, height }} aria-hidden="true" />;
+export function Skeleton({
+  width,
+  height = 16,
+  className,
+}: {
+  width?: number | string;
+  height?: number | string;
+  className?: string;
+}) {
+  return (
+    <div className={clsx("oil-skeleton", className)} style={{ width, height }} aria-hidden="true" />
+  );
 }
 
 export interface EmptyStateProps {
@@ -124,7 +166,13 @@ export interface EmptyStateProps {
   className?: string;
 }
 
-export function EmptyState({ title, description, painting = "bouquet", actions, className }: EmptyStateProps) {
+export function EmptyState({
+  title,
+  description,
+  painting = "bouquet",
+  actions,
+  className,
+}: EmptyStateProps) {
   return (
     <div className={clsx("oil-empty", className)}>
       <Painting name={painting} weight="thin" />

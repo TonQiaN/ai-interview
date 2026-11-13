@@ -3,6 +3,7 @@
 pub mod assess;
 pub mod config;
 pub mod error;
+pub mod live;
 pub mod plan;
 pub mod planner;
 pub mod room;
@@ -15,6 +16,10 @@ pub use config::{
     Language, Seniority, TimeBudget,
 };
 pub use error::EngineError;
+pub use live::{
+    CandidateTurn, LIVE_SCHEMA_VERSION, Line, LiveAction, LiveEvent, LiveOutcome, LiveState,
+    LiveTiming, Speaker,
+};
 pub use plan::{
     FollowUp, GenerationInfo, InterviewBrief, InterviewPlan, PLAN_SCHEMA_VERSION, Phrases,
     PlanIssue, PlannedQuestion, QuestionCategory, QuestionOrigin, ScoringGuide, Utterance,

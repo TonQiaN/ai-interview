@@ -13,11 +13,14 @@ pub struct UnknownValue {
 ///
 /// 生成：serde（序列化成同样的字符串）、`utoipa::ToSchema`、`as_str`、`ALL`、
 /// `FromStr`、`Display`；开了 `sqlx` feature 时还能直接读写 PostgreSQL 的 TEXT 列。
+///
+/// 取值那一格写成 `tt` 而不是 `literal`：`literal` 传给派生宏时外面多一层看不见的括号，
+/// serde 认得，utoipa 认不出，接口文档里的取值就会变成变体名。
 macro_rules! text_enum {
     (
         $(#[$meta:meta])*
         pub enum $name:ident {
-            $( $(#[$vmeta:meta])* $variant:ident => $text:literal ),+ $(,)?
+            $( $(#[$vmeta:meta])* $variant:ident => $text:tt ),+ $(,)?
         }
     ) => {
         $(#[$meta])*

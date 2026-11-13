@@ -22,7 +22,7 @@
 | `llm_usage` | ① | 大模型调用的用量和费用 |
 | `positions` | ② | 岗位。`description` 和 `requirements` 是全文，`extra` 放结构化补充 |
 | `candidates` | ② | 候选人。`profile` 是画像 |
-| `resumes` | ② | 简历。原件在 BlobStore，`text_content` 是全文，`parsed` 是结构化结果 |
+| `resumes` | ② | 简历。原件在 BlobStore，`text_content` 是全文（给 HR 看），`parsed` 是结构化结果，`interview_text` 是去掉联系方式、给大模型出题和写报告用的文字 |
 | `voices` | ④ | 面试官音色 |
 | `interview_templates` | ① | 面试配置模板 |
 | `interviews` | ① | 一场面试。`config`、`plan`、`runtime_state` 三个 JSONB 的结构归 ③ |
@@ -137,3 +137,19 @@ BlobStore 用字符串键，全小写，斜杠分层。库里只存键。约定�
 | `voices.settings` | `interview_tts` 里的类型 | ④ |
 
 这些类型都要派生 `serde::{Serialize, Deserialize}` 和 `utoipa::ToSchema`，前端类型靠它们生成。
+
+## 出题和写报告时怎么读岗位和简历
+
+`interview-flow`、`interview-report` 直接读 ② 的表（只读），不依赖 `interview-talent`：
+
+| 要什么 | 从哪读 |
+| --- | --- |
+| 岗位名称 | `positions.title` |
+| 公司或团队的展示名 | `positions.extra->>'client_name'`，没有就留空 |
+| 岗位描述全文 | `positions.description` 加 `positions.requirements`（任职要求，可能为空） |
+| 怎么称呼候选人 | `candidates.name` |
+| 用哪份简历 | `interviews.resume_id` 指的那份；为空就用候选人的主简历（`resumes.candidate_id = ? AND is_primary`） |
+| 简历文字 | `resumes.interview_text`。`parse_status = 'done'` 之后才有；候选人没有简历或还没解析完时为空，出题只按岗位来 |
+| 画像 | `candidates.profile`（`interview_talent::CandidateProfile`），`interview_focus` 是建议追问的点；`profile_updated_at` 为空表示还没生成 |
+
+发给大模型的简历一律用 `interview_text`，不要用 `text_content`：`text_content` 是原样的全文，里面有姓名、手机、邮箱、住址。`interview_text` 里候选人自己写在自我介绍、项目描述里的姓名、手机、邮箱也会被换成「候选人」和「（已隐去）」，所以称呼候选人要用 `candidates.name`，不要指望从简历文字里读到。

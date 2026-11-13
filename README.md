@@ -14,12 +14,13 @@ AI 面试：开源的 AI 面试系统。主体语言是 Rust；面试官的语�
 - `crates/interview-platform`：运行底座。配置、数据库和迁移、文件存储、后台任务队列、HR 登录、统一的错误和分页。
 - `crates/interview-core`：各模块共用的状态枚举、任务名、文件键。
 - `crates/interview-llm`：DeepSeek 客户端。思考开关和 low / high / max 三档强度、流式输出、JSON 输出、工具调用、重试和用量统计。
-- `crates/interview-engine`：面试引擎的基础模式。面试配置（时长、轮次定位、HR 的考察要求等）、用大模型出题并复核的出题器、逐题问答的会话状态机、每段回答的即时判断（追问、提前结束）。纯逻辑，不碰数据库和网络，说明见 [crates/interview-engine/README.md](crates/interview-engine/README.md)。
+- `crates/interview-engine`：面试引擎。面试配置（时长、轮次定位、HR 的考察要求等）、用大模型出题并复核的出题器、逐题问答的会话状态机、每段回答的即时判断（追问、提前结束），以及实时对话模式（面试官听完现场追问）。纯逻辑，不碰数据库和网络，说明见 [crates/interview-engine/README.md](crates/interview-engine/README.md)。
+- `crates/interview-flow`：面试场次。建面试、配置和配置模板、后台出题并预先合成面试官的语音、看题改题、试听。面试结束后重新转写候选人的回答、生成分析报告（可以重新生成，保留每个版本），HR 看对话记录和报告、写结论。说明见 [crates/interview-flow/README.md](crates/interview-flow/README.md)。
 - `crates/interview-audio`：音频工具。WAV 读写、重采样、按能量找说话的段。
-- `crates/interview-tts`：语音合成。三个 TTS 引擎的清单和能力限制、统一的合成请求、缓存、长文分段、批量合成和流式合成。现在只有输出测试音的假后端，接 Mac 上真模型的后端还没接。
-- `crates/interview-stt`：语音识别。转写接口、带逐字时间戳的结果类型、把模型输出拼成词。现在只有假后端，接真模型的后端还没接。
+- `crates/interview-tts`：语音合成。三个 TTS 引擎的清单和能力限制、统一的合成请求、缓存、长文分段、批量合成和流式合成。后端有输出测试音的假后端，和调 Mac 上常驻 worker 的 `WorkerBackend`（协议见 [tts/worker/README.md](tts/worker/README.md)，真引擎的适配还在 Mac 上验证）。
+- `crates/interview-stt`：语音识别。整段转写和边录边转两种用法，结果带标点和逐字时间戳。真后端用 sherpa-onnx 在进程内跑 X-ASR 模型（CPU 就够，编译时加 `--features sherpa`），默认是不需要模型的假后端。选型和用法见 [docs/speech/stt.md](docs/speech/stt.md)。
 - `crates/interview-raas`：RAAS 招聘平台的只读客户端，取岗位、岗位需求、候选人和简历。
-- `crates/interview-talent`：简历解析（PDF 转成图片让大模型读，带水印和扫描件也行）、候选人画像、岗位描述整理。接口和数据库部分还没接。
+- `crates/interview-talent`：简历解析（PDF 转成图片让大模型读，带水印和扫描件也行）、候选人画像、岗位描述整理。岗位、候选人、简历的接口已经接进服务：上传简历后在后台解析（`resume.parse` 任务），自动补全候选人信息并生成画像。配了 RAAS 的地址和账号以后，可以在 `/api/v1/raas/` 下面浏览 RAAS 里的岗位和候选人并导入进来（对 RAAS 只读），导入的简历走同一条解析的路。
 - `crates/interview-cli`：命令行入口 `ai-interview`，现在只能列出引擎和当前选中的那个。
 - `web/apps/candidate`：候选人面试页的核心逻辑（静音检测、逐题状态机、录制分片上传）。
 - `web/packages/api-client`：前端调后端用的客户端，类型由后端的 OpenAPI 文档生成。

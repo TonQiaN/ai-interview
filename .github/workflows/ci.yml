@@ -87,6 +87,33 @@ jobs:
       - name: 构建
         run: pnpm build
 
+  # 语音识别的真后端在可选特性后面，上面的 rust 任务编不到它，这里单独检查，并用真模型跑一遍
+  stt-sherpa:
+    name: stt-sherpa
+    runs-on: ubuntu-latest
+    env:
+      AI_INTERVIEW_STT_MODEL_DIR: ${{ github.workspace }}/.stt-models
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: stt-sherpa
+      - name: clippy
+        run: cargo clippy -p interview-stt --all-targets --features sherpa -- -D warnings
+      - name: 模型缓存
+        uses: actions/cache@v4
+        with:
+          path: .stt-models
+          key: stt-models-${{ hashFiles('crates/interview-stt/scripts/download-models.sh') }}
+      - name: 下载模型
+        run: crates/interview-stt/scripts/download-models.sh
+      - name: test
+        # 模型在 CPU 上跑，不花钱，所以这里连标了 #[ignore] 的真模型测试一起跑
+        run: cargo test -p interview-stt --features sherpa -- --include-ignored
+
   hygiene:
     name: hygiene
     runs-on: ubuntu-latest
@@ -96,13 +123,15 @@ jobs:
         run: scripts/verify-repo-hygiene.sh
       - name: shell 语法
         run: |
-          for f in scripts/*.sh; do bash -n "$f"; done
+          for f in scripts/*.sh crates/*/scripts/*.sh; do bash -n "$f"; done
+      - name: Python 语法
+        run: python3 -m py_compile tts/worker/*.py crates/interview-stt/bench/*.py
 
   # 总闸：分支保护只需要把这一条设成必过。新加的 job 要加进 needs，否则它红了也挡不住合并。
   all-checks-passed:
     name: all-checks-passed
     if: always()
-    needs: [rust, web, hygiene]
+    needs: [rust, web, stt-sherpa, hygiene]
     runs-on: ubuntu-latest
     steps:
       - name: 上面的 job 都要通过

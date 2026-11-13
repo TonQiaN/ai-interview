@@ -32,14 +32,14 @@ applyTheme(readTheme()); // 读上次的选择，没有就跟随系统
 
 ## 有什么
 
-| 类别 | 组件 |
-| --- | --- |
-| 按钮 | `Button`（主色、朱红、金、次要、幽灵、危险；三种尺寸；加载中） |
-| 表单 | `Field`、`Input`、`Textarea`、`Select`、`Checkbox`、`Radio`、`Switch`、`Slider`、`Segmented`、`Dropzone`、`CopyField` |
-| 容器 | `Card`、`Frame`（镀金画框）、`Painting`、`Hero`、`Dialog` |
-| 数据 | `Table`、`Badge`、`Chip`、`Stat`、`Avatar`、`KeyValue`、`ScoreBar`、`Ring`、`Progress` |
-| 反馈 | `Banner`、`Spinner`、`Skeleton`、`EmptyState`、`ToastProvider` 和 `useToast` |
-| 导航 | `AppShell`、`Brand`、`Nav`、`navItemClass`、`PageHeader`、`Tabs`、`Steps` |
+| 类别   | 组件                                                                                                                                                                                        |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 按钮   | `Button`（主色、朱红、金、次要、幽灵、危险；三种尺寸；加载中）                                                                                                                              |
+| 表单   | `Field`、`Input`、`Textarea`、`Select`、`Checkbox`、`Radio`、`Switch`、`Slider`、`Segmented`、`Dropzone`、`CopyField`                                                                       |
+| 容器   | `Card`、`Frame`（镀金画框）、`Painting`、`Hero`、`Dialog`                                                                                                                                   |
+| 数据   | `Table`、`Badge`、`Chip`、`Stat`、`Avatar`、`KeyValue`、`ScoreBar`、`Ring`、`Progress`                                                                                                      |
+| 反馈   | `Banner`、`Spinner`、`Skeleton`、`EmptyState`、`ToastProvider` 和 `useToast`                                                                                                                |
+| 导航   | `AppShell`、`Brand`、`Nav`、`navItemClass`、`PageHeader`、`Tabs`、`Steps`                                                                                                                   |
 | 面试页 | `Stage`、`DeviceCheckCard`、`ConsentList`、`VideoFrame`、`InterviewerPresence`、`CaptionCard`、`QuestionProgress`、`Timer`、`RecordingIndicator`、`SilenceRing`、`LevelMeter`、`StatusPage` |
 
 每个组件长什么样、怎么写，看展示页：

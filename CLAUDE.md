@@ -38,14 +38,31 @@ pnpm -C web format                     # 用 Biome 格式化并整理 import
 
 真模型测试读 `DEEPSEEK_API_KEY`，会产生少量费用，云端容器里可以直接跑：`cargo test -p interview-llm --test live -- --ignored --nocapture`。
 
-面试引擎用真模型出题和模拟面试（同样读 `DEEPSEEK_API_KEY`，出一份题约 0.1 元，模拟一场不到 0.02 元）：
+面试引擎用真模型出题和模拟面试（同样读 `DEEPSEEK_API_KEY`，出一份题约 0.1 元，模拟一场不到 0.05 元）：
 
 ```bash
 cargo run -p interview-engine --example plan -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
 cargo run -p interview-engine --example simulate -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
+cargo run -p interview-engine --example converse -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
 ```
 
-改了出题或判断回答的提示词，要用这两个命令实际跑一遍看结果，单元测试用的是假模型，测不出提示词的好坏。
+改了出题、判断回答或实时对话的提示词，要用这几个命令实际跑一遍看结果，单元测试用的是假模型，测不出提示词的好坏。
+
+语音合成的真模型只能在 Mac 上跑，由 `tts/worker/worker.py` 提供（协议见 `tts/worker/README.md`）。后端通过 `AI_INTERVIEW_TTS_BACKEND=worker` 和 `AI_INTERVIEW_TTS_WORKER_URLS` 连它，默认是输出测试音的假后端。不用 Mac 也能测协议：`python3 tts/worker/worker.py --engines index2,index25,breeze2 --fake --port 7800` 起一个不加载模型的 worker，`cargo test -p interview-tts --test worker_backend` 会自己起一个（需要 python3）。改了协议，`worker.py`、`crates/interview-tts/src/worker.rs` 和 `tts/worker/README.md` 要一起改。
+
+语音识别的真模型（X-ASR，约 170 MB，CPU 就能跑，不花钱）默认不编进来，要用时加 `--features sherpa`：
+
+```bash
+eval "$(crates/interview-stt/scripts/fetch-sherpa-lib.sh)"   # 只有云端容器需要：构建脚本过不了代理，先用 curl 把预编译库下好
+crates/interview-stt/scripts/download-models.sh              # 模型下到 ~/.cache/ai-interview/stt-models
+export AI_INTERVIEW_STT_MODEL_DIR=~/.cache/ai-interview/stt-models
+cargo test -p interview-stt --features sherpa --test sherpa_live -- --ignored --nocapture
+cargo run --release -p interview-stt --features sherpa --example transcribe -- 录音.wav
+```
+
+服务进程要用真的语音识别（面试后重新转写），同样加特性启动：`cargo run -p interview-server --features sherpa`，并设 `AI_INTERVIEW_STT_BACKEND=sherpa`。
+
+改了 `crates/interview-stt/src/sherpa.rs` 要带着 `--features sherpa` 跑 clippy 和上面的测试，`scripts/check.sh` 不开这个特性。CI 里有单独的 `stt-sherpa` 任务跑这些。
 
 ## 目录
 
