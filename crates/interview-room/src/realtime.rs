@@ -456,6 +456,63 @@ pub(crate) fn open(
     })
 }
 
+/// 面试官现场开口时最常说的头一句。
+///
+/// 引擎要求追问和回应都先用一句很短的话接住候选人，再问。用真模型跑了三场（47 轮现场接话），
+/// 42 轮的头一句是这两句之一。英文面试还没量过，先不备。
+fn usual_openers(language: Language) -> &'static [&'static str] {
+    match language {
+        Language::Zh => &["明白。", "好的。"],
+        Language::En => &[],
+    }
+}
+
+/// 面试一开始，在后台把常说的头一句用这场的音色合成一遍。
+///
+/// 合成出来的不用存：[`LiveVoice`] 的实现按音色和文字缓存，现场说到同一句时马上就有。真引擎合成
+/// 这样一句短话也要两秒左右，备好了候选人答完就能先听到这一句，后面的问题在它播的时候接着合成。
+/// 同一个音色以前说过这几句的，这里只是几次缓存命中。合成不出来不影响面试，现场再合成就是了。
+pub(crate) fn warm_up(deps: &Deps, interview_id: Uuid, language: Language) {
+    let openers = usual_openers(language);
+    if !deps.config.realtime_warm_up || openers.is_empty() || deps.voice.is_none() {
+        return;
+    }
+    let deps = deps.clone();
+    tokio::spawn(async move {
+        let Some(voice) = deps.voice.as_ref() else {
+            return;
+        };
+        let voice_id = match voice_of(&deps, interview_id).await {
+            Ok(voice_id) => voice_id,
+            Err(err) => {
+                tracing::warn!(%interview_id, reason = %err, "没查到这场面试的音色，常说的接话没有提前合成");
+                return;
+            }
+        };
+        let started = Instant::now();
+        // 一句一句来：合成服务一次只做一句的时候，不把别的面试正等着的那一句挤到后面去
+        for (done, text) in openers.iter().enumerate() {
+            match tokio::time::timeout(SYNTH_TIMEOUT, voice.speak(voice_id, language, text)).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(reason)) => {
+                    tracing::warn!(%interview_id, %reason, done, "常说的接话没能提前合成，现场说到再合成");
+                    return;
+                }
+                Err(_) => {
+                    tracing::warn!(%interview_id, done, "提前合成常说的接话太慢，剩下的现场说到再合成");
+                    return;
+                }
+            }
+        }
+        tracing::info!(
+            %interview_id,
+            sentences = openers.len(),
+            total_ms = started.elapsed().as_millis(),
+            "常说的接话提前合成好了"
+        );
+    });
+}
+
 /// 把最近的一步变成协议里的「下一步」：补上语音地址和时长。
 pub(crate) async fn current_step(
     deps: &Deps,
@@ -954,6 +1011,7 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
     let beats = speaker.released + u32::from(speaker.held.is_some());
     let first_ready_ms = speaker.first_ready_ms;
     let settled_ms = speaker.settled_ms;
+    let synth_ms = speaker.synth_ms;
     finish_turn(deps, interview_id, &turn, speaker.leftover(), outcome).await?;
     deps.realtime.notify(interview_id);
 
@@ -976,6 +1034,7 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
         decision_ms = timing.decision_ms,
         first_ready_ms,
         settled_ms,
+        synth_ms,
         total_ms = started.elapsed().as_millis(),
         "实时对话接了一轮"
     );
@@ -1104,6 +1163,8 @@ struct Speaker<'a> {
     released: u32,
     /// 多久之后第一句可以播了
     first_ready_ms: Option<u128>,
+    /// 现场合成一共花了多久（毫秒）。提前备好的句子几乎不花时间
+    synth_ms: u128,
     /// 这一轮已经不作数了（面试结束了，或者状态被别的进程改了）
     stale: bool,
     /// 最后一句已经提前排进队列了（引擎发了 `Done`），整轮想完时不用再排
@@ -1139,6 +1200,7 @@ impl<'a> Speaker<'a> {
             held: None,
             released: 0,
             first_ready_ms: None,
+            synth_ms: 0,
             stale: false,
             tail_released: false,
             settled_ms: None,
@@ -1180,7 +1242,9 @@ impl<'a> Speaker<'a> {
                 self.release_held().await;
                 self.parts += 1;
                 let part = self.parts;
+                let synth_started = Instant::now();
                 let audio = self.synthesize(&key, part, &text).await;
+                self.synth_ms += synth_started.elapsed().as_millis();
                 if !self.generated.contains(&key) {
                     self.generated.push(key.clone());
                 }
@@ -1685,6 +1749,7 @@ impl AheadJob {
         let decision_ms = outcome.timing.decision_ms;
         let beats = speaker.released + u32::from(speaker.held.is_some());
         let first_ready_ms = speaker.first_ready_ms;
+        let synth_ms = speaker.synth_ms;
         let answered = outcome.usage.total_tokens() > 0;
         if action == LiveAction::Wait {
             // 模型没回话（出错、超时）时引擎也是接着听，那不是模型的判断，页面照原来的静音时长算
@@ -1702,6 +1767,7 @@ impl AheadJob {
             heard_ms,
             decision_ms,
             first_ready_ms,
+            synth_ms,
             total_ms = started.elapsed().as_millis(),
             "候选人停顿时先想了一轮"
         );
