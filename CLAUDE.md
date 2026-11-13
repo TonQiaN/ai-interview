@@ -13,17 +13,22 @@
 ## 命令
 
 ```bash
-scripts/check.sh                       # 全量检查，和 CI 一样：卫生检查、fmt、clippy、测试
+scripts/dev.sh                         # 一键启动：开发数据库、迁移、后端（127.0.0.1:8080）
+scripts/dev-db.sh start                # 只起开发数据库。要数据库的测试靠它（DATABASE_URL=$(scripts/dev-db.sh url)）
+scripts/check.sh                       # 全量检查，和 CI 一样：卫生检查、fmt、clippy、测试。会自己起开发数据库
 cargo fmt --all                        # 格式化
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                 # 全部测试
 cargo test -p interview-tts            # 只测一个 crate
 cargo test -p interview-tts <测试名>   # 只跑一个测试
 cargo run -p interview-cli -- tts engines
+cargo run -p interview-server -- openapi   # 打印 OpenAPI 文档，不用数据库
 scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息不进 Git
 ```
 
 需要真模型、真 TTS 或真 RAAS 的测试标 `#[ignore]`，用 `cargo test -- --ignored` 手动跑。CI 不跑这些。
+
+要数据库的测试写 `#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]`，每个测试一个临时库。没设 `DATABASE_URL` 时这些测试会失败，不是代码的问题。
 
 真模型测试读 `DEEPSEEK_API_KEY`，会产生少量费用，云端容器里可以直接跑：`cargo test -p interview-llm --test live -- --ignored --nocapture`。
 
@@ -46,7 +51,7 @@ cargo run -p interview-engine --example simulate -- crates/interview-engine/fixt
 - `tts/`：三个引擎的版本锁定（`engines.json`、`upstreams.json`、`locks/`、`artifacts/`）、接入说明、Python worker。
 - 共用的依赖版本写在根 `Cargo.toml` 的 `[workspace.dependencies]`，按字母序。
 
-只改自己归属的目录。要动别人的，开 issue 找那条线。
+只改自己归属的目录。要动别人的，开 issue 找那条线。例外：把自己的 crate 接进服务进程时，改 `crates/interview-server/src/compose.rs` 里自己那条线的位置（见 `docs/architecture/README.md` 的「平台给了什么」）。
 
 ## 已经定的事
 

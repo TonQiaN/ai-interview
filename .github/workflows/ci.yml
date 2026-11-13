@@ -19,12 +19,31 @@ jobs:
   rust:
     name: rust
     runs-on: ubuntu-latest
+    services:
+      # 要数据库的测试（#[sqlx::test]）每个测试自己建一个临时库，用完删掉
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: 系统工具
+        # poppler-utils：简历 PDF 转图片（pdftoppm、pdftotext）
+        # ffmpeg：合并录像分片、抽帧
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils ffmpeg
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy

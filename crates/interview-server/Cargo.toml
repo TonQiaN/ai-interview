@@ -1,0 +1,33 @@
+[package]
+name = "interview-server"
+description = "AI 面试的服务进程：把各模块装在一起，对外提供 HTTP、托管前端页面、跑后台任务"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+clap = { workspace = true }
+interview-llm = { workspace = true }
+interview-platform = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal"] }
+tokio-util = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+utoipa = { workspace = true }
+utoipa-axum = { workspace = true }
+utoipa-scalar = { workspace = true }
+
+[dev-dependencies]
+sqlx = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

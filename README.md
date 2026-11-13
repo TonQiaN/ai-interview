@@ -8,8 +8,11 @@ AI 面试：开源的 AI 面试系统。主体语言是 Rust；面试官的语�
 
 ## 现在有什么
 
-目前各个模块还在各自开发，没有串成完整的面试：
+后端的底座已经能跑，各个模块还在各自开发，没有串成完整的面试：
 
+- `crates/interview-server`：服务进程。HTTP 接口、接口文档（`/api/docs`）、托管前端页面、跑后台任务。
+- `crates/interview-platform`：运行底座。配置、数据库和迁移、文件存储、后台任务队列、HR 登录、统一的错误和分页。
+- `crates/interview-core`：各模块共用的状态枚举、任务名、文件键。
 - `crates/interview-llm`：DeepSeek 客户端。思考开关和 low / high / max 三档强度、流式输出、JSON 输出、工具调用、重试和用量统计。
 - `crates/interview-engine`：面试引擎的基础模式。面试配置（时长、轮次定位、HR 的考察要求等）、用大模型出题并复核的出题器、逐题问答的会话状态机、每段回答的即时判断（追问、提前结束）。纯逻辑，不碰数据库和网络，说明见 [crates/interview-engine/README.md](crates/interview-engine/README.md)。
 - `crates/interview-audio`：音频工具。WAV 读写、重采样、按能量找说话的段。
@@ -18,27 +21,47 @@ AI 面试：开源的 AI 面试系统。主体语言是 Rust；面试官的语�
 - `crates/interview-raas`：RAAS 招聘平台的只读客户端，取岗位、岗位需求、候选人和简历。
 - `crates/interview-talent`：简历解析（PDF 转成图片让大模型读，带水印和扫描件也行）、候选人画像、岗位描述整理。接口和数据库部分还没接。
 - `crates/interview-cli`：命令行入口 `ai-interview`，现在只能列出引擎和当前选中的那个。
+- `web/apps/candidate`：候选人面试页的核心逻辑（静音检测、逐题状态机、录制分片上传）。
+- `migrations/`：数据库表结构。
 - `tts/`：三个引擎的版本锁定、调用方式、实测数据和已知的坑。
 - CI、issue 和 PR 模板、开发流程约定。
 
 ## 开始
 
-需要 Rust 1.90 以上（`rust-toolchain.toml` 会让 rustup 自动装 stable）。解析 PDF 简历要用 poppler 的 `pdftoppm`：Debian/Ubuntu 装 `poppler-utils`，macOS 用 `brew install poppler`。
+需要 Rust 1.90 以上（`rust-toolchain.toml` 会让 rustup 自动装 stable）和 PostgreSQL 16（只要装了就行，不用自己建库；macOS 上 `brew install postgresql@16`）。解析 PDF 简历要用 poppler 的 `pdftoppm`：Debian/Ubuntu 装 `poppler-utils`，macOS 用 `brew install poppler`。
 
 ```bash
-cargo run -p interview-cli -- tts engines                      # 列出三个引擎，* 是当前选中的
-AI_INTERVIEW_TTS_ENGINE=breeze2 cargo run -p interview-cli -- tts engines
-scripts/check.sh                                               # 全量检查，和 CI 一样
+scripts/dev.sh        # 一键启动：起开发数据库、跑迁移、启动后端
+```
+
+启动后：
+
+- 接口文档：<http://127.0.0.1:8080/api/docs>
+- 健康检查：<http://127.0.0.1:8080/healthz>
+- HR 后台：<http://127.0.0.1:8080/admin/>（要先构建前端）
+- 第一次启动会建一个本机用的管理员账号，邮箱和密码打印在终端里。
+
+想改配置（端口、数据目录、大模型密钥等），把 `.env.example` 复制成 `.env` 再改。
+
+其他常用命令：
+
+```bash
+scripts/check.sh                                   # 全量检查，和 CI 一样
+scripts/dev-db.sh start|stop|status|reset|psql     # 管理开发数据库（数据在 .runtime/pg，不进 Git）
+cargo run -p interview-server -- openapi           # 打印 OpenAPI 文档
+cargo run -p interview-server -- create-admin --email hr@example.com   # 新建 HR 账号，密码从标准输入读
+cargo run -p interview-cli -- tts engines          # 列出三个 TTS 引擎，* 是当前选中的
 ```
 
 ## 目录
 
 ```text
 crates/            Rust workspace，一个 crate 一个目录
+web/               前端（pnpm workspace）
 migrations/        数据库迁移
 tts/               三个 TTS 引擎的接入资料和版本锁定
 docs/              架构文档、开发流程
-scripts/           检查脚本
+scripts/           检查、开发数据库、一键启动
 .github/           CI、Dependabot、issue 和 PR 模板
 CLAUDE.md          给 AI 开发者的约定（AGENTS.md 指向它）
 ```
