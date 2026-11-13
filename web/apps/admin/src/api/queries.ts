@@ -1,6 +1,6 @@
 /** 数据请求：每个接口一个 hook。页面只用这里导出的东西，不直接碰 http。 */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, http, type Query } from "./http";
+import { ApiError, errorMessage, http, type Query } from "./http";
 import type {
   AdminUser,
   CandidateDetail,
@@ -8,7 +8,9 @@ import type {
   CandidateListItem,
   ConfigDefaults,
   CreatedInvite,
+  CreateVoice,
   Decision,
+  EngineList,
   ImportedCandidate,
   Interview,
   InterviewEvent,
@@ -23,6 +25,8 @@ import type {
   Position,
   PositionDraft,
   PositionInput,
+  PreviewRequest,
+  PreviewResult,
   RaasCandidate,
   RaasCandidateImportItem,
   RaasPosition,
@@ -33,13 +37,12 @@ import type {
   ReportEnvelope,
   Resume,
   ResumeDetail,
-  SpeechEngine,
   SystemStatus,
   TemplateInput,
   Turn,
+  UpdateVoice,
   Utterance,
   Voice,
-  VoiceInput,
 } from "./types";
 
 type List<T> = { items: T[] };
@@ -342,36 +345,70 @@ export function useImportRaasCandidates() {
 export function useEngines() {
   return useQuery({
     queryKey: ["engines"],
-    queryFn: () => http.get<List<SpeechEngine>>("/speech/engines"),
+    queryFn: () => http.get<EngineList>("/speech/engines"),
     staleTime: 60_000,
   });
 }
 
-export function useVoices() {
-  return useQuery({ queryKey: ["voices"], queryFn: () => http.get<List<Voice>>("/speech/voices") });
+export function useVoices(q = "") {
+  return useQuery({
+    queryKey: ["voices", q],
+    queryFn: () => http.get<Page<Voice>>("/speech/voices", { q, page_size: 100 }),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** 后端收的是文件本身，不是表单 */
+function uploadReference(id: string, file: File) {
+  return http.put<Voice>(
+    `/speech/voices/${id}/reference`,
+    new Blob([file], { type: "application/octet-stream" }),
+  );
+}
+
+/**
+ * 新建音色。克隆音色分两步：先建，再上传参考录音。
+ * 第二步失败时音色已经建好了（只是还不能用），错误里带上它，页面可以让人重新传。
+ */
+export class ReferenceUploadError extends Error {
+  constructor(
+    readonly voice: Voice,
+    readonly cause: unknown,
+  ) {
+    super(errorMessage(cause));
+    this.name = "ReferenceUploadError";
+  }
 }
 
 export function useCreateVoice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ input, reference }: { input: VoiceInput; reference: File | null }) => {
+    mutationFn: async ({ input, reference }: { input: CreateVoice; reference: File | null }) => {
       const voice = await http.post<Voice>("/speech/voices", input);
-      return reference ? http.put<Voice>(`/speech/voices/${voice.id}/reference`, reference) : voice;
+      if (!reference) return voice;
+      try {
+        return await uploadReference(voice.id, reference);
+      } catch (e) {
+        throw new ReferenceUploadError(voice, e);
+      }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["voices"] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["voices"] }),
   });
 }
 
 export function useUpdateVoice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      id,
-      patch,
-    }: {
-      id: string;
-      patch: Partial<VoiceInput> & { is_default?: boolean };
-    }) => http.patch<Voice>(`/speech/voices/${id}`, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateVoice }) =>
+      http.patch<Voice>(`/speech/voices/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["voices"] }),
+  });
+}
+
+export function useUploadReference() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) => uploadReference(id, file),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["voices"] }),
   });
 }
@@ -384,15 +421,25 @@ export function useDeleteVoice() {
   });
 }
 
+/** 存下来的参考录音，取回来听 */
+export function fetchReference(id: string): Promise<Blob> {
+  return http.getBlob(`/speech/voices/${id}/reference`).then((r) => r.blob);
+}
+
+/** 试听。真模型合成一句话要几秒到十几秒 */
 export function usePreviewSpeech() {
   return useMutation({
-    mutationFn: (input: {
-      text: string;
-      engine: string;
-      voice_id: string | null;
-      style: string;
-      speed: number;
-    }) => http.post<{ audio_url: string }>("/speech/preview", input),
+    mutationFn: async (input: PreviewRequest): Promise<PreviewResult> => {
+      const { blob, headers } = await http.postBlob("/speech/preview", input);
+      const ms = Number(headers.get("x-audio-duration-ms"));
+      return {
+        blob,
+        duration_ms: Number.isFinite(ms) && ms > 0 ? ms : null,
+        engine: headers.get("x-tts-engine"),
+        backend: headers.get("x-tts-backend"),
+        from_cache: headers.get("x-tts-from-cache") === "true",
+      };
+    },
   });
 }
 

@@ -3,6 +3,7 @@ import type {
   Candidate,
   CandidateDetail,
   CreatedInvite,
+  EngineList,
   ImportedCandidate,
   Interview,
   InterviewPlan,
@@ -20,6 +21,7 @@ import type {
   ResumeDetail,
   Turn,
   Utterance,
+  Voice,
 } from "../types";
 import { createMockServer } from "./server";
 
@@ -427,5 +429,129 @@ describe("假后端", () => {
     expect(draft.data.location).toBe("上海");
     expect(draft.data.requirements).toContain("熟悉 Spark");
     expect(server.db.positions).toHaveLength(before);
+  });
+  describe("语音", () => {
+    type Fail = { error: { code: string; details: Record<string, string> | null } };
+
+    it("引擎列表说明现在是测试音，音色列表是分页的", async () => {
+      await login(server);
+      const engines = await call<EngineList>(server, "GET", "/speech/engines");
+      expect(engines.data.simulated).toBe(true);
+      expect(engines.data.items.map((e) => e.id)).toEqual(["index2", "index25", "breeze2"]);
+      expect(engines.data.items.filter((e) => e.supports_voice_design).map((e) => e.id)).toEqual([
+        "breeze2",
+      ]);
+      const voices = await call<Page<Voice>>(server, "GET", "/speech/voices?q=面试官");
+      expect(voices.data.total).toBe(1);
+      expect(voices.data.items[0]?.is_default).toBe(true);
+    });
+
+    it("克隆音色要传了录音才能用、才能设成默认", async () => {
+      await login(server);
+      const created = await call<Voice>(server, "POST", "/speech/voices", {
+        name: "新的声音",
+        engine: "index2",
+        kind: "cloned",
+      });
+      expect(created.data.ready).toBe(false);
+      expect(created.data.not_ready_reason).toContain("参考录音");
+      const id = created.data.id;
+
+      const early = await call<Fail>(server, "PATCH", `/speech/voices/${id}`, { is_default: true });
+      expect([early.status, early.data.error.code]).toEqual([422, "voice_not_ready"]);
+
+      const empty = await server.fetch(`/api/v1/speech/voices/${id}/reference`, {
+        method: "PUT",
+        body: new Blob([]),
+      });
+      expect(empty.status).toBe(422);
+      const uploaded = await server.fetch(`/api/v1/speech/voices/${id}/reference`, {
+        method: "PUT",
+        body: new Blob([new Uint8Array(2048)]),
+      });
+      const voice = (await uploaded.json()) as Voice;
+      expect([voice.has_reference, voice.ready]).toEqual([true, true]);
+
+      const made = await call<Voice>(server, "PATCH", `/speech/voices/${id}`, { is_default: true });
+      expect(made.data.is_default).toBe(true);
+      expect(server.db.voices.filter((v) => v.is_default)).toHaveLength(1);
+
+      const removed = await call<Fail>(server, "DELETE", `/speech/voices/${id}`);
+      expect([removed.status, removed.data.error.code]).toEqual([409, "voice_is_default"]);
+    });
+
+    it("换到 BreezeTTS2 克隆还要逐字稿，默认音色不能改成用不了的样子", async () => {
+      await login(server);
+      const voice = server.db.voices.find((v) => v.is_default);
+      if (!voice) throw new Error("演示数据里没有默认音色");
+      const moved = await call<Fail>(server, "PATCH", `/speech/voices/${voice.id}`, {
+        engine: "breeze2",
+      });
+      expect([moved.status, moved.data.error.code]).toEqual([422, "voice_not_ready"]);
+      expect(voice.engine).toBe("index2");
+      const withText = await call<Voice>(server, "PATCH", `/speech/voices/${voice.id}`, {
+        engine: "breeze2",
+        reference_transcript: "录音里说的话",
+      });
+      expect([withText.data.engine, withText.data.ready]).toEqual(["breeze2", true]);
+    });
+
+    it("用文字描述设计音色只有 BreezeTTS2 行", async () => {
+      await login(server);
+      const input = { name: "设计的声音", kind: "designed", description: "沉稳的女声" };
+      const wrong = await call<Fail>(server, "POST", "/speech/voices", {
+        ...input,
+        engine: "index2",
+      });
+      expect(wrong.status).toBe(422);
+      expect(wrong.data.error.details?.engine).toBeTruthy();
+      const right = await call<Voice>(server, "POST", "/speech/voices", {
+        ...input,
+        engine: "breeze2",
+      });
+      expect([right.data.kind, right.data.ready]).toEqual(["designed", true]);
+    });
+
+    it("试听直接返回一段 WAV，响应头里带时长和引擎", async () => {
+      await login(server);
+      const preview = (body: unknown) =>
+        server.fetch("/api/v1/speech/preview", { method: "POST", body: JSON.stringify(body) });
+
+      const ok = await preview({ text: "你好，我们开始吧。" });
+      expect(ok.status).toBe(200);
+      expect(ok.headers.get("content-type")).toBe("audio/wav");
+      expect(ok.headers.get("x-tts-engine")).toBe("index2");
+      expect(ok.headers.get("x-tts-backend")).toBe("fake");
+      expect(Number(ok.headers.get("x-audio-duration-ms"))).toBeGreaterThan(0);
+      const wav = new Uint8Array(await ok.arrayBuffer());
+      expect(String.fromCharCode(...wav.slice(0, 4))).toBe("RIFF");
+
+      const designed = await preview({ text: "你好", description: "沉稳的女声" });
+      expect(designed.headers.get("x-tts-engine")).toBe("breeze2");
+
+      const notReady = server.db.voices.find((v) => !v.ready);
+      expect((await preview({ text: "你好", voice_id: notReady?.id })).status).toBe(422);
+      expect((await preview({ text: "  " })).status).toBe(422);
+      expect((await preview({ text: "字".repeat(301) })).status).toBe(422);
+    });
+
+    it("安排面试时指定的音色要存在", async () => {
+      await login(server);
+      const candidate = server.db.candidates[0];
+      const position = server.db.positions[0];
+      const voice = server.db.voices.find((v) => v.ready && !v.is_default);
+      const input = { candidate_id: candidate?.id, position_id: position?.id };
+      const missing = await call<Fail>(server, "POST", "/interviews", {
+        ...input,
+        voice_id: "0193a000-0000-7000-8000-00000000ffff",
+      });
+      expect(missing.status).toBe(422);
+      expect(missing.data.error.details?.voice_id).toBeTruthy();
+      const created = await call<Interview>(server, "POST", "/interviews", {
+        ...input,
+        voice_id: voice?.id,
+      });
+      expect(created.data.voice_id).toBe(voice?.id);
+    });
   });
 });
