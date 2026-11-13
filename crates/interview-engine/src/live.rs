@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! probe weak                      ← 第一行：动作，加上对这道题到目前为止的判断
-//! 好的，我再问细一点。你本人负责哪一块？  ← 追问或回应：要念出来的话，按句子流式给出
+//! 好的，我想再多问一点。你本人负责哪一块？  ← 追问或回应：要念出来的话，按句子流式给出
 //! ```
 //!
 //! ```text
@@ -1142,30 +1142,33 @@ fn clip(text: &str, max_chars: usize) -> &str {
 
 /// 追问前说的接话。第一句后面接什么话都通顺，模型没按清单说的时候补的就是它。
 const ZH_PROBE_OPENERS: &[&str] = &[
-    "好的，我了解了。",
-    "好的，我再问细一点。",
+    "好的，这部分我了解了。",
+    "好的，我想再多问一点。",
     "好的，这里我追问一下。",
     "好的，这块我想多了解一点。",
 ];
 /// 回应前说的接话和各自用在什么时候。第一句是哪种回应都能用的。
 const ZH_REPLY_OPENERS: &[(&str, &str)] = &[
-    ("好的，是这样。", "回答候选人的问题、解释题目，或者别的情况"),
+    (
+        "好的，没问题，我说一下。",
+        "回答候选人的问题、解释题目，或者别的情况",
+    ),
     ("没问题，我再说一遍。", "候选人没听清你上一句话"),
     ("好的，咱们回到正题。", "候选人说的话和题目无关"),
     (
-        "好的，这个我记下了。",
+        "好的，这个我记下来了。",
         "候选人问的事你答不了，要转给负责招聘的同事",
     ),
 ];
 const EN_PROBE_OPENERS: &[&str] = &[
-    "Alright, I see.",
+    "Alright, I see what you mean.",
     "Okay, let me dig into that a bit.",
     "Got it, one more question on this.",
     "Okay, I want to hear more on this.",
 ];
 const EN_REPLY_OPENERS: &[(&str, &str)] = &[
     (
-        "Sure, here's the thing.",
+        "Sure, no problem at all.",
         "回答候选人的问题、解释题目，或者别的情况",
     ),
     ("Sure, let me say that again.", "候选人没听清你上一句话"),
@@ -1232,7 +1235,7 @@ fn leading_opener(language: Language, text: &str) -> Option<(&'static str, &str)
             return None;
         }
         let rest = &text[end..];
-        // 接话后面紧跟着别的字（「好的，我了解了你们的方案」），那就不是这句接话
+        // 接话后面紧跟着别的字（「好的，这部分我了解了你们当时的方案」），那就不是这句接话
         if rest.starts_with(|c: char| c.is_alphanumeric()) {
             return None;
         }
@@ -1296,9 +1299,9 @@ fn without_lead_in<'a>(opener: &str, text: &'a str) -> Option<&'a str> {
     (!rest.is_empty()).then_some(rest)
 }
 
-/// 只是一声应答（「明白。」「好的。」「嗯。」），没有别的内容。补了接话以后这一句就多余了。
+/// 只是应答（「明白。」「好的。」「好的，我了解了。」），没有别的内容。补了接话以后这一句就多余了。
 ///
-/// 「能听到。」「可以的，没问题。」这样有内容的短句不算。
+/// 按标点分成小句，每个小句都是一声应答才算。「能听到。」「可以的，没问题。」这样有内容的短句不算。
 fn is_bare_ack(piece: &Piece) -> bool {
     const ACKS: &[&str] = &[
         "好",
@@ -1308,11 +1311,15 @@ fn is_bare_ack(piece: &Piece) -> bool {
         "嗯嗯",
         "明白",
         "明白了",
+        "我明白了",
         "了解",
         "了解了",
+        "我了解了",
         "知道了",
+        "我知道了",
         "收到",
         "行",
+        "没问题",
         "ok",
         "okay",
         "gotit",
@@ -1325,13 +1332,19 @@ fn is_bare_ack(piece: &Piece) -> bool {
     if !piece.ends_sentence {
         return false;
     }
-    let said: String = piece
+    let mut clauses = piece
         .text
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect();
-    ACKS.contains(&said.as_str())
+        .split(|c: char| !c.is_alphanumeric() && !c.is_whitespace())
+        .map(|clause| {
+            clause
+                .chars()
+                .filter(|c| c.is_alphanumeric())
+                .flat_map(char::to_lowercase)
+                .collect::<String>()
+        })
+        .filter(|clause| !clause.is_empty())
+        .peekable();
+    clauses.peek().is_some() && clauses.all(|clause| ACKS.contains(&clause.as_str()))
 }
 
 /// 给提示词用：接话清单和各自什么时候用。
@@ -1833,7 +1846,7 @@ mod tests {
     async fn probes_then_moves_on_and_keeps_only_a_summary() {
         let (plan, config) = setup();
         let model = ScriptedModel::new()
-            .reply("probe weak\n好的，我再问细一点。那个方案里你本人负责哪一块？")
+            .reply("probe weak\n好的，我想再多问一点。那个方案里你本人负责哪一块？")
             .reply("next adequate\n讲了订单系统的拆分，本人负责库存部分。\n- 数字说不出来源")
             .reply("next strong\n讲清楚了排查过程。");
         let (state, first) = open(&plan, &config).unwrap();
@@ -1852,7 +1865,7 @@ mod tests {
         assert_eq!(keys_of(&outcome), ["q1.p1"]);
         assert_eq!(
             outcome.said[0].text,
-            "好的，我再问细一点。那个方案里你本人负责哪一块？"
+            "好的，我想再多问一点。那个方案里你本人负责哪一块？"
         );
         assert_eq!(
             events,
@@ -1862,7 +1875,7 @@ mod tests {
                 },
                 LiveEvent::Speak {
                     key: "q1.p1".to_owned(),
-                    text: "好的，我再问细一点。".to_owned()
+                    text: "好的，我想再多问一点。".to_owned()
                 },
                 LiveEvent::Speak {
                     key: "q1.p1".to_owned(),
@@ -2120,13 +2133,19 @@ mod tests {
         let mut sink = |event| events.push(event);
         let mut run = Run::new(&plan, &config, state, &turn, false, &mut sink);
         run.can_probe = true;
-        for piece in ["pro", "be we", "ak\n好的，我再", "问细一点。那你", "本人做"] {
+        for piece in [
+            "pro",
+            "be we",
+            "ak\n好的，我想",
+            "再多问一点。那你",
+            "本人做",
+        ] {
             run.feed(piece).unwrap();
         }
         // 流在这里断了：已经说出口的照样算数
         assert_eq!(run.finish().unwrap(), LiveAction::Probe);
         let outcome = run.outcome(LiveAction::Probe, Usage::default());
-        assert_eq!(outcome.said[0].text, "好的，我再问细一点。那你本人做");
+        assert_eq!(outcome.said[0].text, "好的，我想再多问一点。那你本人做");
         assert_eq!(outcome.state.probes_asked, 1);
         take_done(&outcome, &mut events);
         assert_eq!(
@@ -2137,7 +2156,7 @@ mod tests {
                 },
                 LiveEvent::Speak {
                     key: "q1.p1".to_owned(),
-                    text: "好的，我再问细一点。".to_owned()
+                    text: "好的，我想再多问一点。".to_owned()
                 },
                 LiveEvent::Speak {
                     key: "q1.p1".to_owned(),
@@ -2152,19 +2171,19 @@ mod tests {
         let (plan, config) = setup();
         // 真模型出过这种输出：追问后面接着写了这道题的概括
         let model = ScriptedModel::new().reply(
-            "probe weak\n好的，我了解了。那你们用了多少台服务器？\n一句话概括：候选人说不清数字的口径。\n数字说不出来源",
+            "probe weak\n好的，这部分我了解了。那你们用了多少台服务器？\n一句话概括：候选人说不清数字的口径。\n数字说不出来源",
         );
         let (state, _) = open(&plan, &config).unwrap();
         let (outcome, events) = run(&model, &plan, &config, &state, &said("记不清了。", 60)).await;
         assert_eq!(outcome.action, LiveAction::Probe);
         assert_eq!(
             outcome.said[0].text,
-            "好的，我了解了。那你们用了多少台服务器？"
+            "好的，这部分我了解了。那你们用了多少台服务器？"
         );
         assert_eq!(events.len(), 3, "概括没有被念出来");
         assert_eq!(
             outcome.state.dialogue.last().unwrap().text,
-            "好的，我了解了。那你们用了多少台服务器？"
+            "好的，这部分我了解了。那你们用了多少台服务器？"
         );
     }
 
@@ -2298,8 +2317,9 @@ mod tests {
     async fn a_long_sentence_broken_into_parts_is_still_one_sentence() {
         let (plan, config) = setup();
         // 四句话，其中一句被切成三段：切出来的段数超过了句数上限，但是话不能说到一半被截掉
-        let script =
-            format!("reply weak\n好的，是这样。{LONG_REASK}不着急。慢慢说。这一句不会念。");
+        let script = format!(
+            "reply weak\n好的，没问题，我说一下。{LONG_REASK}不着急。慢慢说。这一句不会念。"
+        );
         let model = ScriptedModel::new().reply(script);
         let (state, _) = open(&plan, &config).unwrap();
         let (outcome, events) =
@@ -2315,7 +2335,7 @@ mod tests {
         assert_eq!(
             spoken,
             [
-                "好的，是这样。",
+                "好的，没问题，我说一下。",
                 "不好意思，刚才可能没听清，",
                 "我再问一次：请你用一两分钟做个自我介绍，",
                 "重点讲讲最近一段工作里你本人负责的部分。",
@@ -2326,7 +2346,7 @@ mod tests {
         // 记下来的还是连着的一段话
         assert_eq!(
             outcome.said[0].text,
-            format!("好的，是这样。{LONG_REASK}不着急。慢慢说。")
+            format!("好的，没问题，我说一下。{LONG_REASK}不着急。慢慢说。")
         );
     }
 
@@ -2372,15 +2392,18 @@ mod tests {
         }
         // 两种语言各用各的
         assert!(openers(Language::En).iter().all(|opener| opener.is_ascii()));
-        assert_eq!(leading_opener(Language::En, "好的，我了解了。"), None);
+        assert_eq!(leading_opener(Language::En, "好的，这部分我了解了。"), None);
     }
 
     #[test]
     fn recognises_an_opener_even_when_the_punctuation_differs() {
         // 逗号写成了半角，接话和后面的话连成了一句
         assert_eq!(
-            leading_opener(Language::Zh, "好的,我再问细一点，那个方案里你负责哪一块？"),
-            Some(("好的，我再问细一点。", "那个方案里你负责哪一块？"))
+            leading_opener(
+                Language::Zh,
+                "好的,我想再多问一点，那个方案里你负责哪一块？"
+            ),
+            Some(("好的，我想再多问一点。", "那个方案里你负责哪一块？"))
         );
         assert_eq!(
             leading_opener(
@@ -2391,7 +2414,7 @@ mod tests {
         );
         // 只是开头几个字一样，后面接着别的话：不是这句接话
         assert_eq!(
-            leading_opener(Language::Zh, "好的，我了解了你们的方案。"),
+            leading_opener(Language::Zh, "好的，这部分我了解了你们当时的方案。"),
             None
         );
         assert_eq!(leading_opener(Language::Zh, "好的。"), None);
@@ -2404,10 +2427,10 @@ mod tests {
         let near = |text: &str| near_opener(Language::Zh, &piece(text, true));
         assert_eq!(near("好的，我追问一下。"), Some("好的，这里我追问一下。"));
         assert_eq!(near("好的，我们回到正题。"), Some("好的，咱们回到正题。"));
-        assert_eq!(near("这个我记下了。"), Some("好的，这个我记下了。"));
+        assert_eq!(near("好的，这个我记下了。"), Some("好的，这个我记下来了。"));
         assert_eq!(near("好的重申一下。"), None);
-        assert_eq!(near("好的，我了解了你们的方案。"), None);
-        assert_eq!(near("好的，我了解了吗？"), None);
+        assert_eq!(near("好的，这部分我了解了你们当时的方案。"), None);
+        assert_eq!(near("好的，这部分我了解了吗？"), None);
         assert_eq!(
             near_opener(Language::Zh, &piece("好的，我追问一下，", false)),
             None
@@ -2425,11 +2448,20 @@ mod tests {
         let (outcome, events) = run(&model, &plan, &config, &state, &turn).await;
         assert_eq!(
             spoken(&events),
-            ["好的，我了解了。", "那个方案里你本人负责哪一块？"]
+            ["好的，这部分我了解了。", "那个方案里你本人负责哪一块？"]
         );
         assert_eq!(
             outcome.said[0].text,
-            "好的，我了解了。那个方案里你本人负责哪一块？"
+            "好的，这部分我了解了。那个方案里你本人负责哪一块？"
+        );
+
+        // 应答是两个小句的也一样（「好的，我了解了。」是模型很爱写的一句）
+        let model =
+            ScriptedModel::new().reply("probe weak\n好的，我了解了。那个方案里你本人负责哪一块？");
+        let (_, events) = run(&model, &plan, &config, &state, &turn).await;
+        assert_eq!(
+            spoken(&events),
+            ["好的，这部分我了解了。", "那个方案里你本人负责哪一块？"]
         );
 
         // 模型没写接话，直接问：前面补一句
@@ -2437,7 +2469,7 @@ mod tests {
         let (_, events) = run(&model, &plan, &config, &state, &turn).await;
         assert_eq!(
             spoken(&events),
-            ["好的，我了解了。", "你说的系统具体是做什么的？"]
+            ["好的，这部分我了解了。", "你说的系统具体是做什么的？"]
         );
 
         // 模型把清单里的句子改了两个字：还是用清单里的原文
@@ -2453,16 +2485,16 @@ mod tests {
         let (_, events) = run(&model, &plan, &config, &state, &turn).await;
         assert_eq!(
             spoken(&events),
-            ["好的，我了解了。", "那我等你算一下具体数。"]
+            ["好的，这部分我了解了。", "那我等你算一下具体数。"]
         );
 
         // 模型把接话和问句连成了一句：拆开，接话用清单里的原文
-        let model =
-            ScriptedModel::new().reply("probe weak\n好的，我了解了，那个方案里你本人负责哪一块？");
+        let model = ScriptedModel::new()
+            .reply("probe weak\n好的，这部分我了解了，那个方案里你本人负责哪一块？");
         let (_, events) = run(&model, &plan, &config, &state, &turn).await;
         assert_eq!(
             spoken(&events),
-            ["好的，我了解了。", "那个方案里你本人负责哪一块？"]
+            ["好的，这部分我了解了。", "那个方案里你本人负责哪一块？"]
         );
 
         // 很短但有内容的话不能丢
@@ -2470,7 +2502,7 @@ mod tests {
         let (_, events) = run(&model, &plan, &config, &state, &said("喂，能听到吗？", 60)).await;
         assert_eq!(
             spoken(&events),
-            ["好的，是这样。", "能听到。", "那我们开始。"]
+            ["好的，没问题，我说一下。", "能听到。", "那我们开始。"]
         );
 
         // 回应也一样，补的是回应用的那句
@@ -2485,7 +2517,10 @@ mod tests {
         .await;
         assert_eq!(
             spoken(&events),
-            ["好的，是这样。", "这道题想听你亲手做过的一个项目。"]
+            [
+                "好的，没问题，我说一下。",
+                "这道题想听你亲手做过的一个项目。"
+            ]
         );
 
         // 提示词里列出了这几句
@@ -2512,11 +2547,11 @@ mod tests {
         .await;
         assert_eq!(
             spoken(&events),
-            ["Alright, I see.", "Which part did you own?"]
+            ["Alright, I see what you mean.", "Which part did you own?"]
         );
         let request = model.requests()[0].text();
         assert!(request.contains("Okay, let me dig into that a bit."));
-        assert!(!request.contains("好的，我再问细一点。"));
+        assert!(!request.contains("好的，我想再多问一点。"));
     }
 
     #[tokio::test]
@@ -2524,13 +2559,13 @@ mod tests {
         let (plan, mut config) = setup();
         config.follow_ups.max_per_question = 3;
         let model = ScriptedModel::new()
-            .reply("probe weak\n好的，我再问细一点。你本人负责哪一块？")
-            .reply("probe weak\n好的，我再问细一点。当时的数据量有多大？")
+            .reply("probe weak\n好的，我想再多问一点。你本人负责哪一块？")
+            .reply("probe weak\n好的，我想再多问一点。当时的数据量有多大？")
             .reply("probe weak\n这个数字是怎么测出来的？");
         let (state, _) = open(&plan, &config).unwrap();
         let (first, events) =
             run(&model, &plan, &config, &state, &said("做了一个系统。", 60)).await;
-        assert_eq!(spoken(&events)[0], "好的，我再问细一点。");
+        assert_eq!(spoken(&events)[0], "好的，我想再多问一点。");
         // 模型又选了同一句：换成这道题上还没说过的
         let (second, events) = run(
             &model,
@@ -2540,7 +2575,7 @@ mod tests {
             &said("库存那块。", 90),
         )
         .await;
-        assert_eq!(spoken(&events)[0], "好的，我了解了。");
+        assert_eq!(spoken(&events)[0], "好的，这部分我了解了。");
         // 模型没写接话：补的那句也不重样
         let (_, events) = run(
             &model,
@@ -2631,7 +2666,7 @@ mod tests {
         let mut sink = move |event| seen.lock().unwrap().push(event);
         let mut run = Run::new(&plan, &config, state, &turn, false, &mut sink);
         run.can_probe = true;
-        run.feed("probe weak\n好的，我了解了。").unwrap();
+        run.feed("probe weak\n好的，这部分我了解了。").unwrap();
         assert_eq!(done_events(&events.lock().unwrap()), 0, "话还没说完");
         run.feed("具体是哪一块？\n概括：").unwrap();
         let early = events.lock().unwrap().clone();
@@ -2657,7 +2692,7 @@ mod tests {
         let model = ScriptedModel::new()
             .reply("wait")
             .fail(LlmError::Timeout(LIVE_TIMEOUT))
-            .reply("probe weak\n好的，我了解了。你本人负责哪一块？");
+            .reply("probe weak\n好的，这部分我了解了。你本人负责哪一块？");
         let (state, _) = open(&plan, &config).unwrap();
 
         // 还没认出字：不调模型
@@ -2801,7 +2836,7 @@ mod tests {
             .reply("repeat")
             .reply("next adequate\n一")
             .reply("next adequate\n二")
-            .reply("probe weak\n好的，我了解了。这个系统的日活大概是多少，是你自己统计的吗？")
+            .reply("probe weak\n好的，这部分我了解了。这个系统的日活大概是多少，是你自己统计的吗？")
             .reply("next adequate\n三");
         let (state, _) = open(&plan, &config).unwrap();
 
@@ -2853,11 +2888,11 @@ mod tests {
         )
         .await;
         assert_eq!(outcome.action, LiveAction::Probe);
-        let context = cut("q2.p1", 3300, None);
+        let context = cut("q2.p1", 3960, None);
         let turn = said("日活大概十万。", 120);
         let (_, _) = run_with(&model, &plan, &config, &outcome.state, &turn, &context).await;
         assert!(model.requests()[4].text().contains(
-            "面试官：好的，我了解了。这个系统的日活【说到这里被候选人打断，没说出来的部分：大概是多少，是你自己统计的吗？】"
+            "面试官：好的，这部分我了解了。这个系统的日活【说到这里被候选人打断，没说出来的部分：大概是多少，是你自己统计的吗？】"
         ));
     }
 

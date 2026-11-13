@@ -21,7 +21,7 @@
 
 ```text
 probe weak
-好的，我再问细一点。那个方案里你本人负责哪一块？
+好的，我想再多问一点。那个方案里你本人负责哪一块？
 ```
 
 ```text
@@ -221,14 +221,14 @@ let context = TurnContext {
 
 | | 中文 | 英文 |
 | --- | --- | --- |
-| 追问前（任选，同一道题上不重样） | 好的，我了解了。 | Alright, I see. |
-| | 好的，我再问细一点。 | Okay, let me dig into that a bit. |
+| 追问前（任选，同一道题上不重样） | 好的，这部分我了解了。 | Alright, I see what you mean. |
+| | 好的，我想再多问一点。 | Okay, let me dig into that a bit. |
 | | 好的，这里我追问一下。 | Got it, one more question on this. |
 | | 好的，这块我想多了解一点。 | Okay, I want to hear more on this. |
-| 回应：回答问题、解释题目，或者别的情况 | 好的，是这样。 | Sure, here's the thing. |
+| 回应：回答问题、解释题目，或者别的情况 | 好的，没问题，我说一下。 | Sure, no problem at all. |
 | 回应：候选人没听清上一句 | 没问题，我再说一遍。 | Sure, let me say that again. |
 | 回应：候选人说的和题目无关 | 好的，咱们回到正题。 | Okay, let's get back to the question. |
-| 回应：答不了，转给负责招聘的同事 | 好的，这个我记下了。 | Okay, I've noted that. |
+| 回应：答不了，转给负责招聘的同事 | 好的，这个我记下来了。 | Okay, I've noted that. |
 
 清单里没有「明白」和单独的「嗯」：语音线测过，BreezeTTS2 克隆音色读「明白」不稳，两个 IndexTTS 读单独一句的「嗯嗯。」会错。
 
