@@ -22,6 +22,11 @@ pub struct InterviewReport {
     pub recommendation: Recommendation,
     /// 综合得分，0 到 100，由各题评分按权重算出（每题 1 到 5 分，乘以 20）。没有任何一题被评分时为空。
     pub overall_score: Option<u8>,
+    /// 综合得分大概的浮动范围。同一场面试重新分析一遍，分数会有几分的出入，
+    /// 实测重新分析的结果 95% 以上落在这个范围里，页面上建议把它和总分一起显示。
+    /// 它只说明模型打分的出入有多大，不说明分数本身准不准。没有总分时为空。
+    #[serde(default)]
+    pub score_range: Option<ScoreRange>,
     /// 各项能力的评价。
     pub competencies: Vec<CompetencyRating>,
     /// 对 HR 注入的每条重点考察要求的回应。
@@ -45,6 +50,13 @@ pub struct InterviewReport {
     /// 这份报告的局限，例如面试太短、转写质量差。
     pub limitations: Vec<String>,
     pub meta: ReportMeta,
+}
+
+/// 综合得分的浮动范围，两头都包含。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ScoreRange {
+    pub low: u8,
+    pub high: u8,
 }
 
 /// 是否建议进入下一轮。
@@ -213,8 +225,12 @@ pub struct QuestionJudgement {
     pub answered: bool,
     /// 候选人说了什么。
     pub answer_summary: String,
-    /// 1 到 5 分：5 优秀，4 良好，3 合格，2 较弱，1 不合格。
-    pub rating: u8,
+    /// 1 到 5 分，以 0.5 为一档：5 优秀，4 良好，3 合格，2 较弱，1 不合格；
+    /// 带 .5 的表示介于相邻两档之间，例如 3.5 是比合格好、又够不上良好。
+    pub rating: f32,
+    /// 这道题评了不止一次时，每一次给的分数，按评的先后排，`rating` 是它们的平均（取到 0.5）。只评一次时为空。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ratings: Vec<f32>,
     pub rating_reason: String,
     #[serde(default, deserialize_with = "null_as_default")]
     #[schema(required = true)]
@@ -225,6 +241,18 @@ pub struct QuestionJudgement {
     /// 下一轮值得追问的问题。
     #[serde(default)]
     pub follow_up: Option<String>,
+}
+
+impl QuestionJudgement {
+    /// 这道题的分数：评了不止一次时是几次的平均（不取整），只评一次时就是 `rating`。算总分用这个。
+    #[must_use]
+    pub fn mean_rating(&self) -> f32 {
+        if self.ratings.is_empty() {
+            return self.rating;
+        }
+        let count = f32::from(u16::try_from(self.ratings.len()).unwrap_or(u16::MAX));
+        self.ratings.iter().sum::<f32>() / count
+    }
 }
 
 /// 一道题的计时数据，由程序从时间戳算出。

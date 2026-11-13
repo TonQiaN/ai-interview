@@ -291,6 +291,28 @@ const SYNTHESIS: &str = r#"{
   "limitations": ["有一道题没来得及问"]
 }"#;
 
+/// 每道题只评一次。默认是评三次，三次调用同时发出，测「第一次答错、第二次答对」这类顺序时会乱。
+fn once() -> AnalyzeOptions {
+    AnalyzeOptions {
+        question_judgements: 1,
+        ..Default::default()
+    }
+}
+
+/// 和 `full_model` 一样，只是第二道题按顺序给出这几个回答。
+fn full_model_with_q2(replies: &[&str]) -> RoutedModel {
+    let mut model = RoutedModel::new().on("question:q1", Q1);
+    for reply in replies {
+        model = model.on("question:q2", reply);
+    }
+    model
+        .on("requirements", REQUIREMENTS)
+        .on("resume", RESUME)
+        .on("integrity", INTEGRITY)
+        .on("communication", COMMUNICATION)
+        .on("synthesis", SYNTHESIS)
+}
+
 fn full_model() -> RoutedModel {
     RoutedModel::new()
         .on("question:q1", Q1)
@@ -307,7 +329,7 @@ async fn full_report_is_assembled_and_evidence_is_checked() {
     let model = full_model();
     let options = AnalyzeOptions {
         thinking: Some(Thinking::on(Effort::High)),
-        ..Default::default()
+        ..once()
     };
     let report = analyze(&sample_record(), &model, &options).await.unwrap();
 
@@ -350,6 +372,17 @@ async fn full_report_is_assembled_and_evidence_is_checked() {
 
     // 总分：q1 权重 2 得 4 分，q2 权重 1 得 2 分，(2×4 + 1×2) ÷ 3 × 20 ≈ 67
     assert_eq!(report.overall_score, Some(67));
+    // 每题只评一次，没法从几次评分的出入估计浮动，用实测的固定范围：上下 4 分
+    let range = report.score_range.unwrap();
+    assert_eq!((range.low, range.high), (63, 71));
+    assert!(
+        report.questions[0]
+            .judgement
+            .as_ref()
+            .unwrap()
+            .ratings
+            .is_empty()
+    );
     assert_eq!(report.timing.questions_planned, 3);
     assert_eq!(report.timing.questions_asked, 2);
     assert_eq!(report.timing.questions_answered, 2);
@@ -372,9 +405,7 @@ async fn full_report_is_assembled_and_evidence_is_checked() {
 #[tokio::test]
 async fn every_step_shares_the_same_prompt_prefix() {
     let model = full_model();
-    analyze(&sample_record(), &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    analyze(&sample_record(), &model, &once()).await.unwrap();
 
     let requests = model.requests();
     assert_eq!(requests.len(), 7);
@@ -389,6 +420,10 @@ async fn every_step_shares_the_same_prompt_prefix() {
         .unwrap();
     let context = &prompts[0][..context_end];
     assert!(context.contains("s7"));
+    // 题目标了是第几题，模型在正文里才能写「第 2 题」，不用写 HR 看不懂的 id
+    assert!(context.contains("第 1 题（id：q1）：请介绍一下你主导的订单系统重构。"));
+    assert!(context.contains("  追问（id：q1.f1）：延迟具体是怎么降下来的？"));
+    assert!(context.contains("第 2 题（id：q2）：如果下单接口突然变慢，你会怎么排查？"));
     for (stage, request) in &requests {
         let prompt = request.messages[1].content.as_text();
         assert!(
@@ -422,9 +457,7 @@ async fn failed_step_leaves_its_section_empty() {
         .fail("integrity")
         .on("communication", COMMUNICATION)
         .on("synthesis", SYNTHESIS);
-    let report = analyze(&sample_record(), &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    let report = analyze(&sample_record(), &model, &once()).await.unwrap();
 
     assert!(report.integrity.is_none());
     assert!(report.questions[1].asked);
@@ -459,11 +492,9 @@ async fn out_of_range_rating_is_sent_back_to_the_model() {
         .on("integrity", INTEGRITY)
         .on("communication", COMMUNICATION)
         .on("synthesis", SYNTHESIS);
-    let report = analyze(&sample_record(), &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    let report = analyze(&sample_record(), &model, &once()).await.unwrap();
 
-    assert_eq!(report.questions[1].judgement.as_ref().unwrap().rating, 2);
+    assert_eq!(report.questions[1].judgement.as_ref().unwrap().rating, 2.0);
     assert_eq!(model.calls("question:q2"), 2);
     assert_eq!(report.meta.usage.calls, 8);
     // 第二次请求里带着上一次的输出和不合要求的原因
@@ -478,6 +509,118 @@ async fn out_of_range_rating_is_sent_back_to_the_model() {
 }
 
 #[tokio::test]
+async fn half_grades_are_accepted_and_other_fractions_are_sent_back() {
+    let off_grid = Q2.replace("\"rating\": 2", "\"rating\": 2.3");
+    let half = Q2.replace("\"rating\": 2", "\"rating\": 2.5");
+    let model = full_model_with_q2(&[&off_grid, &half]);
+    let report = analyze(&sample_record(), &model, &once()).await.unwrap();
+
+    assert_eq!(report.questions[1].judgement.as_ref().unwrap().rating, 2.5);
+    assert_eq!(model.calls("question:q2"), 2);
+    // (2×4 + 1×2.5) ÷ 3 × 20 = 70
+    assert_eq!(report.overall_score, Some(70));
+}
+
+#[tokio::test]
+async fn repeated_judgements_are_averaged() {
+    // q1 三次都是 4 分；q2 三次是 2、2、3.5 分
+    let higher = Q2
+        .replace("\"rating\": 2", "\"rating\": 3.5")
+        .replace("没有排查思路。", "提到了重启，勉强算有动作。");
+    let model = full_model_with_q2(&[Q2, Q2, &higher]);
+    let report = analyze(&sample_record(), &model, &AnalyzeOptions::default())
+        .await
+        .unwrap();
+
+    assert_eq!(model.calls("question:q1"), 3);
+    assert_eq!(model.calls("question:q2"), 3);
+    let q1 = report.questions[0].judgement.as_ref().unwrap();
+    assert_eq!(q1.rating, 4.0);
+    assert_eq!(q1.ratings, [4.0, 4.0, 4.0]);
+    let q2 = report.questions[1].judgement.as_ref().unwrap();
+    // 平均 2.5 分，页面上的分数取到半分；评语用离平均最近的那一次（2 分的）
+    assert_eq!(q2.rating, 2.5);
+    let mut ratings = q2.ratings.clone();
+    ratings.sort_by(f32::total_cmp);
+    assert_eq!(ratings, [2.0, 2.0, 3.5]);
+    assert_eq!(q2.rating_reason, "没有排查思路。");
+    // 总分用没取整的平均：(2×4 + 1×2.5) ÷ 3 × 20 = 70
+    assert_eq!(report.overall_score, Some(70));
+    // q2 三次的出入大，浮动范围比下限的上下 2 分宽：
+    // 平均数的标准误差 0.5 分，折到总分是 0.5 × 20 ÷ 3 ≈ 3.3 分，两倍向上取整是 7 分
+    let range = report.score_range.unwrap();
+    assert_eq!((range.low, range.high), (63, 77));
+}
+
+#[tokio::test]
+async fn question_ids_in_prose_become_ordinals() {
+    let integrity = INTEGRITY
+        .replace(
+            "有一次切出页面。",
+            "q2 作答前有一次切出页面，q1.f1 和 q1 没有异常。",
+        )
+        .replace("第二题作答前切出页面 5 秒。", "q2作答前切出页面 5 秒。");
+    let model = RoutedModel::new()
+        .on("question:q1", Q1)
+        .on("question:q2", Q2)
+        .on("requirements", REQUIREMENTS)
+        .on("resume", RESUME)
+        .on("integrity", &integrity)
+        .on("communication", COMMUNICATION)
+        .on("synthesis", SYNTHESIS);
+    let report = analyze(&sample_record(), &model, &once()).await.unwrap();
+
+    let integrity = report.integrity.unwrap();
+    assert_eq!(
+        integrity.summary,
+        "第 2 题作答前有一次切出页面，第 1 题的追问和第 1 题没有异常。"
+    );
+    assert_eq!(
+        integrity.signals[0].description,
+        "第 2 题作答前切出页面 5 秒。"
+    );
+    // id 字段和证据不动
+    assert_eq!(report.questions[1].question_id, "q2");
+    assert_eq!(
+        integrity.signals[0].evidence[0].event_id.as_deref(),
+        Some("e1")
+    );
+    assert_eq!(report.overall_score, Some(67));
+}
+
+#[tokio::test]
+async fn agreeing_judgements_still_get_a_minimum_range() {
+    let report = analyze(&sample_record(), &full_model(), &AnalyzeOptions::default())
+        .await
+        .unwrap();
+
+    assert_eq!(report.overall_score, Some(67));
+    let range = report.score_range.unwrap();
+    assert_eq!((range.low, range.high), (65, 69));
+}
+
+#[tokio::test]
+async fn one_failed_judgement_does_not_lose_the_question() {
+    let model = RoutedModel::new()
+        .on("question:q1", Q1)
+        .fail("question:q2")
+        .on("question:q2", Q2)
+        .on("requirements", REQUIREMENTS)
+        .on("resume", RESUME)
+        .on("integrity", INTEGRITY)
+        .on("communication", COMMUNICATION)
+        .on("synthesis", SYNTHESIS);
+    let report = analyze(&sample_record(), &model, &AnalyzeOptions::default())
+        .await
+        .unwrap();
+
+    let q2 = report.questions[1].judgement.as_ref().unwrap();
+    assert_eq!(q2.rating, 2.0);
+    assert_eq!(q2.ratings, [2.0, 2.0]);
+    assert!(report.meta.failed_stages.is_empty());
+}
+
+#[tokio::test]
 async fn synthesis_failure_fails_the_whole_report() {
     let model = RoutedModel::new()
         .on("question:q1", Q1)
@@ -487,7 +630,7 @@ async fn synthesis_failure_fails_the_whole_report() {
         .on("integrity", INTEGRITY)
         .on("communication", COMMUNICATION)
         .fail("synthesis");
-    let error = analyze(&sample_record(), &model, &AnalyzeOptions::default())
+    let error = analyze(&sample_record(), &model, &once())
         .await
         .unwrap_err();
     assert!(matches!(error, AnalyzeError::Synthesis(_)));
@@ -506,9 +649,7 @@ async fn untagged_transcript_is_split_by_the_model() {
         {"question_id": "q3", "first_segment_id": "s404", "last_segment_id": "s8"}
     ]}"#;
     let model = full_model().on("alignment", alignment);
-    let report = analyze(&record, &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    let report = analyze(&record, &model, &once()).await.unwrap();
 
     assert_eq!(model.calls("alignment"), 1);
     assert_eq!(report.questions[0].segment_ids, ["s2", "s3", "s4", "s5"]);
@@ -525,9 +666,7 @@ async fn alignment_failure_is_reported() {
         segment.question_id = None;
     }
     let model = full_model().fail("alignment");
-    let error = analyze(&record, &model, &AnalyzeOptions::default())
-        .await
-        .unwrap_err();
+    let error = analyze(&record, &model, &once()).await.unwrap_err();
     assert!(matches!(error, AnalyzeError::Alignment(_)));
 }
 
@@ -551,9 +690,7 @@ async fn risky_findings_raise_review_flags() {
         .on("integrity", integrity)
         .on("communication", COMMUNICATION)
         .on("synthesis", SYNTHESIS);
-    let report = analyze(&sample_record(), &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    let report = analyze(&sample_record(), &model, &once()).await.unwrap();
 
     let codes: Vec<ReviewFlagCode> = report.review_flags.iter().map(|f| f.code).collect();
     assert_eq!(
@@ -575,7 +712,7 @@ async fn empty_record_has_nothing_to_analyze() {
     let mut record = sample_record();
     record.questions.clear();
     record.transcript.clear();
-    let error = analyze(&record, &RoutedModel::new(), &AnalyzeOptions::default())
+    let error = analyze(&record, &RoutedModel::new(), &once())
         .await
         .unwrap_err();
     assert_eq!(error, AnalyzeError::NothingToAnalyze);
@@ -589,9 +726,7 @@ async fn interview_without_planned_questions_still_gets_a_report() {
         segment.question_id = None;
     }
     let model = full_model();
-    let report = analyze(&record, &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    let report = analyze(&record, &model, &once()).await.unwrap();
 
     assert!(report.questions.is_empty());
     assert_eq!(report.overall_score, None);
@@ -603,11 +738,7 @@ async fn interview_without_planned_questions_still_gets_a_report() {
 fn report_survives_a_json_round_trip() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let report = runtime
-        .block_on(analyze(
-            &sample_record(),
-            &full_model(),
-            &AnalyzeOptions::default(),
-        ))
+        .block_on(analyze(&sample_record(), &full_model(), &once()))
         .unwrap();
     let json = serde_json::to_string(&report).unwrap();
     let back: interview_report::InterviewReport = serde_json::from_str(&json).unwrap();
@@ -628,9 +759,7 @@ async fn single_mild_doubt_about_resume_is_not_flagged() {
         .on("integrity", INTEGRITY)
         .on("communication", COMMUNICATION)
         .on("synthesis", SYNTHESIS);
-    let report = analyze(&sample_record(), &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    let report = analyze(&sample_record(), &model, &once()).await.unwrap();
     assert!(report.review_flags.is_empty());
 
     // 整体可信度判为低的时候，一条存疑也要提醒
@@ -643,9 +772,7 @@ async fn single_mild_doubt_about_resume_is_not_flagged() {
         .on("integrity", INTEGRITY)
         .on("communication", COMMUNICATION)
         .on("synthesis", SYNTHESIS);
-    let report = analyze(&sample_record(), &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    let report = analyze(&sample_record(), &model, &once()).await.unwrap();
     assert_eq!(report.review_flags[0].code, ReviewFlagCode::ResumeDoubt);
 }
 
@@ -664,9 +791,7 @@ async fn resume_claim_without_resume_quote_is_sent_back() {
         .on("integrity", INTEGRITY)
         .on("communication", COMMUNICATION)
         .on("synthesis", SYNTHESIS);
-    let report = analyze(&sample_record(), &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    let report = analyze(&sample_record(), &model, &once()).await.unwrap();
 
     assert_eq!(model.calls("resume"), 2);
     let claim = &report.resume_verification.unwrap().claims[0];
@@ -679,9 +804,7 @@ async fn follow_up_answers_join_their_question_without_being_listed() {
     let mut record = sample_record();
     record.questions.retain(|q| q.id != "q1.f1");
     let model = full_model();
-    let report = analyze(&record, &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    let report = analyze(&record, &model, &once()).await.unwrap();
     assert_eq!(report.questions[0].segment_ids, ["s2", "s3", "s4", "s5"]);
 }
 
@@ -720,9 +843,7 @@ async fn raw_room_events_are_merged_and_shown_to_the_model() {
         .on("integrity", &integrity)
         .on("communication", COMMUNICATION)
         .on("synthesis", SYNTHESIS);
-    let report = analyze(&record, &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    let report = analyze(&record, &model, &once()).await.unwrap();
 
     let prompt = model.requests()[0].1.messages[1].content.as_text();
     assert!(prompt.contains(r#"[e1 | 开始前 | page_opened | -] {"in_app_browser":"wechat"}"#));
@@ -753,9 +874,7 @@ async fn long_ids_are_shown_as_short_ones_and_mapped_back() {
         segment.id.clone_from(id);
     }
     let model = full_model();
-    let report = analyze(&record, &model, &AnalyzeOptions::default())
-        .await
-        .unwrap();
+    let report = analyze(&record, &model, &once()).await.unwrap();
 
     let prompt = model.requests()[0].1.messages[1].content.as_text();
     assert!(prompt.contains("[s2 | "));
@@ -773,4 +892,16 @@ async fn long_ids_are_shown_as_short_ones_and_mapped_back() {
         .collect();
     assert!(!cited.is_empty());
     assert!(cited.iter().all(|id| original.iter().any(|o| o == id)));
+}
+
+fn assert_send<T: Send>(_: &T) {}
+
+/// 报告任务在后台任务里跑，分析的 future 必须是 Send 的。只要能编译过就算通过。
+#[test]
+fn analyze_future_can_be_spawned() {
+    let model = full_model();
+    let model: &dyn ChatModel = &model;
+    let record = sample_record();
+    let options = once();
+    assert_send(&analyze(&record, model, &options));
 }

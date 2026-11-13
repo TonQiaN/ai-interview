@@ -21,13 +21,14 @@ use tokio::sync::Semaphore;
 
 use crate::evidence::{EvidenceIndex, HasEvidence};
 use crate::prompts::{self, PROMPT_VERSION, SYSTEM};
+use crate::prose;
 use crate::record::InterviewRecord;
 use crate::report::{
     ClaimVerdict, CommunicationAssessment, CompetencyRating, Credibility, Decision, Evidence,
     EvidenceSource, EvidenceStats, Finding, FocusCheck, Importance, IntegrityAssessment,
     InterviewReport, Level, NextRound, QuestionJudgement, QuestionReview, Recommendation,
     ReportMeta, RequirementMatch, RequirementVerdict, ResumeVerification, ReviewFlag,
-    ReviewFlagCode, RiskLevel, SCHEMA_VERSION, StageFailure, Usage, null_as_default,
+    ReviewFlagCode, RiskLevel, SCHEMA_VERSION, ScoreRange, StageFailure, Usage, null_as_default,
 };
 use crate::transcript::{
     Assignment, QuestionGroup, group_by_question, lookup_by_alias, provided_assignment,
@@ -45,6 +46,9 @@ pub struct AnalyzeOptions {
     pub thinking: Option<Thinking>,
     /// 每次调用的输出上限（token，思考也算在里面）。不填用接口的默认值。
     pub max_output_tokens: Option<u32>,
+    /// 每道题评几次，分数取平均。评得越多，同一份记录重新分析时总分的出入越小，花费也越多：
+    /// 实测评 1、2、3 次，总分的标准差分别约 1.8、1.2、0.9 分，每份报告约 0.13、0.17、0.21 元。
+    pub question_judgements: u32,
 }
 
 impl Default for AnalyzeOptions {
@@ -54,6 +58,7 @@ impl Default for AnalyzeOptions {
             attempts: 3,
             thinking: None,
             max_output_tokens: None,
+            question_judgements: 3,
         }
     }
 }
@@ -109,11 +114,7 @@ pub async fn analyze(
             }
             let stage = format!("question:{}", group.root.id);
             let task = prompts::question_task(group, &record.transcript);
-            Some(
-                runner
-                    .run::<QuestionJudgement>(&stage, context, &task)
-                    .await,
-            )
+            Some(judge_question(runner, &stage, context, &task, options.question_judgements).await)
         }
     }));
     let (question_judgements, requirement_match, resume_verification, integrity, communication) =
@@ -204,6 +205,7 @@ pub async fn analyze(
             .count(),
     );
 
+    let score = overall_score(&groups, &questions);
     let recommendation = Recommendation {
         decision: synthesis.recommendation,
         confidence: synthesis.confidence,
@@ -222,7 +224,7 @@ pub async fn analyze(
     );
     let outcome = runner.finish();
 
-    Ok(InterviewReport {
+    let report = InterviewReport {
         schema_version: SCHEMA_VERSION,
         interview_id: record.interview_id.clone(),
         generated_at_ms: SystemTime::now()
@@ -231,7 +233,8 @@ pub async fn analyze(
                 u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
             }),
         recommendation,
-        overall_score: overall_score(&groups, &questions),
+        overall_score: score.map(|(score, _)| score),
+        score_range: score.map(|(_, range)| range),
         competencies: synthesis.competencies,
         focus_checks: synthesis.focus_checks,
         questions,
@@ -253,7 +256,46 @@ pub async fn analyze(
             evidence: stats,
             failed_stages,
         },
-    })
+    };
+    Ok(prose::replace_question_ids(report, &groups))
+}
+
+/// 评一道题。评不止一次时分数取平均，评语用分数离平均最近的那一次的。
+async fn judge_question(
+    runner: &Runner<'_>,
+    stage: &str,
+    context: &str,
+    task: &str,
+    times: u32,
+) -> Result<QuestionJudgement, String> {
+    let results =
+        join_all((0..times.max(1)).map(|_| runner.run::<QuestionJudgement>(stage, context, task)))
+            .await;
+    let mut judgements = Vec::new();
+    let mut last_error = String::new();
+    for result in results {
+        match result {
+            Ok(judgement) => judgements.push(judgement),
+            Err(error) => last_error = error,
+        }
+    }
+    if judgements.len() <= 1 {
+        let mut only = judgements.pop().ok_or(last_error)?;
+        // 这个字段不是让模型填的
+        only.ratings.clear();
+        return Ok(only);
+    }
+    let ratings: Vec<f32> = judgements.iter().map(|j| j.rating).collect();
+    let mean = mean(&ratings);
+    let position = ratings
+        .iter()
+        .enumerate()
+        .min_by(|a, b| (a.1 - mean).abs().total_cmp(&(b.1 - mean).abs()))
+        .map_or(0, |(index, _)| index);
+    let mut chosen = judgements.swap_remove(position);
+    chosen.rating = (mean * 2.0).round() / 2.0;
+    chosen.ratings = ratings;
+    Ok(chosen)
 }
 
 fn count(n: usize) -> u32 {
@@ -283,11 +325,19 @@ fn settle<T: HasEvidence>(
     }
 }
 
-/// 各题评分按权重算出的总分：每题 1 到 5 分，乘以 20，所以 3 分（合格）对应 60 分。
-/// 没被问到和分析失败的题不参与。
-fn overall_score(groups: &[QuestionGroup<'_>], questions: &[QuestionReview]) -> Option<u8> {
+/// 各题评分按权重算出的总分，以及总分大概的浮动范围。
+///
+/// 每题 1 到 5 分，乘以 20，所以 3 分（合格）对应 60 分。一道题评了不止一次时用几次的平均，
+/// 不用取整到半分之后的 `rating`，取整会把评多次换来的精度丢掉。没被问到和分析失败的题不参与。
+fn overall_score(
+    groups: &[QuestionGroup<'_>],
+    questions: &[QuestionReview],
+) -> Option<(u8, ScoreRange)> {
     let mut weighted = 0.0_f32;
     let mut total_weight = 0.0_f32;
+    // 各题平均分的方差按权重合起来，没除以总权重的平方
+    let mut variance = 0.0_f32;
+    let mut single = false;
     for (group, review) in groups.iter().zip(questions) {
         let Some(judgement) = &review.judgement else {
             continue;
@@ -297,15 +347,62 @@ fn overall_score(groups: &[QuestionGroup<'_>], questions: &[QuestionReview]) -> 
             .weight
             .filter(|w| w.is_finite() && *w > 0.0)
             .unwrap_or(1.0);
-        weighted += weight * f32::from(judgement.rating) * 20.0;
+        weighted += weight * judgement.mean_rating() * 20.0;
         total_weight += weight;
+        match variance_of_mean(&judgement.ratings) {
+            Some(v) => variance += (weight * 20.0).powi(2) * v,
+            None => single = true,
+        }
     }
     if total_weight <= 0.0 {
         return None;
     }
     let score = (weighted / total_weight).round().clamp(0.0, 100.0);
+    // 浮动范围取两倍标准误差，并且不小于实测出来的下限：几次评分碰巧一样，不代表再评一次还一样
+    let floor = if single {
+        SCORE_MARGIN_SINGLE
+    } else {
+        SCORE_MARGIN_REPEATED
+    };
+    let margin = (2.0 * variance.sqrt() / total_weight).ceil().max(floor);
+    Some((
+        to_score(score),
+        ScoreRange {
+            low: to_score(score - margin),
+            high: to_score(score + margin),
+        },
+    ))
+}
+
+/// 每题只评一次时总分的浮动范围（正负几分）。实测同一份记录重评，约 97% 落在这个范围里。
+const SCORE_MARGIN_SINGLE: f32 = 4.0;
+/// 每题评了不止一次时浮动范围的下限。
+const SCORE_MARGIN_REPEATED: f32 = 2.0;
+
+fn to_score(value: f32) -> u8 {
     // clamp 之后一定落在 u8 范围内
-    format!("{score:.0}").parse().ok()
+    format!("{:.0}", value.clamp(0.0, 100.0))
+        .parse()
+        .unwrap_or(0)
+}
+
+fn mean(values: &[f32]) -> f32 {
+    values.iter().sum::<f32>() / count_f32(values.len())
+}
+
+fn count_f32(n: usize) -> f32 {
+    f32::from(u16::try_from(n).unwrap_or(u16::MAX))
+}
+
+/// 几次评分的平均数的方差（样本方差除以次数）。不到两次算不出来。
+fn variance_of_mean(ratings: &[f32]) -> Option<f32> {
+    if ratings.len() < 2 {
+        return None;
+    }
+    let mean = mean(ratings);
+    let squares: f32 = ratings.iter().map(|r| (r - mean).powi(2)).sum();
+    let n = count_f32(ratings.len());
+    Some(squares / (n - 1.0) / n)
 }
 
 /// 按固定条件给出需要人工复核的提示。这些条件是确定的，不靠模型判断。
@@ -497,7 +594,14 @@ fn check_rating(name: &str, rating: Option<u8>) -> Result<(), String> {
 
 impl Checked for QuestionJudgement {
     fn check(&self) -> Result<(), String> {
-        check_rating("rating", Some(self.rating))
+        let rating = self.rating;
+        let half_step = (rating * 2.0).fract() == 0.0;
+        if (1.0..=5.0).contains(&rating) && half_step {
+            return Ok(());
+        }
+        Err(format!(
+            "rating 是 {rating}，必须在 1 到 5 之间，并且只能是整数或者带 .5"
+        ))
     }
 }
 impl Checked for RequirementMatch {}
