@@ -84,7 +84,9 @@ export function readBrowserEnvironment(): BrowserEnvironment {
     secureContext: window.isSecureContext,
     hasGetUserMedia: typeof navigator.mediaDevices?.getUserMedia === "function",
     hasMediaRecorder,
-    recordingMime: hasMediaRecorder ? pickRecordingMime((type) => MediaRecorder.isTypeSupported(type)) : null,
+    recordingMime: hasMediaRecorder
+      ? pickRecordingMime((type) => MediaRecorder.isTypeSupported(type))
+      : null,
     hasAudioContext: typeof AudioContext !== "undefined",
     hasIndexedDb: typeof indexedDB !== "undefined",
     userAgent: navigator.userAgent,

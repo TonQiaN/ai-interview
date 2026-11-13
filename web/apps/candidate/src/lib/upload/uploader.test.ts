@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { MemoryChunkStore, sha256Hex, type SegmentMeta } from "./chunk-store";
-import { retryDelayMs, type SegmentRef, type UploadApi, UploadError, Uploader, type UploadStatus } from "./uploader";
+import { MemoryChunkStore, type SegmentMeta, sha256Hex } from "./chunk-store";
+import {
+  retryDelayMs,
+  type SegmentRef,
+  type UploadApi,
+  UploadError,
+  Uploader,
+  type UploadStatus,
+} from "./uploader";
 
 const SESSION = "session-a";
 
@@ -24,7 +31,12 @@ class FakeApi implements UploadApi {
     return [...(this.chunks.get(segmentId)?.keys() ?? [])];
   }
 
-  async putChunk({ segmentId }: SegmentRef, seq: number, bytes: ArrayBuffer, sha256: string): Promise<void> {
+  async putChunk(
+    { segmentId }: SegmentRef,
+    seq: number,
+    bytes: ArrayBuffer,
+    sha256: string,
+  ): Promise<void> {
     await this.record(`put:${segmentId}:${seq}`);
     this.chunks.get(segmentId)?.set(seq, { bytes, sha256 });
   }
@@ -44,7 +56,11 @@ class FakeApi implements UploadApi {
   }
 }
 
-function segment(segmentId: string, startMs: number, totalChunks: number | null = null): SegmentMeta {
+function segment(
+  segmentId: string,
+  startMs: number,
+  totalChunks: number | null = null,
+): SegmentMeta {
   return {
     sessionKey: SESSION,
     track: "camera",
@@ -55,9 +71,20 @@ function segment(segmentId: string, startMs: number, totalChunks: number | null 
   };
 }
 
-async function addChunk(store: MemoryChunkStore, segmentId: string, seq: number, text = `chunk-${seq}`) {
+async function addChunk(
+  store: MemoryChunkStore,
+  segmentId: string,
+  seq: number,
+  text = `chunk-${seq}`,
+) {
   const bytes = new TextEncoder().encode(text).buffer as ArrayBuffer;
-  await store.putChunk({ sessionKey: SESSION, segmentId, seq, bytes, sha256: await sha256Hex(bytes) });
+  await store.putChunk({
+    sessionKey: SESSION,
+    segmentId,
+    seq,
+    bytes,
+    sha256: await sha256Hex(bytes),
+  });
 }
 
 function setup(overrides: Partial<ConstructorParameters<typeof Uploader>[0]> = {}) {
@@ -117,7 +144,11 @@ describe("Uploader", () => {
     expect(api.completed).toEqual([{ segmentId: "seg-1", totalChunks: 3 }]);
     expect(await store.listChunks(SESSION, "seg-1")).toEqual([]);
     expect(await store.listSegments(SESSION)).toEqual([]);
-    expect(uploader.getStatus()).toMatchObject({ state: "idle", pendingChunks: 0, pendingBytes: 0 });
+    expect(uploader.getStatus()).toMatchObject({
+      state: "idle",
+      pendingChunks: 0,
+      pendingBytes: 0,
+    });
     expect(uploader.getStatus().uploadedBytes).toBe("chunk-0".length * 3);
   });
 
@@ -131,7 +162,9 @@ describe("Uploader", () => {
 
     const received = api.chunks.get("seg-1")?.get(0);
     expect(new TextDecoder().decode(received?.bytes)).toBe("你好，面试官");
-    expect(received?.sha256).toBe(await sha256Hex(new TextEncoder().encode("你好，面试官").buffer as ArrayBuffer));
+    expect(received?.sha256).toBe(
+      await sha256Hex(new TextEncoder().encode("你好，面试官").buffer as ArrayBuffer),
+    );
   });
 
   it("请求失败会重试，间隔逐步拉长，成功前分片一直留在本地", async () => {
@@ -154,7 +187,11 @@ describe("Uploader", () => {
     expect(sleeps).toEqual([1000, 2000, 4000]);
     expect(api.seqs("seg-1")).toEqual([0]);
     expect(states).toContain("retrying");
-    expect(uploader.getStatus()).toMatchObject({ state: "idle", consecutiveFailures: 0, lastError: null });
+    expect(uploader.getStatus()).toMatchObject({
+      state: "idle",
+      consecutiveFailures: 0,
+      lastError: null,
+    });
   });
 
   it("不是 UploadError 的异常（例如 fetch 抛的 TypeError）也按可重试处理", async () => {
@@ -192,7 +229,10 @@ describe("Uploader", () => {
     uploader.start();
     await uploader.drain();
 
-    expect(api.calls.filter((call) => call.startsWith("put:"))).toEqual(["put:seg-1:2", "put:seg-1:3"]);
+    expect(api.calls.filter((call) => call.startsWith("put:"))).toEqual([
+      "put:seg-1:2",
+      "put:seg-1:3",
+    ]);
     expect(await store.listChunks(SESSION, "seg-1")).toEqual([]);
     expect(api.completed).toEqual([{ segmentId: "seg-1", totalChunks: 4 }]);
   });
@@ -208,7 +248,9 @@ describe("Uploader", () => {
     uploader.start();
     await uploader.drain();
 
-    expect(api.calls.filter((call) => call.startsWith("put:") || call.startsWith("complete:"))).toEqual([
+    expect(
+      api.calls.filter((call) => call.startsWith("put:") || call.startsWith("complete:")),
+    ).toEqual([
       "put:seg-old:0",
       "put:seg-old:1",
       "complete:seg-old",
@@ -288,7 +330,11 @@ describe("Uploader", () => {
     await expect(uploader.drain()).rejects.toThrow("链接已失效");
 
     expect(sleeps).toEqual([]);
-    expect(uploader.getStatus()).toMatchObject({ state: "failed", lastError: "链接已失效", pendingChunks: 1 });
+    expect(uploader.getStatus()).toMatchObject({
+      state: "failed",
+      lastError: "链接已失效",
+      pendingChunks: 1,
+    });
     expect(await store.listChunks(SESSION, "seg-1")).toHaveLength(1);
     await expect(uploader.drain()).rejects.toThrow("链接已失效");
   });

@@ -25,7 +25,10 @@ export async function closeOrphanSegments(
       total = Math.max(...local.map((chunk) => chunk.seq)) + 1;
     } else {
       try {
-        const received = await api.receivedChunks({ track: segment.track, segmentId: segment.segmentId });
+        const received = await api.receivedChunks({
+          track: segment.track,
+          segmentId: segment.segmentId,
+        });
         total = received.length === 0 ? 0 : Math.max(...received) + 1;
       } catch {
         unresolved += 1;

@@ -89,12 +89,29 @@ impl RoomConfig {
             );
             default.abandon_after_minutes
         });
+        let timeslice_ms = env_parse(
+            "AI_INTERVIEW_ROOM_RECORDING_TIMESLICE_MS",
+            default.recording.timeslice_ms,
+        )
+        .ok()
+        .filter(|ms| (500..=30_000).contains(ms))
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "AI_INTERVIEW_ROOM_RECORDING_TIMESLICE_MS 要在 500 到 30000 之间，这次用默认值 {}",
+                default.recording.timeslice_ms
+            );
+            default.recording.timeslice_ms
+        });
         Self {
             invite_ttl_hours,
             camera_required,
             ffmpeg,
             ffprobe,
             abandon_after_minutes,
+            recording: RecordingSettings {
+                timeslice_ms,
+                ..default.recording.clone()
+            },
             ..default
         }
     }

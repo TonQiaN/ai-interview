@@ -165,7 +165,11 @@ function checkTimeouts(state: Listening, at: number, config: TurnConfig): TurnSt
   return state;
 }
 
-export function reduceTurn(state: TurnState, event: TurnEvent, config: TurnConfig = DEFAULT_TURN_CONFIG): TurnState {
+export function reduceTurn(
+  state: TurnState,
+  event: TurnEvent,
+  config: TurnConfig = DEFAULT_TURN_CONFIG,
+): TurnState {
   switch (state.phase) {
     case "asking":
       if (event.type === "question_ended") return startListening(event.at, state.replaysUsed);
@@ -208,7 +212,11 @@ export function reduceTurn(state: TurnState, event: TurnEvent, config: TurnConfi
 
         case "speech_end":
           if (!state.speaking) return state;
-          return checkTimeouts({ ...state, speaking: false, silenceSince: event.at }, event.at, config);
+          return checkTimeouts(
+            { ...state, speaking: false, silenceSince: event.at },
+            event.at,
+            config,
+          );
 
         case "user_continue":
           // 只有在静音计时期间才有意义：重新开始计静音。
@@ -252,7 +260,11 @@ export interface TurnView {
   canReplay: boolean;
 }
 
-export function viewTurn(state: TurnState, now: number, config: TurnConfig = DEFAULT_TURN_CONFIG): TurnView {
+export function viewTurn(
+  state: TurnState,
+  now: number,
+  config: TurnConfig = DEFAULT_TURN_CONFIG,
+): TurnView {
   if (state.phase !== "listening") {
     return {
       countdownVisible: false,
@@ -267,7 +279,11 @@ export function viewTurn(state: TurnState, now: number, config: TurnConfig = DEF
   const silenceRemainingMs =
     state.silenceSince === null
       ? null
-      : Math.max(0, config.silenceMs - (at - state.silenceSince), config.minAnswerMs - (at - state.listenStartedAt));
+      : Math.max(
+          0,
+          config.silenceMs - (at - state.silenceSince),
+          config.minAnswerMs - (at - state.listenStartedAt),
+        );
   const answerRemainingMs = Math.max(0, config.maxAnswerMs - (at - state.listenStartedAt));
   return {
     countdownVisible: silenceRemainingMs !== null && silenceRemainingMs <= config.countdownMs,

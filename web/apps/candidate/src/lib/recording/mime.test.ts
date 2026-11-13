@@ -29,9 +29,9 @@ describe("pickRecordingMime", () => {
   });
 
   it("只录音时用音频格式的清单", () => {
-    expect(pickRecordingMime((mime) => mime.startsWith("audio/mp4"), AUDIO_ONLY_MIME_CANDIDATES)).toBe(
-      "audio/mp4;codecs=mp4a.40.2",
-    );
+    expect(
+      pickRecordingMime((mime) => mime.startsWith("audio/mp4"), AUDIO_ONLY_MIME_CANDIDATES),
+    ).toBe("audio/mp4;codecs=mp4a.40.2");
   });
 });
 

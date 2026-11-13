@@ -31,7 +31,9 @@ describe("浏览器能力检查", () => {
 
   it("有 MediaRecorder 但一种格式都录不了，也算不能录", () => {
     expect(checkCapabilities({ ...good, recordingMime: null }).problems).toEqual(["no_recorder"]);
-    expect(checkCapabilities({ ...good, hasMediaRecorder: false, recordingMime: null }).problems).toEqual(["no_recorder"]);
+    expect(
+      checkCapabilities({ ...good, hasMediaRecorder: false, recordingMime: null }).problems,
+    ).toEqual(["no_recorder"]);
   });
 
   it("没有 IndexedDB 只提醒，不拦", () => {
@@ -41,10 +43,17 @@ describe("浏览器能力检查", () => {
   });
 
   it("认出内嵌在聊天软件里的浏览器", () => {
-    const ios = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
-    expect(detectInAppBrowser(`${ios} MicroMessenger/8.0.50(0x18003233) NetType/WIFI Language/zh_CN`)).toBe("wechat");
-    expect(detectInAppBrowser(`${ios} wxwork/4.1.30 MicroMessenger/7.0.1 Language/zh`)).toBe("wecom");
-    expect(detectInAppBrowser(`${ios} AliApp(DingTalk/7.6.0) com.laiwang.DingTalk/1 DingTalk/7.6.0`)).toBe("dingtalk");
+    const ios =
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
+    expect(
+      detectInAppBrowser(`${ios} MicroMessenger/8.0.50(0x18003233) NetType/WIFI Language/zh_CN`),
+    ).toBe("wechat");
+    expect(detectInAppBrowser(`${ios} wxwork/4.1.30 MicroMessenger/7.0.1 Language/zh`)).toBe(
+      "wecom",
+    );
+    expect(
+      detectInAppBrowser(`${ios} AliApp(DingTalk/7.6.0) com.laiwang.DingTalk/1 DingTalk/7.6.0`),
+    ).toBe("dingtalk");
     expect(detectInAppBrowser(`${ios} Lark/7.20.0 LarkLocale/zh_CN`)).toBe("feishu");
     expect(detectInAppBrowser(`${ios} QQ/9.0.0.1 NetType/4G`)).toBe("qq");
     expect(detectInAppBrowser(`${ios} AlipayClient/10.6.0`)).toBe("alipay");

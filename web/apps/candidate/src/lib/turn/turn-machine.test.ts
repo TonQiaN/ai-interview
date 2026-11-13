@@ -21,7 +21,11 @@ const listening = (): TurnState => run([{ type: "question_ended", at: 10_000 }])
 describe("逐题状态机", () => {
   it("题目播完后进入听作答", () => {
     const state = listening();
-    expect(state).toMatchObject({ phase: "listening", listenStartedAt: 10_000, firstSpeechAt: null });
+    expect(state).toMatchObject({
+      phase: "listening",
+      listenStartedAt: 10_000,
+      firstSpeechAt: null,
+    });
   });
 
   it("播放题目期间的声音不算作答", () => {
@@ -91,13 +95,24 @@ describe("逐题状态机", () => {
       ],
       listening(),
     );
-    expect(viewTurn(state, 21_000, config)).toMatchObject({ countdownVisible: false, silenceRemainingMs: 4_000 });
-    expect(viewTurn(state, 22_500, config)).toMatchObject({ countdownVisible: true, silenceRemainingMs: 2_500 });
+    expect(viewTurn(state, 21_000, config)).toMatchObject({
+      countdownVisible: false,
+      silenceRemainingMs: 4_000,
+    });
+    expect(viewTurn(state, 22_500, config)).toMatchObject({
+      countdownVisible: true,
+      silenceRemainingMs: 2_500,
+    });
 
     const continued = reduceTurn(state, { type: "user_continue", at: 23_000 }, config);
-    expect(viewTurn(continued, 23_000, config)).toMatchObject({ countdownVisible: false, silenceRemainingMs: 5_000 });
+    expect(viewTurn(continued, 23_000, config)).toMatchObject({
+      countdownVisible: false,
+      silenceRemainingMs: 5_000,
+    });
     expect(reduceTurn(continued, { type: "tick", at: 27_000 }, config).phase).toBe("listening");
-    expect(reduceTurn(continued, { type: "tick", at: 28_000 }, config)).toMatchObject({ reason: "silence" });
+    expect(reduceTurn(continued, { type: "tick", at: 28_000 }, config)).toMatchObject({
+      reason: "silence",
+    });
   });
 
   it("一直不开口：先提示，再超时进入下一题", () => {
@@ -108,7 +123,12 @@ describe("逐题状态机", () => {
     expect(viewTurn(state, 22_000, config).noSpeechPromptVisible).toBe(true);
 
     state = reduceTurn(state, { type: "tick", at: 40_000 }, config);
-    expect(state).toMatchObject({ phase: "ended", reason: "no_speech", firstSpeechAt: null, lastSpeechEndAt: null });
+    expect(state).toMatchObject({
+      phase: "ended",
+      reason: "no_speech",
+      firstSpeechAt: null,
+      lastSpeechEndAt: null,
+    });
   });
 
   it("提示之后开口，提示消失，不再按没开口处理", () => {
@@ -133,10 +153,17 @@ describe("逐题状态机", () => {
       listening(),
     );
     expect(state.phase).toBe("listening");
-    expect(viewTurn(state, 176_000, config)).toMatchObject({ maxWarningVisible: true, answerRemainingMs: 14_000 });
+    expect(viewTurn(state, 176_000, config)).toMatchObject({
+      maxWarningVisible: true,
+      answerRemainingMs: 14_000,
+    });
 
     const ended = reduceTurn(state, { type: "tick", at: 190_000 }, config);
-    expect(ended).toMatchObject({ phase: "ended", reason: "max_duration", lastSpeechEndAt: 190_000 });
+    expect(ended).toMatchObject({
+      phase: "ended",
+      reason: "max_duration",
+      lastSpeechEndAt: 190_000,
+    });
   });
 
   it("候选人点「我答完了」立即结束", () => {
@@ -204,7 +231,9 @@ describe("逐题状态机", () => {
     // 恢复后静音重新计，已用的作答时间不包含暂停的那一分钟
     expect(state).toMatchObject({ pausedAt: null, silenceSince: 82_000, listenStartedAt: 70_000 });
     expect(reduceTurn(state, { type: "tick", at: 86_999 }, config).phase).toBe("listening");
-    expect(reduceTurn(state, { type: "tick", at: 87_000 }, config)).toMatchObject({ reason: "silence" });
+    expect(reduceTurn(state, { type: "tick", at: 87_000 }, config)).toMatchObject({
+      reason: "silence",
+    });
   });
 
   it("结束后不再响应任何事件", () => {

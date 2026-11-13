@@ -31,7 +31,10 @@ class FakeAudio {
 
 let nextSeq = 0;
 
-function say(key: string, options: { expectsAnswer?: boolean; audioMs?: number | null; index?: number } = {}): NextStep {
+function say(
+  key: string,
+  options: { expectsAnswer?: boolean; audioMs?: number | null; index?: number } = {},
+): NextStep {
   const { expectsAnswer = true, audioMs = 2_000, index = 1 } = options;
   nextSeq += 1;
   return {
@@ -47,6 +50,7 @@ function say(key: string, options: { expectsAnswer?: boolean; audioMs?: number |
     expects_answer: expectsAnswer,
     answer: expectsAnswer ? { silence_sec: 5, max_sec: 60, min_sec: 3 } : null,
     progress: { index, total: 3, elapsed_ms: 0, expected_total_ms: 600_000 },
+    preload_audio_urls: [],
   };
 }
 
@@ -128,7 +132,12 @@ describe("逐题面试编排", () => {
 
     expect(api.requests).toHaveLength(1);
     const first = api.requests[0] as AdvanceRequest;
-    expect(first).toMatchObject({ utterance_key: "q1", playback_start_ms: 0, playback_end_ms: 2_000, end_reason: "silence" });
+    expect(first).toMatchObject({
+      utterance_key: "q1",
+      playback_start_ms: 0,
+      playback_end_ms: 2_000,
+      end_reason: "silence",
+    });
     // 第 3 秒开口（检测要 150 毫秒），第 7 秒停下（检测要 400 毫秒）
     expect(first.answer_start_ms).toBeGreaterThanOrEqual(3_000);
     expect(first.answer_start_ms).toBeLessThan(3_300);
@@ -136,7 +145,11 @@ describe("逐题面试编排", () => {
     expect(first.answer_end_ms).toBeLessThan(7_600);
 
     // 第二题：点「我答完了」
-    expect(runner.getSnapshot()).toMatchObject({ phase: "asking", utterance: { key: "q2" }, progress: { index: 2 } });
+    expect(runner.getSnapshot()).toMatchObject({
+      phase: "asking",
+      utterance: { key: "q2" },
+      progress: { index: 2 },
+    });
     await quiet(runner, 2_000);
     await feed(runner, 1_000, true);
     runner.done();
@@ -147,8 +160,14 @@ describe("逐题面试编排", () => {
     expect(audio.played).toEqual([2_000, 2_000]);
     expect(runner.getSnapshot()).toMatchObject({ phase: "finished", finishReason: "completed" });
     expect(phases).toEqual([
-      "preparing", "asking", "listening", "submitting",
-      "preparing", "asking", "listening", "submitting",
+      "preparing",
+      "asking",
+      "listening",
+      "submitting",
+      "preparing",
+      "asking",
+      "listening",
+      "submitting",
       "finished",
     ]);
   });
@@ -207,7 +226,11 @@ describe("逐题面试编排", () => {
     expect(runner.getSnapshot().turn?.noSpeechPromptVisible).toBe(true);
     await feed(runner, 18_000, false);
     expect(await result).toBe("completed");
-    expect(api.requests[0]).toMatchObject({ end_reason: "no_speech", answer_start_ms: null, answer_end_ms: null });
+    expect(api.requests[0]).toMatchObject({
+      end_reason: "no_speech",
+      answer_start_ms: null,
+      answer_end_ms: null,
+    });
   });
 
   it("到了最长作答时间就结束这一题", async () => {
@@ -239,7 +262,11 @@ describe("逐题面试编排", () => {
     expect(await result).toBe("completed");
     expect(audio.played).toEqual([2_000, 2_000]);
     // 播放的起点是第一次开始播，终点是最后一次播完
-    expect(api.requests[0]).toMatchObject({ replays: 1, playback_start_ms: 0, playback_end_ms: 5_000 });
+    expect(api.requests[0]).toMatchObject({
+      replays: 1,
+      playback_start_ms: 0,
+      playback_end_ms: 5_000,
+    });
   });
 
   it("倒计时期间点「继续回答」会重新计静音", async () => {
@@ -272,7 +299,11 @@ describe("逐题面试编排", () => {
 
     expect(await result).toBe("completed");
     expect(audio.played).toEqual([]);
-    expect(api.requests[0]).toMatchObject({ playback_start_ms: 0, playback_end_ms: 6_000, end_reason: "button" });
+    expect(api.requests[0]).toMatchObject({
+      playback_start_ms: 0,
+      playback_end_ms: 6_000,
+      end_reason: "button",
+    });
   });
 
   it("语音解码失败、又不需要回答：文字停留一会儿再继续", async () => {
@@ -288,7 +319,12 @@ describe("逐题面试编排", () => {
   it("语音太慢时不干等，超时后显示文字", async () => {
     const api = new FakeApi([finish]);
     api.fetchAudio = () => new Promise(() => {}); // 永远不返回
-    const runner = new InterviewRunner({ api, audio: new FakeAudio(), now: () => Date.now(), audioTimeoutMs: 5_000 });
+    const runner = new InterviewRunner({
+      api,
+      audio: new FakeAudio(),
+      now: () => Date.now(),
+      audioTimeoutMs: 5_000,
+    });
     void runner.run(say("q1"));
     await vi.advanceTimersByTimeAsync(4_900);
     expect(runner.getSnapshot().phase).toBe("preparing");
@@ -307,7 +343,8 @@ describe("逐题面试编排", () => {
     };
     const runner = new InterviewRunner({ api, audio: new FakeAudio(), now: () => Date.now() });
     const first = say("q1");
-    if (first.action === "say") first.preload_audio_urls = ["/audio/q2?ms=1000", "/audio/q1?ms=2000"];
+    if (first.action === "say")
+      first.preload_audio_urls = ["/audio/q2?ms=1000", "/audio/q1?ms=2000"];
     void runner.run(first);
     await vi.advanceTimersByTimeAsync(0);
     // q1 自己的语音只取一次
@@ -317,7 +354,11 @@ describe("逐题面试编排", () => {
 
   it("上报时断网会一直重试，恢复后继续", async () => {
     const { api, runner } = setup([finish]);
-    api.failures = [new RoomApiError("network", "断网"), new TypeError("fetch failed"), new RoomApiError("rate_limited", "太快")];
+    api.failures = [
+      new RoomApiError("network", "断网"),
+      new TypeError("fetch failed"),
+      new RoomApiError("rate_limited", "太快"),
+    ];
     const result = runner.run(say("q1"));
     await quiet(runner, 2_000);
     await feed(runner, 500, true);
@@ -396,6 +437,31 @@ describe("逐题面试编排", () => {
     await feed(runner, 1_000, true);
     await feed(runner, 6_000, false);
     expect(seen).toEqual(["question_ended", "speech_start", "speech_end"]);
+  });
+
+  it("答完一题、上报之前告诉外面一声；不需要回答的话和重听都不算", async () => {
+    const api = new FakeApi([say("q1"), finish]);
+    const seen: string[] = [];
+    const runner = new InterviewRunner({
+      api,
+      audio: new FakeAudio(),
+      now: () => Date.now(),
+      onAnswerEnded: () => seen.push(`答完（已上报 ${api.requests.length} 次）`),
+    });
+    void runner.run(say("opening", { expectsAnswer: false }));
+    await quiet(runner, 2_000); // 开场白播完，直接上报
+    expect(api.requests).toHaveLength(1);
+    expect(seen).toEqual([]);
+
+    await quiet(runner, 2_000);
+    runner.replay(); // 重听一遍，这一题还没答完
+    await quiet(runner, 2_000);
+    expect(seen).toEqual([]);
+
+    await feed(runner, 1_000, true);
+    await feed(runner, 6_000, false); // 静音由计时发现，也要通知到
+    expect(seen).toEqual(["答完（已上报 1 次）"]);
+    expect(api.requests).toHaveLength(2);
   });
 });
 

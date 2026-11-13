@@ -18,6 +18,8 @@ export interface RecorderLike {
   onerror: ((event: unknown) => void) | null;
   start(timesliceMs?: number): void;
   stop(): void;
+  /** 让浏览器马上把手里攒着的数据作为一个分片吐出来。 */
+  requestData?(): void;
 }
 
 export interface SegmentRecorderOptions {
@@ -77,7 +79,8 @@ export class SegmentRecorder {
       this.writes = this.writes.then(() => this.storeChunk(seq, event.data));
     };
     recorder.onerror = (event) => {
-      const cause = typeof event === "object" && event !== null && "error" in event ? event.error : event;
+      const cause =
+        typeof event === "object" && event !== null && "error" in event ? event.error : event;
       options.onError?.(cause instanceof Error ? cause : new Error("录制出错"));
     };
 
@@ -94,6 +97,20 @@ export class SegmentRecorder {
     this.meta = meta;
     await options.store.putSegment(meta);
     return meta;
+  }
+
+  /**
+   * 不等下一个分片的时间点，马上切出一片。候选人答完一题时调用：
+   * 服务端要拿这段回答的声音去转写，早一点传上去，下一题就来得快一点。
+   */
+  flush(): void {
+    const { recorder } = this;
+    if (!recorder || this.stopping || recorder.state !== "recording") return;
+    try {
+      recorder.requestData?.();
+    } catch {
+      // 切不出来就等下一个分片，不影响录制
+    }
   }
 
   /**
