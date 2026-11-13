@@ -1,0 +1,28 @@
+[package]
+name = "interview-room"
+description = "候选人面试间的服务端：面试链接、同意和设备检测、逐题问答的推进、录制上传、过程事件"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum = { workspace = true }
+chrono = { workspace = true }
+interview-core = { workspace = true, features = ["sqlx"] }
+interview-engine = { workspace = true }
+interview-platform = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tracing = { workspace = true }
+utoipa = { workspace = true }
+utoipa-axum = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

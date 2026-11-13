@@ -12,9 +12,12 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
+interview-flow = { workspace = true }
 interview-llm = { workspace = true }
 interview-platform = { workspace = true }
+interview-room = { workspace = true }
 interview-talent = { workspace = true }
+interview-tts = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal"] }

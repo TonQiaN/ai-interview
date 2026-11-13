@@ -47,6 +47,18 @@ cargo run -p interview-engine --example simulate -- crates/interview-engine/fixt
 
 改了出题或判断回答的提示词，要用这两个命令实际跑一遍看结果，单元测试用的是假模型，测不出提示词的好坏。
 
+语音识别的真模型（X-ASR，约 170 MB，CPU 就能跑，不花钱）默认不编进来，要用时加 `--features sherpa`：
+
+```bash
+eval "$(crates/interview-stt/scripts/fetch-sherpa-lib.sh)"   # 只有云端容器需要：构建脚本过不了代理，先用 curl 把预编译库下好
+crates/interview-stt/scripts/download-models.sh              # 模型下到 ~/.cache/ai-interview/stt-models
+export AI_INTERVIEW_STT_MODEL_DIR=~/.cache/ai-interview/stt-models
+cargo test -p interview-stt --features sherpa --test sherpa_live -- --ignored --nocapture
+cargo run --release -p interview-stt --features sherpa --example transcribe -- 录音.wav
+```
+
+改了 `crates/interview-stt/src/sherpa.rs` 要带着 `--features sherpa` 跑 clippy 和上面的测试，`scripts/check.sh` 不开这个特性。CI 里有单独的 `stt-sherpa` 任务跑这些。
+
 ## 目录
 
 完整的归属表在 `docs/architecture/README.md`，这里是速查：

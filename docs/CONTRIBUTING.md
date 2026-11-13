@@ -7,7 +7,7 @@
 1. **开 issue。** 标题写要达到的结果。正文按模板写背景、要做什么、怎么算完成。「怎么算完成」要写成能检查的条件。大的事拆成几个 issue，用子 issue 或任务清单串起来。
 2. **开分支。** 从最新的 main 开，一个分支只做一件事。
 3. **提交。** 小步提交，提交信息按下面的格式写。
-4. **开 PR。** 先开草稿，描述按模板写，正文里写 `Closes #号` 关联 issue。本地先跑 `scripts/check.sh`。
+4. **开 PR。** 先开草稿，描述按模板写，正文里写 `Closes #号` 关联 issue。本地先跑 `scripts/check.sh`。CI 用最新的 stable Rust，新版本的 clippy 会多出检查项，所以隔一段时间跑一次 `rustup update stable`，免得本地过了 CI 不过。
 5. **等 CI。** 总闸 `all-checks-passed` 绿了才能合。红了就修，不要跳过或关掉检查。
 6. **合并。** 用 squash 合并，合完删分支。issue 会随 PR 自动关闭。
 

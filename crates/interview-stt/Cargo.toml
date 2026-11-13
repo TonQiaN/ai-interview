@@ -7,15 +7,31 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# 真的识别后端（sherpa-onnx 进程内跑 X-ASR）。默认不开：它编译时要下载约 23 MB 的预编译库，
+# 不开时只有假后端，其他 crate 的编译和测试不受影响。
+sherpa = ["dep:sherpa-onnx", "dep:tokio"]
+
 [dependencies]
 async-trait.workspace = true
 interview-audio.workspace = true
 serde.workspace = true
+sherpa-onnx = { workspace = true, optional = true }
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync"], optional = true }
 
 [dev-dependencies]
+anyhow.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[[example]]
+name = "transcribe"
+required-features = ["sherpa"]
+
+[[test]]
+name = "sherpa_live"
+required-features = ["sherpa"]
 
 [lints]
 workspace = true

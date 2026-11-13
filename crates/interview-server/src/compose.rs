@@ -19,6 +19,7 @@ use interview_llm::{ChatModel, DeepSeekClient};
 use interview_platform::AppContext;
 use interview_platform::status::{ComponentStatus, DatabaseProbe, StatusProbe, StatusRegistry};
 use interview_platform::tasks::TaskRegistry;
+use interview_tts::{FakeBackend, Synthesizer};
 use utoipa_axum::router::OpenApiRouter;
 
 /// 多个模块共用、又不属于平台的东西。
@@ -26,6 +27,13 @@ use utoipa_axum::router::OpenApiRouter;
 pub struct Shared {
     /// 大模型。没配密钥时是 `None`：服务照常启动，用到大模型的功能返回 503。
     pub llm: Option<Arc<dyn ChatModel>>,
+    /// 语音合成。现在只有输出测试音的假后端，接 Mac 上真模型的后端由语音线换掉 [`default_synth`]。
+    pub synth: Arc<Synthesizer>,
+}
+
+/// 现在用的语音合成后端。
+fn default_synth() -> Arc<Synthesizer> {
+    Arc::new(Synthesizer::new(Arc::new(FakeBackend::new())))
 }
 
 impl Shared {
@@ -38,12 +46,18 @@ impl Shared {
                 None
             }
         };
-        Self { llm }
+        Self {
+            llm,
+            synth: default_synth(),
+        }
     }
 
     /// 什么外部依赖都没有。生成 OpenAPI 文档和测试时用。
     pub fn none() -> Self {
-        Self { llm: None }
+        Self {
+            llm: None,
+            synth: default_synth(),
+        }
     }
 }
 
@@ -76,8 +90,18 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
     // ── ④ 语音：interview-tts（音色管理、合成）、interview-stt ──
 
     // ── ⑤ 候选人面试间：interview-room ──
+    let room = interview_room::Deps::new(ctx.clone(), interview_room::RoomConfig::from_env());
+    api = api.merge(interview_room::router(room.clone()));
+    interview_room::register_tasks(&mut tasks, room);
 
     // ── ① 面试场次：interview-flow ──
+    let flow = interview_flow::Deps {
+        ctx: ctx.clone(),
+        llm: shared.llm.clone(),
+        synth: shared.synth.clone(),
+    };
+    api = api.merge(interview_flow::router(flow.clone()));
+    interview_flow::register_tasks(&mut tasks, flow);
 
     // ── ① 平台：登录、设置、系统状态。放最后，因为它要拿到登记完的探针 ──
     api = api.merge(interview_platform::routes::router(
