@@ -149,6 +149,17 @@ impl Ffmpeg {
         self.decode_file_inner(path, None).await
     }
 
+    /// 把磁盘上的一个媒体文件解成单声道音频，采样率自己定。
+    ///
+    /// 识别用 16 kHz 就够了，克隆音色的参考录音要留住更多的高频，用这个（一般给 24 kHz）。
+    pub async fn decode_file_at(&self, path: &Path, sample_rate: u32) -> Result<Audio, MediaError> {
+        let child = self.spawn_at(sample_rate, |command| {
+            command.arg("-i").arg(path);
+            command.stdin(Stdio::null());
+        })?;
+        collect_at(sample_rate, child, ONE_SHOT_TIMEOUT).await
+    }
+
     /// 只解文件里从 `start_ms` 到 `end_ms` 的一段。返回的音频从 0 开始计时（第 0 毫秒是 `start_ms`）。
     ///
     /// 面试结束后按每个回答的起止时间重新转写时用：不用把一小时的录像整个放进内存。
@@ -249,6 +260,16 @@ impl Ffmpeg {
 
     /// 起一个输出 16 kHz 单声道 PCM16 到标准输出的 ffmpeg。`input` 负责加上输入相关的参数。
     fn spawn(&self, input: impl FnOnce(&mut Command)) -> Result<Child, MediaError> {
+        self.spawn_at(REALTIME_SAMPLE_RATE, input)
+    }
+
+    /// 同 [`Ffmpeg::spawn`]，输出的采样率由 `sample_rate` 指定。
+    fn spawn_at(
+        &self,
+        sample_rate: u32,
+        input: impl FnOnce(&mut Command),
+    ) -> Result<Child, MediaError> {
+        let resample = format!("aresample={sample_rate}:async=1:first_pts=0");
         let mut command = Command::new(&self.program);
         command.args(["-nostdin", "-v", "error"]);
         input(&mut command);
@@ -258,7 +279,7 @@ impl Ffmpeg {
                 "-vn",
                 // 开头没声音的部分和中间丢的包补成静音，让音频的时间和录像对得上
                 "-af",
-                "aresample=16000:async=1:first_pts=0",
+                &resample,
                 "-ac",
                 "1",
                 "-f",
@@ -384,7 +405,16 @@ impl DecodedAudio {
 }
 
 /// 读完子进程的输出，等它退出，把 PCM 变成 [`Audio`]。
-async fn collect(mut child: Child, timeout: Duration) -> Result<Audio, MediaError> {
+async fn collect(child: Child, timeout: Duration) -> Result<Audio, MediaError> {
+    collect_at(REALTIME_SAMPLE_RATE, child, timeout).await
+}
+
+/// 同 [`collect`]，PCM 的采样率由 `sample_rate` 指定。
+async fn collect_at(
+    sample_rate: u32,
+    mut child: Child,
+    timeout: Duration,
+) -> Result<Audio, MediaError> {
     let mut stdout = child.stdout.take().expect("stdout 是管道");
     let stderr = drain_stderr(&mut child);
     let run = async {
@@ -408,7 +438,7 @@ async fn collect(mut child: Child, timeout: Duration) -> Result<Audio, MediaErro
     if pcm.len() % 2 == 1 {
         pcm.pop();
     }
-    Ok(Audio::from_pcm16_le(REALTIME_SAMPLE_RATE, &pcm)?)
+    Ok(Audio::from_pcm16_le(sample_rate, &pcm)?)
 }
 
 /// 在后台把子进程的错误输出读到一个字符串里（只留开头一段），避免管道写满把 ffmpeg 卡住。

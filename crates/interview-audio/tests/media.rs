@@ -164,6 +164,13 @@ async fn decodes_a_file_and_a_range_of_it() {
 
     assert_timeline(&ffmpeg.decode_file(&path).await.unwrap());
 
+    // 采样率可以自己定（参考录音要 24 kHz）
+    let high = ffmpeg.decode_file_at(&path, 24_000).await.unwrap();
+    assert_eq!(high.sample_rate(), 24_000);
+    assert!((9_900..=10_200).contains(&high.duration_ms()));
+    assert!(loudness(&high, 300, 1_700) < 0.01);
+    assert!(loudness(&high, 2_300, 4_700) > 0.05);
+
     // 第 4 到 6 秒：前一秒有声音，后一秒没有
     let part = ffmpeg.decode_file_range(&path, 4_000, 6_000).await.unwrap();
     assert_eq!(part.duration_ms(), 2_000);

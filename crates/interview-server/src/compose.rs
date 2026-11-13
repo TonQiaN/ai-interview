@@ -21,6 +21,7 @@ use interview_platform::AppContext;
 use interview_platform::status::{ComponentStatus, DatabaseProbe, StatusProbe, StatusRegistry};
 use interview_platform::tasks::TaskRegistry;
 use interview_stt::{SttConfig, Transcriber};
+use interview_tts::http::BlobAudioCache;
 use interview_tts::{FakeBackend, Synthesizer, backend_from_env};
 use utoipa_axum::router::OpenApiRouter;
 
@@ -111,7 +112,17 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
 
     // ── ③ AI 引擎：interview-engine 是纯库，由 interview-flow 调用，这里不用接 ──
 
-    // ── ④ 语音：interview-tts（音色管理、合成）、interview-stt ──
+    // ── ④ 语音：interview-tts（音色管理、试听、合成）、interview-stt ──
+    // 合成结果存进 BlobStore：同一句话、同一个音色只合成一次，重启后还在
+    shared
+        .synth
+        .attach_cache(Arc::new(BlobAudioCache::new(ctx.blobs.clone())));
+    api = api.merge(interview_tts::http::router(
+        interview_tts::http::Deps::from_env(ctx.clone(), shared.synth.clone()),
+    ));
+    probes.register(SttProbe {
+        stt: shared.stt.clone(),
+    });
     probes.register(FfmpegProbe(Ffmpeg::from_env()));
 
     // ── ⑤ 候选人面试间：interview-room ──
@@ -196,6 +207,46 @@ impl StatusProbe for TtsProbe {
             ComponentStatus::down(self.name(), format!("三个引擎都用不了：{reason}"))
         };
         status.with_details(serde_json::json!({ "backend": backend, "engines": engines }))
+    }
+}
+
+/// 语音识别能不能用。面试后重新转写、面试中听候选人的回答都靠它。
+struct SttProbe {
+    stt: Option<Arc<dyn Transcriber>>,
+}
+
+#[async_trait]
+impl StatusProbe for SttProbe {
+    fn name(&self) -> &'static str {
+        "stt"
+    }
+
+    async fn check(&self) -> ComponentStatus {
+        let Some(stt) = &self.stt else {
+            return ComponentStatus::not_configured(
+                self.name(),
+                "语音识别没启动起来（原因见启动日志），面试后不会重新转写",
+            );
+        };
+        let status = stt.status().await;
+        let details = serde_json::json!({ "backend": status.backend, "model": status.detail });
+        let component = if status.backend == "fake" {
+            ComponentStatus::not_configured(
+                self.name(),
+                "现在是假后端，转写出来的不是候选人真正说的话。要用真模型，带 --features sherpa 启动并设 AI_INTERVIEW_STT_BACKEND=sherpa",
+            )
+        } else if status.ready {
+            ComponentStatus::ok(self.name())
+        } else {
+            ComponentStatus::down(
+                self.name(),
+                status
+                    .detail
+                    .clone()
+                    .unwrap_or_else(|| "没有说明原因".to_owned()),
+            )
+        };
+        component.with_details(details)
     }
 }
 

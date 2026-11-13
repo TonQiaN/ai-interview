@@ -1622,16 +1622,26 @@ name = "interview-tts"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
+ "bytes",
+ "chrono",
  "futures-util",
+ "hound",
  "interview-audio",
+ "interview-core",
+ "interview-platform",
  "reqwest",
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "sqlx",
  "tempfile",
  "thiserror",
  "tokio",
  "tracing",
+ "utoipa",
+ "utoipa-axum",
+ "uuid",
 ]
 
 [[package]]
