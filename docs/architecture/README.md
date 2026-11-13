@@ -100,7 +100,7 @@ interview-server
 
 ### 一个业务 crate 对外给什么
 
-带 HTTP 的 crate（`interview-flow`、`interview-talent`、`interview-room`，以及 `interview-tts` 里管音色的部分）都导出同样的三样，`interview-server` 负责装配，各线不用改 server：
+带 HTTP 的 crate（`interview-flow`、`interview-talent`、`interview-room`，以及 `interview-tts` 里管音色的部分）都导出同样的三样，`interview-server` 负责装配：
 
 ```rust
 /// 这个 crate 需要的东西。AppContext 是平台给的（数据库、BlobStore、任务队列、配置）；
@@ -117,6 +117,31 @@ pub fn router(deps: Deps) -> utoipa_axum::router::OpenApiRouter;
 /// 后台任务的处理函数（没有就不提供）。
 pub fn register_tasks(registry: &mut interview_platform::tasks::TaskRegistry, deps: Deps);
 ```
+
+接入服务进程只改一个文件：`crates/interview-server/src/compose.rs`。在里面自己那条线的位置加 `api = api.merge(xxx::router(deps.clone()))` 和 `xxx::register_tasks(&mut tasks, deps)`，有外部依赖的再登记一个状态探针。这是唯一允许各线改 `interview-server` 的地方。
+
+### 平台给了什么
+
+`interview-platform` 里各线会用到的东西：
+
+| 要做的事 | 用什么 |
+| --- | --- |
+| 拿数据库、文件存储、任务队列、配置 | `AppContext { db, blobs, tasks, config }`，克隆很便宜 |
+| 存取文件 | `ctx.blobs`：`put`、`get`、`get_range`、`head`、`delete`、`list`、`concat`、`local_path`。键用 `interview_core::blob_key` 里的函数拼 |
+| 把文件作为响应返回（支持 Range） | `http::serve_blob(&*ctx.blobs, key, content_type, &headers)` |
+| 接口报错 | `ApiError::not_found("面试")`、`conflict(...)`、`invalid_field("email", "格式不对")`、`unavailable(...)`、`not_implemented()`……handler 返回 `ApiResult<Json<T>>` |
+| 解析请求 | `http::{Json, Query, Path}`，和 axum 的同名提取器用法一样，解析失败时返回统一的错误结构 |
+| 列表分页 | `http::PageQuery`（`limit()`、`offset()`、`keyword()`、`order_by(白名单, 默认)`）和 `http::Page<T>` |
+| 拿当前登录的 HR | handler 参数里写 `user: AdminUser`。`/api/v1` 下除了登录和 `/api/v1/room/` 都默认要登录，不用自己加检查 |
+| 生成和校验令牌 | `auth::generate_token()`、`auth::hash_token()`，库里只存哈希 |
+| 入队后台任务 | `ctx.tasks.enqueue(NewTask::new(task_kind::RESUME_PARSE, json!({...})).dedupe(...))`；要和业务数据同一个事务用 `TaskQueue::enqueue_in(&mut tx, ...)` |
+| 处理后台任务 | `registry.register_fn(kind, move \|task\| { let deps = deps.clone(); async move { let p: Payload = task.payload_as()?; ...; Ok(None) } })`。`?` 抛出的错误默认会重试，不该重试的用 `TaskError::fatal(...)`。处理函数要能重复执行 |
+| 记大模型用量 | `usage::record(&ctx.db, LlmUsage { purpose, model, prompt_tokens, ... }).await` |
+| 报告依赖是否就绪 | 实现 `status::StatusProbe`，在 `compose.rs` 里登记，`GET /api/v1/system/status` 会列出来 |
+| 读写全局设置 | `routes::read_setting(&ctx, key)`、`routes::write_setting(...)` |
+| 写测试 | `testing::test_context(pool)`、`testing::create_admin(&ctx)`、`testing::as_admin(router, admin)`、`testing::TestRequest::post(uri).json(&body).send(&app)` |
+
+状态枚举（`InterviewStatus` 等）、任务名、文件键在 `interview-core` 里，纯库也可以依赖它。
 
 ### 共用文件怎么改才不打架
 
@@ -196,13 +221,15 @@ HR 在后台看录像、文字记录、报告，写结论（interviews.decision�
 | `AI_INTERVIEW_BIND` | `127.0.0.1:8080` | 监听地址 |
 | `AI_INTERVIEW_PUBLIC_URL` | `http://localhost:8080` | 生成面试链接用的对外地址 |
 | `AI_INTERVIEW_DATA_DIR` | `./data` | BlobStore 的本地目录 |
-| `AI_INTERVIEW_WEB_DIR` | `./web/dist` | 前端构建产物目录，不存在就不托管 |
-| `AI_INTERVIEW_ADMIN_EMAIL`、`AI_INTERVIEW_ADMIN_PASSWORD` | 无 | 库里没有账号时，用它们建第一个管理员 |
+| `AI_INTERVIEW_WEB_DIR` | `./web/dist` | 前端构建产物目录。里面的 `admin/` 挂在 `/admin/`，`candidate/` 挂在 `/i/` |
+| `AI_INTERVIEW_ADMIN_EMAIL`、`AI_INTERVIEW_ADMIN_PASSWORD` | 无 | 库里没有这个邮箱时，启动会建一个管理员；已经有了就不动它 |
+| `AI_INTERVIEW_TASK_WORKERS` | `4` | 同时跑几个后台任务；`0` 表示这个进程不跑任务 |
+| `AI_INTERVIEW_LOG` | `info` | 日志级别，写法和 `RUST_LOG` 一样 |
 
 ## 测试
 
 - 单测和代码放一起。纯逻辑尽量做成不需要数据库和网络的函数。
-- 要数据库的测试用 `#[sqlx::test]`（每个测试一个临时库，自动跑迁移）。CI 里有 PostgreSQL。
+- 要数据库的测试用 `#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]`（每个测试一个临时库，自动跑迁移）。本地先 `scripts/dev-db.sh start`，`scripts/check.sh` 会自己起；CI 里有 PostgreSQL。
 - 要真模型的测试（DeepSeek、TTS、STT）标 `#[ignore]`，CI 不跑。DeepSeek 的可以在云端手动跑（有密钥），TTS 的只能在 Mac 上跑。
 - 别的线的能力都通过 trait 拿到，测试里用假实现：假 `ChatModel`、TTS 假后端。
 - 前端：组件和逻辑用 Vitest，整条流程用 Playwright（Chromium 可以用假摄像头和假麦克风）。

@@ -10,34 +10,59 @@ license = "AGPL-3.0-only"
 publish = false
 
 [workspace.dependencies]
-# 内部 crate
+# 内部 crate（按字母序）
 interview-audio = { path = "crates/interview-audio" }
+interview-core = { path = "crates/interview-core" }
 interview-engine = { path = "crates/interview-engine" }
 interview-llm = { path = "crates/interview-llm" }
+interview-platform = { path = "crates/interview-platform" }
 interview-raas = { path = "crates/interview-raas" }
 interview-report = { path = "crates/interview-report" }
 interview-stt = { path = "crates/interview-stt" }
 interview-talent = { path = "crates/interview-talent" }
 interview-tts = { path = "crates/interview-tts" }
 
-# 通用
+# 第三方（按字母序）。加之前确认许可和 AGPL-3.0 兼容。
 anyhow = "1"
+argon2 = "0.5"
 async-trait = "0.1"
+axum = { version = "0.8", features = ["macros", "multipart", "ws"] }
 base64 = "0.22"
 bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4", features = ["derive", "env"] }
+dotenvy = "0.15"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+getrandom = "0.3"
 hound = "3.5"
+http-body-util = "0.1"
 # 默认的 rustls 走系统证书校验，云端容器的代理证书也能认
 reqwest = { version = "0.13", features = ["form", "json", "query", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
+sqlx = { version = "0.8", default-features = false, features = [
+    "chrono",
+    "json",
+    "macros",
+    "migrate",
+    "postgres",
+    "runtime-tokio",
+    "uuid",
+] }
 tempfile = "3"
 thiserror = "2"
+# 各 crate 按需要开 feature，这里只开最小的
 tokio = { version = "1", features = ["time"] }
+tokio-util = "0.7"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs", "limit", "trace"] }
 tracing = "0.1"
-utoipa = "5"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-axum = "0.2"
+utoipa-scalar = { version = "0.3", features = ["axum"] }
+uuid = { version = "1", features = ["serde", "v7"] }
 wiremock = "0.6"
 
 [workspace.lints.rust]
