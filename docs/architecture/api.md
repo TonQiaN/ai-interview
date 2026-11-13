@@ -122,7 +122,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `POST /api/v1/positions/draft` | 粘贴一段岗位描述，让大模型整理成岗位草稿（不保存，给新建岗位的表单预填） |
 | `GET /api/v1/candidates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 候选人 |
 | `GET /api/v1/candidates/{id}/resumes`、`POST /api/v1/candidates/{id}/resumes` | 简历列表、上传 |
-| `GET /api/v1/resumes/{id}`、`GET /api/v1/resumes/{id}/file`、`POST /api/v1/resumes/{id}/parse` | 简历详情、原件、重新解析 |
+| `GET /api/v1/resumes/{id}`、`GET /api/v1/resumes/{id}/file`、`POST /api/v1/resumes/{id}/parse`、`DELETE /api/v1/resumes/{id}` | 简历详情、原件、重新解析、删除（连原件一起删） |
 | `POST /api/v1/candidates/import` | 直接传一份简历，自动建候选人 |
 | `POST /api/v1/candidates/{id}/profile/regenerate` | 重新生成画像 |
 | `GET /api/v1/raas/status` | RAAS 是否连得上 |

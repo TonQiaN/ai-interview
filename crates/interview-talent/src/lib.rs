@@ -30,6 +30,7 @@ pub mod render;
 pub mod resume;
 mod settings;
 pub mod store;
+mod tasks;
 mod text_enum;
 mod today;
 
@@ -48,9 +49,7 @@ pub use resume::{ResumeReading, normalize_phone, read_resume};
 pub use settings::{
     PROFILE_THINKING_ENV_VAR, READING_THINKING_ENV_VAR, TalentAiSettings, parse_thinking,
 };
+pub use store::candidates::{Candidate, CandidateSource};
 pub use store::positions::{Position, PositionSource, PositionStatus};
-
-/// 登记这条线的后台任务。
-pub fn register_tasks(_registry: &mut interview_platform::tasks::TaskRegistry, _deps: Deps) {
-    // 简历解析（resume.parse）和 RAAS 同步（raas.sync）在后面的改动里加
-}
+pub use store::resumes::{Resume, ResumeDetail};
+pub use tasks::register_tasks;

@@ -56,3 +56,29 @@ pub fn encode(value: &str) -> String {
     }
     encoded
 }
+
+/// 拼一个只带一个文件字段的 multipart 请求体，返回（Content-Type，请求体）。
+pub fn multipart_file(field: &str, file_name: Option<&str>, content: &[u8]) -> (String, Vec<u8>) {
+    const BOUNDARY: &str = "----talent-test-boundary";
+    let mut body = Vec::new();
+    let disposition = match file_name {
+        Some(name) => format!("form-data; name=\"{field}\"; filename=\"{name}\""),
+        None => format!("form-data; name=\"{field}\""),
+    };
+    body.extend_from_slice(
+        format!("--{BOUNDARY}\r\nContent-Disposition: {disposition}\r\n\r\n").as_bytes(),
+    );
+    body.extend_from_slice(content);
+    body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
+    (format!("multipart/form-data; boundary={BOUNDARY}"), body)
+}
+
+/// 把排着队的后台任务跑完，返回跑了几条。
+pub async fn run_tasks(ctx: &AppContext, llm: Option<Arc<dyn ChatModel>>) -> usize {
+    let mut registry = interview_platform::tasks::TaskRegistry::new();
+    interview_talent::register_tasks(&mut registry, Deps::new(ctx.clone(), llm));
+    interview_platform::tasks::TaskRunner::new(ctx.db.clone(), registry)
+        .run_until_idle()
+        .await
+        .expect("任务跑得起来")
+}

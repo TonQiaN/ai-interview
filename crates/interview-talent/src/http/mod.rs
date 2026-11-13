@@ -8,12 +8,19 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::deps::Deps;
 use crate::error::TalentError;
 
+pub mod candidates;
 pub mod positions;
+pub mod resumes;
+mod upload;
+
+pub use upload::ResumeUploadForm;
 
 /// 岗位和候选人这条线的全部接口。
 pub fn router(deps: Deps) -> OpenApiRouter {
     OpenApiRouter::new()
         .merge(positions::router())
+        .merge(candidates::router())
+        .merge(resumes::router())
         .with_state(deps)
 }
 
