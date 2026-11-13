@@ -191,23 +191,10 @@ pub async fn analyze(
     };
     let findings =
         serde_json::to_string(&findings).map_err(|e| AnalyzeError::Synthesis(e.to_string()))?;
-    // 这一步的输出最长，模型偶尔会交出一份缺了收尾括号的 JSON，在同一段对话里让它改，
-    // 它常常接着犯同样的错。这一步失败整份报告就没了，前面各步的花费也白费，
-    // 所以失败后从头再来一次：新的对话里一般就好了。
-    let synthesis_task = prompts::synthesis_task(&findings);
-    let mut synthesis = match runner
-        .run::<Synthesis>("synthesis", &context, &synthesis_task)
+    let mut synthesis = runner
+        .run::<Synthesis>("synthesis", &context, &prompts::synthesis_task(&findings))
         .await
-    {
-        Ok(synthesis) => synthesis,
-        Err(error) => {
-            tracing::warn!(%error, "生成综合建议失败，从头再试一次");
-            runner
-                .run::<Synthesis>("synthesis", &context, &synthesis_task)
-                .await
-                .map_err(AnalyzeError::Synthesis)?
-        }
-    };
+        .map_err(AnalyzeError::Synthesis)?;
     synthesis.each_evidence_list(&mut |list| index.resolve(list, &mut stats));
 
     let mut timing = timing_overview(record, &groups);
