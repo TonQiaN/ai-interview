@@ -152,6 +152,18 @@ pub fn register_tasks(registry: &mut interview_platform::tasks::TaskRegistry, de
 - **`web/pnpm-lock.yaml` 冲突**：`git checkout origin/main -- web/pnpm-lock.yaml && pnpm -C web install`。
 - **`.github/workflows/ci.yml`、`scripts/`、`web/` 根配置**：要改找 ①。
 
+### 前端怎么搭
+
+`web/` 是一个 pnpm workspace（`apps/*` 和 `packages/*`），根上有共用的 `tsconfig.base.json`、`biome.json` 和唯一的一份 `pnpm-lock.yaml`。
+
+- **包之间互相引用**写 `"@ai-interview/ui": "workspace:*"`、`"@ai-interview/api-client": "workspace:*"`。
+- **调后端**只用 `@ai-interview/api-client`：`createApiClient()` 给 HR 后台（带登录 cookie），`createRoomClient(token)` 给面试间（带链接里的令牌）。`unwrap()` 把出错的响应变成带 `code`、`status`、`details` 的 `ApiError`。
+- **类型由 OpenAPI 生成**：`pnpm -C web gen:api` 跑一次 `cargo run -p interview-server -- openapi`，把结果写进 `packages/api-client/src/generated/`（不进 Git）。`typecheck` 和 `build` 会自己先跑它。后端加了接口，前端重新生成就有类型。
+- **每个包自己提供脚本** `typecheck`、`test`、`build`（没有的会被跳过），根上的 `pnpm -C web check` 依次跑 lint、类型检查、测试、构建，CI 的前端任务跑的就是这些。
+- **构建产物**放 `web/dist/<应用名>/`，`admin` 和 `candidate` 两个目录由服务进程托管。
+- **代码风格**用 Biome（`pnpm -C web format`）。现在 CI 只查 lint，等各个包都格式化过一遍再把格式检查也打开。
+- **TypeScript 版本**：应用和 `ui` 用 7；`api-client` 固定在 5.9，因为生成工具 openapi-typescript 7 还不支持 TypeScript 7 的编译器接口。
+
 ## 几条主流程
 
 ### 面试前：准备

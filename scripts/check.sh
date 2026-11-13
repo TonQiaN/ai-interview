@@ -15,3 +15,11 @@ fi
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+
+# 前端。没装 pnpm 就跳过（CI 里一定会跑）
+if command -v pnpm >/dev/null 2>&1; then
+  pnpm -C web install --frozen-lockfile
+  pnpm -C web check
+else
+  echo "没找到 pnpm，跳过前端检查。安装：corepack enable pnpm"
+fi
