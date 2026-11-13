@@ -494,7 +494,7 @@ fn is_replay(state: &SessionState, input: &StepInput) -> bool {
             .is_some_and(|answer| answer.seq == input.seq)
 }
 
-fn current_question<'a>(
+pub(crate) fn current_question<'a>(
     plan: &'a InterviewPlan,
     state: &SessionState,
 ) -> Result<&'a PlannedQuestion, EngineError> {
@@ -641,6 +641,16 @@ fn follow_up_allowed(
     {
         return false;
     }
+    exchange_fits(plan, config, state, elapsed_ms)
+}
+
+/// 在当前这道题上再多一轮问答，时间还够不够：后面必答的题和结束语都要留出来。
+pub(crate) fn exchange_fits(
+    plan: &InterviewPlan,
+    config: &InterviewConfig,
+    state: &SessionState,
+    elapsed_ms: u64,
+) -> bool {
     let after = elapsed_ms
         + FOLLOW_UP_COST_MS
         + required_cost_ms(plan, config, state.question_index as usize + 1)

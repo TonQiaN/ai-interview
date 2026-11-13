@@ -1,8 +1,8 @@
 # interview-engine
 
-面试引擎的基础模式：提前出好题，逐题问，候选人逐题答。纯逻辑，不碰数据库、网络和音频；模型通过 `interview-llm` 的 `ChatModel` 传进来。
+面试引擎。基础模式：提前出好题，逐题问，候选人逐题答。进阶模式：实时对话，面试官听完现场追问。纯逻辑，不碰数据库、网络和音频；模型通过 `interview-llm` 的 `ChatModel` 传进来。
 
-## 四块东西
+## 五块东西
 
 | 模块 | 做什么 | 存在哪 |
 | --- | --- | --- |
@@ -10,6 +10,7 @@
 | `planner` | `plan_interview(model, &PlanInput)` 出一份 `InterviewPlan`：面试官要说的每一句话、每道题的考察意图和评分要点、备用追问 | `interviews.plan` |
 | `session` | `start` 给出第一步，`advance` 根据候选人刚答完的一段给出下一步 | 包在 `RoomState` 里 |
 | `room` | 把一步拆成一次播一句的节拍，给面试间直接用 | `interviews.runtime_state` |
+| `live` | 实时对话模式：候选人说完一段，现场决定追问、回应还是下一题 | `interviews.runtime_state` |
 
 所有对外的类型都能序列化，也都带 `utoipa::ToSchema`。
 
@@ -69,14 +70,28 @@
 
 每一拍带递增的 `seq`，上报时原样带回：上报当前这一拍就往下走，重复上报上一拍结果不变，其他序号报错（接口返回 409）。同一句话会出现在不同的拍里（没听到声音时重问、过渡语复用），所以幂等按 `seq` 判断。`RoomStep` 序列化出来就是 `{"action":"say","seq":…,"utterance":…,"expects_answer":…,"answer":…,"progress":…,"preload_keys":[…]}` 或 `{"action":"finish","reason":…}`，和 `docs/architecture/api.md` 里的面试间协议对应（`audio_url` 这些由面试间补上）。`RoomState` 整个存进 `interviews.runtime_state`，`state.last` 是断点续面时该重播的那一拍。
 
+## 实时对话模式
+
+配置里 `mode` 选 `conversational`。题目还是出题器提前出好的那一份，主问题、过渡语、结束语照样提前合成；只有追问和回应是现场生成的。
+
+```rust
+let (state, first) = live::open(&plan, &config)?;
+let outcome = live::respond(&model, &plan, &config, &state, &turn, &mut sink).await?;
+```
+
+每轮调一次模型，流式输出，第一行就是决定（追问、回应、下一题、结束）。`sink` 陆续收到 `LiveEvent`：`Speak` 是现场生成的一句话，拿到就送去合成；`Play` 是播一句提前合成好的。已经问完的题在上下文里只留一行概括，所以每轮发给模型的内容大小不随面试变长。追问次数、时间够不够、换题、提前结束都由代码决定，规则和逐题模式相同。
+
+实测模型大约 1 秒做出决定，一场面试的模型费用两三分钱。做法、实测数字、整条链路的延迟预算和还没解决的问题见 [docs/realtime.md](docs/realtime.md)。
+
 ## 用真模型试
 
 ```bash
 cargo run -p interview-engine --example plan -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
 cargo run -p interview-engine --example simulate -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json lost
+cargo run -p interview-engine --example converse -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
 ```
 
-`simulate` 让模型扮演候选人，人设有 `strong`（经验扎实）、`vague`（说话空泛）、`faker`（简历注水）、`lost`（大多答不上来）、`quitter`（中途不想面了）。`fixtures/` 里的岗位和简历都是编的。
+`simulate` 让模型扮演候选人，人设有 `strong`（经验扎实）、`vague`（说话空泛）、`faker`（简历注水）、`lost`（大多答不上来）、`quitter`（中途不想面了）。`converse` 是实时对话模式的同一件事，多一个人设 `curious`（爱反问、最后会提问），最后一个参数可以写 `off`、`low`、`high`、`max` 指定思考强度。`fixtures/` 里的岗位和简历都是编的。
 
 2026-11-13 用 deepseek-flash 实测：
 
