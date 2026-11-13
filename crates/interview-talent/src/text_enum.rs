@@ -3,11 +3,14 @@
 
 /// 定义一个取值是 snake_case 字符串的枚举：serde、OpenAPI、`as_str`、`FromStr`，
 /// 以及直接读写 PostgreSQL 的 TEXT 列。
+///
+/// 取值那一格写成 `tt` 而不是 `literal`：`literal` 传给派生宏时外面多一层看不见的括号，
+/// serde 认得，utoipa 认不出，接口文档里的取值就会变成变体名。
 macro_rules! text_enum {
     (
         $(#[$meta:meta])*
         pub enum $name:ident {
-            $( $(#[$vmeta:meta])* $variant:ident => $text:literal ),+ $(,)?
+            $( $(#[$vmeta:meta])* $variant:ident => $text:tt ),+ $(,)?
         }
     ) => {
         $(#[$meta])*

@@ -163,3 +163,31 @@ async fn openapi_can_be_generated_without_a_database() {
     let spec: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert!(spec["paths"].get("/api/v1/auth/login").is_some());
 }
+
+/// 前端的类型是照接口文档生成的。文档里枚举的取值必须是 JSON 里实际的写法（小写加下划线），
+/// 不能是 Rust 的变体名。
+#[tokio::test]
+async fn openapi_enum_values_are_the_json_spelling() {
+    let json = interview_server::serve::openapi_json().unwrap();
+    let spec: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let schemas = spec["components"]["schemas"].as_object().unwrap();
+    let mut checked = 0;
+    for (name, schema) in schemas {
+        let Some(values) = schema["enum"].as_array() else {
+            continue;
+        };
+        for value in values.iter().filter_map(|v| v.as_str()) {
+            assert!(
+                value
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "{name} 在接口文档里的取值「{value}」不是 JSON 里的写法"
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked > 20,
+        "接口文档里应该有不少枚举，只看到 {checked} 个取值"
+    );
+}
