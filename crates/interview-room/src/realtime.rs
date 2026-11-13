@@ -14,6 +14,11 @@
 //! 已经排好的句子还在，没想完的那一轮重新想一遍。谁在等、哪场面试正在想，记在进程内存里
 //! （[`Hub`]），所以和现场转写一样，一场面试要由同一个进程服务到底。
 //!
+//! 候选人一停顿，页面可以先来问一次这段话说完没有（[`check_pause`]）。服务端这时就把这段话转成
+//! 文字、让引擎想怎么接，结果先备着（[`Ahead`]）：模型觉得说完了，页面不用等满静音时长就上报，
+//! 上报时备好的话直接排进队列；模型觉得没说完，页面这次停顿多等一会儿。候选人接着说了，备好的就
+//! 作废。备着的东西只在进程内存里，没用上也不留痕迹，引擎的状态要等这段话真的答完才更新。
+//!
 //! 候选人说的话只进数据库，不进日志。
 
 use std::collections::HashMap;
@@ -23,7 +28,9 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use interview_core::blob_key;
 use interview_core::status::InterviewStatus;
-use interview_engine::live::{self, CandidateTurn, LiveAction, LiveEvent, LiveOutcome, LiveState};
+use interview_engine::live::{
+    self, CandidateTurn, LiveAction, LiveEvent, LiveOutcome, LiveState, TurnContext,
+};
 use interview_engine::room::AnswerWindow;
 use interview_engine::session::{Listen, Progress as EngineProgress};
 use interview_engine::{
@@ -35,7 +42,7 @@ use interview_platform::{ApiError, ApiResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgConnection;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use uuid::Uuid;
 
 use crate::Deps;
@@ -43,7 +50,10 @@ use crate::conduct::{
     self, AdvanceRequest, AnswerEndReason, BeatTimes, NoModel, Row, at_elapsed, audio_url,
     clamp_i64, engine_error, finish_reason, utterance_kind,
 };
-use crate::protocol::{AnswerSettings, NextStep, Progress, Utterance};
+use crate::protocol::{
+    AnswerSettings, NextStep, PauseCheckRequest, PauseCheckSettings, PauseVerdict, Progress,
+    Utterance,
+};
 
 /// 状态结构的版本。
 pub const RT_SCHEMA_VERSION: u32 = 1;
@@ -60,6 +70,12 @@ const SYNTH_TIMEOUT: Duration = Duration::from_secs(20);
 const MIN_ANSWER_SEC: u32 = 1;
 /// 候选人说了话但没转写出来时，交给引擎的文字。引擎会请候选人再说一遍。
 const UNHEARD: &str = "（这一段没有听清）";
+/// 一段回答里，候选人停顿时最多先问几次「说完没有」。再多就不问了，照静音时长算。
+const MAX_PAUSE_CHECKS: u32 = 8;
+/// 候选人停顿时先转写这段话，最多等这么久。这时候录像分片多半刚传上来，等不到就不备了。
+const AHEAD_HEAR_WAIT: Duration = Duration::from_secs(3);
+/// 页面问「说完没有」最多等这么久，到时候还没有结论就让它照静音时长算。后台接着想，想好了照样能用上。
+const VERDICT_WAIT: Duration = Duration::from_secs(4);
 /// 现场生成的句子在 `interview_utterances.seq` 里从这里排起，排在提前准备的句子后面。
 const LIVE_UTTERANCE_SEQ_BASE: i64 = 100_000;
 
@@ -210,6 +226,32 @@ pub(crate) fn answer_window(
     }
 }
 
+/// 告诉页面怎么听这段回答。
+pub(crate) fn answer_settings(deps: &Deps, window: AnswerWindow) -> AnswerSettings {
+    AnswerSettings {
+        silence_sec: window.silence_sec,
+        max_sec: window.max_sec,
+        min_sec: window.min_sec,
+        pause_check: pause_check_settings(deps, window),
+    }
+}
+
+/// 候选人停顿时要不要先来问一次，问完怎么用。
+fn pause_check_settings(deps: &Deps, window: AnswerWindow) -> Option<PauseCheckSettings> {
+    let config = &deps.config;
+    let silence_ms = window.silence_sec.saturating_mul(1000);
+    // 问得比静音时长还晚就没有意义了
+    if config.realtime_pause_check_ms == 0 || config.realtime_pause_check_ms >= silence_ms {
+        return None;
+    }
+    Some(PauseCheckSettings {
+        after_ms: config.realtime_pause_check_ms,
+        done_silence_ms: config.realtime_done_silence_ms.min(silence_ms),
+        wait_silence_ms: config.realtime_wait_silence_ms.max(silence_ms),
+        max_checks: MAX_PAUSE_CHECKS,
+    })
+}
+
 fn window(deps: &Deps, listen: &Listen) -> AnswerWindow {
     answer_window(deps, listen.silence_sec, listen.max_sec, listen.min_sec)
 }
@@ -314,11 +356,7 @@ pub(crate) async fn current_step(
             audio_duration_ms: own.and_then(|(_, duration)| duration),
         },
         expects_answer: beat.answer.is_some(),
-        answer: beat.answer.map(|window| AnswerSettings {
-            silence_sec: window.silence_sec,
-            max_sec: window.max_sec,
-            min_sec: window.min_sec,
-        }),
+        answer: beat.answer.map(|window| answer_settings(deps, window)),
         progress: Progress {
             index: beat.progress.index,
             total: beat.progress.total,
@@ -588,6 +626,17 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
     let (plan, config) = conduct::script(interview_id, &row)?;
     let started = Instant::now();
 
+    // 候选人停顿时先备好的那一轮：还是同一段话就直接用
+    let mut parts = 0;
+    if turn.spoke {
+        match adopt_ahead(deps, interview_id, &turn, started).await? {
+            Adopted::Whole | Adopted::Stale => return Ok(()),
+            Adopted::Nothing { parts_used } => parts = parts_used,
+        }
+    } else {
+        deps.realtime.take_ahead(interview_id, None);
+    }
+
     // 候选人说了什么
     let text = if turn.spoke {
         let deadline = tokio::time::Instant::now()
@@ -606,33 +655,23 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
     let heard_ms = started.elapsed().as_millis();
 
     // 面试官怎么接
-    let (voice_id,): (Option<Uuid>,) =
-        sqlx::query_as("SELECT voice_id FROM interviews WHERE id = $1")
-            .bind(interview_id)
-            .fetch_one(&deps.ctx.db)
-            .await?;
+    let voice_id = voice_of(deps, interview_id).await?;
     let progress = match &state.last {
         RtStep::Say(beat) => beat.progress,
         RtStep::Finish { .. } => state.live.session.current.progress,
     };
-    let mut speaker = Speaker {
+    let mut speaker = Speaker::new(
         deps,
         interview_id,
-        beat_seq: turn.beat_seq,
+        turn.beat_seq,
         voice_id,
-        language: config.language,
+        config.language,
         progress,
-        started,
-        action: None,
-        parts: 0,
-        generated: Vec::new(),
-        held: None,
-        released: 0,
-        first_ready_ms: None,
-        stale: false,
-        tail_released: false,
-        settled_ms: None,
-    };
+        Outlet::Queue,
+    );
+    speaker.started = started;
+    // 备好的那一轮用到一半出了错的，现场生成的句子接着它的往下编号，免得和已经排进去的撞上
+    speaker.parts = parts;
     let candidate = CandidateTurn {
         text,
         elapsed_ms: turn.elapsed_ms,
@@ -642,12 +681,14 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
         .llm
         .clone()
         .unwrap_or_else(|| std::sync::Arc::new(NoModel));
+    let settled = TurnContext::default();
     let outcome = match converse(
         model.as_ref(),
         &plan,
         &config,
         &state.live,
         &candidate,
+        &settled,
         &mut speaker,
     )
     .await
@@ -662,6 +703,7 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
                 &config,
                 &state.live,
                 &candidate,
+                &settled,
                 &mut speaker,
             )
             .await
@@ -678,7 +720,7 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
     let beats = speaker.released + u32::from(speaker.held.is_some());
     let first_ready_ms = speaker.first_ready_ms;
     let settled_ms = speaker.settled_ms;
-    finish_turn(deps, interview_id, &turn, speaker, outcome).await?;
+    finish_turn(deps, interview_id, &turn, speaker.leftover(), outcome).await?;
     deps.realtime.notify(interview_id);
 
     conduct::record_turn_usage(
@@ -694,6 +736,7 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
         %interview_id,
         action = ?action,
         beats,
+        ahead = false,
         heard_ms,
         decision_ms = timing.decision_ms,
         first_ready_ms,
@@ -704,6 +747,16 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
     Ok(())
 }
 
+/// 这场面试的面试官用的是哪个声音。
+async fn voice_of(deps: &Deps, interview_id: Uuid) -> ApiResult<Option<Uuid>> {
+    let (voice_id,): (Option<Uuid>,) =
+        sqlx::query_as("SELECT voice_id FROM interviews WHERE id = $1")
+            .bind(interview_id)
+            .fetch_one(&deps.ctx.db)
+            .await?;
+    Ok(voice_id)
+}
+
 /// 让引擎想怎么接，同时把它陆续给出来的话准备好。
 async fn converse(
     model: &dyn ChatModel,
@@ -711,6 +764,7 @@ async fn converse(
     config: &InterviewConfig,
     state: &LiveState,
     candidate: &CandidateTurn,
+    context: &TurnContext,
     speaker: &mut Speaker<'_>,
 ) -> Result<LiveOutcome, EngineError> {
     let (events, mut incoming) = mpsc::unbounded_channel();
@@ -718,7 +772,7 @@ async fn converse(
         let mut sink = move |event: LiveEvent| {
             let _ = events.send(event);
         };
-        live::respond(model, plan, config, state, candidate, &mut sink).await
+        live::respond_with(model, plan, config, state, candidate, context, &mut sink).await
     };
     let speak = async {
         while let Some(event) = incoming.recv().await {
@@ -729,12 +783,37 @@ async fn converse(
     outcome
 }
 
+/// 准备好的句子交到哪。
+enum Outlet {
+    /// 候选人答完了：直接排进这场面试的队列，页面马上能取到。
+    Queue,
+    /// 候选人只是停顿了一下：先备着，这段话真的答完了再由接手的那一轮排进队列。
+    Ahead {
+        /// 第几次备。现场合成的语音按它分开存，免得作废的那一次把后来的盖掉
+        id: u64,
+        pipe: mpsc::UnboundedSender<AheadItem>,
+    },
+}
+
+/// 一轮想完时手里还剩什么。
+struct Leftover {
+    /// 还没交出去的最后一句
+    held: Option<RtBeat>,
+    /// 最后一句已经交出去了（带着听不听回答和进度）
+    tail_released: bool,
+    /// 这一轮现场生成的话用了哪些 key
+    generated: Vec<String>,
+}
+
 /// 把引擎给出来的话一句一句准备好，排进队列。
 ///
 /// 最后一句播完是听回答还是结束面试，要等引擎说这一轮的话都给出来了（`Done`）才知道。所以手里
 /// 总留着最新的一句（`held`），来了下一句或者来了 `Done` 才把它排进去。
 struct Speaker<'a> {
     deps: &'a Deps,
+    outlet: Outlet,
+    /// 页面在等「说完没有」的结论。只有候选人停顿时先备的那一轮有
+    verdict: Option<oneshot::Sender<PauseVerdict>>,
     interview_id: Uuid,
     /// 候选人答的是第几拍
     beat_seq: u32,
@@ -760,14 +839,69 @@ struct Speaker<'a> {
     settled_ms: Option<u128>,
 }
 
-impl Speaker<'_> {
+impl<'a> Speaker<'a> {
+    fn new(
+        deps: &'a Deps,
+        interview_id: Uuid,
+        beat_seq: u32,
+        voice_id: Option<Uuid>,
+        language: Language,
+        progress: EngineProgress,
+        outlet: Outlet,
+    ) -> Self {
+        Self {
+            deps,
+            outlet,
+            verdict: None,
+            interview_id,
+            beat_seq,
+            voice_id,
+            language,
+            progress,
+            started: Instant::now(),
+            action: None,
+            parts: 0,
+            generated: Vec::new(),
+            held: None,
+            released: 0,
+            first_ready_ms: None,
+            stale: false,
+            tail_released: false,
+            settled_ms: None,
+        }
+    }
+
+    fn leftover(self) -> Leftover {
+        Leftover {
+            held: self.held,
+            tail_released: self.tail_released,
+            generated: self.generated,
+        }
+    }
+
     async fn on_event(&mut self, event: LiveEvent) {
+        if let Outlet::Ahead { pipe, .. } = &self.outlet
+            && pipe.is_closed()
+        {
+            // 候选人接着说了，先备的这一轮没人要了：后面的句子不用再合成
+            self.stale = true;
+        }
         match event {
-            LiveEvent::Action { action } => self.action = Some(action),
+            LiveEvent::Action { action } => {
+                self.action = Some(action);
+                // 说完了的马上告诉页面。接着听的等这次调用回来再说：模型没回话时引擎也按接着听算，
+                // 那种情况不能当成模型的判断
+                if action != LiveAction::Wait
+                    && let Some(verdict) = self.verdict.take()
+                {
+                    let _ = verdict.send(PauseVerdict::Done);
+                }
+            }
             LiveEvent::Play { utterance } => {
                 self.release_held().await;
                 self.hold(planned_beat(utterance, self.progress));
             }
+            LiveEvent::Speak { .. } if self.stale => {}
             LiveEvent::Speak { key, text } => {
                 self.release_held().await;
                 self.parts += 1;
@@ -817,11 +951,10 @@ impl Speaker<'_> {
         }
         beat.answer = listen.map(|listen| window(self.deps, listen));
         beat.progress = progress;
-        match enqueue(self.deps, self.interview_id, self.beat_seq, beat.clone()).await {
+        match self.put(beat.clone(), true).await {
             Ok(true) => {
                 self.released += 1;
                 self.tail_released = true;
-                self.deps.realtime.notify(self.interview_id);
             }
             Ok(false) => self.stale = true,
             Err(err) => {
@@ -845,14 +978,32 @@ impl Speaker<'_> {
         if self.stale {
             return;
         }
-        match enqueue(self.deps, self.interview_id, self.beat_seq, beat).await {
-            Ok(true) => {
-                self.released += 1;
-                self.deps.realtime.notify(self.interview_id);
-            }
+        match self.put(beat, false).await {
+            Ok(true) => self.released += 1,
             Ok(false) => self.stale = true,
             Err(err) => {
                 tracing::warn!(interview_id = %self.interview_id, reason = %err, "实时对话有一句没排进队列");
+            }
+        }
+    }
+
+    /// 把准备好的一句交出去。`tail` 表示这是这一轮的最后一句。这一轮已经不作数时返回 `false`。
+    async fn put(&self, beat: RtBeat, tail: bool) -> ApiResult<bool> {
+        match &self.outlet {
+            Outlet::Queue => {
+                let queued = enqueue(self.deps, self.interview_id, self.beat_seq, beat).await?;
+                if queued {
+                    self.deps.realtime.notify(self.interview_id);
+                }
+                Ok(queued)
+            }
+            Outlet::Ahead { pipe, .. } => {
+                let item = if tail {
+                    AheadItem::Tail(beat)
+                } else {
+                    AheadItem::Beat(beat)
+                };
+                Ok(pipe.send(item).is_ok())
             }
         }
     }
@@ -877,7 +1028,11 @@ impl Speaker<'_> {
                 return None;
             }
         };
-        let blob_key = blob_key::utterance_audio(interview_id, &format!("{key}.s{part}"));
+        let name = match &self.outlet {
+            Outlet::Queue => format!("{key}.s{part}"),
+            Outlet::Ahead { id, .. } => format!("{key}.a{id}.s{part}"),
+        };
+        let blob_key = blob_key::utterance_audio(interview_id, &name);
         if let Err(err) = self.deps.ctx.blobs.put(&blob_key, spoken.wav.into()).await {
             tracing::warn!(%interview_id, reason = %err, "现场合成的语音没存下来，这一句只显示文字");
             return None;
@@ -919,7 +1074,7 @@ async fn finish_turn(
     deps: &Deps,
     interview_id: Uuid,
     turn: &PendingTurn,
-    speaker: Speaker<'_>,
+    leftover: Leftover,
     outcome: LiveOutcome,
 ) -> ApiResult<()> {
     let mut tx = deps.ctx.db.begin().await?;
@@ -932,9 +1087,9 @@ async fn finish_turn(
         return Ok(());
     };
 
-    let mut tail = speaker.held;
+    let mut tail = leftover.held;
     // 最后一句已经提前排进去的（带着听不听回答和进度），页面可能都播完了，这里不用再管
-    if let Some(listen) = outcome.listen.as_ref().filter(|_| !speaker.tail_released) {
+    if let Some(listen) = outcome.listen.as_ref().filter(|_| !leftover.tail_released) {
         if tail.is_none() && state.queue.is_empty() {
             // 这一轮什么都没说却要接着听：把刚才那句再说一遍，不让页面干等
             if let RtStep::Say(asked) = &state.last {
@@ -968,7 +1123,7 @@ async fn finish_turn(
     for (index, utterance) in outcome
         .said
         .iter()
-        .filter(|utterance| speaker.generated.contains(&utterance.key))
+        .filter(|utterance| leftover.generated.contains(&utterance.key))
         .enumerate()
     {
         let kind =
@@ -994,6 +1149,333 @@ async fn finish_turn(
     Ok(())
 }
 
+// ───────────────────────── 候选人停顿时先想 ─────────────────────────
+
+/// 候选人的一段话：答的是第几拍，在面试时间轴上从哪到哪。
+/// 先备的那一轮和真的答完的那一轮，这几样都一样才是同一段话。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AheadKey {
+    beat_seq: u32,
+    /// 从哪里开始转写
+    from_ms: i64,
+    /// 候选人停下来的时刻
+    end_ms: i64,
+    answer_ms: u64,
+}
+
+/// 候选人停顿时先备的一轮。
+struct Ahead {
+    key: AheadKey,
+    pipe: mpsc::UnboundedReceiver<AheadItem>,
+}
+
+/// 先备的那一轮陆续交出来的东西。没等到 `Finished` 管道就关了，说明这一轮没备成（模型觉得
+/// 候选人还没说完，或者中途出了错）。
+enum AheadItem {
+    /// 候选人说了什么。总是第一个
+    Heard(conduct::Heard),
+    /// 备好了一句
+    Beat(RtBeat),
+    /// 备好了最后一句，带着听不听回答和进度
+    Tail(RtBeat),
+    /// 整轮想完了
+    Finished(Box<(Leftover, LiveOutcome)>),
+}
+
+/// 页面报告候选人停顿了一下：先看这段话说完没有。模型觉得说完了的，怎么接也一起备好。
+pub(crate) async fn check_pause(
+    deps: &Deps,
+    interview_id: Uuid,
+    request: &PauseCheckRequest,
+) -> ApiResult<PauseVerdict> {
+    if deps.config.realtime_pause_check_ms == 0 || deps.llm.is_none() || deps.transcriber.is_none()
+    {
+        return Ok(PauseVerdict::Unknown);
+    }
+    let mut conn = deps.ctx.db.acquire().await?;
+    let row = conduct::load(&mut conn, interview_id, false).await?;
+    drop(conn);
+    if row.status != InterviewStatus::InProgress || !row.is_realtime() {
+        return Ok(PauseVerdict::Unknown);
+    }
+    let Some(state) = parse(interview_id, &row)? else {
+        return Ok(PauseVerdict::Unknown);
+    };
+    // 只管正在听的这一句：页面晚到的、重复的请求都不算
+    let RtStep::Say(beat) = &state.last else {
+        return Ok(PauseVerdict::Unknown);
+    };
+    let listening = request.seq == state.seq
+        && beat.utterance.key == request.utterance_key
+        && beat.answer.is_some()
+        && state.thinking.is_none()
+        && state.queue.is_empty()
+        && state.ending.is_none();
+    if !listening {
+        return Ok(PauseVerdict::Unknown);
+    }
+    // 和这段话答完时上报的算法一样，两边的范围才对得上
+    let times = BeatTimes::from_request(
+        &AdvanceRequest {
+            seq: request.seq,
+            utterance_key: request.utterance_key.clone(),
+            playback_start_ms: None,
+            playback_end_ms: request.playback_end_ms,
+            answer_start_ms: Some(request.answer_start_ms),
+            answer_end_ms: Some(request.answer_end_ms),
+            end_reason: None,
+            replays: 0,
+        },
+        row.elapsed_ms(Utc::now()),
+    );
+    let Some((from_ms, end_ms)) = times.answer_range().filter(|(from, end)| end > from) else {
+        return Ok(PauseVerdict::Unknown);
+    };
+    let key = AheadKey {
+        beat_seq: beat.seq,
+        from_ms,
+        end_ms,
+        answer_ms: u64::try_from(times.answer_ms()).unwrap_or(0),
+    };
+    let (plan, config) = conduct::script(interview_id, &row)?;
+    let voice_id = voice_of(deps, interview_id).await?;
+    let Some((id, pipe)) = deps.realtime.prepare(interview_id, key) else {
+        return Ok(PauseVerdict::Unknown);
+    };
+
+    let (verdict, decided) = oneshot::channel();
+    let job = AheadJob {
+        deps: deps.clone(),
+        interview_id,
+        key,
+        live: state.live,
+        progress: beat.progress,
+        plan,
+        config,
+        voice_id,
+        outlet: Outlet::Ahead { id, pipe },
+        verdict,
+    };
+    tokio::spawn(job.run());
+    Ok(tokio::time::timeout(VERDICT_WAIT, decided)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or(PauseVerdict::Unknown))
+}
+
+/// 候选人停顿时先想的一轮要用到的东西。
+struct AheadJob {
+    deps: Deps,
+    interview_id: Uuid,
+    key: AheadKey,
+    live: LiveState,
+    progress: EngineProgress,
+    plan: InterviewPlan,
+    config: InterviewConfig,
+    voice_id: Option<Uuid>,
+    outlet: Outlet,
+    verdict: oneshot::Sender<PauseVerdict>,
+}
+
+impl AheadJob {
+    /// 转写这段话，带着「候选人只是停了一下」去问引擎。引擎觉得说完了，它给出来的话照常准备好，
+    /// 送进管道备着；觉得没说完，告诉页面多等一会儿，这一轮就到这。
+    ///
+    /// 这里不碰面试的状态：备好的东西用不用、什么时候用，由这段话真的答完时的那一轮决定。
+    async fn run(self) {
+        let Self {
+            deps,
+            interview_id,
+            key,
+            live,
+            progress,
+            plan,
+            config,
+            voice_id,
+            outlet,
+            verdict,
+        } = self;
+        let Some(model) = deps.llm.clone() else {
+            return;
+        };
+        let Outlet::Ahead { pipe, .. } = &outlet else {
+            return;
+        };
+        let pipe = pipe.clone();
+        let started = Instant::now();
+
+        let deadline = tokio::time::Instant::now() + AHEAD_HEAR_WAIT;
+        let Some(heard) =
+            conduct::transcribe_span(&deps, interview_id, key.from_ms, key.end_ms, deadline).await
+        else {
+            return;
+        };
+        let heard_ms = started.elapsed().as_millis();
+        let candidate = CandidateTurn {
+            text: heard.text.clone(),
+            elapsed_ms: u64::try_from(key.end_ms).unwrap_or(0),
+            answer_ms: key.answer_ms,
+        };
+        if pipe.send(AheadItem::Heard(heard)).is_err() {
+            return;
+        }
+
+        let mut speaker = Speaker::new(
+            &deps,
+            interview_id,
+            key.beat_seq,
+            voice_id,
+            config.language,
+            progress,
+            outlet,
+        );
+        speaker.started = started;
+        speaker.verdict = Some(verdict);
+        let paused = TurnContext {
+            paused: true,
+            interrupted: None,
+        };
+        let outcome = match converse(
+            model.as_ref(),
+            &plan,
+            &config,
+            &live,
+            &candidate,
+            &paused,
+            &mut speaker,
+        )
+        .await
+        {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                tracing::warn!(%interview_id, reason = %err, "候选人停顿时先想的这一轮引擎出错，等这段话答完再想");
+                return;
+            }
+        };
+        conduct::record_turn_usage(
+            &deps,
+            interview_id,
+            &plan,
+            &config,
+            &outcome.usage,
+            Duration::from_millis(outcome.timing.total_ms),
+        )
+        .await;
+        let action = outcome.action;
+        let decision_ms = outcome.timing.decision_ms;
+        let beats = speaker.released + u32::from(speaker.held.is_some());
+        let first_ready_ms = speaker.first_ready_ms;
+        let answered = outcome.usage.total_tokens() > 0;
+        if action == LiveAction::Wait {
+            // 模型没回话（出错、超时）时引擎也是接着听，那不是模型的判断，页面照原来的静音时长算
+            if answered && let Some(verdict) = speaker.verdict.take() {
+                let _ = verdict.send(PauseVerdict::Wait);
+            }
+        } else if !speaker.stale {
+            let _ = pipe.send(AheadItem::Finished(Box::new((speaker.leftover(), outcome))));
+        }
+        tracing::info!(
+            %interview_id,
+            action = ?action,
+            answered,
+            beats,
+            heard_ms,
+            decision_ms,
+            first_ready_ms,
+            total_ms = started.elapsed().as_millis(),
+            "候选人停顿时先想了一轮"
+        );
+    }
+}
+
+/// 先备的那一轮用上了没有。
+enum Adopted {
+    /// 整轮都用上了，这段话接完了。
+    Whole,
+    /// 用到一半发现这一轮已经不作数了（面试结束了，或者状态被别的进程改了）。
+    Stale,
+    /// 没有备，或者没备成。`parts_used` 是已经排进队列的现场生成的句子数（没备成之前排进去的）。
+    Nothing { parts_used: u32 },
+}
+
+/// 候选人这段话答完了。停顿时先备的那一轮要是同一段话，就把它备好的句子排进队列，
+/// 还没备完的边备边排。
+async fn adopt_ahead(
+    deps: &Deps,
+    interview_id: Uuid,
+    turn: &PendingTurn,
+    started: Instant,
+) -> ApiResult<Adopted> {
+    let nothing = Adopted::Nothing { parts_used: 0 };
+    let span = conduct::latest_answer_span(deps, interview_id).await?;
+    let key = span
+        .filter(|span| span.turn_seq == conduct::candidate_turn_seq(turn.beat_seq))
+        .map(|span| AheadKey {
+            beat_seq: turn.beat_seq,
+            from_ms: span.from_ms,
+            end_ms: span.end_ms,
+            answer_ms: turn.answer_ms,
+        });
+    let Some(mut pipe) = deps.realtime.take_ahead(interview_id, key.as_ref()) else {
+        return Ok(nothing);
+    };
+
+    let (mut beats, mut parts_used) = (0u32, 0u32);
+    let mut first_ready_ms = None;
+    // 最后一句没排进去的话留在手里，整轮想完时和引擎的新状态一起写
+    let mut unqueued_tail = None;
+    while let Some(item) = pipe.recv().await {
+        let (beat, tail) = match item {
+            AheadItem::Heard(heard) => {
+                let mut conn = deps.ctx.db.acquire().await?;
+                let answer = heard.into_answer(turn.beat_seq);
+                conduct::save_answer_text(&mut conn, interview_id, &answer).await?;
+                continue;
+            }
+            AheadItem::Beat(beat) => (beat, false),
+            AheadItem::Tail(beat) => (beat, true),
+            AheadItem::Finished(done) => {
+                let (mut leftover, outcome) = *done;
+                if let Some(beat) = unqueued_tail.take() {
+                    leftover.held = Some(beat);
+                    leftover.tail_released = false;
+                }
+                let action = outcome.action;
+                beats += u32::from(leftover.held.is_some());
+                finish_turn(deps, interview_id, turn, leftover, outcome).await?;
+                deps.realtime.notify(interview_id);
+                tracing::info!(
+                    %interview_id,
+                    action = ?action,
+                    beats,
+                    ahead = true,
+                    first_ready_ms,
+                    total_ms = started.elapsed().as_millis(),
+                    "实时对话接了一轮"
+                );
+                return Ok(Adopted::Whole);
+            }
+        };
+        parts_used = parts_used.max(beat.part.unwrap_or(0));
+        match enqueue(deps, interview_id, turn.beat_seq, beat.clone()).await {
+            Ok(true) => {
+                beats += 1;
+                first_ready_ms.get_or_insert(started.elapsed().as_millis());
+                deps.realtime.notify(interview_id);
+            }
+            Ok(false) => return Ok(Adopted::Stale),
+            Err(err) => {
+                tracing::warn!(%interview_id, reason = %err, "先备好的一句没排进队列");
+                if tail {
+                    unqueued_tail = Some(beat);
+                }
+            }
+        }
+    }
+    Ok(Adopted::Nothing { parts_used })
+}
+
 // ───────────────────────── 谁在等、谁在想 ─────────────────────────
 
 struct Entry {
@@ -1001,6 +1483,12 @@ struct Entry {
     changed: watch::Sender<u64>,
     /// 有没有后台任务正在想这场面试怎么接话
     running: bool,
+    /// 候选人停顿时先备的那一轮。只留最近的一次
+    ahead: Option<Ahead>,
+    /// 一共备过几次
+    ahead_count: u64,
+    /// 正在听的是第几拍，这一拍里已经先问了几次「说完没有」
+    asked: (u32, u32),
 }
 
 /// 进程里记着的实时对话：哪场面试有请求在等下一句，哪场正在想。
@@ -1015,6 +1503,9 @@ impl Hub {
         f(entries.entry(interview_id).or_insert_with(|| Entry {
             changed: watch::Sender::new(0),
             running: false,
+            ahead: None,
+            ahead_count: 0,
+            asked: (0, 0),
         }))
     }
 
@@ -1047,6 +1538,42 @@ impl Hub {
             entry.running = false;
             entry.changed.send_modify(|count| *count += 1);
         });
+    }
+
+    /// 候选人停顿了，要先备一轮：记下来，返回这是第几次备、备好的东西往哪送。
+    /// 上一次备的作废。这一拍里问得太多时返回 `None`。
+    fn prepare(
+        &self,
+        interview_id: Uuid,
+        key: AheadKey,
+    ) -> Option<(u64, mpsc::UnboundedSender<AheadItem>)> {
+        self.with(interview_id, |entry| {
+            if entry.asked.0 != key.beat_seq {
+                entry.asked = (key.beat_seq, 0);
+            }
+            if entry.asked.1 >= MAX_PAUSE_CHECKS {
+                return None;
+            }
+            entry.asked.1 += 1;
+            entry.ahead_count += 1;
+            let (pipe, incoming) = mpsc::unbounded_channel();
+            entry.ahead = Some(Ahead {
+                key,
+                pipe: incoming,
+            });
+            Some((entry.ahead_count, pipe))
+        })
+    }
+
+    /// 取走先备的那一轮。备的不是 `key` 这段话就作废，返回 `None`。
+    fn take_ahead(
+        &self,
+        interview_id: Uuid,
+        key: Option<&AheadKey>,
+    ) -> Option<mpsc::UnboundedReceiver<AheadItem>> {
+        let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
+        let ahead = entries.get_mut(&interview_id)?.ahead.take()?;
+        (Some(&ahead.key) == key).then_some(ahead.pipe)
     }
 
     /// 面试结束了，不用再记着它。

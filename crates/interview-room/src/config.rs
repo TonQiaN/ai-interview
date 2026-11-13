@@ -55,6 +55,13 @@ pub struct RoomConfig {
     /// 实时对话里，候选人停下来多少秒算说完了一段。逐题模式用的是面试配置里的静音时长（3 到 10 秒），
     /// 对话的时候等那么久太僵；太短又会把想一想的停顿当成说完了
     pub realtime_silence_sec: u32,
+    /// 实时对话里，候选人的声音停下多少毫秒，就先让模型看一眼这段话说完没有、说完了怎么接。
+    /// 0 是不看，只按上面的静音时长算
+    pub realtime_pause_check_ms: u32,
+    /// 模型说说完了的，声音停下满这么多毫秒就接话
+    pub realtime_done_silence_ms: u32,
+    /// 模型说还没说完的，这次停顿等到这么多毫秒才算说完
+    pub realtime_wait_silence_ms: u32,
 }
 
 impl RoomConfig {
@@ -129,6 +136,45 @@ impl RoomConfig {
             );
             default.realtime_silence_sec
         });
+        let realtime_pause_check_ms = env_parse(
+            "AI_INTERVIEW_ROOM_REALTIME_PAUSE_CHECK_MS",
+            default.realtime_pause_check_ms,
+        )
+        .ok()
+        .filter(|ms| *ms == 0 || (300..=5_000).contains(ms))
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "AI_INTERVIEW_ROOM_REALTIME_PAUSE_CHECK_MS 要么是 0（不开），要么在 300 到 5000 之间，这次用默认值 {}",
+                default.realtime_pause_check_ms
+            );
+            default.realtime_pause_check_ms
+        });
+        let realtime_done_silence_ms = env_parse(
+            "AI_INTERVIEW_ROOM_REALTIME_DONE_SILENCE_MS",
+            default.realtime_done_silence_ms,
+        )
+        .ok()
+        .filter(|ms| (300..=10_000).contains(ms))
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "AI_INTERVIEW_ROOM_REALTIME_DONE_SILENCE_MS 要在 300 到 10000 之间，这次用默认值 {}",
+                default.realtime_done_silence_ms
+            );
+            default.realtime_done_silence_ms
+        });
+        let realtime_wait_silence_ms = env_parse(
+            "AI_INTERVIEW_ROOM_REALTIME_WAIT_SILENCE_MS",
+            default.realtime_wait_silence_ms,
+        )
+        .ok()
+        .filter(|ms| (1_000..=15_000).contains(ms))
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "AI_INTERVIEW_ROOM_REALTIME_WAIT_SILENCE_MS 要在 1000 到 15000 之间，这次用默认值 {}",
+                default.realtime_wait_silence_ms
+            );
+            default.realtime_wait_silence_ms
+        });
         Self {
             invite_ttl_hours,
             camera_required,
@@ -137,6 +183,9 @@ impl RoomConfig {
             abandon_after_minutes,
             transcribe_with_fake,
             realtime_silence_sec,
+            realtime_pause_check_ms,
+            realtime_done_silence_ms,
+            realtime_wait_silence_ms,
             recording: RecordingSettings {
                 timeslice_ms,
                 ..default.recording.clone()
@@ -159,6 +208,9 @@ impl Default for RoomConfig {
             settle_timeout_sec: 20,
             transcribe_with_fake: false,
             realtime_silence_sec: 2,
+            realtime_pause_check_ms: 500,
+            realtime_done_silence_ms: 1_000,
+            realtime_wait_silence_ms: 3_000,
         }
     }
 }
