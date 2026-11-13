@@ -1,0 +1,26 @@
+{
+  "name": "ai-interview-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "description": "AI 面试的前端 workspace：HR 后台、候选人面试页、设计系统、接口客户端",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "gen:api": "pnpm --filter @ai-interview/api-client gen",
+    "dev:admin": "pnpm --filter @ai-interview/admin dev",
+    "dev:candidate": "pnpm --filter @ai-interview/candidate dev",
+    "build": "pnpm gen:api && pnpm -r --if-present build",
+    "typecheck": "pnpm gen:api && pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "lint": "biome lint .",
+    "format": "biome check --write .",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm -r --if-present build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0"
+  }
+}

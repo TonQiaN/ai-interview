@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClientEvent } from "../api/room-types";
-import { bindPageEvents, EventCollector } from "./collector";
+import { bindPageEvents, collectableSignals, EventCollector } from "./collector";
 
 function setup(options: { maxBatch?: number; maxBuffered?: number } = {}) {
   const sent: Array<{ events: ClientEvent[]; keepalive: boolean }> = [];
@@ -112,23 +112,41 @@ describe("页面事件监听", () => {
   class FakeDocument extends EventTarget {
     visibilityState: DocumentVisibilityState = "visible";
     fullscreenElement: Element | null = null;
+    fullscreenEnabled = true;
+    selection = "";
+    getSelection = () => ({ toString: () => this.selection }) as Selection;
+  }
+
+  class FakeMediaDevices extends EventTarget {
+    ondevicechange = null;
+    devices: MediaDeviceKind[] = ["videoinput", "audioinput", "audiooutput"];
+    enumerateDevices = async () => this.devices.map((kind) => ({ kind, label: "不该被上报的设备名" }) as MediaDeviceInfo);
   }
 
   function bind() {
     const context = setup();
     const doc = new FakeDocument();
     const win = new EventTarget();
-    const mediaDevices = new EventTarget();
-    const unbind = bindPageEvents(context.collector, {
+    const mediaDevices = new FakeMediaDevices();
+    const targets = {
       document: doc as unknown as Document,
       window: win as unknown as Window,
       mediaDevices: mediaDevices as unknown as MediaDevices,
-    });
-    return { ...context, doc, win, mediaDevices, unbind };
+      now: () => Date.now(),
+    };
+    const binding = bindPageEvents(context.collector, targets);
+    return { ...context, doc, win, mediaDevices, targets, binding };
+  }
+
+  function paste(text: string): Event {
+    const event = new Event("paste");
+    Object.defineProperty(event, "clipboardData", { value: { getData: () => text } });
+    return event;
   }
 
   it("把切页面、失焦、粘贴、断网、换设备都记下来", async () => {
     const { collector, sent, doc, win, mediaDevices } = bind();
+    await vi.advanceTimersByTimeAsync(0);
 
     win.dispatchEvent(new Event("blur"));
     doc.visibilityState = "hidden";
@@ -141,10 +159,10 @@ describe("页面事件监听", () => {
     doc.visibilityState = "visible";
     doc.dispatchEvent(new Event("visibilitychange"));
     win.dispatchEvent(new Event("focus"));
-    doc.dispatchEvent(new Event("paste"));
+    doc.dispatchEvent(paste("粘贴进来的十个字符哦"));
+    doc.selection = "选中的字";
     doc.dispatchEvent(new Event("copy"));
     win.dispatchEvent(new Event("offline"));
-    mediaDevices.dispatchEvent(new Event("devicechange"));
     doc.fullscreenElement = {} as Element;
     doc.dispatchEvent(new Event("fullscreenchange")); // 进入全屏不记
     doc.fullscreenElement = null;
@@ -158,23 +176,90 @@ describe("页面事件监听", () => {
       "paste",
       "copy",
       "network_offline",
-      "device_changed",
       "fullscreen_exit",
       "network_online",
     ]);
-    // 粘贴和复制只记发生了，不带内容
-    expect(sent[1]?.events.filter((event) => event.kind === "paste" || event.kind === "copy").map((event) => event.payload)).toEqual([{}, {}]);
+    // 粘贴和复制只记发生了和字符数，不带内容
+    const clipboard = sent[1]?.events.filter((event) => event.kind === "paste" || event.kind === "copy");
+    expect(clipboard?.map((event) => event.payload)).toEqual([{ chars: 10 }, { chars: 4 }]);
+    expect(JSON.stringify(sent)).not.toContain("粘贴进来");
     expect(collector.pending).toBe(0);
+    void mediaDevices;
+  });
+
+  it("成对的事件，回来的那一条带上离开了多久", async () => {
+    const { collector, sent, doc, win } = bind();
+    await vi.advanceTimersByTimeAsync(0);
+
+    win.dispatchEvent(new Event("focus")); // 没有对应的失焦：不带时长
+    win.dispatchEvent(new Event("blur"));
+    await vi.advanceTimersByTimeAsync(1200);
+    win.dispatchEvent(new Event("focus"));
+    win.dispatchEvent(new Event("offline"));
+    await vi.advanceTimersByTimeAsync(700);
+    win.dispatchEvent(new Event("online"));
+    doc.visibilityState = "hidden";
+    doc.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(18_000);
+    doc.visibilityState = "visible";
+    doc.dispatchEvent(new Event("visibilitychange"));
+    await collector.flush();
+
+    const events = sent.flatMap((batch) => batch.events);
+    expect(events.filter((event) => event.kind === "window_focus").map((event) => event.payload)).toEqual([{}, { duration_ms: 1200 }]);
+    expect(events.find((event) => event.kind === "network_online")?.payload).toEqual({ duration_ms: 700 });
+    expect(events.find((event) => event.kind === "visibility_visible")?.payload).toEqual({ duration_ms: 18_000 });
+  });
+
+  it("换设备时报是哪一类变了，只数个数，不带设备名", async () => {
+    const { collector, sent, mediaDevices, binding } = bind();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 授权之后浏览器给出完整清单，这不算换设备
+    mediaDevices.devices = ["videoinput", "audioinput", "audioinput", "audiooutput"];
+    await binding.rebaselineDevices();
+
+    mediaDevices.devices = ["videoinput", "audioinput", "audiooutput", "audiooutput"];
+    mediaDevices.dispatchEvent(new Event("devicechange"));
+    await vi.advanceTimersByTimeAsync(0);
+    await collector.flush();
+
+    const changed = sent.flatMap((batch) => batch.events).filter((event) => event.kind === "device_changed");
+    expect(changed.map((event) => event.payload)).toEqual([
+      {
+        kinds: ["microphone", "speaker"],
+        before: { camera: 1, microphone: 2, speaker: 1 },
+        after: { camera: 1, microphone: 1, speaker: 2 },
+      },
+    ]);
+    expect(JSON.stringify(changed)).not.toContain("设备名");
+  });
+
+  it("报告这个浏览器里哪几类事件采得到", () => {
+    const { targets, doc } = bind();
+    expect(collectableSignals(targets, { onLine: true })).toEqual({
+      visibility: true,
+      fullscreen: true,
+      device_change: true,
+      network: true,
+      clipboard: true,
+    });
+    doc.fullscreenEnabled = false;
+    expect(collectableSignals({ ...targets, mediaDevices: undefined }, {})).toMatchObject({
+      fullscreen: false,
+      device_change: false,
+      network: false,
+    });
   });
 
   it("关页面时把剩下的发出去；解绑后不再记录", async () => {
-    const { collector, sent, doc, win, unbind } = bind();
+    const { collector, sent, doc, win, binding } = bind();
     doc.dispatchEvent(new Event("paste"));
     win.dispatchEvent(new Event("pagehide"));
     await vi.advanceTimersByTimeAsync(0);
     expect(sent[0]).toMatchObject({ keepalive: true });
 
-    unbind();
+    binding.unbind();
     doc.dispatchEvent(new Event("paste"));
     win.dispatchEvent(new Event("blur"));
     expect(collector.pending).toBe(0);

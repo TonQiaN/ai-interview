@@ -41,6 +41,7 @@ describe("候选人侧接口客户端", () => {
   it("上报回答用 JSON", async () => {
     const { api, calls } = setup(() => json({ action: "finish", reason: "completed" }));
     const next = await api.advance({
+      seq: 2,
       utterance_key: "q1",
       playback_start_ms: 0,
       playback_end_ms: 2_000,

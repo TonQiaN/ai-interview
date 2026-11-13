@@ -1,0 +1,67 @@
+/* 候选人页自己的少量布局样式。组件的样子都来自 @ai-interview/ui。 */
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+.app-center {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+}
+
+.app-list {
+  margin: 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 4px;
+}
+
+/* 欢迎页的注意事项：图标加一段话 */
+.app-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--oil-space-4);
+}
+.app-notes li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: var(--oil-space-3);
+  align-items: start;
+}
+.app-notes svg {
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  color: var(--oil-primary);
+}
+
+/* 开始前的规则 */
+.app-rules {
+  margin: 0;
+  padding-left: 1.4em;
+  display: grid;
+  gap: var(--oil-space-3);
+}
+
+/* 面试中：自己的小画面和音量条并排 */
+.app-live {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oil-space-5);
+  min-height: 96px;
+}
+.app-live__self {
+  flex: 0 0 auto;
+  width: 128px;
+}
+.app-live__meter {
+  display: grid;
+  place-items: center;
+  min-width: 120px;
+}

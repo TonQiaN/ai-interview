@@ -38,10 +38,12 @@ const FALLBACK_FRAME_MS = 20;
 export class AudioGraph {
   private fallbackTimer: ReturnType<typeof setInterval> | null = null;
   private current: { source: AudioBufferSourceNode; stop: () => void } | null = null;
+  /** 麦克风除了混音输出之外还接到哪个节点（音量计算）。换麦克风时要重新接。 */
+  private levelInput: AudioNode | null = null;
 
   private constructor(
     readonly context: AudioContext,
-    private readonly micSource: MediaStreamAudioSourceNode,
+    private micSource: MediaStreamAudioSourceNode,
     private readonly mixDestination: MediaStreamAudioDestinationNode,
     private readonly playbackBus: GainNode,
   ) {}
@@ -74,6 +76,17 @@ export class AudioGraph {
    */
   async resume(): Promise<void> {
     if (this.context.state !== "running") await this.context.resume();
+  }
+
+  /**
+   * 换一个麦克风（原来的设备被拔掉、重新授权之后）。
+   * 混音输出的流不变，正在录的 MediaRecorder 不受影响。
+   */
+  replaceMic(micStream: MediaStream): void {
+    this.micSource.disconnect();
+    this.micSource = this.context.createMediaStreamSource(micStream);
+    this.micSource.connect(this.mixDestination);
+    if (this.levelInput) this.micSource.connect(this.levelInput);
   }
 
   /** 把一段音频文件的字节解码出来，供 play 使用。可以提前解码好。 */
@@ -156,6 +169,7 @@ export class AudioGraph {
         node.port.onmessage = (event: MessageEvent<LevelFrame>) => onLevel(event.data);
         this.micSource.connect(node);
         node.connect(sink);
+        this.levelInput = node;
         return;
       } catch {
         // 加载失败（旧 WebView、内容安全策略等），走下面的退路
@@ -166,6 +180,7 @@ export class AudioGraph {
     analyser.fftSize = 1024;
     this.micSource.connect(analyser);
     analyser.connect(sink);
+    this.levelInput = analyser;
     const samples = new Float32Array(analyser.fftSize);
     let last = performance.now();
     this.fallbackTimer = setInterval(() => {
