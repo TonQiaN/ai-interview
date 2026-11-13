@@ -637,6 +637,28 @@ async fn synthesis_failure_fails_the_whole_report() {
 }
 
 #[tokio::test]
+async fn synthesis_gets_a_fresh_start_after_failing() {
+    // 模型在同一段对话里三次都少写收尾的括号，换一段新的对话就好了
+    let broken = r#"{"recommendation": "advance", "confidence": "medium""#;
+    let model = RoutedModel::new()
+        .on("question:q1", Q1)
+        .on("question:q2", Q2)
+        .on("requirements", REQUIREMENTS)
+        .on("resume", RESUME)
+        .on("integrity", INTEGRITY)
+        .on("communication", COMMUNICATION)
+        .on("synthesis", broken)
+        .on("synthesis", broken)
+        .on("synthesis", broken)
+        .on("synthesis", SYNTHESIS);
+    let report = analyze(&sample_record(), &model, &once())
+        .await
+        .expect("第二次从头来应该成功");
+    assert_eq!(model.calls("synthesis"), 4);
+    assert!(report.meta.failed_stages.is_empty());
+}
+
+#[tokio::test]
 async fn untagged_transcript_is_split_by_the_model() {
     let mut record = sample_record();
     for segment in &mut record.transcript {
