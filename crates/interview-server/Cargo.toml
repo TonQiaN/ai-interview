@@ -7,6 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# 把真的语音识别后端（sherpa-onnx 跑 X-ASR）编进来。默认不开，见 docs/speech/stt.md
+sherpa = ["interview-stt/sherpa"]
+
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -16,6 +20,7 @@ interview-flow = { workspace = true }
 interview-llm = { workspace = true }
 interview-platform = { workspace = true }
 interview-room = { workspace = true }
+interview-stt = { workspace = true }
 interview-talent = { workspace = true }
 interview-tts = { workspace = true }
 serde = { workspace = true }

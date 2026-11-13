@@ -1,6 +1,6 @@
 [package]
 name = "interview-flow"
-description = "AI 面试的面试场次：建面试、配置、出题和预合成语音、看题改题"
+description = "AI 面试的面试场次：建面试、出题和预合成语音、看题改题，面试后的转写、分析报告和结论"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,10 +12,13 @@ anyhow = { workspace = true }
 axum = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
+interview-audio = { workspace = true }
 interview-core = { workspace = true, features = ["sqlx"] }
 interview-engine = { workspace = true }
 interview-llm = { workspace = true }
 interview-platform = { workspace = true }
+interview-report = { workspace = true }
+interview-stt = { workspace = true }
 interview-tts = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -26,6 +29,7 @@ utoipa-axum = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]

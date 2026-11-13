@@ -94,7 +94,7 @@ interview-server
                       └─ interview-core
 ```
 
-- 带 HTTP 和数据库的业务 crate 之间不互相依赖。它们通过数据库表和任务队列配合：比如面试结束时 `interview-room` 往队列里放一条 `interview.finalize` 任务，由 `interview-flow` 接手。
+- 带 HTTP 和数据库的业务 crate 之间不互相依赖。它们通过数据库表和任务队列配合：比如面试结束时 `interview-room` 往队列里放一条 `interview.finalize` 任务，由 `interview-flow` 接手。任务内容是 `{"interview_id": "<面试 id>"}`，去重键是 `interview.finalize:<面试 id>`（同一场面试放多次只会有一条在排队）。
 - 纯逻辑的 crate（`interview-engine`、`interview-report`）不依赖 `interview-platform`，输入输出都是能序列化的 Rust 类型，方便单测。
 - 跨线读别人的表可以（只读），写只能由归属线来做。
 
@@ -195,12 +195,14 @@ HR 可以在 `ready` 之后看题、改题；改过的话术重新合成。
 
 ```text
 interview.finalize（interview-flow）
-  → 等录像合并完成
-  → 调 interview-stt 对整段录音重新转写，更新 interview_turns（带逐字时间戳）
+  → 等录像合并完成（等不到也往下走，不卡住报告）
+  → 调 interview-stt 重新转写候选人的回答，更新 interview_turns（带逐字时间戳）
+    现在只转写有单独答题录音的轮次（interview_turns.audio_blob_key）；
+    从整段录像里按时间切出回答再转写，等语音线的解码函数合进来之后接
   → 入队 report.generate
 report.generate（interview-flow）
-  → 组装面试记录（岗位、简历、配置、plan、turns、events、录像位置）
-  → 调 interview-report 生成报告，存 interview_reports
+  → 组装面试记录（岗位、简历、配置、plan、turns、events）
+  → 调 interview-report 生成报告，存 interview_reports（每次生成一个新版本）
 HR 在后台看录像、文字记录、报告，写结论（interviews.decision）
 ```
 

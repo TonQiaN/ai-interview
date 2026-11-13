@@ -22,7 +22,7 @@ pub async fn serve(config: PlatformConfig) -> anyhow::Result<()> {
         None => warn_if_no_admin(&ctx).await,
     }
 
-    let app = crate::build(&ctx, &Shared::from_env());
+    let app = crate::build(&ctx, &Shared::from_env().await);
     let shutdown = CancellationToken::new();
 
     let runner_handle = if ctx.config.task_workers > 0 {
