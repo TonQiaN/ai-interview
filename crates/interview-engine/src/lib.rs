@@ -5,6 +5,7 @@ pub mod config;
 pub mod error;
 pub mod plan;
 pub mod planner;
+pub mod room;
 pub mod session;
 
 pub use assess::{AnswerNote, AnswerQuality, CandidateIntent};
@@ -22,6 +23,10 @@ pub use plan::{
 pub use planner::{
     CANDIDATE_NAME_PLACEHOLDER, CandidateContext, JobContext, PlanInput, PlanOptions,
     plan_interview, plan_interview_with,
+};
+pub use room::{
+    AnswerWindow, Beat, BeatReport, PendingAnswer, Position, ROOM_SCHEMA_VERSION, Reported,
+    RoomState, RoomStep, Settled,
 };
 pub use session::{
     Advance, AnswerEnd, AnswerRecord, FinishReason, Listen, Phase, Progress,
