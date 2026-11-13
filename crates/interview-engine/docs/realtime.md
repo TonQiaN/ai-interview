@@ -80,10 +80,11 @@ let outcome = live::respond(&model, &plan, &config, &state, &turn, &mut sink).aw
 
 - `turn` 是候选人这一轮到现在说的话：转写文字、面试进行到的时间、这段话的时长。
 - 候选人只是停了一下，或者是打断面试官开的口，改用 `live::respond_with`，多传一个 `TurnContext`（`paused` 和 `interrupted`），下面两节讲。`respond` 就是两样都不填的 `respond_with`。
-- `sink` 陆续收到 `LiveEvent`：`Action`（定了怎么接）、`Speak { key, text }`（现场生成的一句，马上送去合成；同一轮的几句 `key` 相同，例如 `q3.p1`、`q3.r1`）、`Play { utterance }`（播一句提前合成好的）。
+- `sink` 陆续收到 `LiveEvent`：`Action`（定了怎么接）、`Speak { key, text }`（现场生成的一句，马上送去合成；同一轮的几句 `key` 相同，例如 `q3.p1`、`q3.r1`）、`Play { utterance }`（播一句提前合成好的）、`Done { listen, finished, progress }`（这一轮要说的话都给出来了）。
+- `Done` 每一轮只发一次，在它之后不会再有 `Speak` 和 `Play`。它带的 `listen`、`finished`、`progress` 和最后返回的 `outcome` 里的一样，发出以后不会再变，模型后面出错或超时也一样。调用方拿到它就知道这一轮说完之后是接着听候选人还是面试结束，可以把手里最后一句话放出去，不用等 `respond` 返回。换题时模型在 `Done` 之后还要写这道题的概括，早多少见下面的实测。
 - 返回的 `outcome` 里有新的状态（存回 `interviews.runtime_state`）、这一轮说过的话（现场生成的那句已经拼成完整的一句，可以记进 `interview_turns`）、接下来怎么听（`listen`）或者为什么结束（`finished`）、进度、用量、各个时间点。
 
-对应到 `docs/architecture/api.md` 里的 WebSocket 消息：`Action` 之前发 `thinking`；`Speak` 对应 `speak_begin`（`mode` 为 `stream`）加音频帧；`Play` 对应 `speak_begin`（`mode` 为 `url`）；一轮结束后发 `listening` 或 `finished`。
+对应到 `docs/architecture/api.md` 里的 WebSocket 消息：`Action` 之前发 `thinking`；`Speak` 对应 `speak_begin`（`mode` 为 `stream`）加音频帧；`Play` 对应 `speak_begin`（`mode` 为 `url`）；收到 `Done` 就可以定下这一轮的话播完后发 `listening` 还是 `finished`。
 
 ### 候选人停了一下：说完了没有
 
@@ -155,6 +156,7 @@ let context = TurnContext {
 - **定下动作大约 1 秒**。多数场次里 90% 的轮次在 1.4 秒以内，最慢的一场是 1.7 秒。追问的第一句话比决定晚 0.1 到 0.2 秒。
 - **一场面试的模型费用两三分钱**，比出题（约 0.1 元）还便宜。
 - **打开思考（low）**：同一场面试，定下动作中位 1.48 秒、90% 在 2.14 秒以内，费用多一半左右，追问的质量没有看出明显差别。实时模式建议保持思考关闭（`live_thinking` 的默认值）。
+- **`Done` 比函数返回早多少**（两场，后端 20 分钟，回答空泛和爱反问）：换题的 15 轮里，`Done` 和第一句要播的话同时出来，比等模型写完这道题的概括早 0.3 到 0.4 秒（中位），最多 0.7 秒。追问和回应的 18 轮没有差别：问句一出来模型就停笔了，`Done` 和函数返回几乎同时。所以它省下的是换题那一轮的等待。
 - 「完全不会」的候选人问了三道题后提前结束；「不想面了」的候选人说完那句话的当轮就结束；「回答空泛」的候选人被追问到说出「核心代码是同事写的」为止，记录里留下了「简历把该方案作为个人核心成果，与自述不符」。
 
 对话质量上看到的问题和处理：

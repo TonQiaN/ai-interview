@@ -443,7 +443,7 @@ async fn main() -> Result<()> {
                 LiveEvent::Play { utterance } => {
                     heard.push_str(&format!("[{}]", utterance.key));
                 }
-                LiveEvent::Action { .. } => {}
+                LiveEvent::Action { .. } | LiveEvent::Done { .. } => {}
             };
             let outcome = respond_with(
                 &model,
