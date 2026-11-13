@@ -1404,6 +1404,7 @@ name = "interview-engine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "futures-util",
  "interview-llm",
  "serde",
  "serde_json",
