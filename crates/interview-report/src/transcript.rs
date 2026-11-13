@@ -186,6 +186,34 @@ fn seconds(ms: u64) -> String {
     format!("{}.{}秒", ms / 1000, (ms % 1000) / 100)
 }
 
+/// 给模型看的片段编号：`s` 加序号。
+///
+/// 库里的片段和事件编号往往很长（比如 UUID），让模型抄写容易出错，也费字数。所以提示里一律用
+/// 短编号，模型引用时写短编号，程序再对回原来的那一条。报告里写的始终是原来的编号。
+pub(crate) fn segment_alias(index: usize) -> String {
+    format!("s{}", index + 1)
+}
+
+/// 给模型看的事件编号：`e` 加序号。
+pub(crate) fn event_alias(index: usize) -> String {
+    format!("e{}", index + 1)
+}
+
+/// 从模型写的编号查到是第几条。短编号优先；模型照抄了原来的编号也认。
+pub(crate) fn lookup_by_alias<'a>(
+    original_ids: impl Iterator<Item = &'a str>,
+    alias: fn(usize) -> String,
+) -> HashMap<String, usize> {
+    let ids: Vec<&str> = original_ids.collect();
+    let mut lookup: HashMap<String, usize> = ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| ((*id).to_owned(), index))
+        .collect();
+    lookup.extend((0..ids.len()).map(|index| (alias(index), index)));
+    lookup
+}
+
 /// 把整场面试的材料排成给模型看的文本。所有分析步骤共用这一段，放在提示的最前面，
 /// 这样各步的输入前缀相同，可以命中模型服务的缓存。
 pub(crate) fn render_context(
@@ -241,12 +269,12 @@ pub(crate) fn render_context(
     if record.transcript.is_empty() {
         out.push_str("（没有任何转写内容）\n");
     }
-    for segment in &record.transcript {
+    for (index, segment) in record.transcript.iter().enumerate() {
         let question = assignment.get(&segment.id).map_or("-", String::as_str);
         let _ = writeln!(
             out,
             "[{} | {}-{} | {} | {}] {}",
-            segment.id,
+            segment_alias(index),
             clock(segment.start_ms),
             clock(segment.end_ms),
             segment.speaker.label(),
@@ -285,11 +313,11 @@ pub(crate) fn render_context(
     if record.events.is_empty() {
         out.push_str("（面试网页全程在采集，没有记录到切出页面、粘贴、退出全屏这类事件。）\n");
     }
-    for event in &record.events {
+    for (index, event) in record.events.iter().enumerate() {
         let _ = writeln!(
             out,
             "[{} | {} | {} | {}] {}",
-            event.id,
+            event_alias(index),
             event.at_ms.map_or_else(|| "开始前".to_owned(), clock),
             event.kind,
             event.duration_ms.map_or_else(|| "-".to_owned(), seconds),
