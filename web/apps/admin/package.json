@@ -7,7 +7,9 @@
   "description": "HR 管理后台：候选人、岗位、面试设置、面试链接、回看和分析报告。",
   "scripts": {
     "dev": "vite",
+    "dev:demo": "vite --mode demo",
     "build": "tsc --noEmit && vite build",
+    "build:demo": "tsc --noEmit && vite build --mode demo",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

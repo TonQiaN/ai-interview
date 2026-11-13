@@ -2,8 +2,7 @@
  * 接口的数据类型。
  *
  * 都取自后端的 OpenAPI 文档（@ai-interview/api-client），后端改了字段这里编译就会报错。
- * 例外是「语音」一段：音色和试听的接口后端还没有，那一段是照 docs/architecture/api.md
- * 的路径先写的，只在演示数据下能用。
+ * 这里只是起个顺手的名字，再加上少数几个页面自己用的类型。
  */
 
 import type { Schemas } from "@ai-interview/api-client";
@@ -64,16 +63,13 @@ export type ResumeDetail = Resume & {
 };
 
 export type Candidate = Schemas["Candidate"];
-export type CandidateListItem = Candidate & { primary_resume: Resume | null };
-export type CandidateDetail = CandidateListItem & { possible_duplicates: DuplicateHint[] };
+export type CandidateListItem = Schemas["CandidateListItem"];
+export type CandidateDetail = Schemas["CandidateDetail"];
 
 export type CandidateInput = Schemas["CreateCandidate"];
 
 /** 上传简历建候选人的返回 */
-export interface ImportedCandidate {
-  candidate: Candidate;
-  resume: Resume;
-}
+export type ImportedCandidate = Schemas["ImportedCandidate"];
 
 // ───────── 语音 ─────────
 
