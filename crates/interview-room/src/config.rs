@@ -65,6 +65,9 @@ pub struct RoomConfig {
     /// 实时对话里，面试官说话时一听到候选人出声页面就先停下来；之后候选人的声音再持续这么多毫秒
     /// 才算插话，不到的（咳嗽、嗯一声）从停下的地方接着播。0 是不让插话，面试官每句话都说完
     pub realtime_barge_in_ms: u32,
+    /// 实时对话的面试一开始，就把面试官现场开口最常说的头一句（「明白。」「好的。」）用这场的音色
+    /// 合成一遍。合成结果按音色和文字有缓存，之后现场说到这几句不用再等合成
+    pub realtime_warm_up: bool,
 }
 
 impl RoomConfig {
@@ -191,6 +194,14 @@ impl RoomConfig {
             );
             default.realtime_barge_in_ms
         });
+        let realtime_warm_up = env_flag(
+            "AI_INTERVIEW_ROOM_REALTIME_WARM_UP",
+            default.realtime_warm_up,
+        )
+        .unwrap_or_else(|err| {
+            tracing::warn!(reason = %err, "AI_INTERVIEW_ROOM_REALTIME_WARM_UP 写得不对，这次按提前合成处理");
+            default.realtime_warm_up
+        });
         Self {
             invite_ttl_hours,
             camera_required,
@@ -203,6 +214,7 @@ impl RoomConfig {
             realtime_done_silence_ms,
             realtime_wait_silence_ms,
             realtime_barge_in_ms,
+            realtime_warm_up,
             recording: RecordingSettings {
                 timeslice_ms,
                 ..default.recording.clone()
@@ -229,6 +241,7 @@ impl Default for RoomConfig {
             realtime_done_silence_ms: 1_000,
             realtime_wait_silence_ms: 3_000,
             realtime_barge_in_ms: 400,
+            realtime_warm_up: true,
         }
     }
 }
