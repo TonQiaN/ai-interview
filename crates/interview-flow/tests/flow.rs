@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::http::StatusCode;
+use interview_audio::Ffmpeg;
 use interview_flow::Deps;
 use interview_llm::ChatModel;
 use interview_llm::testing::ScriptedModel;
@@ -42,6 +43,7 @@ impl Harness {
             llm: llm.map(|model| Arc::new(model) as Arc<dyn ChatModel>),
             synth: Arc::new(Synthesizer::new(tts.clone())),
             stt: None,
+            ffmpeg: Ffmpeg::from_env(),
         };
         let (router, _api) = interview_flow::router(deps.clone()).split_for_parts();
         let app = testing::as_admin(router, admin.clone());
@@ -92,6 +94,7 @@ impl Harness {
             llm: llm.map(|model| Arc::new(model) as Arc<dyn ChatModel>),
             synth: Arc::new(Synthesizer::new(tts.clone())),
             stt: None,
+            ffmpeg: Ffmpeg::from_env(),
         };
         self.rebuilt(deps, tts)
     }
@@ -107,6 +110,7 @@ impl Harness {
             llm,
             synth: self.deps.synth.clone(),
             stt,
+            ffmpeg: self.deps.ffmpeg.clone(),
         };
         self.rebuilt(deps, self.tts.clone())
     }
@@ -1063,6 +1067,7 @@ async fn endpoints_require_login(pool: PgPool) {
         llm: None,
         synth: Arc::new(Synthesizer::new(Arc::new(FakeBackend::new()))),
         stt: None,
+        ffmpeg: Ffmpeg::from_env(),
     };
     let (router, _api) = interview_flow::router(deps).split_for_parts();
     let id = Uuid::now_v7();

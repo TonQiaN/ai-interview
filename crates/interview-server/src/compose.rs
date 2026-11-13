@@ -126,6 +126,7 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
         llm: shared.llm.clone(),
         synth: shared.synth.clone(),
         stt: shared.stt.clone(),
+        ffmpeg: Ffmpeg::from_env(),
     };
     api = api.merge(interview_flow::router(flow.clone()));
     interview_flow::register_tasks(&mut tasks, flow);

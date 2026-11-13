@@ -36,8 +36,10 @@ utoipa-axum = { workspace = true }
 utoipa-scalar = { workspace = true }
 
 [dev-dependencies]
+bytes = { workspace = true }
 sqlx = { workspace = true }
 tempfile = { workspace = true }
+uuid = { workspace = true }
 
 [lints]
 workspace = true

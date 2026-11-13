@@ -21,7 +21,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                 # 全部测试
 cargo test -p interview-tts            # 只测一个 crate
 cargo test -p interview-tts <测试名>   # 只跑一个测试
-cargo test -p interview-server --test e2e   # 端到端：整个应用装起来，从 HR 登录走到面试收尾（外部依赖是假的）
+cargo test -p interview-server --test e2e   # 端到端：整个应用装起来，从 HR 登录走到出报告（外部依赖是假的；要 ffmpeg，没装就不测录像那一段）
 cargo run -p interview-cli -- tts engines
 cargo run -p interview-server -- openapi   # 打印 OpenAPI 文档，不用数据库
 scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息不进 Git
