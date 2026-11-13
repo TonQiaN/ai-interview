@@ -1,0 +1,1861 @@
+{
+  "schema_version": 1,
+  "interview_id": "sample-analyst-nervous",
+  "generated_at_ms": 1794537654098,
+  "recommendation": {
+    "decision": "advance",
+    "confidence": "high",
+    "headline": "硬性要求均达标，分析逻辑清楚，建议进下一轮人工核实因果归因",
+    "overview": "候选人有两年多外卖平台数据分析经验，三条硬性要求（经验年限、SQL、统计与 A/B 测试）在面试中都能找到具体细节支撑：配送超时项目有维度拆解、假设否定和落地结果，A/B 测试讲得出样本量四要素、卡方检验和 AA 测试，SQL 窗口函数连并列值处理都想到了，且与简历表述一致。主要短板是因果归因讲不完整、Python 和报表搭建未验证、部分数字记忆模糊。整体达到岗位要求，值得人工面试官花时间，诚信方面没有发现任何迹象。",
+    "key_reasons": [
+      {
+        "point": "分析问题有明确的假设—验证链条，不是凭经验下结论，这是本岗位最核心的能力",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "我第一步不是马上去找原因，是先把这个超时率拆开，按时间段、按区域、按骑手、还有按商家的出餐时长",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "所以这个假设就被数据否掉了",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "所以我就判断不是人不够，是人到了店门口在那儿干等着",
+            "start_ms": 131408,
+            "end_ms": 189608,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "统计与 A/B 测试不是背概念，讲出了实操细节（样本量换算成天数、取整偏保守、先做 AA 测试、不能中途偷看）",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "显著性水平，我们一般用 0.05，还有统计功效，一般用 0.8",
+            "start_ms": 202236,
+            "end_ms": 303721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "不能中途偷看结果，看着有效果就停，那样 p 值是虚的",
+            "start_ms": 202236,
+            "end_ms": 303721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s9",
+            "quote": "先看看两组的基线是不是本来就有差异",
+            "start_ms": 314721,
+            "end_ms": 362721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "SQL 达到熟练水平，边界情况（同秒多单）和替代写法的缺陷都能讲出来，说明真写过而不只是背模板",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "就是用一个窗口函树，row_number() over，里面 partition by 用户 id，然后 order by 下单时间 desc",
+            "start_ms": 452852,
+            "end_ms": 515778,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "最好在 order by 里再加一个订单 id 做 tie breaker，不然结果不稳定",
+            "start_ms": 452852,
+            "end_ms": 515778,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "resume",
+            "quote": "SQL、Python、Tableau、A/B 测试",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "推动落地和沟通有真实反思：结论被驳回后不是抱怨，而是把分析对象收窄到可执行的人群，并提炼出可复用的方法",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s19",
+            "quote": "我改了个做法，就是找了一批本来菜品数就够、但是没上架的商家，只推这一批",
+            "start_ms": 622789,
+            "end_ms": 712436,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s19",
+            "quote": "结论不被采纳，很多时候不是数据不对，是没给对方一个他能执行的动作",
+            "start_ms": 622789,
+            "end_ms": 712436,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "point": "超时率 6.1%→4.3% 的归因链是断的：没讲对照组、没讲上线时间、没排除同期其它变化，这个降幅有多少是派单规则带来的无法确认。人工面试必须问清",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "最后超时率从 6.1 降到 4.3",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "我就按出餐时长把订单分了组，看出餐慢的那组超时率是出餐快那组的好几倍",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "关键量化偏模糊：样本量只说「几十万量级」、排除运力假设只说「高一成左右」，没有参照口径和判断阈值，无法核对是否真的算过",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s9",
+            "quote": "我记不太清具体数字了，反正是几十万这个量级",
+            "start_ms": 314721,
+            "end_ms": 362721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "差得没有想象中那么多，可能就高一成左右",
+            "start_ms": 131408,
+            "end_ms": 189608,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "简历的加分项 Python 和技能 Tableau 全场未被问到，工作经历里也没有用 Python 做分析的具体描述，熟练程度无法验证",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "SQL、Python、Tableau、A/B 测试",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "简历写的「搭建商家经营日报」只在 q6 带过项目名，口径设计、数据源、更新维护、使用方都没讲，搭建工作本身的深度未经验证",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "搭建商家经营日报",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s19",
+            "quote": "之前我做商家经营日报那个项目",
+            "start_ms": 622789,
+            "end_ms": 712436,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "因果推断只有概念层面，本人也承认没实操过、不知道怎么检验，如果岗位需要做实验之外的业务效果评估，这是能力缺口",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s15",
+            "quote": "说实话，双重叉分我只是听说过，没实际用过",
+            "start_ms": 524520,
+            "end_ms": 567270,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s17",
+            "quote": "具体怎么检验我确实没做过",
+            "start_ms": 575741,
+            "end_ms": 612104,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ]
+  },
+  "overall_score": 83,
+  "competencies": [
+    {
+      "name": "专业能力",
+      "rating": 4,
+      "comment": "SQL 明显熟练，A/B 测试的样本量、显著性、AA 测试都讲得出实操细节，统计学底子在。扣分点是因果推断只停留在名词和条件层面，且分析结论的因果归因（超时率下降怎么归功于改规则）没有交代。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s13",
+          "quote": "还有一种写法是用 group by 用户 id 取 max 下单时间，然后再 join 回原表，但那个如果同一时间有多条就会重复",
+          "start_ms": 452852,
+          "end_ms": 515778,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s7",
+          "quote": "判断显著的话，我们是用卡方捡验看转化率差异，p 值小于 0.05 就认为显著",
+          "start_ms": 202236,
+          "end_ms": 303721,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s15",
+          "quote": "我只看过一些文章，真让我上手写我可能写不出来",
+          "start_ms": 524520,
+          "end_ms": 567270,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "解决问题",
+      "rating": 4,
+      "comment": "拆解有先后顺序，会先验证数据再归因，且用数据主动否定自己的初始假设，这是比较难得的分析习惯。不足是拆到「定位到哪一块」就停了，没讲怎么确认这就是主因；q3 也没意识到「昨天比前天」本身有周内周期性偏差。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s3",
+          "quote": "所以这个假设就被数据否掉了",
+          "start_ms": 24927,
+          "end_ms": 121251,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s11",
+          "quote": "我第一反应不是去找业务原因，是先确认这个数是不是真的",
+          "start_ms": 372621,
+          "end_ms": 442467,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s11",
+          "quote": "一般拆到两三层就能定位到是哪一块掉的",
+          "start_ms": 372621,
+          "end_ms": 442467,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "沟通表达",
+      "rating": 4,
+      "comment": "六道题全部答在问点上，回答基本都有「先做什么、再做什么、为什么」的结构，结论能听明白。有口头语和两次自陈紧张，但不影响内容。个别地方颗粒度粗（样本量级、排除运力的幅度），讲得不够确切。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s11",
+          "quote": "确认是真的之后，再按维度拆，先按城市拆，看是全国都在跌还是某几个城市",
+          "start_ms": 372621,
+          "end_ms": 442467,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s7",
+          "quote": "不好意思我有点紧张",
+          "start_ms": 202236,
+          "end_ms": 303721,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s9",
+          "quote": "我记不太清具体数字了，反正是几十万这个量级",
+          "start_ms": 314721,
+          "end_ms": 362721,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "学习与成长",
+      "rating": 4,
+      "comment": "有间接证据：不会的方法坦率承认并讲出已理解的部分，结论被驳回后能吸收对方意见并改设计，还提炼出可复用的方法。但面试没有直接考察学新东西的场景，这个分数把握一般。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s15",
+          "quote": "说实话，双重叉分我只是听说过，没实际用过",
+          "start_ms": 524520,
+          "end_ms": 567270,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s19",
+          "quote": "当时我其实有点不服，但后来想了想他们说得也有道理",
+          "start_ms": 622789,
+          "end_ms": 712436,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "动机与契合",
+      "rating": null,
+      "comment": "没有考察到。六道题都是方法和技术题，没有问为什么换工作、对这个岗位的理解、职业规划或稳定性，无法评价。",
+      "evidence": []
+    },
+    {
+      "name": "职业素养",
+      "rating": 4,
+      "comment": "诚信方面表现好：不会的方法直接说没实操过，没有编造；讲失败经历时如实说出业务方的反对理由。协作与推动从 q6 的反思里能看到。但只有这一处证据，且没讲当时怎么当面回应运营，深度有限。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s15",
+          "quote": "说实话，双重叉分我只是听说过，没实际用过",
+          "start_ms": 524520,
+          "end_ms": 567270,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s19",
+          "quote": "商家菜品少可能是因为他本来就没那么多产能，你让他补他也补不了，而且这个，怎么说呢，是相关不是因果",
+          "start_ms": 622789,
+          "end_ms": 712436,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    }
+  ],
+  "focus_checks": [
+    {
+      "focus": "重点看分析问题的逻辑",
+      "verdict": "satisfied",
+      "finding": "q1 先按时间、区域、骑手、商家出餐时长四个维度拆解定位到午高峰，再用每骑手背单比和到店等餐时长否定「运力不足」的假设，再按出餐时长分组验证，逻辑链完整且有先后顺序；q3 也是先验证数据真实性、再逐层拆维度、最后看外部因素。短板是拆解停在定位层面，没讲怎么确认主因，也没讲怎么排除混杂因素。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s3",
+          "quote": "我第一步不是马上去找原因，是先把这个超时率拆开，按时间段、按区域、按骑手、还有按商家的出餐时长",
+          "start_ms": 24927,
+          "end_ms": 121251,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s5",
+          "quote": "算了一个比值，就是平均每个在线骑手要背多少单",
+          "start_ms": 131408,
+          "end_ms": 189608,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s5",
+          "quote": "如果真是运力不足，那解法就完全不一样了",
+          "start_ms": 131408,
+          "end_ms": 189608,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "focus": "看他能不能把结论讲清楚",
+      "verdict": "satisfied",
+      "finding": "回答结构清楚，先给顺序或结论再展开，关键数字（6.1%→4.3%、出餐时长 20 分钟、两周、0.05/0.8）都带上了，听者不用猜。q6 还把一次失败经历提炼成一句可执行的结论。扣分点在 q2.f1 追问样本量级时只说「几十万」、记不清具体数字，讲得比其他回答含糊。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s7",
+          "quote": "样本量的话，它不是拍脑袋定的，它是跟几个东西有关",
+          "start_ms": 202236,
+          "end_ms": 303721,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s19",
+          "quote": "结论不被采纳，很多时候不是数据不对，是没给对方一个他能执行的动作",
+          "start_ms": 622789,
+          "end_ms": 712436,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s9",
+          "quote": "我记不太清具体数字了，反正是几十万这个量级",
+          "start_ms": 314721,
+          "end_ms": 362721,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "question_id": "q1",
+      "question_text": "讲讲你分析配送超时原因的那个项目，你是怎么一步步找到原因的？",
+      "asked": true,
+      "segment_ids": [
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "timing": {
+        "start_ms": 15085,
+        "end_ms": 189608,
+        "response_latency_ms": 3200,
+        "candidate_speaking_ms": 154524,
+        "candidate_chars": 491,
+        "chars_per_minute": 190,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人讲了配送超时项目的完整分析链条：先把超时率按时间、区域、骑手、商家出餐时长几个维度拆开，发现集中在午高峰；用「骑手有效在线时长/订单量」这个比值排除运力不足的假设，再通过骑手到店等餐时长和按出餐时长分组的对比，把原因定位到商家出餐慢；最后推动派单规则加入出餐预估，超时率从 6.1% 降到 4.3%。追问部分具体讲了怎么拆半小时格子、算比值、看等餐时长，并区分了「运力不足」和「到店干等」两种情况下解法不同。",
+        "rating": 4,
+        "rating_reason": "对照评分要点，拆解过程清楚，先拆维度再立假设再否定假设，思路有先后顺序；用到了具体指标（骑手有效在线时长与单量的比值、骑手等餐时长、按出餐时长分组的超时率对比）；结论有落地动作和结果数字，并且和简历中的 6.1%→4.3% 一致；追问里还讲出了「如果真是运力不足，解法完全不一样」这种有分析意识的判断，超出了只报结论的水平。没给 5 分，是因为最后一步的因果归属没交代——超时率下降怎么确认是派单规则改动的功劳，有没有对照组、有没有排除同期其它变化，完全没讲；分组对比本质是相关，也没提如何排除距离、时段等混杂因素。",
+        "strengths": [
+          {
+            "point": "拆解有明确顺序：先多维拆解定位问题集中的场景，再去找原因，而不是一上来就猜原因",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s3",
+                "quote": "我第一步不是马上去找原因，是先把这个超时率拆开，按时间段、按区域、按骑手、还有按商家的出餐时长",
+                "start_ms": 24927,
+                "end_ms": 121251,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "假设驱动、用数据否定假设，而不是凭经验下结论",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s3",
+                "quote": "所以这个假设就被数据否掉了",
+                "start_ms": 24927,
+                "end_ms": 121251,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s5",
+                "quote": "算了一个比值，就是平均每个在线骑手要背多少单",
+                "start_ms": 131408,
+                "end_ms": 189608,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "追问时补充了关键佐证指标（骑手到店等餐时长），把「人不够」和「人到了在等」两种情况区分开，体现对结论落地的考虑",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s5",
+                "quote": "那个特别长，有的商圈能到十几分钟",
+                "start_ms": 131408,
+                "end_ms": 189608,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s5",
+                "quote": "如果真是运力不足，那解法就完全不一样了",
+                "start_ms": 131408,
+                "end_ms": 189608,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "结论有落地动作和量化结果，且与简历表述一致",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s3",
+                "quote": "最后超时率从 6.1 降到 4.3",
+                "start_ms": 24927,
+                "end_ms": 121251,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "resume",
+                "quote": "超时率从 6.1% 降到 4.3%",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "最终效果（6.1%→4.3%）没有交代怎么归因到派单规则改动上，没提对照组、上线时间、同期有没有其它变化，这条因果链是断的",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s3",
+                "quote": "最后超时率从 6.1 降到 4.3",
+                "start_ms": 24927,
+                "end_ms": 121251,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "按出餐时长分组比较超时率只是相关性，没讲怎么排除距离、时段、品类等混杂因素就下了结论",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s3",
+                "quote": "我就按出餐时长把订单分了组，看出餐慢的那组超时率是出餐快那组的好几倍",
+                "start_ms": 24927,
+                "end_ms": 121251,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "关键量化偏模糊：排除运力假设时只说「差得没想象中那么多、高一成左右」，没有给出参照口径和判断阈值，无法判断这个排除是否站得住",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s5",
+                "quote": "差得没有想象中那么多，可能就高一成左右",
+                "start_ms": 131408,
+                "end_ms": 189608,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "超时率从 6.1% 降到 4.3%，你怎么确认是派单规则里加出餐预估带来的？当时有没有留对照组或做上线前后的可比性处理，同期还有没有别的变化（季节、商家结构、骑手规模）可能影响这个数？"
+      }
+    },
+    {
+      "question_id": "q2",
+      "question_text": "你做优惠券 A/B 测试的时候，怎么确定样本量？怎么判断结果是不是显著？",
+      "asked": true,
+      "segment_ids": [
+        "s6",
+        "s7",
+        "s8",
+        "s9"
+      ],
+      "timing": {
+        "start_ms": 190508,
+        "end_ms": 362721,
+        "response_latency_ms": 3800,
+        "candidate_speaking_ms": 149485,
+        "candidate_chars": 448,
+        "chars_per_minute": 179,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人说样本量由基线转化率、想检测的最小提升幅度、显著性水平（0.05）和统计功效（0.8）共同决定，算出总样本后除以日流量得出实验天数；实际跑了两周，是为了盖住两个完整的周周期，并留一天做 AA 测试；判断显著是用卡方检验看转化率差异，p<0.05 认为显著，还主动提到不能中途偷看结果。追问里承认记不清具体样本量，只说是几十万量级、日流量几万单、算出八九天再向上取整到两周。",
+        "rating": 4,
+        "rating_reason": "回答扣住题目，把样本量由哪几个因素决定、怎么换算成实验天数、显著性怎么判断都说清了，并主动补上「不能中途偷看」和「先做 AA 测试」这两个体现真实操作经验的点，属于有具体内容、个别地方不够深入（4 分）。没给到 5 分是因为：具体样本量记不清、最小提升幅度没给量级、也没讲那次实验最后的结果和提升幅度，深度没有超出常规答题。",
+        "strengths": [
+          {
+            "point": "样本量的决定因素说得完整，四个要素（基线、最小提升幅度、显著性水平、统计功效）都提到了",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s7",
+                "quote": "样本量的话，它不是拍脑袋定的，它是跟几个东西有关：一个是基线转化率",
+                "start_ms": 202236,
+                "end_ms": 303721,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "知道固定实验时间要覆盖完整周期，避免周内/周末结构差异干扰",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s7",
+                "quote": "我们那次实际是跑了两周，因为，怎么说呢，一周的话周内和周末的行为差异太大了",
+                "start_ms": 202236,
+                "end_ms": 303721,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "知道从总样本换算到实验天数，并给出取整偏保守的实际做法",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s9",
+                "quote": "除下来大概八九天，那我就往上取整到两周，因为要盖住两个完整的周周期",
+                "start_ms": 314721,
+                "end_ms": 362721,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "主动提到偷看结果会让 p 值失真，这是实操里常被忽略的点",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s7",
+                "quote": "不能中途偷看结果，看着有效果就停，那样 p 值是虚的",
+                "start_ms": 202236,
+                "end_ms": 303721,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "提到正式实验前先做 AA 测试，检查两组基线是否本来就有差异",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s9",
+                "quote": "AA 测试，先看看两组的基线是不是本来就有差异",
+                "start_ms": 314721,
+                "end_ms": 362721,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "具体样本量记不清，只给了「几十万」这个模糊量级，无法核对他是否真的算过",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s9",
+                "quote": "我记不太清具体数字了，反正是几十万这个量级",
+                "start_ms": 314721,
+                "end_ms": 362721,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "最小可检测提升幅度只讲了原理，没给当时券的实际提升量级，也就没法判断算出的样本量是否合理",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s7",
+                "quote": "第二个是我想检测出来的最小提升幅度，就是说我这个券如果只提升零点几个点，那我可能需要很大很大的样本才看得出来",
+                "start_ms": 202236,
+                "end_ms": 303721,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "整道题只讲了方法，没讲那次 A/B 测试的结果（是否显著、提升多少、最后有没有落地），缺少结果侧的交代",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s7",
+                "quote": "判断显著的话，我们是用卡方捡验看转化率差异，p 值小于 0.05 就认为显著",
+                "start_ms": 202236,
+                "end_ms": 303721,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请把当时那张优惠券 A/B 测试的完整链路讲一遍：基线转化率大概多少、要检测的最小提升是多少、算出来的每组样本量和实际跑出来的样本量各是多少、最后转化率差多少、p 值大概是多少、这个结论业务方采纳后做了什么动作。"
+      }
+    },
+    {
+      "question_id": "q3",
+      "question_text": "如果发现昨天的订单量比前天突然跌了 15%，你会怎么分析？",
+      "asked": true,
+      "segment_ids": [
+        "s10",
+        "s11"
+      ],
+      "timing": {
+        "start_ms": 363621,
+        "end_ms": 442467,
+        "response_latency_ms": 3000,
+        "candidate_speaking_ms": 69846,
+        "candidate_chars": 227,
+        "chars_per_minute": 195,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人给出了一套有先后顺序的排查思路：先不做业务归因，而是验证数据本身是否可信（数据延迟、埋点故障、下单量/支付量/DAU 是否同步下跌），确认为真后再按城市、渠道、新老用户、品类逐层拆解定位，最后排查天气、大促错位、竞对价格战等外部因素。整个回答是通用方法框架，没有结合自己工作中实际处理过的指标异动案例。",
+        "rating": 4,
+        "rating_reason": "契合考察意图，且给出了明确的先后顺序：先查数据可信度、再维度拆解、最后看外部因素，与评分要点「先确认数据没问题，再按维度拆解，有先后顺序」基本对上。方法层面也比较扎实，例如用多个应同步变化的指标互相校验来判断是否为数据问题。不足在于：全程是通用框架，没有真实的排查案例；维度拆解停在「拆两三层就能定位」，没说怎么确认定位到的就是主因；对「昨天 vs 前天」这个对比口径本身的周期性偏差没有意识。因此给 4 分，属于良好但个别地方不够深入。",
+        "strengths": [
+          {
+            "point": "第一反应是验证数据真实性，而不是直接做业务归因，这是排查异动最容易被忽略的一步",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s11",
+                "quote": "我第一反应不是去找业务原因，是先确认这个数是不是真的",
+                "start_ms": 372621,
+                "end_ms": 442467,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "给出了具体的验证手段：查数据延迟和埋点，并用应该同步变化的指标互相校验",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s11",
+                "quote": "先看是不是数据延迟，或者买点出了问题",
+                "start_ms": 372621,
+                "end_ms": 442467,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s11",
+                "quote": "比如下单量和支付量、还有 DAU 是不是一起跌",
+                "start_ms": 372621,
+                "end_ms": 442467,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "维度拆解有明确的从粗到细顺序（城市→渠道→新老用户→品类），并说明拆解的目的是定位到具体是哪一块在跌",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s11",
+                "quote": "再按维度拆，先按城市拆，看是全国都在跌还是某几个城市",
+                "start_ms": 372621,
+                "end_ms": 442467,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "补充了外部因素这一层，考虑到跌幅可能不由内部业务变化造成",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s11",
+                "quote": "比如天气、大促的错位、或者竞对在打价格战",
+                "start_ms": 372621,
+                "end_ms": 442467,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "没有意识到「昨天对比前天」这个比较口径本身有问题：两天可能对应不同星期，需要和上周同一天或近几周同口径对比才能排除周内周期性，他把时间维度的考虑只放在了外部事件上",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s11",
+                "quote": "最后还要看一下时间上是不是有什么，那个，外部事件",
+                "start_ms": 372621,
+                "end_ms": 442467,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "拆解深度靠经验判断，没有说明拆到某一层后如何验证这就是主因（比如用贡献度拆解、做交叉验证或找业务方确认）",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s11",
+                "quote": "一般拆到两三层就能定位到是哪一块掉的",
+                "start_ms": 372621,
+                "end_ms": 442467,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "全程只有通用框架，没有引用自己工作中真实遇到过的指标异动案例，无法判断这套思路他是否真的执行过",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s11",
+                "quote": "我会先看几个应该同步变化的指标对不对得上",
+                "start_ms": 372621,
+                "end_ms": 442467,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "如果昨天是周一、前天是周日，你还会直接拿这两天比吗？你会怎么处理周内周期性的问题？另外请举一个你实际处理过的指标异动案例，说明你最后定位到的原因是什么、怎么确认的、结论落地后指标有没有回来。"
+      }
+    },
+    {
+      "question_id": "q4",
+      "question_text": "写 SQL 的时候，怎么找出每个用户最近一次下单的记录？讲思路。",
+      "asked": true,
+      "segment_ids": [
+        "s12",
+        "s13"
+      ],
+      "timing": {
+        "start_ms": 443367,
+        "end_ms": 515778,
+        "response_latency_ms": 2200,
+        "candidate_speaking_ms": 62926,
+        "candidate_chars": 215,
+        "chars_per_minute": 205,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人给出窗口函数写法：row_number() over(partition by 用户id order by 下单时间 desc) 外套一层取 rn=1；并补充同一用户同一秒下多单时，要在 order by 里加订单 id 作为 tie breaker。他还对比了 group by 取 max 再 join 回原表的写法，指出同一时间多条会重复、需再去重，因此平时优先用 row_number。",
+        "rating": 5,
+        "rating_reason": "完全切题，覆盖了评分要点中的窗口函数解法，而且不止背语法：讲清了为什么这么写（结果稳定）、替代写法的具体缺陷（同秒多单 join 回来会重复、要再去重）、以及边界情况怎么处理（加订单 id 做 tie breaker）。这是一道只要求「讲思路」的题，候选人的回答在正确性、可操作性和边界意识上都到位，细节超过一般初中级分析师的口头表述水平。",
+        "strengths": [
+          {
+            "point": "核心解法讲得准确完整，窗口函数的分区、排序、取行三层结构都说清楚了",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "用一个窗口函树，row_number() over，里面 partition by 用户 id，然后 order by 下单时间 desc，外面套一层，取 rn 等于 1 的那些行",
+                "start_ms": 452852,
+                "end_ms": 515778,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "主动考虑到排序不唯一的边界情况，给出加订单 id 做 tie breaker 的处理，说明是真写过而不只是背答案",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "如果有同一个用户同一秒下了两单，那最好在 order by 里再加一个订单 id 做 tie breaker，不然结果不稳定",
+                "start_ms": 452852,
+                "end_ms": 515778,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "能对比另一种写法并指出其缺陷，体现取舍判断而不是只会一种模板",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "还有一种写法是用 group by 用户 id 取 max 下单时间，然后再 join 回原表，但那个如果同一时间有多条就会重复",
+                "start_ms": 452852,
+                "end_ms": 515778,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "只讲了逻辑正确性，没提在订单大表上的性能考虑（如先按时间分区裁剪再开窗），也没说明同秒多单如果都要保留该用 rank 还是 row_number，深度上还有空间",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "这个我平时写得挺多的。就是用一个窗口函树",
+                "start_ms": 452852,
+                "end_ms": 515778,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "如果订单表是几十亿行的分区大表，你这个 row_number 的写法直接跑会不会有问题？你会怎么改（比如先做分区裁剪或先聚合再关联）？另外，如果同一用户同一秒下的两单都要算作「最近一次」，row_number 和 rank 的结果会差在哪里？"
+      }
+    },
+    {
+      "question_id": "q5",
+      "question_text": "你了解因果推断里的双重差分法吗？",
+      "asked": true,
+      "segment_ids": [
+        "s14",
+        "s15",
+        "s16",
+        "s17"
+      ],
+      "timing": {
+        "start_ms": 516678,
+        "end_ms": 612104,
+        "response_latency_ms": 4200,
+        "candidate_speaking_ms": 79113,
+        "candidate_chars": 214,
+        "chars_per_minute": 162,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人一开始就说明自己只是听说过双重差分法、没有实际用过，然后用自己的话讲了双重差分的基本逻辑：有实验组和对照组，比较干预前后的变化，再把对照组自身的变化扣掉。追问前提时，他说出两组干预前趋势要平行、不能有只影响其中一组的同期变化，并承认不知道怎么做检验。",
+        "rating": 4,
+        "rating_reason": "这道题会最好，不会的话坦率承认并能讲出相关思路也可以。候选人没有回避，直接承认自己没实操过，这一点符合评分要点；他讲的核心逻辑（两次差分、扣掉对照组自然变化）是正确的，追问还答出了平行趋势这个最关键的假设。扣分在于只有概念层面的理解，没有任何实际操作细节，自己也说写不出来、不知道怎么检验。整体属于「坦率承认且相关思路基本正确」，但深度不到优秀。",
+        "strengths": [
+          {
+            "point": "不装懂，直接说明只是听说过、没有实际用过，诚信和自知方面是正面的",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "说实话，双重叉分我只是听说过，没实际用过",
+                "start_ms": 524520,
+                "end_ms": 567270,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "用大白话把双重差分的核心逻辑讲对了：两次差分，扣掉对照组自身的变化，剩下的才算干预效果",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "它要有一个实验组和一个对照组，然后看两组在干预前后的变化，再把这个变化再减一次",
+                "start_ms": 524520,
+                "end_ms": 567270,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "把对照组本来的变化给扣掉，剩下的才算干预的效果",
+                "start_ms": 524520,
+                "end_ms": 567270,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "追问前提下答出了平行趋势，还补充了不能有只影响其中一组的同期冲击，这两个都是双重差分的关键假设",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s17",
+                "quote": "应该是，两组在干预之前得是比较像的，就是趋势要平行？",
+                "start_ms": 575741,
+                "end_ms": 612104,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s17",
+                "quote": "还有就是，那个，不能有别的同期发生的变化只影响其中一组",
+                "start_ms": 575741,
+                "end_ms": 612104,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "只有概念理解，没有任何实操细节，自己也说上手写不出来",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "我只看过一些文章，真让我上手写我可能写不出来",
+                "start_ms": 524520,
+                "end_ms": 567270,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "知道平行趋势是前提，但不知道实际怎么检验，说明对方法的掌握停在名词层面",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s17",
+                "quote": "具体怎么检验我确实没做过",
+                "start_ms": 575741,
+                "end_ms": 612104,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "如果平行趋势不满足（比如实验组本来就在上涨、对照组在下跌），你觉得还能怎么补救或者换什么方法？请结合一个你能接触到的业务场景说说你会怎么设计。"
+      }
+    },
+    {
+      "question_id": "q6",
+      "question_text": "讲一次你的分析结论没有被业务方采纳的经历。",
+      "asked": true,
+      "segment_ids": [
+        "s18",
+        "s19"
+      ],
+      "timing": {
+        "start_ms": 613004,
+        "end_ms": 712436,
+        "response_latency_ms": 4000,
+        "candidate_speaking_ms": 89647,
+        "candidate_chars": 254,
+        "chars_per_minute": 170,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人讲了一次商家经营日报的分析经历：他发现菜品少的商家复购明显低，建议运营推动商家补菜品，运营以「菜品少可能是产能不足」和「相关不等于因果」为由不认可。他后来改变做法，只针对本来菜品数够但没上架的商家做推动，运营愿意尝试，并总结出「结论不被采纳，常常是因为没给对方一个能执行的动作」。",
+        "rating": 4,
+        "rating_reason": "切题，是一个具体事例，包含分析内容、业务方反对的真实理由、候选人自己的反思，以及改进后的做法和结果，最后还提炼出可复用的沟通方法，符合良好档。未给满分的原因在于：改进后的结果只用「比较干净」「愿意试了」形容，没有量化指标和最终落地结果；对这批商家怎么筛出来、怎么控制混杂也没交代，深度还差一层。",
+        "strengths": [
+          {
+            "point": "事例具体，把业务方不采纳的理由讲得很清楚（产能限制、相关不等于因果），说明他真正理解了分歧点",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s19",
+                "quote": "商家菜品少可能是因为他本来就没那么多产能，你让他补他也补不了，而且这个，怎么说呢，是相关不是因果",
+                "start_ms": 622789,
+                "end_ms": 712436,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "不只是抱怨没被采纳，而是拿出改进方案：从「推动所有菜品少的商家」收窄到「本来菜品数够但没上架」的商家，思路更接近因果识别",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s19",
+                "quote": "我改了个做法，就是找了一批本来菜品数就够、但是没上架的商家，只推这一批",
+                "start_ms": 622789,
+                "end_ms": 712436,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "有提炼、可迁移的方法论总结，把「推动落地」落到「给对方一个能执行的动作」上，符合岗位对沟通推动能力的要求",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s19",
+                "quote": "结论不被采纳，很多时候不是数据不对，是没给对方一个他能执行的动作",
+                "start_ms": 622789,
+                "end_ms": 712436,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "改进后的结果过于笼统，只有形容词，没有指标、样本量、观察周期，也没说最终是否真的落地并带来复购变化",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s19",
+                "quote": "那个结果就比较干净，运营也愿意试了",
+                "start_ms": 622789,
+                "end_ms": 712436,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "当时面对运营的反驳是怎么回应的、有没有再做一轮沟通去说服，这一段过程没讲，只有内心转变",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s19",
+                "quote": "当时我其实有点不服，但后来想了想他们说得也有道理",
+                "start_ms": 622789,
+                "end_ms": 712436,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "你后来筛的那批「本来菜品数够但没上架」的商家是怎么选出来的、样本有多大、用什么指标观察了多久来判断「结果比较干净」？这次运营最终实际推动了多少商家，复购率有变化吗？"
+      }
+    }
+  ],
+  "requirement_match": {
+    "match_level": "high",
+    "summary": "三条硬性要求都有对应的实际经历支撑：配送超时项目体现出清晰的假设拆解与验证逻辑；A/B 测试能讲出样本量的确定依据、统计功效、卡方检验、不提前查看结果，以及补做 AA 测试。SQL 窗口函数的写法也谈到并列值处理这类细节；表达和推动能力从 q6 的反思中可以看出。缺口是 Python 只在简历技能栏出现，面试未涉及，无法验证；报表搭建只在简历提及，未展开细节。",
+    "items": [
+      {
+        "requirement": "两年以上数据分析经验",
+        "importance": "must_have",
+        "verdict": "met",
+        "basis": "both",
+        "reasoning": "简历显示 2022.07 至今在同一外卖平台任数据分析师，连续从业已超过两年。面试中讲的项目有具体的时间背景、指标口径、推动过程和结果数字（6.1%→4.3%），能看出是一线实操经历，并非泛泛而谈。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "2022.07 至今 某外卖平台 数据分析师",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "这个项目是，是前年年底开始做的",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "最后超时率从 6.1 降到 4.3",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "熟练使用 SQL",
+        "importance": "must_have",
+        "verdict": "met",
+        "basis": "both",
+        "reasoning": "q4 不只说出 row_number 窗口函数的写法，还主动提到同一用户同一秒下单要用订单 id 做 tie breaker 保证结果稳定，并对比了 group by 取 max 再 join 的写法及其去重缺陷。这种比较说明他踩过坑，不是背答案。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "就是用一个窗口函树，row_number() over，里面 partition by 用户 id，然后 order by 下单时间 desc",
+            "start_ms": 452852,
+            "end_ms": 515778,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "要注意的是如果有同一个用户同一秒下了两单，那最好在 order by 里再加一个订单 id 做 tie breaker",
+            "start_ms": 452852,
+            "end_ms": 515778,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "resume",
+            "quote": "SQL、Python、Tableau、A/B 测试",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "懂基本的统计方法",
+        "importance": "must_have",
+        "verdict": "met",
+        "basis": "interview",
+        "reasoning": "q2 能说出样本量取决于基线转化率、最小可检测提升、显著性水平（0.05）、统计功效（0.8），判断显著性用卡方检验、p<0.05，并主动提到不能中途查看结果，否则 p 值是虚的。q5.f1 虽没做过双重差分，但能说出平行趋势和同期干扰这两个核心前提，说明统计思维扎实。统计学本科背景也吻合。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "显著性水平，我们一般用 0.05，还有统计功效，一般用 0.8",
+            "start_ms": 202236,
+            "end_ms": 303721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "判断显著的话，我们是用卡方捡验看转化率差异，p 值小于 0.05 就认为显著",
+            "start_ms": 202236,
+            "end_ms": 303721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "不能中途偷看结果，看着有效果就停，那样 p 值是虚的",
+            "start_ms": 202236,
+            "end_ms": 303721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s17",
+            "quote": "应该是，两组在干预之前得是比较像的，就是趋势要平行",
+            "start_ms": 575741,
+            "end_ms": 612104,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "A/B 测试的实际设计与分析经验",
+        "importance": "must_have",
+        "verdict": "met",
+        "basis": "both",
+        "reasoning": "简历写明负责优惠券 A/B 测试设计和结果分析。面试中能讲出实验周期的确定逻辑：算出总量几十万量级，按日流量几万单推出八九天，向上取整到两周以覆盖完整的周周期；并会先做 AA 测试检查两组基线。属于有实操细节的作答。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "负责优惠券 A/B 测试的设计和结果分析",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s9",
+            "quote": "反正是几十万这个量级，然后我们那个实验分组的流量是一天几万单，除下来大概八九天",
+            "start_ms": 314721,
+            "end_ms": 362721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s9",
+            "quote": "AA 测试，先看看两组的基线是不是本来就有差异",
+            "start_ms": 314721,
+            "end_ms": 362721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "我们那次实际是跑两周",
+            "start_ms": 202236,
+            "end_ms": 303721,
+            "speaker": "candidate",
+            "quote_match": "approximate"
+          }
+        ]
+      },
+      {
+        "requirement": "会 Python",
+        "importance": "nice_to_have",
+        "verdict": "unknown",
+        "basis": "resume",
+        "reasoning": "Python 只出现在简历技能栏，简历工作经历里没有任何用 Python 做分析的具体描述，面试六道题也没有涉及，无法验证熟练程度。这一点建议下一轮直接问。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "SQL、Python、Tableau、A/B 测试",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "负责业务数据的分析和报表（报表/看板搭建）",
+        "importance": "must_have",
+        "verdict": "partially_met",
+        "basis": "both",
+        "reasoning": "简历写有搭建商家经营日报，面试 q6 也提到做过这个项目，说明确实做过。但面试中只把这个项目当作背景带过，没有讲报表的口径设计、指标体系和更新维护方式，证据只到“做过”这一层。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "搭建商家经营日报",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s19",
+            "quote": "之前我做商家经营日报那个项目",
+            "start_ms": 622789,
+            "end_ms": 712436,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "分析问题的逻辑：能拆解、能验证假设",
+        "importance": "must_have",
+        "verdict": "met",
+        "basis": "interview",
+        "reasoning": "q1 先按时间段、区域、骑手、商家出餐时长四个维度拆解，定位到午高峰；再用骑手有效在线时长与单量的比值否掉运力不足假设，并补充等餐时长佐证；最后按出餐时长分组验证。q3 也是先排除数据问题，再逐层拆维度，顺序清楚。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "我第一步不是马上去找原因，是先把这个超时率拆开，按时间段、按区域、按骑手、还有按商家的出餐时长",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "所以我就判断不是人不够，是人到了店门口在那儿干等着",
+            "start_ms": 131408,
+            "end_ms": 189608,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s11",
+            "quote": "我第一反应不是去找业务原因，是先确认这个数是不是真的",
+            "start_ms": 372621,
+            "end_ms": 442467,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "能把分析结论讲清楚并推动落地",
+        "importance": "must_have",
+        "verdict": "met",
+        "basis": "both",
+        "reasoning": "q1 用完整因果链讲到结论落地：推动在派单规则里加入出餐预估。q6 面对结论被运营驳回，没有停留在情绪，而是识别出“相关不等于因果”和“对方可执行性”两个问题，改为只推已具备菜品数但未上架的商家重做验证，并总结出结论不被采纳往往是没给对方可执行的动作。表达有条理，反思具体，有说服力。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "所以就推动在派单归则里加了出餐预估",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s19",
+            "quote": "后来我改了个做法，就是找了一批本来菜品数就够、但是没上架的商家，只推这一批",
+            "start_ms": 622789,
+            "end_ms": 712436,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s19",
+            "quote": "结论不被采纳，很多时候不是数据不对，是没给对方一个他能执行的动作",
+            "start_ms": 622789,
+            "end_ms": 712436,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ]
+  },
+  "resume_verification": {
+    "credibility": "high",
+    "summary": "简历里两个核心项目（配送超时分析、优惠券 A/B 测试）在面试里都讲出了具体做法、取舍理由和数字来由，与简历表述一致，SQL 窗口函数也答得具体且正确。主要待核实的是：在职时间与职责范围没有直接确认、商家经营日报只提到项目名没讲搭建过程、Python 和 Tableau 完全没被问到。整体未见明显不实迹象。",
+    "claims": [
+      {
+        "claim": "2022.07 至今在某外卖平台担任数据分析师",
+        "verdict": "partially_corroborated",
+        "reasoning": "面试里描述的场景（骑手派单、商家出餐、午高峰运力）确实是外卖平台的分析工作，超时项目说成「前年年底开始」，与 2022 年入职的时间线不冲突。但候选人没有直接说明入职时间、汇报关系和职责范围，无法据此确认这段履历本身。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "2022.07 至今 某外卖平台 数据分析师",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "这个项目是，是前年年底开始做的",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "确认具体入职时间、所在团队和汇报对象，以及这两年主要负责的业务线是哪一块。"
+      },
+      {
+        "claim": "分析骑手配送超时原因，推动调整派单规则，超时率从 6.1% 降到 4.3%",
+        "verdict": "corroborated",
+        "reasoning": "候选人给出了完整的分析链条：先按时间、区域、骑手、商家出餐时长四个维度拆解，发现午高峰集中；再用「骑手有效在线时长/订单量」比值和到店等餐时长否定运力不足假设；再按出餐时长分组验证超时率差异；最后落到派单规则加出餐预估，并给出 6.1→4.3 的结果。假设排除和验证方式都是只有实际做过才讲得出的细节，与简历表述一致。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "分析骑手配送超时的原因，推动调整派单规则，超时率从 6.1% 降到 4.3%",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "按时间段、按区域、按骑手、还有按商家的出餐时长，就是这几个维度分别去拆",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "所以我就判断不是人不够，是人到了店门口在那儿干等着",
+            "start_ms": 131408,
+            "end_ms": 189608,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "所以就推动在派单归则里加了出餐预估",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": null
+      },
+      {
+        "claim": "负责优惠券 A/B 测试的设计和结果分析",
+        "verdict": "corroborated",
+        "reasoning": "讲出了样本量由基线转化率、最小可检测提升、显著性水平 0.05、统计功效 0.8 决定，用日流量倒推实验天数；实验跑两周是为了覆盖两个完整的周周期；用卡方检验看转化率差异、p<0.05 判显著；还提到不能中途偷看结果、先做 AA 测试看基线。这些是实际做过实验的人才有的操作细节，方向与简历一致。只有样本量具体数值记忆模糊（只说「几十万量级」），属于记忆问题而非讲不出。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "负责优惠券 A/B 测试的设计和结果分析",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "然后是显著性水平，我们一般用 0.05，还有统计功效，一般用 0.8",
+            "start_ms": 202236,
+            "end_ms": 303721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "不能中途偷看结果，看着有效果就停，那样 p 值是虚的",
+            "start_ms": 202236,
+            "end_ms": 303721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s9",
+            "quote": "先看看两组的基线是不是本来就有差异",
+            "start_ms": 314721,
+            "end_ms": 362721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": null
+      },
+      {
+        "claim": "搭建商家经营日报",
+        "verdict": "partially_corroborated",
+        "reasoning": "只在讲「结论没被采纳」那题时顺带提到「做商家经营日报那个项目」并由此分析了菜品数与复购的关系，但没有讲日报本身怎么搭的——数据源、指标口径、更新方式、使用方都没提，无法确认搭建工作本身的深度。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "搭建商家经营日报",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s19",
+            "quote": "之前我做商家经营日报那个项目",
+            "start_ms": 622789,
+            "end_ms": 712436,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "商家经营日报里有哪些指标、数据从哪来、更新频率和口径怎么定的、现在有哪些人在用？"
+      },
+      {
+        "claim": "技能栏列出 SQL",
+        "verdict": "corroborated",
+        "reasoning": "取每个用户最近一次下单的题，候选人准确说出 row_number() over(partition by 用户id order by 下单时间 desc) 再取 rn=1，并主动补充同一秒多单要用订单 id 做 tie breaker，还对比了 group by+join 写法会产生重复需要去重。思路和边界情况都正确，属于熟练使用的表现。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "SQL、Python、Tableau、A/B 测试",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "最好在 order by 里再加一个订单 id 做 tie breaker，不然结果不稳定",
+            "start_ms": 452852,
+            "end_ms": 515778,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": null
+      },
+      {
+        "claim": "技能栏列出 Python、Tableau",
+        "verdict": "not_covered",
+        "reasoning": "六道题里没有任何一题涉及 Python 或 Tableau，面试中没有出现相关内容，无法判断这两项技能的真实程度。未考察不等于不实。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "SQL、Python、Tableau、A/B 测试",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "实际工作中用 Python 做过哪类分析（清洗、建模还是自动化报表）？Tableau 是自建仪表盘还是只看别人做好的？"
+      },
+      {
+        "claim": "2018 至 2022 统计学本科",
+        "verdict": "not_covered",
+        "reasoning": "面试没有问学历，无法从面试内容印证。只能侧面看到候选人对显著性水平、统计功效、卡方检验、平行趋势等概念的理解基本正确，与统计学背景不冲突，但这不能替代学历核验。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "2018 至 2022 统计学 本科",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "按常规流程核验学历证书与学信网信息即可，可在人工面试中顺带确认专业课程里是否包含实验设计与因果推断。"
+      }
+    ]
+  },
+  "integrity": {
+    "risk_level": "none",
+    "summary": "整场面试没有发现作弊或诚信方面的迹象。六道题开口前的等待时间为 2.2～4.2 秒，语速在 162～205 字/分钟之间，属于正常的口语作答节奏；页面全程没有记录到切出页面、粘贴或退出全屏。回答虽然结构清楚，但夹带着大量个人的操作细节、自我修正和犹豫，与“照着稿子念”的样子不符：比如样本量“我记不太清具体数字了”，以及“双重差分只是听说过，没实际用过，具体怎么检验我确实没做过”。常见题答得有框架、偶有紧张和口头禅（如 q2、q6 说“不好意思我有点紧张”），都不构成诚信疑点。",
+    "signals": []
+  },
+  "communication": {
+    "summary": "候选人能把分析过程按「先做什么、再做什么、为什么」讲清楚，回答基本都紧扣问题，没有跑题。遇到不会的双重差分法时直接承认没实操过，仍讲出了平行趋势等前提，并说明具体检验也没做过，整体稳定。表达上有一些口头语和停顿，也有两次说「有点紧张」，但内容没有乱。",
+    "aspects": [
+      {
+        "aspect": "clarity",
+        "rating": 4,
+        "observation": "讲项目时给出具体的拆解维度和关键数字（超时率 6.1% 降到 4.3%、出餐时长 20 分钟），听者不用猜他想说什么。但 q2.f1 问到样本量级时只说「几十万」、记不清具体数字，细节颗粒度比其他回答粗。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "我第一步不是马上去找原因，是先把这个超时率拆开，按时间段、按区域、按骑手、还有按商家的出餐时长",
+            "start_ms": 24927,
+            "end_ms": 121251,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s11",
+            "quote": "我第一反应不是去找业务原因，是先确认这个数是不是真的",
+            "start_ms": 372621,
+            "end_ms": 442467,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s9",
+            "quote": "我记不太清具体数字了，反正是几十万这个量级",
+            "start_ms": 314721,
+            "end_ms": 362721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "aspect": "structure",
+        "rating": 4,
+        "observation": "回答有明显先后顺序：排查类问题先验证数据再拆维度再看外部事件；A/B 测试先列影响样本量的四个因素再讲怎么算天数；SQL 先讲窗口函数再讲 tie breaker 和备选写法。基本是先给结论或顺序，再展开，不是想到哪说到哪。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s11",
+            "quote": "确认是真的之后，再按维度拆，先按城市拆，看是全国都在跌还是某几个城市",
+            "start_ms": 372621,
+            "end_ms": 442467,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "样本量的话，它不是拍脑袋定的，它是跟几个东西有关",
+            "start_ms": 202236,
+            "end_ms": 303721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "还有一种是是用 group by 用户 id 取 max 下单时间",
+            "start_ms": 452852,
+            "end_ms": 515778,
+            "speaker": "candidate",
+            "quote_match": "approximate"
+          }
+        ]
+      },
+      {
+        "aspect": "responsiveness",
+        "rating": 5,
+        "observation": "每个问题都答在问点上。追问「怎么排除运力不足」时直接给了每骑手背单比和等餐时长两个证据，并说明这个判断为什么关键；追问「两周怎么定」时回到公式算天数再取整；问双重差分前提时答的是平行趋势和同期干扰，没有绕开。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "算了一个比值，就是平均每个在线骑手要背多少单",
+            "start_ms": 131408,
+            "end_ms": 189608,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s9",
+            "quote": "除下来大概八九天，那我就往上取整到两周，因为要盖住两个完整的周周期",
+            "start_ms": 314721,
+            "end_ms": 362721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s17",
+            "quote": "应该是，两组在干预之前得是比较像的，就是趋势要平行？",
+            "start_ms": 575741,
+            "end_ms": 612104,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "aspect": "composure",
+        "rating": 4,
+        "observation": "不会的问题坦率承认没实操过，同时把理解到的逻辑讲出来，追问前提时也给出了两条正确前提并明说检验没做过，属于稳的应对。两次主动说「有点紧张」，但紧接着的内容仍然有条理，没有出现答非所问或敷衍带过。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s15",
+            "quote": "说实话，双重叉分我只是听说过，没实际用过",
+            "start_ms": 524520,
+            "end_ms": 567270,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s17",
+            "quote": "具体怎么检验我确实没做过",
+            "start_ms": 575741,
+            "end_ms": 612104,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "不好意思我有点紧张",
+            "start_ms": 202236,
+            "end_ms": 303721,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ],
+    "reliability_note": "结论只依据转写文字和计时推断，看不到表情、听不到语气，紧张程度和流畅度的判断有限；转写存在识别错字（如「窗口函树」「双重叉分」「派单归则」），已按最合理意思理解，未据此扣分。"
+  },
+  "next_round": {
+    "focus_areas": [
+      "因果归因能力：结论落地后的效果怎么确认是自己的改动带来的，会不会做对照、做上线前后可比性处理",
+      "A/B 测试的完整闭环：从基线、最小提升、算出的样本量到最终结果和业务动作，核实是否真的主导过而不是参与过",
+      "Python 与报表搭建的实际深度（简历写了但这场完全没考察）",
+      "动机与稳定性：为什么看这个机会、对数据分析师这个岗位的理解"
+    ],
+    "questions": [
+      {
+        "question": "超时率从 6.1% 降到 4.3%，你怎么确认是派单规则加出餐预估带来的？当时有没有留对照组，或者怎么处理上线前后可比性的问题？同期还有没有别的变化可能影响这个数？",
+        "purpose": "核实简历里最亮的那条结果到底有多少是他的分析带来的，这是判断经验深度的关键，也是这一轮暴露的最大缺口"
+      },
+      {
+        "question": "把那张优惠券 A/B 测试的完整链路讲一遍：基线转化率多少、要检测的最小提升是多少、算出来的样本量和实际跑出来的样本量各是多少、最后转化率差多少、p 值大概多少、结论落地后做了什么动作？",
+        "purpose": "这一轮他样本量只说了「几十万量级」，需要确认他是真的算过还是只知道方法"
+      },
+      {
+        "question": "如果昨天是周一、前天是周日，你还会直接拿这两天比吗？你会怎么处理周内周期性的问题？请举一个你实际处理过的指标异动案例，说明最后定位到什么原因、怎么确认的。",
+        "purpose": "q3 只给了通用框架，且没意识到对比口径的周期性偏差，用真实案例验证这套思路他是否真的执行过"
+      },
+      {
+        "question": "实际工作中你用 Python 做过哪类分析？是清洗、建模还是自动化取数/报表？Tableau 是自建仪表盘还是只看别人做好的？商家经营日报里有哪些指标、数据从哪来、更新频率怎么定、现在谁在用？",
+        "purpose": "补上这一轮完全没考察的加分项和报表搭建能力，同时核实简历技能栏的真实程度"
+      },
+      {
+        "question": "如果平行趋势不满足（比如实验组本来在涨、对照组在跌），你觉得还能怎么补救或者换什么方法？结合一个你能接触到的业务场景说说你会怎么设计。",
+        "purpose": "他在双重差分上只到概念层面，看是否具备把统计方法迁移到业务场景的能力，以及学习潜力"
+      },
+      {
+        "question": "现在这份工作做得怎么样？为什么考虑换机会？你希望下一份工作里数据分析师承担什么样的角色？",
+        "purpose": "这一轮完全没有考察动机、岗位理解和稳定性，需要在人工面试补上"
+      }
+    ]
+  },
+  "timing": {
+    "duration_ms": 720978,
+    "expected_ms": 1200000,
+    "candidate_speaking_ms": 605541,
+    "interviewer_speaking_ms": 74137,
+    "questions_planned": 6,
+    "questions_asked": 6,
+    "questions_answered": 6
+  },
+  "review_flags": [],
+  "limitations": [
+    "面试只有 12 分钟（预期 20 分钟），六道题平均每题不到 1.5 分钟，追问深度有限，很多点只能问到「讲过没有」，问不到「做得多深」。",
+    "转写来自语音识别，存在同音错字（如「窗口函树」「双重叉分」「派单归则」「卡方捡验」「买点」），已按最合理意思理解，未据此扣分。",
+    "动机与契合度完全没考察到；Python、Tableau、报表搭建也未涉及，这几项无法评价。",
+    "无法看到画面和听到原始语音，流畅度、紧张程度的判断只能依据文字和停顿数据。",
+    "所有关于简历真实性的判断都基于口头叙述与简历文字的一致性，没有第三方材料（离职证明、项目文档、上级评价）可交叉验证。"
+  ],
+  "meta": {
+    "model": "deepseek-flash",
+    "thinking": "high",
+    "prompt_version": 1,
+    "system_fingerprints": [
+      "bc19ba97cbe016479903222bb1578db6"
+    ],
+    "usage": {
+      "calls": 11,
+      "prompt_tokens": 54575,
+      "completion_tokens": 24775,
+      "reasoning_tokens": 12008,
+      "cache_hit_tokens": 40704,
+      "cache_miss_tokens": 13871
+    },
+    "elapsed_ms": 49555,
+    "evidence": {
+      "cited": 132,
+      "exact": 130,
+      "approximate": 2,
+      "whole_segment": 0,
+      "dropped": 0
+    },
+    "failed_stages": []
+  }
+}

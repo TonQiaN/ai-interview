@@ -858,6 +858,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "interview-report"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "futures-util",
+ "interview-llm",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "utoipa",
+]
+
+[[package]]
 name = "interview-talent"
 version = "0.1.0"
 dependencies = [
