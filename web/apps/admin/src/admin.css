@@ -106,6 +106,54 @@
     }
   }
 
+  /* 新建时「粘贴一段文字自动整理」的那一块 */
+  .adm-draft {
+    display: grid;
+    gap: var(--oil-space-3);
+    padding: var(--oil-space-4);
+    border: 1px dashed var(--oil-line-strong);
+    border-radius: var(--oil-radius-md);
+    background: var(--oil-sunken);
+  }
+  /* 小标题、不带圆点的列表、小字说明 */
+  .adm-label {
+    margin-bottom: var(--oil-space-1);
+    color: var(--oil-ink-3);
+    font-size: var(--oil-text-xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .adm-plain-list {
+    display: grid;
+    gap: var(--oil-space-1);
+    margin: 0;
+    padding-left: 1.1em;
+  }
+  .adm-row-actions {
+    margin-top: var(--oil-space-1);
+    font-size: var(--oil-text-sm);
+    --oil-gap: var(--oil-space-3);
+  }
+  button.adm-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+  }
+  button.adm-link:disabled {
+    color: var(--oil-ink-disabled);
+    cursor: default;
+    text-decoration: none;
+  }
+  .adm-gap-below {
+    margin-bottom: var(--oil-space-5);
+  }
+  .adm-note {
+    margin: 0;
+    font-size: var(--oil-text-sm);
+  }
+
   /* 列表里的一行：左边头像或图标，中间两行字，右边状态和操作 */
   .adm-list {
     list-style: none;

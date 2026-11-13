@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ai-interview/api-client": "workspace:*",
     "@ai-interview/ui": "workspace:*",
     "@tanstack/react-query": "^5.90.0",
     "clsx": "^2.1.1",
