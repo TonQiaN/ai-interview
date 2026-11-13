@@ -1,5 +1,7 @@
 //! `positions` 表的读写。
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use interview_platform::http::{Page, PageQuery};
 use serde::{Deserialize, Serialize};
@@ -155,6 +157,69 @@ pub async fn insert(db: &PgPool, new: NewPosition) -> sqlx::Result<Position> {
     .bind(new.source)
     .bind(new.external_ref)
     .bind(new.created_by)
+    .fetch_one(db)
+    .await
+}
+
+/// 按来源系统里的编号取一个岗位。归档的也能取到。
+pub async fn get_by_external_ref(
+    db: &PgPool,
+    source: PositionSource,
+    external_ref: &str,
+) -> sqlx::Result<Option<Position>> {
+    sqlx::query_as(&format!(
+        "SELECT {COLUMNS} FROM positions WHERE source = $1 AND external_ref = $2"
+    ))
+    .bind(source)
+    .bind(external_ref)
+    .fetch_optional(db)
+    .await
+}
+
+/// 这些来源编号里，哪些已经导入过（不含归档的）：来源编号 → 我们的岗位 id。
+pub async fn imported_ids(
+    db: &PgPool,
+    source: PositionSource,
+    external_refs: &[String],
+) -> sqlx::Result<HashMap<String, Uuid>> {
+    if external_refs.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows: Vec<(String, Uuid)> = sqlx::query_as(
+        "SELECT external_ref, id FROM positions
+         WHERE source = $1 AND external_ref = ANY($2) AND archived_at IS NULL",
+    )
+    .bind(source)
+    .bind(external_refs)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().collect())
+}
+
+/// 用来源系统里最新的内容覆盖一个导入的岗位，归档的顺便恢复。
+pub async fn overwrite_from_source(
+    db: &PgPool,
+    id: Uuid,
+    new: NewPosition,
+) -> sqlx::Result<Position> {
+    sqlx::query_as(&format!(
+        "UPDATE positions
+         SET title = $2, department = $3, location = $4, employment_type = $5, seniority = $6,
+             description = $7, requirements = $8, extra = $9, status = $10,
+             external_synced_at = now(), archived_at = NULL
+         WHERE id = $1
+         RETURNING {COLUMNS}"
+    ))
+    .bind(id)
+    .bind(new.title)
+    .bind(new.department)
+    .bind(new.location)
+    .bind(new.employment_type)
+    .bind(new.seniority)
+    .bind(new.description)
+    .bind(new.requirements)
+    .bind(Json(new.extra))
+    .bind(new.status)
     .fetch_one(db)
     .await
 }

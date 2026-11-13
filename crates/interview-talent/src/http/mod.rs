@@ -10,6 +10,7 @@ use crate::error::TalentError;
 
 pub mod candidates;
 pub mod positions;
+pub mod raas;
 pub mod resumes;
 mod upload;
 
@@ -21,6 +22,7 @@ pub fn router(deps: Deps) -> OpenApiRouter {
         .merge(positions::router())
         .merge(candidates::router())
         .merge(resumes::router())
+        .merge(raas::router())
         .with_state(deps)
 }
 

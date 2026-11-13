@@ -153,6 +153,59 @@ pub(crate) async fn store_resume(
     }
 }
 
+impl Upload {
+    /// 从别处拿到的文件（比如 RAAS 里的简历原件）。大小和种类的要求和上传的一样。
+    pub(crate) fn from_bytes(file_name: Option<&str>, bytes: Bytes) -> ApiResult<Self> {
+        if bytes.len() > MAX_RESUME_BYTES {
+            return Err(too_large());
+        }
+        let file_name = file_name.and_then(clean_file_name);
+        let kind = DocumentKind::detect(&bytes, file_name.as_deref()).map_err(talent_error)?;
+        let sha256 = hex(&Sha256::digest(&bytes));
+        Ok(Self {
+            file_name,
+            bytes,
+            kind,
+            sha256,
+        })
+    }
+}
+
+/// 存一份只有文字、没有原件的简历（设成主简历），并排解析任务。
+///
+/// 返回 `None` 表示这位候选人已经有一份文字一模一样的，没有新建。
+pub(crate) async fn store_text_resume(
+    conn: &mut PgConnection,
+    candidate_id: Uuid,
+    text: String,
+    adopt_name: bool,
+) -> sqlx::Result<Option<Resume>> {
+    let sha256 = hex(&Sha256::digest(text.as_bytes()));
+    if resumes::find_by_sha256(&mut *conn, candidate_id, &sha256)
+        .await?
+        .is_some()
+    {
+        return Ok(None);
+    }
+    let resume_id = interview_core::new_id();
+    let resume = resumes::insert_primary(
+        &mut *conn,
+        NewResume {
+            id: resume_id,
+            candidate_id,
+            blob_key: None,
+            file_name: None,
+            content_type: None,
+            size_bytes: None,
+            sha256: Some(sha256),
+            text_content: Some(text),
+        },
+    )
+    .await?;
+    TaskQueue::enqueue_in(&mut *conn, parse_task(resume_id, adopt_name)).await?;
+    Ok(Some(resume))
+}
+
 /// 上传简历自动建候选人时，先用文件名当名字，等解析出姓名再换掉。
 pub(crate) fn placeholder_name(file_name: Option<&str>) -> String {
     let stem = file_name

@@ -170,7 +170,7 @@ pub async fn primary_detail(db: &PgPool, candidate_id: Uuid) -> sqlx::Result<Opt
 
 /// 这位候选人是不是已经传过内容一模一样的文件。
 pub async fn find_by_sha256(
-    db: &PgPool,
+    db: impl sqlx::PgExecutor<'_>,
     candidate_id: Uuid,
     sha256: &str,
 ) -> sqlx::Result<Option<Resume>> {
