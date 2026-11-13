@@ -328,3 +328,91 @@ async fn opening_the_link_is_counted(pool: PgPool) {
     assert!(invite["first_opened_at"].is_string());
     assert!(invite["last_opened_at"].is_string());
 }
+
+/// 把测试期间的日志收进内存。
+#[derive(Clone, Default)]
+struct LogBuffer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl LogBuffer {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().expect("日志缓冲区的锁坏了")).into_owned()
+    }
+}
+
+impl std::io::Write for LogBuffer {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .expect("日志缓冲区的锁坏了")
+            .extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuffer {
+    type Writer = LogBuffer;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// 令牌就是候选人的全部身份，哪一级日志里都不能出现它，连数据库的查询日志也不行。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_token_never_reaches_the_logs(pool: PgPool) {
+    let logs = LogBuffer::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .with_writer(logs.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    // 进程里只有一个订阅者时，tracing 会按「第一次碰到这条日志的线程」决定它要不要打。
+    // 别的测试线程（没有订阅者）先碰到的话，这条日志就对谁都不打了，这边也就收不到。
+    // 再登记一个什么都不收的订阅者，它就改成每次都问当前线程。
+    let _second = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+
+    let app = app(pool).await;
+    let (interview_id, token) = invited(&app).await;
+    assert_eq!(session_status(&app, &token).await.0, 200);
+
+    // 长得像令牌、但库里没有的
+    let stranger = interview_platform::auth::generate_token();
+    assert_eq!(
+        session_status(&app, &stranger).await,
+        (401, "invite_invalid".to_owned())
+    );
+
+    // 撤销以后再用
+    let listed = TestRequest::get(invites_uri(interview_id))
+        .send(&app.hr)
+        .await;
+    assert_eq!(listed.status, 200, "{}", listed.text());
+    let invite_id = listed.json()["items"][0]["id"]
+        .as_str()
+        .expect("链接应该有 id")
+        .to_owned();
+    let revoked = TestRequest::delete(format!("{}/{invite_id}", invites_uri(interview_id)))
+        .send(&app.hr)
+        .await;
+    assert_eq!(revoked.status, 204);
+    assert_eq!(
+        session_status(&app, &token).await,
+        (410, "invite_revoked".to_owned())
+    );
+
+    tracing::info!("探针");
+    let text = logs.text();
+    // 确实收到了日志：自己打的这一行，和处理请求时数据库打的查询日志
+    assert!(text.contains("探针"), "没有收到日志");
+    assert!(
+        text.contains("interview_invites"),
+        "没有收到处理请求时的日志，这个测试就查不出问题"
+    );
+    assert!(!text.contains(&token), "日志里出现了面试链接的令牌");
+    assert!(!text.contains(&stranger), "日志里出现了请求带来的令牌");
+}
