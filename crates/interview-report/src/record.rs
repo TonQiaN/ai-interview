@@ -171,13 +171,69 @@ pub struct RawEvent {
     pub payload: serde_json::Value,
 }
 
-/// 成对上报的事件：`(回来, 离开)`。面试间在「回来」那一条上带 `duration_ms`。
-const PAIRED_KINDS: [(&str, &str); 4] = [
-    ("visibility_visible", "visibility_hidden"),
-    ("window_focus", "window_blur"),
-    ("network_online", "network_offline"),
-    ("device_recovered", "recording_gap"),
+/// 成对上报的事件。面试间把「离开了多久」写在「回来」那一条上。
+struct Pair {
+    /// 「回来」那一条的种类。
+    closing: &'static str,
+    /// 「离开」那一条的种类，合成之后留下的是它。
+    opening: &'static str,
+    /// 「回来」那一条里表示离开了多久的字段。
+    duration_key: &'static str,
+    /// 「回来」那一条里要带到合成结果上的其他字段。
+    carry: &'static [&'static str],
+}
+
+const PAIRS: [Pair; 5] = [
+    Pair::new("visibility_visible", "visibility_hidden"),
+    Pair::new("window_focus", "window_blur"),
+    Pair::new("network_online", "network_offline"),
+    Pair::new("device_recovered", "recording_gap"),
+    Pair {
+        closing: "upload_recovered",
+        opening: KIND_UPLOAD_STALLED,
+        duration_key: "stalled_ms",
+        carry: &["failures"],
+    },
 ];
+
+impl Pair {
+    const fn new(closing: &'static str, opening: &'static str) -> Self {
+        Self {
+            closing,
+            opening,
+            duration_key: "duration_ms",
+            carry: &[],
+        }
+    }
+}
+
+/// 录像传不动了。同一次停顿里，重试变成彻底失败时面试间会再报一条。
+const KIND_UPLOAD_STALLED: &str = "upload_stalled";
+
+/// 整理到一半的事件：带的数据先留着，合成完了再转成文字。
+struct Draft {
+    id: String,
+    at_ms: Option<u64>,
+    kind: String,
+    duration_ms: Option<u64>,
+    payload: serde_json::Value,
+}
+
+impl Draft {
+    /// 还没等到「回来」的那一条「离开」。
+    fn is_open(&self, opening: &str) -> bool {
+        self.kind == opening && self.duration_ms.is_none()
+    }
+
+    fn set(&mut self, key: &str, value: serde_json::Value) {
+        if !self.payload.is_object() {
+            self.payload = serde_json::Value::Object(serde_json::Map::new());
+        }
+        if let Some(map) = self.payload.as_object_mut() {
+            map.insert(key.to_owned(), value);
+        }
+    }
+}
 
 impl ProctorEvent {
     /// 把面试间上报的原始事件整理成分析用的事件，`raw` 按发生的先后排好。
@@ -185,61 +241,95 @@ impl ProctorEvent {
     /// 面试间把「离开」和「回来」分两条报，离开了多久写在「回来」那一条上。这里把两条合成一条：
     /// 保留「离开」，补上持续时间，这样一条事件就说清了从什么时候起离开了多久，证据也能对到
     /// 录像上的那一段。只有「回来」没有「离开」时，按持续时间往回推出一条「离开」。
+    /// 录像上传的「传不动」和「又传动了」也是这样一对；同一次停顿里重试变成彻底失败的那一条
+    /// 并进前一条，说明里的 `cause` 改成 `failed`，`gave_up_after_ms` 是重试了多久才放弃的。
+    /// 没有等到「又传动了」的那一条没有持续时间，表示到面试记录结束都没恢复。
     /// 其余事件原样保留，带的数据转成一行文字放进 `detail`。
     #[must_use]
     pub fn from_raw(raw: Vec<RawEvent>) -> Vec<Self> {
-        let mut events: Vec<Self> = Vec::with_capacity(raw.len());
+        let mut drafts: Vec<Draft> = Vec::with_capacity(raw.len());
         for item in raw {
             let mut payload = item.payload;
-            let duration_ms = payload
-                .as_object_mut()
-                .and_then(|map| map.remove("duration_ms"))
-                .and_then(|value| value.as_u64());
-            let detail = detail_text(&payload);
-            let opening = PAIRED_KINDS
-                .iter()
-                .find(|(closing, _)| *closing == item.kind)
-                .map(|(_, opening)| *opening);
-            let Some(opening) = opening else {
-                events.push(Self {
+            let pair = PAIRS.iter().find(|pair| pair.closing == item.kind);
+            let mut duration_ms = take_u64(&mut payload, "duration_ms");
+            if let Some(pair) = pair {
+                duration_ms = take_u64(&mut payload, pair.duration_key).or(duration_ms);
+            }
+
+            let Some(pair) = pair else {
+                let gave_up = item.kind == KIND_UPLOAD_STALLED
+                    && payload.get("cause").and_then(|cause| cause.as_str()) == Some("failed");
+                let stalled = drafts
+                    .iter_mut()
+                    .rev()
+                    .find(|draft| draft.kind == KIND_UPLOAD_STALLED)
+                    .filter(|draft| gave_up && draft.is_open(KIND_UPLOAD_STALLED));
+                if let Some(stalled) = stalled {
+                    stalled.set("cause", "failed".into());
+                    if let (Some(start), Some(at)) = (stalled.at_ms, item.at_ms) {
+                        stalled.set("gave_up_after_ms", at.saturating_sub(start).into());
+                    }
+                    continue;
+                }
+                drafts.push(Draft {
                     id: item.id,
                     at_ms: item.at_ms,
                     kind: item.kind,
                     duration_ms,
-                    detail,
+                    payload,
                 });
                 continue;
             };
-            let open = events
+
+            let open = drafts
                 .iter_mut()
                 .rev()
-                .find(|event| event.kind == opening)
-                .filter(|event| event.duration_ms.is_none());
+                .find(|draft| draft.kind == pair.opening)
+                .filter(|draft| draft.is_open(pair.opening));
             match (open, duration_ms) {
                 (Some(open), _) => {
                     open.duration_ms = duration_ms.or_else(|| {
                         let (start, end) = (open.at_ms?, item.at_ms?);
                         end.checked_sub(start)
                     });
+                    for key in pair.carry {
+                        if let Some(value) = payload.get(*key) {
+                            open.set(key, value.clone());
+                        }
+                    }
                 }
-                (None, Some(duration)) => events.push(Self {
+                (None, Some(duration)) => drafts.push(Draft {
                     id: item.id,
                     at_ms: item.at_ms.map(|at| at.saturating_sub(duration)),
-                    kind: opening.to_owned(),
+                    kind: pair.opening.to_owned(),
                     duration_ms: Some(duration),
-                    detail,
+                    payload,
                 }),
-                (None, None) => events.push(Self {
+                (None, None) => drafts.push(Draft {
                     id: item.id,
                     at_ms: item.at_ms,
                     kind: item.kind,
                     duration_ms: None,
-                    detail,
+                    payload,
                 }),
             }
         }
-        events
+        drafts
+            .into_iter()
+            .map(|draft| Self {
+                id: draft.id,
+                at_ms: draft.at_ms,
+                kind: draft.kind,
+                duration_ms: draft.duration_ms,
+                detail: detail_text(&draft.payload),
+            })
+            .collect()
     }
+}
+
+/// 从事件带的数据里取走一个非负整数字段。
+fn take_u64(payload: &mut serde_json::Value, key: &str) -> Option<u64> {
+    payload.as_object_mut()?.remove(key)?.as_u64()
 }
 
 /// 事件带的数据转成一行文字。空对象和空值不算。
@@ -345,6 +435,97 @@ mod tests {
         assert_eq!(events[0].duration_ms, Some(2_000));
         assert_eq!(events[1].at_ms, Some(9_000));
         assert_eq!(events[1].duration_ms, Some(11_000));
+    }
+
+    #[test]
+    fn upload_stall_and_recovery_become_one_event() {
+        let events = ProctorEvent::from_raw(vec![
+            raw(
+                "e1",
+                "upload_stalled",
+                Some(100_000),
+                json!({"cause": "retrying", "pending_chunks": 3}),
+            ),
+            raw(
+                "e2",
+                "upload_recovered",
+                Some(114_000),
+                json!({"stalled_ms": 14_000, "failures": 4, "pending_chunks": 5}),
+            ),
+        ]);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id, "e1");
+        assert_eq!(events[0].kind, "upload_stalled");
+        assert_eq!(events[0].at_ms, Some(100_000));
+        assert_eq!(events[0].duration_ms, Some(14_000));
+        let detail: serde_json::Value =
+            serde_json::from_str(events[0].detail.as_deref().unwrap_or_default()).expect("是 JSON");
+        assert_eq!(
+            detail,
+            json!({"cause": "retrying", "pending_chunks": 3, "failures": 4})
+        );
+    }
+
+    #[test]
+    fn giving_up_is_folded_into_the_same_stall() {
+        let events = ProctorEvent::from_raw(vec![
+            raw(
+                "e1",
+                "upload_stalled",
+                Some(100_000),
+                json!({"cause": "retrying", "pending_chunks": 3}),
+            ),
+            raw(
+                "e2",
+                "upload_stalled",
+                Some(125_000),
+                json!({"cause": "failed", "pending_chunks": 9}),
+            ),
+        ]);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].duration_ms, None, "没恢复就没有持续时间");
+        let detail: serde_json::Value =
+            serde_json::from_str(events[0].detail.as_deref().unwrap_or_default()).expect("是 JSON");
+        assert_eq!(detail["cause"], "failed");
+        assert_eq!(detail["gave_up_after_ms"], 25_000);
+    }
+
+    #[test]
+    fn a_new_stall_after_recovery_is_a_new_event() {
+        let events = ProctorEvent::from_raw(vec![
+            raw(
+                "e1",
+                "upload_stalled",
+                Some(10_000),
+                json!({"cause": "offline"}),
+            ),
+            raw(
+                "e2",
+                "upload_recovered",
+                Some(16_000),
+                json!({"stalled_ms": 6_000}),
+            ),
+            raw(
+                "e3",
+                "upload_stalled",
+                Some(90_000),
+                json!({"cause": "failed"}),
+            ),
+            raw(
+                "e4",
+                "upload_finished",
+                Some(200_000),
+                json!({"wait_ms": 30_000}),
+            ),
+        ]);
+        let kinds: Vec<&str> = events.iter().map(|event| event.kind.as_str()).collect();
+        assert_eq!(
+            kinds,
+            ["upload_stalled", "upload_stalled", "upload_finished"]
+        );
+        assert_eq!(events[0].duration_ms, Some(6_000));
+        assert_eq!(events[1].id, "e3");
+        assert_eq!(events[1].duration_ms, None);
     }
 
     #[test]
