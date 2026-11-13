@@ -76,7 +76,11 @@ export function InterviewPage(props: InterviewPageProps) {
   const { phase, utterance, progress, turn } = runner;
   const listening = phase === "listening";
   const isQuestion = progress !== null && progress.index > 0;
-  const meta = isQuestion ? `第 ${progress.index} 题 / 共 ${progress.total} 题` : utterance ? KIND_LABEL[utterance.kind] : "";
+  const meta = isQuestion
+    ? `第 ${progress.index} 题 / 共 ${progress.total} 题`
+    : utterance
+      ? KIND_LABEL[utterance.kind]
+      : "";
   const countdownTotal = Math.min(3, silenceSec);
 
   const backlog = upload !== null && upload.pendingChunks >= BACKLOG_WARNING_CHUNKS;
@@ -86,7 +90,8 @@ export function InterviewPage(props: InterviewPageProps) {
   if (phase === "preparing") hint = "正在准备下一题";
   else if (phase === "submitting") hint = runner.submitFailures > 0 ? "正在重新连接" : "好的，稍等";
   else if (phase === "asking") hint = runner.expectsAnswer ? "请听题，听完直接回答" : "";
-  else if (phase === "reading") hint = runner.expectsAnswer ? "语音没有加载出来，请看文字，准备好后点「开始回答」" : "";
+  else if (phase === "reading")
+    hint = runner.expectsAnswer ? "语音没有加载出来，请看文字，准备好后点「开始回答」" : "";
   else if (listening) {
     if (interrupted) hint = "已暂停";
     else if (turn?.noSpeechPromptVisible) hint = "请开始回答。如果已经在说，请靠近麦克风";
@@ -165,7 +170,9 @@ export function InterviewPage(props: InterviewPageProps) {
       {utterance && <CaptionCard meta={meta}>{utterance.text}</CaptionCard>}
 
       <div className="app-live">
-        {cameraStream && <CameraPreview stream={cameraStream} weight="thin" className="app-live__self" />}
+        {cameraStream && (
+          <CameraPreview stream={cameraStream} weight="thin" className="app-live__self" />
+        )}
         <div className="app-live__meter">
           {listening && turn?.countdownVisible && turn.silenceRemainingMs !== null ? (
             <SilenceRing remaining={turn.silenceRemainingMs / 1000} total={countdownTotal} />

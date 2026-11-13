@@ -260,7 +260,8 @@ HR 侧：
 - 服务端把面试官的话和候选人的回答各记一行 `interview_turns`（没开口的回答不记），调 `interview-engine` 的状态机决定下一步。逐题模式下候选人的文字在面试后由整段转写补上；如果配置允许逐题追问，服务端会先转写这一段再决定。
 - 候选人答完之后，`advance` 马上返回一句过渡语，回答放到后台判断。页面报告过渡语播完时判断还没好，这次请求会等到判断完再返回；判断最多等 20 秒，等不到就按顺序问下一题。极少数情况下返回 503（`answer_pending`），页面过一会儿原样重试。
 - `advance` 是幂等的：同一个 `seq` 重复提交返回同样的下一步（断网重试用）；`seq` 不是当前这一句也不是上一句时返回 409（`seq_conflict`）。面试已经结束时返回 `finish`。
-- 断点续面：`GET /room/session` 的 `resume` 是当前该播的那一句；页面重新检查设备后调 `start`，从这一句继续。录像从新的一段开始录。
+- 断点续面：`GET /room/session` 的 `resume` 是当前该播的那一句；页面重新检查设备后调 `start`，从这一句继续。录像从新的一段开始录。续面时这一步里的 `progress.elapsed_ms` 是服务端现在的时间（面试开始到此刻过了多久），页面拿它当时间轴的起点，新的一段录像才不会和刷新前的那段叠在一起。
+- 面试结束之后 `GET /room/session` 的 `stage` 是 `finished`，`end_reason` 是结束的原因（取值和 `finish` 的 `reason` 一样），页面据此决定结束页说「面试完成」还是「面试已结束」。还没结束时 `end_reason` 是 null。
 - 面试结束（不管哪种原因）时，服务端在同一个事务里排一个 `interview.finalize` 任务，转写和出报告从那里开始。
 - 页面超过 15 分钟（`AI_INTERVIEW_ROOM_ABANDON_MINUTES`）没有任何动静（不上报、不传录像），后台任务 `room.watchdog` 把面试按 `connection_lost` 结束，并记一条服务端事件 `interview_abandoned`。结束语已经发给页面的不算中途离开，记成正常结束。
 - 配置成实时对话（`conversational`）的面试，在实时通道接上之前按逐题进行，`session.mode` 是 `scripted`。

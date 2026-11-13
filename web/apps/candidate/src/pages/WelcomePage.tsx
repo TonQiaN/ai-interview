@@ -35,18 +35,23 @@ export function WelcomePage({ room, capability, volatileStorage, onNext }: Welco
           {room.candidate_name ? `${room.candidate_name}，你好` : "你好"}
         </h1>
         <p style={{ marginTop: 8 }}>
-          欢迎参加「{room.position_title}」的 AI 面试。这是第一轮面试，由 AI 面试官提问，你口头回答，{duration}。
+          欢迎参加「{room.position_title}」的 AI 面试。这是第一轮面试，由 AI
+          面试官提问，你口头回答，{duration}。
         </p>
       </div>
 
-      {resuming && <Banner tone="info">你有一场还没完成的面试。检查设备之后，会从上次中断的地方继续。</Banner>}
+      {resuming && (
+        <Banner tone="info">你有一场还没完成的面试。检查设备之后，会从上次中断的地方继续。</Banner>
+      )}
       {app && (
         <Banner tone="warning" title={`你正在${app}里打开`} actions={<CopyLink />}>
           内置浏览器录音录像不稳定。建议复制链接，到 Safari、Chrome 或 Edge 里打开。
         </Banner>
       )}
       {volatileStorage && (
-        <Banner tone="warning">当前是无痕或隐私模式，面试中请不要刷新页面，否则还没上传的录像会丢失。</Banner>
+        <Banner tone="warning">
+          当前是无痕或隐私模式，面试中请不要刷新页面，否则还没上传的录像会丢失。
+        </Banner>
       )}
 
       <ul className="app-notes">

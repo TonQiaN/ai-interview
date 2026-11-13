@@ -48,8 +48,18 @@ describe("过程事件收集", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(sent).toHaveLength(1);
     expect(sent[0]?.events).toEqual([
-      { kind: "device_check", at_ms: null, occurred_at: "2026-11-13T02:00:00.000Z", payload: { camera: "ok" } },
-      { kind: "visibility_hidden", at_ms: 12_345, occurred_at: "2026-11-13T02:00:00.000Z", payload: {} },
+      {
+        kind: "device_check",
+        at_ms: null,
+        occurred_at: "2026-11-13T02:00:00.000Z",
+        payload: { camera: "ok" },
+      },
+      {
+        kind: "visibility_hidden",
+        at_ms: 12_345,
+        occurred_at: "2026-11-13T02:00:00.000Z",
+        payload: {},
+      },
     ]);
     expect(collector.pending).toBe(0);
 
@@ -92,7 +102,14 @@ describe("过程事件收集", () => {
 
     control.fail = false;
     await collector.flush();
-    expect(sent[0]?.events.map((event) => event.kind)).toEqual(["e3", "e4", "e5", "e6", "e7", "events_dropped"]);
+    expect(sent[0]?.events.map((event) => event.kind)).toEqual([
+      "e3",
+      "e4",
+      "e5",
+      "e6",
+      "e7",
+      "events_dropped",
+    ]);
     expect(sent[0]?.events.at(-1)?.payload).toEqual({ count: 3 });
   });
 
@@ -120,7 +137,8 @@ describe("页面事件监听", () => {
   class FakeMediaDevices extends EventTarget {
     ondevicechange = null;
     devices: MediaDeviceKind[] = ["videoinput", "audioinput", "audiooutput"];
-    enumerateDevices = async () => this.devices.map((kind) => ({ kind, label: "不该被上报的设备名" }) as MediaDeviceInfo);
+    enumerateDevices = async () =>
+      this.devices.map((kind) => ({ kind, label: "不该被上报的设备名" }) as MediaDeviceInfo);
   }
 
   function bind() {
@@ -154,7 +172,10 @@ describe("页面事件监听", () => {
     await vi.advanceTimersByTimeAsync(0);
     // 切走时立刻发一次，免得页面被回收后丢掉
     expect(sent[0]).toMatchObject({ keepalive: true });
-    expect(sent[0]?.events.map((event) => event.kind)).toEqual(["window_blur", "visibility_hidden"]);
+    expect(sent[0]?.events.map((event) => event.kind)).toEqual([
+      "window_blur",
+      "visibility_hidden",
+    ]);
 
     doc.visibilityState = "visible";
     doc.dispatchEvent(new Event("visibilitychange"));
@@ -180,7 +201,9 @@ describe("页面事件监听", () => {
       "network_online",
     ]);
     // 粘贴和复制只记发生了和字符数，不带内容
-    const clipboard = sent[1]?.events.filter((event) => event.kind === "paste" || event.kind === "copy");
+    const clipboard = sent[1]?.events.filter(
+      (event) => event.kind === "paste" || event.kind === "copy",
+    );
     expect(clipboard?.map((event) => event.payload)).toEqual([{ chars: 10 }, { chars: 4 }]);
     expect(JSON.stringify(sent)).not.toContain("粘贴进来");
     expect(collector.pending).toBe(0);
@@ -206,9 +229,15 @@ describe("页面事件监听", () => {
     await collector.flush();
 
     const events = sent.flatMap((batch) => batch.events);
-    expect(events.filter((event) => event.kind === "window_focus").map((event) => event.payload)).toEqual([{}, { duration_ms: 1200 }]);
-    expect(events.find((event) => event.kind === "network_online")?.payload).toEqual({ duration_ms: 700 });
-    expect(events.find((event) => event.kind === "visibility_visible")?.payload).toEqual({ duration_ms: 18_000 });
+    expect(
+      events.filter((event) => event.kind === "window_focus").map((event) => event.payload),
+    ).toEqual([{}, { duration_ms: 1200 }]);
+    expect(events.find((event) => event.kind === "network_online")?.payload).toEqual({
+      duration_ms: 700,
+    });
+    expect(events.find((event) => event.kind === "visibility_visible")?.payload).toEqual({
+      duration_ms: 18_000,
+    });
   });
 
   it("换设备时报是哪一类变了，只数个数，不带设备名", async () => {
@@ -224,7 +253,9 @@ describe("页面事件监听", () => {
     await vi.advanceTimersByTimeAsync(0);
     await collector.flush();
 
-    const changed = sent.flatMap((batch) => batch.events).filter((event) => event.kind === "device_changed");
+    const changed = sent
+      .flatMap((batch) => batch.events)
+      .filter((event) => event.kind === "device_changed");
     expect(changed.map((event) => event.payload)).toEqual([
       {
         kinds: ["microphone", "speaker"],

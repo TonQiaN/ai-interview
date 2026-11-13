@@ -4,17 +4,32 @@ import { classifyHttpError, HttpRoomApi, RoomApiError } from "./room-api";
 
 const token = "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG0";
 
+/** 测试里没有页面，相对地址发不出去，给一个假的站点。 */
+const origin = "https://room.test";
+
 interface Call {
-  url: string;
-  init: RequestInit;
+  method: string;
+  /** 去掉站点之后的路径。 */
+  path: string;
+  headers: Headers;
+  body: string;
+  request: Request;
 }
 
 function setup(respond: (call: Call) => Response | Promise<Response>) {
   const calls: Call[] = [];
   const api = new HttpRoomApi({
     token,
-    fetch: async (input, init = {}) => {
-      const call = { url: String(input), init };
+    baseUrl: origin,
+    fetch: async (request) => {
+      const url = new URL(request.url);
+      const call = {
+        method: request.method,
+        path: `${url.pathname}${url.search}`,
+        headers: request.headers,
+        body: await request.clone().text(),
+        request,
+      };
       calls.push(call);
       return respond(call);
     },
@@ -32,10 +47,10 @@ describe("候选人侧接口客户端", () => {
     const { api, calls } = setup(() => json({ stage: "not_started" }));
     await api.getSession();
     const call = calls[0] as Call;
-    expect(call.url).toBe("/api/v1/room/session");
-    expect(call.url).not.toContain(token);
-    expect(call.init.headers).toMatchObject({ Authorization: `Bearer ${token}` });
-    expect(call.init.credentials).toBe("omit");
+    expect(call.path).toBe("/api/v1/room/session");
+    expect(call.request.url).not.toContain(token);
+    expect(call.headers.get("Authorization")).toBe(`Bearer ${token}`);
+    expect(call.request.credentials).toBe("omit");
   });
 
   it("上报回答用 JSON", async () => {
@@ -52,87 +67,126 @@ describe("候选人侧接口客户端", () => {
     });
     expect(next).toEqual({ action: "finish", reason: "completed" });
     const call = calls[0] as Call;
-    expect(call.url).toBe("/api/v1/room/advance");
-    expect(call.init.method).toBe("POST");
-    expect(JSON.parse(call.init.body as string)).toMatchObject({ utterance_key: "q1", end_reason: "silence" });
+    expect(call.path).toBe("/api/v1/room/advance");
+    expect(call.method).toBe("POST");
+    expect(call.headers.get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(call.body)).toMatchObject({ utterance_key: "q1", end_reason: "silence" });
   });
 
   it("取语音时也带令牌", async () => {
     const { api, calls } = setup(() => new Response(new Uint8Array([1, 2, 3])));
     const bytes = await api.fetchAudio("/api/v1/room/utterances/q1/audio");
     expect(bytes.byteLength).toBe(3);
-    expect(calls[0]?.url).toBe("/api/v1/room/utterances/q1/audio");
-    expect(calls[0]?.init.headers).toMatchObject({ Authorization: `Bearer ${token}` });
+    expect(calls[0]?.path).toBe("/api/v1/room/utterances/q1/audio");
+    expect(calls[0]?.headers.get("Authorization")).toBe(`Bearer ${token}`);
+    expect(calls[0]?.request.credentials).toBe("omit");
   });
 
   it("没有事件时不发请求；页面要关时带 keepalive", async () => {
     const { api, calls } = setup(() => new Response(null, { status: 204 }));
     await api.postEvents([]);
     expect(calls).toHaveLength(0);
-    await api.postEvents([{ kind: "paste", at_ms: 1, occurred_at: "2026-11-13T02:00:00Z", payload: {} }], { keepalive: true });
-    expect(calls[0]?.init.keepalive).toBe(true);
+    await api.postEvents(
+      [{ kind: "paste", at_ms: 1, occurred_at: "2026-11-13T02:00:00Z", payload: {} }],
+      { keepalive: true },
+    );
+    expect(calls[0]?.request.keepalive).toBe(true);
+    expect(JSON.parse(calls[0]?.body ?? "")).toEqual({
+      events: [{ kind: "paste", at_ms: 1, occurred_at: "2026-11-13T02:00:00Z", payload: {} }],
+    });
   });
 
   it("上传分片：地址里是轨道、段和序号，校验和放在请求头", async () => {
     const { api, calls } = setup((call) =>
-      call.url.endsWith("/chunks") ? json({ received: [0, 1] }) : new Response(null, { status: 204 }),
+      call.path.endsWith("/chunks")
+        ? json({ received: [0, 1] })
+        : new Response(null, { status: 204 }),
     );
     const segment = { track: "camera" as const, segmentId: "0b1c2d3e-0000-4000-8000-000000000001" };
     await api.openSegment({ ...segment, mimeType: "video/webm;codecs=vp8,opus", startMs: 1_200 });
     expect(await api.receivedChunks(segment)).toEqual([0, 1]);
-    await api.putChunk(segment, 2, new Uint8Array([9, 9]).buffer, "abc123");
+    await api.putChunk(segment, 2, new Uint8Array([9, 8]).buffer, "abc123");
     await api.completeSegment(segment, 3);
 
     const base = `/api/v1/room/recordings/camera/${segment.segmentId}`;
-    expect(calls.map((call) => `${call.init.method} ${call.url}`)).toEqual([
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
       `PUT ${base}`,
       `GET ${base}/chunks`,
       `PUT ${base}/chunks/2`,
       `POST ${base}/complete`,
     ]);
-    expect(JSON.parse(calls[0]?.init.body as string)).toEqual({ content_type: "video/webm;codecs=vp8,opus", start_ms: 1_200 });
-    expect(calls[2]?.init.headers).toMatchObject({ "X-Chunk-Sha256": "abc123", "Content-Type": "application/octet-stream" });
-    expect(JSON.parse(calls[3]?.init.body as string)).toEqual({ total_chunks: 3 });
+    expect(JSON.parse(calls[0]?.body ?? "")).toEqual({
+      content_type: "video/webm;codecs=vp8,opus",
+      start_ms: 1_200,
+    });
+    expect(calls[2]?.headers.get("X-Chunk-Sha256")).toBe("abc123");
+    expect(calls[2]?.headers.get("Content-Type")).toBe("application/octet-stream");
+    // 分片的字节原样发出去，不会被当成 JSON 序列化
+    expect([...new Uint8Array(await (calls[2] as Call).request.arrayBuffer())]).toEqual([9, 8]);
+    expect(JSON.parse(calls[3]?.body ?? "")).toEqual({ total_chunks: 3 });
   });
 
   it("把后端的错误归类，带上错误码和提示", async () => {
     const { api } = setup(() => json(errorBody("invite_expired", "链接已过期"), 410));
     const error = await api.getSession().catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(RoomApiError);
-    expect(error).toMatchObject({ kind: "expired", status: 410, code: "invite_expired", message: "链接已过期", retryable: false });
+    expect(error).toMatchObject({
+      kind: "expired",
+      status: 410,
+      code: "invite_expired",
+      message: "链接已过期",
+      retryable: false,
+    });
   });
 
   it("断网和超时算可以重试的网络错误", async () => {
     const offline = setup(() => {
       throw new TypeError("Failed to fetch");
     });
-    expect(await offline.api.getSession().catch((caught: unknown) => caught)).toMatchObject({ kind: "network", retryable: true });
+    expect(await offline.api.getSession().catch((caught: unknown) => caught)).toMatchObject({
+      kind: "network",
+      retryable: true,
+    });
 
     const slow = new HttpRoomApi({
       token,
+      baseUrl: origin,
       timeoutMs: 10,
-      fetch: (_input, init) =>
+      fetch: (request) =>
         new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+          request.signal.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
         }),
     });
-    expect(await slow.getSession().catch((caught: unknown) => caught)).toMatchObject({ kind: "network", message: "请求超时" });
+    expect(await slow.getSession().catch((caught: unknown) => caught)).toMatchObject({
+      kind: "network",
+      message: "请求超时",
+    });
   });
 
   it("反向代理返回的不是 JSON 时也能给出错误", async () => {
     const { api } = setup(() => new Response("<html>502 Bad Gateway</html>", { status: 502 }));
-    expect(await api.getSession().catch((caught: unknown) => caught)).toMatchObject({ kind: "network", status: 502, code: null });
+    expect(await api.getSession().catch((caught: unknown) => caught)).toMatchObject({
+      kind: "network",
+      status: 502,
+      code: null,
+    });
   });
 
   it("上传相关的错误转成 Uploader 认识的类型", async () => {
     const segment = { track: "camera" as const, segmentId: "s1" };
     const busy = setup(() => json(errorBody("internal", "出错了"), 503));
-    const retryable = await busy.api.putChunk(segment, 0, new ArrayBuffer(1), "x").catch((caught: unknown) => caught);
+    const retryable = await busy.api
+      .putChunk(segment, 0, new ArrayBuffer(1), "x")
+      .catch((caught: unknown) => caught);
     expect(retryable).toBeInstanceOf(UploadError);
     expect(retryable).toMatchObject({ retryable: true, status: 503 });
 
     const gone = setup(() => json(errorBody("invite_revoked", "链接已撤销"), 410));
-    const fatal = await gone.api.putChunk(segment, 0, new ArrayBuffer(1), "x").catch((caught: unknown) => caught);
+    const fatal = await gone.api
+      .putChunk(segment, 0, new ArrayBuffer(1), "x")
+      .catch((caught: unknown) => caught);
     expect(fatal).toMatchObject({ retryable: false, status: 410 });
   });
 

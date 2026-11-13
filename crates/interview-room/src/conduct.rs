@@ -312,10 +312,39 @@ pub(crate) async fn resume_step(deps: &Deps, access: &RoomAccess) -> ApiResult<O
     let row = load(&mut conn, access.interview_id, false).await?;
     drop(conn);
     match stored_state(access.interview_id, &row)? {
-        Some(state) => Ok(Some(
-            decorate(deps, access.interview_id, &state.last).await?,
-        )),
+        Some(state) => {
+            let step = decorate(deps, access.interview_id, &state.last).await?;
+            Ok(Some(at_elapsed(step, row.elapsed_ms(Utc::now()))))
+        }
         None => Ok(None),
+    }
+}
+
+/// 续面时把这一步里的「已经进行了多久」换成服务端现在的时间。
+///
+/// 存着的那一步记的是它发出去那一刻的时间。页面刷新后拿它当面试时间轴的起点，
+/// 要是不换，刷新前后两段录像在时间轴上会叠在一起。
+fn at_elapsed(step: NextStep, elapsed_ms: i64) -> NextStep {
+    match step {
+        NextStep::Say {
+            seq,
+            utterance,
+            expects_answer,
+            answer,
+            progress,
+            preload_audio_urls,
+        } => NextStep::Say {
+            seq,
+            utterance,
+            expects_answer,
+            answer,
+            progress: Progress {
+                elapsed_ms,
+                ..progress
+            },
+            preload_audio_urls,
+        },
+        finish @ NextStep::Finish { .. } => finish,
     }
 }
 
@@ -349,8 +378,12 @@ async fn start_interview(
     if row.is_finished() {
         return Ok(Json(row.finish_step()));
     }
+    let mut resumed_at = None;
     let step = match (row.status, stored_state(interview_id, &row)?) {
-        (InterviewStatus::InProgress, Some(state)) => state.last,
+        (InterviewStatus::InProgress, Some(state)) => {
+            resumed_at = Some(row.elapsed_ms(Utc::now()));
+            state.last
+        }
         (InterviewStatus::Invited | InterviewStatus::InProgress, _) => {
             let (plan, config) = script(interview_id, &row)?;
             let (state, step) = room::open(&plan, &config).map_err(engine_error)?;
@@ -382,7 +415,11 @@ async fn start_interview(
         }
     };
     tx.commit().await?;
-    Ok(Json(decorate(&deps, interview_id, &step).await?))
+    let step = decorate(&deps, interview_id, &step).await?;
+    Ok(Json(match resumed_at {
+        Some(elapsed_ms) => at_elapsed(step, elapsed_ms),
+        None => step,
+    }))
 }
 
 // ───────────────────────── 推进 ─────────────────────────
