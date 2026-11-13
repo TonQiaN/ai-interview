@@ -161,9 +161,11 @@ async fn generate_plan(
     };
     let db = &deps.ctx.db;
 
-    let (title, department, description, requirements): (String, Option<String>, String, String) =
+    // 各列的读法见 docs/architecture/data-model.md 的「出题和写报告时怎么读岗位和简历」
+    let (title, company, description, requirements): (String, Option<String>, String, String) =
         sqlx::query_as(
-            "SELECT title, department, description, requirements FROM positions WHERE id = $1",
+            "SELECT title, extra->>'client_name', description, requirements \
+             FROM positions WHERE id = $1",
         )
         .bind(row.position_id)
         .fetch_one(db)
@@ -172,23 +174,23 @@ async fn generate_plan(
         .bind(row.candidate_id)
         .fetch_one(db)
         .await?;
-    let resume: Option<(Option<String>, String)> = match row.resume_id {
-        Some(resume_id) => {
-            sqlx::query_as("SELECT text_content, parse_status FROM resumes WHERE id = $1")
-                .bind(resume_id)
-                .fetch_optional(db)
-                .await?
-        }
-        None => {
-            sqlx::query_as(
-                "SELECT text_content, parse_status FROM resumes WHERE candidate_id = $1 \
-                 ORDER BY is_primary DESC, created_at DESC LIMIT 1",
-            )
+    // interview_text 是去掉了姓名和联系方式的简历；老数据没有这一列时退回全文
+    const RESUME: &str = "SELECT COALESCE(interview_text, text_content), parse_status FROM resumes";
+    let resume: Option<(Option<String>, String)> =
+        match row.resume_id {
+            Some(resume_id) => {
+                sqlx::query_as(&format!("{RESUME} WHERE id = $1"))
+                    .bind(resume_id)
+                    .fetch_optional(db)
+                    .await?
+            }
+            None => sqlx::query_as(&format!(
+                "{RESUME} WHERE candidate_id = $1 ORDER BY is_primary DESC, created_at DESC LIMIT 1"
+            ))
             .bind(row.candidate_id)
             .fetch_optional(db)
-            .await?
-        }
-    };
+            .await?,
+        };
     let resume_text = match resume {
         Some((_, status)) if status == "pending" || status == "running" => {
             return Err(Stop::Retry(anyhow::anyhow!(
@@ -210,12 +212,12 @@ async fn generate_plan(
     let input = PlanInput {
         job: JobContext {
             title,
-            company: department.unwrap_or_default(),
+            company: company.unwrap_or_default(),
             description: job_description,
         },
         candidate: CandidateContext {
             name,
-            // 电话和邮箱出题用不上，不发给大模型
+            // 电话和邮箱出题用不上，不发给大模型。interview_text 里本来就没有，这里再挡一道
             resume_text: scrub_contacts(&resume_text),
         },
         config: config.clone(),

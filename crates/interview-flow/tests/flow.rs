@@ -48,17 +48,19 @@ impl Harness {
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO resumes (candidate_id, text_content, parse_status, is_primary) \
-             VALUES ($1, $2, 'done', true)",
+            "INSERT INTO resumes (candidate_id, text_content, interview_text, parse_status, is_primary) \
+             VALUES ($1, $2, $3, 'done', true)",
         )
         .bind(candidate_id)
         .bind("李明 电话 13800001234 邮箱 liming@example.com\n三年后端开发经验，做过订单系统重构。")
+        .bind("三年后端开发经验，做过订单系统重构。备用电话 13800005678")
         .execute(&ctx.db)
         .await
         .unwrap();
         let position_id: Uuid = sqlx::query_scalar(
-            "INSERT INTO positions (title, department, description, requirements) \
-             VALUES ('后端开发工程师', '示例科技', '负责订单系统的开发和维护。', '熟悉 Rust 和 PostgreSQL。') \
+            "INSERT INTO positions (title, department, description, requirements, extra) \
+             VALUES ('后端开发工程师', '平台研发部', '负责订单系统的开发和维护。', '熟悉 Rust 和 PostgreSQL。', \
+                     '{\"client_name\": \"示例科技\"}') \
              RETURNING id",
         )
         .fetch_one(&ctx.db)
@@ -425,7 +427,12 @@ async fn contact_details_are_not_sent_to_the_model(pool: PgPool) {
     let sent: String = requests.iter().map(|request| request.text()).collect();
     assert!(sent.contains("订单系统重构"), "简历正文要发过去");
     assert!(sent.contains("熟悉 Rust 和 PostgreSQL"), "任职要求要发过去");
+    assert!(sent.contains("示例科技"), "公司名要发过去");
     assert!(!sent.contains("13800001234"), "手机号不发给模型");
+    assert!(
+        !sent.contains("13800005678"),
+        "漏在简历正文里的手机号也要挡住"
+    );
     assert!(!sent.contains("liming@example.com"), "邮箱不发给模型");
 }
 

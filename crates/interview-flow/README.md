@@ -31,7 +31,7 @@ draft ──prepare──▶ preparing ──成功──▶ ready ──（面�
 
 - 面试间读 `interviews.plan`（`interview_engine::InterviewPlan`）和 `interview_utterances`（`synth_status = 'done'` 的行有 `audio_blob_key`）。
 - 面试官的声音：面试上指定的音色，没指定用 `voices.is_default` 的那个，都没有就用 BreezeTTS2 的设计音色兜底。
-- 发给大模型的简历会先去掉电话和邮箱（`scrub::scrub_contacts`）。
+- 发给大模型的简历读 `resumes.interview_text`（岗位和候选人线写的、不带姓名和联系方式的版本），发之前再用 `scrub::scrub_contacts` 挡一道电话和邮箱。
 
 ## 测试
 
