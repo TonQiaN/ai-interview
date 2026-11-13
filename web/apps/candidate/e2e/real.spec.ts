@@ -50,6 +50,13 @@ test("真模型：实时对话，面试官现场接话", async ({ page }) => {
       () => verdicts.push("failed"),
     );
   });
+  // 面试官说话时候选人插话了几次（假麦克风是循环播放的，说话那一段碰上面试官在说就是插话）
+  const cuts: number[] = [];
+  page.on("request", (request) => {
+    if (!request.url().endsWith("/api/v1/room/advance")) return;
+    const body = request.postDataJSON() as { interrupted_played_ms?: number | null } | null;
+    if (typeof body?.interrupted_played_ms === "number") cuts.push(body.interrupted_played_ms);
+  });
   const interview = await enterInterview(page, { silenceSec: 3, minSec: 2, realtime: true });
   await expect(page.getByText("面试完成，谢谢你")).toBeVisible({ timeout: 8 * 60_000 });
 
@@ -82,6 +89,9 @@ test("真模型：实时对话，面试官现场接话", async ({ page }) => {
   console.log(
     `停顿时先问了 ${verdicts.length} 次：说完了 ${count("done")}，没说完 ${count("wait")}，` +
       `不知道 ${count("unknown")}，没问到 ${count("failed")}`,
+  );
+  console.log(
+    `候选人插话 ${cuts.length} 次，面试官的话断在第 ${cuts.join("、") || "无"} 毫秒（重试的上报也算在内）`,
   );
   // 面试官现场说的话：key 是「题号.p几」（追问）或「题号.r几」（回应）
   const improvised = spokenKeys(state).filter((key) => key !== null && /\.[pr]\d+$/.test(key));

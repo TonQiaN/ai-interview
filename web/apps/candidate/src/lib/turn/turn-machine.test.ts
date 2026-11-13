@@ -37,6 +37,30 @@ describe("逐题状态机", () => {
     expect(state.phase).toBe("asking");
   });
 
+  it("面试官还在说、候选人插话：直接进入听作答，开口时刻就是插话的时刻", () => {
+    let state = run([{ type: "barge_in", at: 2_450, speechAt: 2_000 }]);
+    expect(state).toMatchObject({
+      phase: "listening",
+      listenStartedAt: 2_000,
+      firstSpeechAt: 2_000,
+      speaking: true,
+      silenceSince: null,
+    });
+    state = run(
+      [
+        { type: "speech_end", at: 5_400, quietMs: 400 },
+        { type: "tick", at: 5_000 + config.silenceMs },
+      ],
+      state,
+    );
+    expect(state).toMatchObject({
+      phase: "ended",
+      reason: "silence",
+      firstSpeechAt: 2_000,
+      lastSpeechEndAt: 5_400,
+    });
+  });
+
   it("没到最短作答时间时，静音够久也不结束", () => {
     const short: TurnConfig = { ...config, silenceMs: 1_000, minAnswerMs: 4_000 };
     let state = listening();
