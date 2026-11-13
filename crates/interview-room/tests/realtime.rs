@@ -285,7 +285,7 @@ async fn turns(app: &TestApp, interview_id: Uuid) -> Vec<(String, Option<String>
     .unwrap()
 }
 
-const PROBE: &str = "probe weak\n明白。那个方案里你本人负责哪一块？";
+const PROBE: &str = "probe weak\n好的，我了解了。那个方案里你本人负责哪一块？";
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn probes_on_the_spot_then_moves_on_until_the_end(pool: PgPool) {
@@ -346,7 +346,7 @@ async fn probes_on_the_spot_then_moves_on_until_the_end(pool: PgPool) {
     let (ack, ask) = (&steps[2], &steps[3]);
     assert_eq!(
         (text(ack), text(ask)),
-        ("明白。", "那个方案里你本人负责哪一块？")
+        ("好的，我了解了。", "那个方案里你本人负责哪一块？")
     );
     assert_eq!(ask["utterance"]["kind"], "follow_up");
     assert_eq!(
@@ -361,7 +361,7 @@ async fn probes_on_the_spot_then_moves_on_until_the_end(pool: PgPool) {
     assert_eq!(ask["answer"]["silence_sec"], 2);
     assert_eq!(
         *voice.spoken.lock().unwrap(),
-        ["明白。", "那个方案里你本人负责哪一块？"],
+        ["好的，我了解了。", "那个方案里你本人负责哪一块？"],
         "只有现场生成的话要现场合成"
     );
     // 提前合成的句子还是用原来的语音
@@ -401,7 +401,7 @@ async fn probes_on_the_spot_then_moves_on_until_the_end(pool: PgPool) {
         .filter(|(speaker, key, _)| speaker == "interviewer" && key.as_deref() == Some("q1.p1"))
         .map(|(.., text)| text.as_str())
         .collect();
-    assert_eq!(probe, ["明白。", "那个方案里你本人负责哪一块？"]);
+    assert_eq!(probe, ["好的，我了解了。", "那个方案里你本人负责哪一块？"]);
 
     // 现场生成的追问登记成这场面试的一句话，整理记录和出报告时按 key 找得到
     let live: Vec<(String, String, String, String)> = sqlx::query_as(
@@ -417,7 +417,7 @@ async fn probes_on_the_spot_then_moves_on_until_the_end(pool: PgPool) {
         [(
             "q1.p1".to_owned(),
             "follow_up".to_owned(),
-            "明白。那个方案里你本人负责哪一块？".to_owned(),
+            "好的，我了解了。那个方案里你本人负责哪一块？".to_owned(),
             "skipped".to_owned()
         )]
     );
@@ -439,12 +439,12 @@ async fn live_audio_is_served_only_while_it_is_due(pool: PgPool) {
     let opening = start(&app, &token).await;
     let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
     let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
-    assert_eq!(text(&ack), "明白。");
+    assert_eq!(text(&ack), "好的，我了解了。");
 
     let url = ack["utterance"]["audio_url"].as_str().unwrap();
     let response = audio(&app, &token, url).await;
     assert_eq!(response.status, 200);
-    assert_eq!(response.text(), "现场合成：明白。");
+    assert_eq!(response.text(), "现场合成：好的，我了解了。");
     // 问句在接话播的时候准备，排好之后可以提前取
     let mut current = ack.clone();
     for _ in 0..100 {
@@ -501,7 +501,7 @@ async fn a_repeated_report_does_not_answer_twice(pool: PgPool) {
     // 刷新页面：从正在播的这一句接着面
     let resumed = start(&app, &token).await;
     assert_eq!(resumed["seq"], ack["seq"]);
-    assert_eq!(text(&resumed), "明白。");
+    assert_eq!(text(&resumed), "好的，我了解了。");
     let seen = session(&app, &token).await;
     assert_eq!(seen["mode"], "realtime");
     assert_eq!(seen["resume"]["seq"], ack["seq"]);
@@ -632,7 +632,7 @@ async fn an_unheard_answer_is_told_to_the_model_as_such(pool: PgPool) {
     });
     let Setup { app, model, .. } = setup_with(
         pool,
-        ScriptedModel::new().reply("reply adequate\n不好意思，刚才没听清，能再说一遍吗？"),
+        ScriptedModel::new().reply("reply adequate\n好的，是这样。刚才没听清，能再说一遍吗？"),
         transcriber,
         FakeVoice::default(),
     )
@@ -641,8 +641,10 @@ async fn an_unheard_answer_is_told_to_the_model_as_such(pool: PgPool) {
 
     let opening = start(&app, &token).await;
     let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
-    let reply = advance(&app, &token, &report(&q1, 200, "silence")).await;
-    assert_eq!(text(&reply), "不好意思，刚才没听清，能再说一遍吗？");
+    let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
+    assert_eq!(text(&ack), "好的，是这样。");
+    let reply = advance(&app, &token, &report(&ack, 300, "silence")).await;
+    assert_eq!(text(&reply), "刚才没听清，能再说一遍吗？");
     assert_eq!(reply["utterance"]["kind"], "other");
     assert_eq!(reply["expects_answer"], true);
     assert!(model.requests()[0].text().contains("没有听清"));
@@ -665,7 +667,7 @@ async fn a_sentence_that_cannot_be_synthesized_is_shown_as_text(pool: PgPool) {
     let opening = start(&app, &token).await;
     let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
     let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
-    assert_eq!(text(&ack), "明白。");
+    assert_eq!(text(&ack), "好的，我了解了。");
     assert_eq!(ack["utterance"]["audio_url"], Value::Null);
     let response = audio(&app, &token, "/api/v1/room/utterances/q1.p1/audio?part=1").await;
     assert_eq!(response.status, 404);
@@ -831,8 +833,11 @@ async fn a_pause_is_judged_ahead_and_the_reply_is_ready_when_the_answer_ends(poo
     // 这段话答完了（还是停在同一个地方）：直接用备好的，不再问模型
     // 备的时候合成的语音，页面照常取得到
     let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
-    assert_eq!((key(&ack), text(&ack)), ("q1.p1", "明白。"));
-    assert_eq!(spoken_audio(&app, &token, &ack).await, "现场合成：明白。");
+    assert_eq!((key(&ack), text(&ack)), ("q1.p1", "好的，我了解了。"));
+    assert_eq!(
+        spoken_audio(&app, &token, &ack).await,
+        "现场合成：好的，我了解了。"
+    );
     let ask = advance(&app, &token, &report(&ack, 300, "silence")).await;
     assert_eq!(text(&ask), "那个方案里你本人负责哪一块？");
     assert_eq!(ask["expects_answer"], true);
@@ -843,7 +848,7 @@ async fn a_pause_is_judged_ahead_and_the_reply_is_ready_when_the_answer_ends(poo
     assert_eq!(model.requests().len(), 1, "同一段话只问了模型一次");
     assert_eq!(
         *voice.spoken.lock().unwrap(),
-        ["明白。", "那个方案里你本人负责哪一块？"],
+        ["好的，我了解了。", "那个方案里你本人负责哪一块？"],
         "每句只合成了一遍"
     );
 
@@ -875,7 +880,7 @@ async fn a_pause_is_judged_ahead_and_the_reply_is_ready_when_the_answer_ends(poo
     }
     assert_eq!(
         probe_text.as_deref(),
-        Some("明白。那个方案里你本人负责哪一块？")
+        Some("好的，我了解了。那个方案里你本人负责哪一块？")
     );
 }
 
@@ -891,7 +896,7 @@ async fn a_pause_judged_unfinished_asks_the_page_to_wait(pool: PgPool) {
 
     // 候选人还是没接着说，这段话到底算答完了：这时再照常问模型怎么接
     let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
-    assert_eq!(text(&ack), "明白。");
+    assert_eq!(text(&ack), "好的，我了解了。");
     assert_eq!(model.requests().len(), 2);
 }
 
@@ -953,7 +958,7 @@ async fn an_answer_that_ends_while_the_pause_is_still_being_judged_uses_it(pool:
     };
     let (verdict, ack, ()) = tokio::join!(asking, answering, release);
     assert_eq!(verdict, "done");
-    assert_eq!(text(&ack), "明白。");
+    assert_eq!(text(&ack), "好的，我了解了。");
     assert_eq!(model.requests().len(), 1);
 }
 
@@ -972,7 +977,7 @@ async fn a_pause_the_model_cannot_judge_changes_nothing(pool: PgPool) {
         "模型没回话不能当成它觉得没说完"
     );
     let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
-    assert_eq!(text(&ack), "明白。");
+    assert_eq!(text(&ack), "好的，我了解了。");
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
@@ -1106,7 +1111,8 @@ async fn a_question_cut_short_is_told_to_the_model_with_what_was_heard(pool: PgP
 async fn cutting_in_before_the_question_drops_what_was_queued_behind(pool: PgPool) {
     let Setup { app, model, .. } = setup_with(
         pool,
-        ScriptedModel::new().reply("reply adequate\n能听到。那我们开始，请介绍一个你做过的项目。"),
+        ScriptedModel::new()
+            .reply("reply adequate\n好的，是这样。那我们开始，请介绍一个你做过的项目。"),
         FakeTranscriber::says("喂，能听到吗？"),
         FakeVoice::default(),
     )
@@ -1120,7 +1126,7 @@ async fn cutting_in_before_the_question_drops_what_was_queued_behind(pool: PgPoo
     assert_eq!(opening["barge_in"]["answer"]["silence_sec"], 2);
 
     let reply = advance(&app, &token, &cut_in(&opening, 100, 800)).await;
-    assert_eq!(text(&reply), "能听到。");
+    assert_eq!(text(&reply), "好的，是这样。");
     let ask = advance(&app, &token, &report(&reply, 200, "silence")).await;
     assert_eq!(text(&ask), "那我们开始，请介绍一个你做过的项目。");
     assert_eq!(
@@ -1235,7 +1241,7 @@ async fn a_pause_after_cutting_in_is_judged_with_the_cut_and_reused(pool: PgPool
 
     // 这段话答完了：直接用备好的
     let ack = advance(&app, &token, &cut_in(&q1, 200, 1_500)).await;
-    assert_eq!(text(&ack), "明白。");
+    assert_eq!(text(&ack), "好的，我了解了。");
     assert_eq!(model.requests().len(), 1, "同一段话只问了模型一次");
 }
 
