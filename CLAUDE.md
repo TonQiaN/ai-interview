@@ -13,19 +13,39 @@
 ## 命令
 
 ```bash
-scripts/check.sh                       # 全量检查，和 CI 一样：卫生检查、fmt、clippy、测试
+scripts/dev.sh                         # 一键启动：开发数据库、迁移、后端（127.0.0.1:8080）
+scripts/dev-db.sh start                # 只起开发数据库。要数据库的测试靠它（DATABASE_URL=$(scripts/dev-db.sh url)）
+scripts/check.sh                       # 全量检查，和 CI 一样：卫生检查、fmt、clippy、测试。会自己起开发数据库
 cargo fmt --all                        # 格式化
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                 # 全部测试
 cargo test -p interview-tts            # 只测一个 crate
 cargo test -p interview-tts <测试名>   # 只跑一个测试
 cargo run -p interview-cli -- tts engines
+cargo run -p interview-server -- openapi   # 打印 OpenAPI 文档，不用数据库
 scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息不进 Git
+
+pnpm -C web install                    # 装前端依赖（Node 22 以上，pnpm 10）
+pnpm -C web check                      # 前端全量检查：lint、类型检查、测试、构建
+pnpm -C web gen:api                    # 由后端的 OpenAPI 文档生成 TypeScript 类型（typecheck 和 build 会自己先跑）
+pnpm -C web --filter <包名> test       # 只测一个包，比如 @ai-interview/api-client
+pnpm -C web format                     # 用 Biome 格式化并整理 import
 ```
 
 需要真模型、真 TTS 或真 RAAS 的测试标 `#[ignore]`，用 `cargo test -- --ignored` 手动跑。CI 不跑这些。
 
+要数据库的测试写 `#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]`，每个测试一个临时库。没设 `DATABASE_URL` 时这些测试会失败，不是代码的问题。
+
 真模型测试读 `DEEPSEEK_API_KEY`，会产生少量费用，云端容器里可以直接跑：`cargo test -p interview-llm --test live -- --ignored --nocapture`。
+
+面试引擎用真模型出题和模拟面试（同样读 `DEEPSEEK_API_KEY`，出一份题约 0.1 元，模拟一场不到 0.02 元）：
+
+```bash
+cargo run -p interview-engine --example plan -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
+cargo run -p interview-engine --example simulate -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
+```
+
+改了出题或判断回答的提示词，要用这两个命令实际跑一遍看结果，单元测试用的是假模型，测不出提示词的好坏。
 
 ## 目录
 
@@ -37,7 +57,7 @@ scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息
 - `tts/`：三个引擎的版本锁定（`engines.json`、`upstreams.json`、`locks/`、`artifacts/`）、接入说明、Python worker。
 - 共用的依赖版本写在根 `Cargo.toml` 的 `[workspace.dependencies]`，按字母序。
 
-只改自己归属的目录。要动别人的，开 issue 找那条线。
+只改自己归属的目录。要动别人的，开 issue 找那条线。例外：把自己的 crate 接进服务进程时，改 `crates/interview-server/src/compose.rs` 里自己那条线的位置（见 `docs/architecture/README.md` 的「平台给了什么」）。
 
 ## 已经定的事
 
@@ -61,6 +81,7 @@ scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息
 - JSON 字段用 `snake_case`；接口出错返回统一的错误结构（见 `docs/architecture/api.md`）。
 - 数据库查询用 sqlx 的运行时接口（`query_as` 等），不用要离线缓存的 `query!` 宏；要数据库的测试用 `#[sqlx::test]`。
 - 候选人的简历、录像、声音是个人信息：不进日志，不进测试数据，发给大模型的内容只带任务需要的部分。
+- 前端调后端只用 `@ai-interview/api-client`（`createApiClient()` 给 HR 后台，`createRoomClient(token)` 给面试间），类型由 OpenAPI 生成，不手写接口类型。生成结果在 `web/packages/api-client/src/generated/`，不进 Git。
 - 改了引擎清单或能力限制，`tts/engines.json`、`crates/interview-tts` 和 `tts/README.md` 要一起改，有测试检查前两个对不对得上。
 - 一个 PR 一件事。修 bug 先写一个会失败的测试，再修。
 - 改了约定、命令或目录结构，同一个 PR 里更新这个文件。

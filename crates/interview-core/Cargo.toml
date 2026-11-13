@@ -1,0 +1,25 @@
+[package]
+name = "interview-core"
+description = "AI 面试各模块共用的基础类型：状态枚举、任务名、文件键"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# 让状态枚举可以直接作为 sqlx 的列类型（读写 TEXT 列）
+sqlx = ["dep:sqlx"]
+
+[dependencies]
+serde = { workspace = true }
+sqlx = { workspace = true, optional = true }
+thiserror = { workspace = true }
+utoipa = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
