@@ -7,6 +7,9 @@
 //! cargo run -p interview-report --example lab -- analyze crates/interview-report/samples/backend-strong.json
 //! # 把全部样例分析一遍，对照场景里写的预期，报告存到 samples/reports/
 //! cargo run -p interview-report --example lab -- evaluate --thinking high
+//! # 给样例的转写加上更重的语音识别错误，再对照同一套预期，看分析受不受转写质量的影响
+//! cargo run -p interview-report --example lab -- noise --out /tmp/noisy
+//! cargo run -p interview-report --example lab -- evaluate --samples /tmp/noisy
 //! # 从一段录像里抽帧，让模型看画面里有几个人、有没有手机，打印整理出来的过程事件
 //! cargo run -p interview-report --example lab -- frames 录像.webm
 //! # 把这些事件加进一份面试记录再分析（--record 指定记录，报告打印到标准输出）
@@ -72,6 +75,21 @@ enum Command {
         /// 报告存到哪个目录。不填就不存
         #[arg(long)]
         out: Option<PathBuf>,
+    },
+    /// 给样例的转写加上更重的语音识别错误，另存一份，用来检验分析受不受转写质量的影响
+    Noise {
+        /// 只处理这几个场景（场景 id），不填就处理全部
+        only: Vec<String>,
+        /// 每 100 个字大约几处识别错误
+        #[arg(long, default_value_t = 8)]
+        percent: u32,
+        #[arg(long, default_value = "crates/interview-report/scenarios")]
+        scenarios: PathBuf,
+        #[arg(long, default_value = "crates/interview-report/samples")]
+        samples: PathBuf,
+        /// 加了错误的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
+        #[arg(long)]
+        out: PathBuf,
     },
     /// 从录像里抽帧，让模型看画面，打印整理出来的过程事件和每一帧的结果
     Frames {
@@ -192,6 +210,13 @@ async fn main() -> Result<()> {
             )
             .await
         }
+        Command::Noise {
+            only,
+            percent,
+            scenarios,
+            samples,
+            out,
+        } => noise_all(&model, &scenarios, &samples, &out, &only, percent).await,
         Command::Frames {
             video,
             start_ms,
@@ -511,6 +536,135 @@ fn build_record(scenario: &Scenario, script: Script) -> InterviewRecord {
 }
 
 // ---------- 对照预期 ----------
+
+const NOISE_SYSTEM: &str = r#"你在帮忙测试一套面试分析系统受不受语音识别错误的影响。下面是一场面试里候选人说的话，每段一个编号。请把每一段改写成一个质量一般的中文语音识别引擎会输出的样子。
+
+错误要像真的识别错误：
+- 专业名词、英文单词、缩写被听成同音或近音的中文字，或者别的词。例如 Redis 写成「瑞迪斯」，Kubernetes 写成「酷伯内提斯」，幂等写成「密等」，熔断写成「融段」，QPS 写成「扣屁S」，SQL 写成「西口」。
+- 普通词的同音、近音错字。例如权限写成「全线」，部署写成「不属」，优化写成「优画」。
+- 漏掉一两个字，或者把口吃、重复原样写出来。
+- 数字和单位的写法混乱，例如「两千」「2000」「二千」混着用。
+- 断句不准：标点的位置不对，或者该有标点的地方没有。
+
+要求：
+- 只改字面，不改意思和顺序，不增删句子，原来就有的错误不要纠正。
+- 每 100 个字大约 PERCENT 处错误，其中一半以上落在专业名词上，分散在各段里，不要集中在开头。
+- 很短的一段（十几个字以内）可以不改。
+- 不要标注哪里改了。
+
+只输出一个 JSON 对象：{"segments": [{"index": 段落编号, "text": "改写后的这一段"}]}，每个编号都要有。"#;
+
+#[derive(Deserialize)]
+struct NoisyTranscript {
+    segments: Vec<NoisySegment>,
+}
+
+#[derive(Deserialize)]
+struct NoisySegment {
+    index: usize,
+    text: String,
+}
+
+async fn noise_all(
+    model: &dyn ChatModel,
+    scenarios: &Path,
+    samples: &Path,
+    out: &Path,
+    only: &[String],
+    percent: u32,
+) -> Result<()> {
+    let scenarios = load_scenarios(scenarios, only)?;
+    std::fs::create_dir_all(out)?;
+    let results = join_all(scenarios.iter().map(|scenario| async move {
+        let record: InterviewRecord = read_json(&samples.join(format!("{}.json", scenario.id)))?;
+        add_noise(model, record, percent).await
+    }))
+    .await;
+    for (scenario, result) in scenarios.iter().zip(results) {
+        let (record, changed, total) =
+            result.with_context(|| format!("给场景 {} 加识别错误失败", scenario.id))?;
+        let path = out.join(format!("{}.json", scenario.id));
+        std::fs::write(&path, serde_json::to_string_pretty(&record)? + "\n")?;
+        println!(
+            "{}：候选人说了 {total} 个字，改动了 {changed} 个字 → {}",
+            scenario.id,
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+/// 让模型把候选人的话改写成带识别错误的样子。返回新的记录、改动的字数（编辑距离）和候选人的总字数。
+async fn add_noise(
+    model: &dyn ChatModel,
+    mut record: InterviewRecord,
+    percent: u32,
+) -> Result<(InterviewRecord, usize, usize)> {
+    let spoken: Vec<usize> = record
+        .transcript
+        .iter()
+        .enumerate()
+        .filter(|(_, segment)| segment.speaker == Speaker::Candidate)
+        .map(|(index, _)| index)
+        .collect();
+    let listing: String = spoken
+        .iter()
+        .enumerate()
+        .map(|(number, index)| format!("{}. {}\n", number + 1, record.transcript[*index].text))
+        .collect();
+    let request = ChatRequest::new(vec![
+        Message::system(NOISE_SYSTEM.replace("PERCENT", &percent.to_string())),
+        Message::user(listing),
+    ])
+    .with_thinking(Thinking::on(Effort::Low));
+    let expected = spoken.len();
+    let reply = chat_json_checked::<NoisyTranscript, _>(model, request, 3, |noisy| {
+        let mut seen = vec![false; expected];
+        for segment in &noisy.segments {
+            match seen.get_mut(segment.index.wrapping_sub(1)) {
+                Some(slot) => *slot = true,
+                None => return Err(format!("没有编号 {} 这一段", segment.index)),
+            }
+            if segment.text.trim().is_empty() {
+                return Err(format!("编号 {} 的 text 是空的", segment.index));
+            }
+        }
+        match seen.iter().position(|seen| !seen) {
+            Some(missing) => Err(format!("缺了编号 {} 这一段", missing + 1)),
+            None => Ok(()),
+        }
+    })
+    .await?;
+
+    let (mut changed, mut total) = (0, 0);
+    for noisy in reply.value.segments {
+        let segment = &mut record.transcript[spoken[noisy.index - 1]];
+        let before: Vec<char> = segment.text.chars().collect();
+        let after: Vec<char> = noisy.text.trim().chars().collect();
+        total += before.len();
+        changed += edit_distance(&before, &after);
+        if before != after {
+            segment.text = after.into_iter().collect();
+            segment.words.clear(); // 逐字时间戳对不上新的文字了
+        }
+    }
+    Ok((record, changed, total))
+}
+
+/// 把一段文字改成另一段最少要增、删、改几个字。
+fn edit_distance(before: &[char], after: &[char]) -> usize {
+    let mut row: Vec<usize> = (0..=after.len()).collect();
+    for (i, a) in before.iter().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, b) in after.iter().enumerate() {
+            let substitute = diagonal + usize::from(a != b);
+            diagonal = row[j + 1];
+            row[j + 1] = substitute.min(row[j] + 1).min(row[j + 1] + 1);
+        }
+    }
+    row[after.len()]
+}
 
 struct Outcome {
     id: String,

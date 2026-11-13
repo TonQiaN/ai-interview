@@ -22,6 +22,10 @@ pub struct InterviewReport {
     pub recommendation: Recommendation,
     /// 综合得分，0 到 100，由各题评分按权重算出（每题 1 到 5 分，乘以 20）。没有任何一题被评分时为空。
     pub overall_score: Option<u8>,
+    /// 综合得分大概的浮动范围。同一场面试重新分析一遍，分数会有几分的出入，
+    /// 页面上建议把总分和这个范围一起显示。没有总分时为空。
+    #[serde(default)]
+    pub score_range: Option<ScoreRange>,
     /// 各项能力的评价。
     pub competencies: Vec<CompetencyRating>,
     /// 对 HR 注入的每条重点考察要求的回应。
@@ -45,6 +49,13 @@ pub struct InterviewReport {
     /// 这份报告的局限，例如面试太短、转写质量差。
     pub limitations: Vec<String>,
     pub meta: ReportMeta,
+}
+
+/// 综合得分的浮动范围，两头都包含。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ScoreRange {
+    pub low: u8,
+    pub high: u8,
 }
 
 /// 是否建议进入下一轮。
@@ -215,6 +226,10 @@ pub struct QuestionJudgement {
     pub answer_summary: String,
     /// 1 到 5 分：5 优秀，4 良好，3 合格，2 较弱，1 不合格。
     pub rating: u8,
+    /// 这道题评了不止一次时，每一次给的分数，按评的先后排。只评一次时为空。
+    /// 几次的分数不一样，说明这道题的表现介于两档之间，`rating` 取的是中间那个。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ratings: Vec<u8>,
     pub rating_reason: String,
     #[serde(default, deserialize_with = "null_as_default")]
     #[schema(required = true)]

@@ -45,6 +45,8 @@ pub struct AnalyzeOptions {
     pub thinking: Option<Thinking>,
     /// 每次调用的输出上限（token，思考也算在里面）。不填用接口的默认值。
     pub max_output_tokens: Option<u32>,
+    /// 每道题评几次。
+    pub question_judgements: u32,
 }
 
 impl Default for AnalyzeOptions {
@@ -54,6 +56,7 @@ impl Default for AnalyzeOptions {
             attempts: 3,
             thinking: None,
             max_output_tokens: None,
+            question_judgements: 1,
         }
     }
 }
@@ -109,11 +112,7 @@ pub async fn analyze(
             }
             let stage = format!("question:{}", group.root.id);
             let task = prompts::question_task(group, &record.transcript);
-            Some(
-                runner
-                    .run::<QuestionJudgement>(&stage, context, &task)
-                    .await,
-            )
+            Some(judge_question(runner, &stage, context, &task, options.question_judgements).await)
         }
     }));
     let (question_judgements, requirement_match, resume_verification, integrity, communication) =
@@ -232,6 +231,7 @@ pub async fn analyze(
             }),
         recommendation,
         overall_score: overall_score(&groups, &questions),
+        score_range: None,
         competencies: synthesis.competencies,
         focus_checks: synthesis.focus_checks,
         questions,
@@ -254,6 +254,38 @@ pub async fn analyze(
             failed_stages,
         },
     })
+}
+
+/// 评一道题。评不止一次时取中间的分数，评语用给出这个分数的那一次的。
+async fn judge_question(
+    runner: &Runner<'_>,
+    stage: &str,
+    context: &str,
+    task: &str,
+    times: u32,
+) -> Result<QuestionJudgement, String> {
+    let results =
+        join_all((0..times.max(1)).map(|_| runner.run::<QuestionJudgement>(stage, context, task)))
+            .await;
+    let mut judgements = Vec::new();
+    let mut last_error = String::new();
+    for result in results {
+        match result {
+            Ok(judgement) => judgements.push(judgement),
+            Err(error) => last_error = error,
+        }
+    }
+    if judgements.len() <= 1 {
+        return judgements.pop().ok_or(last_error);
+    }
+    let ratings: Vec<u8> = judgements.iter().map(|j| j.rating).collect();
+    let mut sorted = ratings.clone();
+    sorted.sort_unstable();
+    let middle = sorted[(sorted.len() - 1) / 2];
+    let position = ratings.iter().position(|r| *r == middle).unwrap_or(0);
+    let mut chosen = judgements.swap_remove(position);
+    chosen.ratings = ratings;
+    Ok(chosen)
 }
 
 fn count(n: usize) -> u32 {
