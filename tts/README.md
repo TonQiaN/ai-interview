@@ -161,7 +161,7 @@ for chunk in runtime.iter_audio_chunks(inputs, request_id=request_id):
 - **参考编码器加载失败不会报错退出**：生成日志里出现 `Failed to load semantic_codec weights` 或 `Failed to load CAMPPlus` 时，输出可能是随机权重生成的，要当作失败丢弃。
 - **参考音色**：2 到 30 秒的单人清晰人声，建议 5 到 15 秒，统一转成 24 kHz 单声道 WAV。研究时关掉了参考降噪（`--no-denoise-ref`）。
 - **逐字稿要保留口头语和重复**：给 Breeze 的参考逐字稿必须和录音逐字对应，不能用自动转写的「整理版」。
-- **内存**：IndexTTS 的 `memory_limit` 设的是 28 GB，实测 worker 稳定占 22 GB、峰值 29 GB。BreezeTTS2 的 worker 占 7 到 8 GB。IndexTTS（一次留一个版本）和 BreezeTTS2 两个 worker 同时常驻约 30 GB。
+- **内存**：IndexTTS 的 worker 稳定占 9 GB 上下、峰值 12 GB，BreezeTTS2 的 worker 占 7 到 8 GB，两个同时常驻约 17 GB。IndexTTS 的适配代码有两处会让内存涨到 30 GB 以上（编译声码器的结果按形状缓存、不释放；MLX 的缓存上限设得太大），worker 里都绕开了，直接用适配代码写脚本时要注意，见 `worker/README.md` 的「加载和内存」。`memory_limit` 设的是 28 GB，它不是硬上限，越过以后不报错，只是变慢。
 - **输出采样率不一样**：IndexTTS 两个版本输出 22.05 kHz，BreezeTTS2 输出 24 kHz。播放和拼接的代码不能写死采样率。
 - **MLX 的计算流跟着线程走**：模型在一个线程里加载，换一个线程调用会报 `There is no Stream(...) in current thread`。常驻服务里所有碰模型的操作要放在同一个线程。
 - **Breeze 的四个提示模板**：`tts_plain`、`tts_instruction`（文字设计音色）、`ref_clone_tata`（克隆）、`ref_edit_tata`（克隆加导演指令）。带指令的两个要把引导强度设成 4，纯克隆必须是 1。

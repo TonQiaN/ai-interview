@@ -40,6 +40,7 @@ AI_INTERVIEW_TTS_WORKER_TOKEN=<两边一致的随机串>     # worker 不在本�
 | `--state` | 存参考录音的目录，默认是仓库下的 `.runtime/tts-worker/` |
 | `--preload` | 启动时就加载模型。不加的话第一条请求会多等几秒。IndexTTS 的两个版本内存里只留一个，预加载完留下的是 `--engines` 里排第一的 |
 | `--memory-limit-gb` | IndexTTS 的内存上限，默认 28 |
+| `--cache-limit-gb` | IndexTTS 用的 MLX 缓存上限，默认 2。见「加载和内存」 |
 
 IndexTTS 2 和 2.5 在同一个进程里，内存里一次只留一个版本，切换时重新加载：切换后的第一条请求实测多花 1.3 到 2.4 秒。
 
@@ -161,7 +162,12 @@ IndexTTS 2 和 2.5 在同一个进程里，内存里一次只留一个版本，�
 ### 加载和内存
 
 - 带 `--preload` 启动：IndexTTS 的 worker 7.5 到 9.7 秒（两个版本各加载一次，含参考编码器），BreezeTTS2 的 worker 5.2 到 8.5 秒。
-- IndexTTS 的 worker 稳定占 22 GB，峰值 29 GB，超过了 `--memory-limit-gb` 设的 28。BreezeTTS2 的 worker 7 到 8 GB。两个 worker 同时常驻约 30 GB，64 GB 的机器放得下。
+- IndexTTS 的 worker 加载完占 3.7 GB，合成起来稳定在 9 GB 上下，峰值 12 GB，不随合成的条数涨。BreezeTTS2 的 worker 加载完 4 GB，用起来 7 到 8 GB。两个 worker 同时常驻约 17 GB。这里说的是 `footprint` 报的实际占用（含显存），`ps` 里的 RSS 小得多。
+- IndexTTS 早先占 22 到 33 GB，原因有两个，worker 里都处理了：
+  - 适配代码加载时用 `mx.compile` 编译了声码器，编译结果按输入的形状缓存。每段音频的长度都不一样，所以每合成一段就多留约 0.42 GB，不会释放，也清不掉。合成五六十段以后 MLX 在用的内存越过 `--memory-limit-gb`：不报错，但合成慢一倍（实时率从 0.7 变成 1.5），并且接着涨，69 条后进程占到 44 GB。一场面试要合成三四十段，也就是连着服务两场就会变慢。worker 现在不让它编译，输出逐字节相同，速度相差不到 3%（形状几乎每段都是新的，编译本来就帮不上忙）。
+  - 适配代码把 MLX 的缓存上限设成机器内存的四分之一（64 GB 的机器是 16 GB），第一条请求就填满。worker 加载后改成 `--cache-limit-gb`（默认 2），速度不受影响。
+- `--memory-limit-gb` 不是硬上限，越过以后 MLX 照样分配。worker 在每条请求之后看一眼 MLX 在用的内存，超过上限的八成就在日志里提醒（正常是 3 GB 上下）。见到这条提醒就重启 worker，并且查一下是不是适配代码升级后编译又回来了。
+- 参考编码器的几个 PyTorch 模块在显存里常驻 2.4 GB，算在上面的数字里。
 
 ### 读出来的字对不对
 
@@ -253,6 +259,42 @@ cargo test -p interview-tts --test worker_live -- --ignored --nocapture
 - IndexTTS「打断后的下一句」里有约 3 秒是在排队，等被打断的那一段算完。BreezeTTS2 打断后马上就停。
 - worker 刚起来的第一条请求偏慢（第一遍 IndexTTS 2 整段 3.56 秒，BreezeTTS2 整段 3.42 秒）。
 - 测的时候机器不是空闲的，系统负载 5 上下。
+
+## 接真引擎完整跑一场面试
+
+`crates/interview-server/tests/live.rs` 把整个应用装起来，用真大模型、真语音识别走完一场面试：建岗位和候选人、解析简历、出题、预合成、答题、合并录像、重新转写、出报告。在 Mac 上起好两个 worker 以后，它连真的语音合成一起跑：
+
+```bash
+crates/interview-stt/scripts/download-models.sh       # 识别模型，约 175 MB，只用下一次
+export AI_INTERVIEW_STT_BACKEND=sherpa AI_INTERVIEW_STT_MODEL_DIR=~/.cache/ai-interview/stt-models
+export AI_INTERVIEW_TTS_BACKEND=worker
+export AI_INTERVIEW_TTS_WORKER_URLS=http://127.0.0.1:7801,http://127.0.0.1:7802
+export DATABASE_URL=$(scripts/dev-db.sh url)           # 先 scripts/dev-db.sh start
+export DEEPSEEK_API_KEY=...                            # 一场约 0.45 元
+cargo test -p interview-server --features sherpa --test live -- --ignored --nocapture
+```
+
+不设别的变量时面试官是兜底的设计音色（BreezeTTS2）。`AI_INTERVIEW_LIVE_VOICE_WAV=$REPO/voices/r001/reference.wav` 加 `AI_INTERVIEW_TTS_ENGINE=index2` 换成 IndexTTS 2 的克隆音色，再加 `AI_INTERVIEW_LIVE_MODE=conversational` 跑实时对话。Mac 上不用 `fetch-sherpa-lib.sh`，预编译库由构建脚本自己下（约 21 MB）。
+
+2026-11-13 在 M3 Max（64 GB）上各跑了一场，三场都通过，没有合成失败，没有现场合成超时，没有让页面重试。候选人的声音是识别模型自带的示例录音，和题目无关，所以三场都是答了三题就被判答非所问提前结束。单位秒：
+
+| | 逐题，兜底音色（BreezeTTS2 设计音色） | 逐题，IndexTTS 2 克隆 | 实时对话，IndexTTS 2 克隆 |
+| --- | ---: | ---: | ---: |
+| 出题（大模型） | 98.4 | 98.6 | 109.3 |
+| 预合成 | 约 131 | 约 152 | 约 125 |
+| 预合成的句数 / 音频总时长 | 25 句 / 173.1 | 26 句 / 189.9 | 24 句 / 165.1 |
+| 面试本身 | 8 步，3.7 | 8 步，3.9 | 11 步，37.1 |
+| 面试后（合并录像、重新转写、报告） | 66.6 | 57.1 | 65.7 |
+| 整场 | 324 | 334 | 358 |
+| 大模型花费 | 0.46 元 | 0.45 元 | 0.49 元 |
+
+读这些数字要知道的：
+
+- 预合成是一条一条发给 worker 的（worker 上的排队时间都是 0），合成 1 秒音频用 0.76 到 0.80 秒。一场面试的题目、追问和过渡语合成下来两分钟出头，和出题的时间差不多。
+- 逐题模式下面试中不用现场合成，每一步等的只有判断回答的那 1.1 到 1.3 秒。
+- 实时对话里现场说的话要整句合成完才出声。这一场现场说了 4 句，IndexTTS 2 合成它们用了：10 个字 2.8 秒，27 个字 6.5 秒，41 个字 10.8 秒，64 个字 10.1 秒。候选人答完以后「等下一步」最长的两次是 11.9 秒和 12.0 秒，其余在 0 到 6.5 秒之间。离 20 秒的上限还有余量，但等得太久，怎么缩短在 issue #154 里跟进：让模型现场先说一句短的、长句拆开合成，或者换成能边生成边出的 BreezeTTS2。
+- 这 4 句的实时率是 0.9 到 1.6，比上面「首块和总耗时」里单独量的慢。跑这三场的时候 IndexTTS 的 worker 还有内存一直涨的问题（见「加载和内存」，这三场跑完以后才查出来并修掉）：它前后合成了 54 条，到实时对话这一场时已经越过内存上限，合成慢了下来。预合成的那些数字是越线之前的，不受影响。
+- 下载识别模型和预编译库各失败过一次，都是连 GitHub 断了，重跑一次就好。
 
 ## 日志
 
