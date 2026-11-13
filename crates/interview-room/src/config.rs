@@ -52,6 +52,9 @@ pub struct RoomConfig {
     /// 语音识别用的是假后端时，要不要也做现场转写。假后端出来的是固定的文字，不是候选人说的话，
     /// 所以默认不做；联调和端到端测试想看整条链路通不通时打开
     pub transcribe_with_fake: bool,
+    /// 实时对话里，候选人停下来多少秒算说完了一段。逐题模式用的是面试配置里的静音时长（3 到 10 秒），
+    /// 对话的时候等那么久太僵；太短又会把想一想的停顿当成说完了
+    pub realtime_silence_sec: u32,
 }
 
 impl RoomConfig {
@@ -113,6 +116,19 @@ impl RoomConfig {
             tracing::warn!(reason = %err, "AI_INTERVIEW_ROOM_FAKE_TRANSCRIPT 写得不对，这次按 false 处理");
             default.transcribe_with_fake
         });
+        let realtime_silence_sec = env_parse(
+            "AI_INTERVIEW_ROOM_REALTIME_SILENCE_SEC",
+            default.realtime_silence_sec,
+        )
+        .ok()
+        .filter(|seconds| (1..=10).contains(seconds))
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "AI_INTERVIEW_ROOM_REALTIME_SILENCE_SEC 要在 1 到 10 之间，这次用默认值 {}",
+                default.realtime_silence_sec
+            );
+            default.realtime_silence_sec
+        });
         Self {
             invite_ttl_hours,
             camera_required,
@@ -120,6 +136,7 @@ impl RoomConfig {
             ffprobe,
             abandon_after_minutes,
             transcribe_with_fake,
+            realtime_silence_sec,
             recording: RecordingSettings {
                 timeslice_ms,
                 ..default.recording.clone()
@@ -141,6 +158,7 @@ impl Default for RoomConfig {
             abandon_after_minutes: 15,
             settle_timeout_sec: 20,
             transcribe_with_fake: false,
+            realtime_silence_sec: 2,
         }
     }
 }

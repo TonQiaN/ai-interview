@@ -6,6 +6,7 @@
  */
 
 import { estimateBudget } from "../../lib/budget";
+import { replanReasons } from "../../lib/replan";
 import type {
   AdminUser,
   Candidate,
@@ -1151,15 +1152,20 @@ export function createMockServer(options: MockOptions = {}) {
     if (issues) throw new HttpError(422, "validation_failed", "面试设置不合要求", issues);
     const resumeId = patch.resume_id ?? i.resume_id ?? null;
     const voiceId = patch.voice_id ?? i.voice_id ?? null;
-    const contentChanged =
-      JSON.stringify(config) !== JSON.stringify(i.config) || resumeId !== (i.resume_id ?? null);
+    // 题目已经出好时，看这次改动让不让它作废（规则和后端一样，见 lib/replan.ts）
+    const reasons = i.has_plan
+      ? [
+          ...(resumeId !== (i.resume_id ?? null) ? ["resume_id"] : []),
+          ...replanReasons(i.config, config),
+        ]
+      : [];
     const voiceChanged = voiceId !== (i.voice_id ?? null);
     i.config = config;
     i.time_budget = estimateBudget(config);
     i.resume_id = resumeId;
     i.voice_id = voiceId;
-    if (contentChanged) {
-      // 设置或简历变了，原来的题目作废
+    if (reasons.length > 0) {
+      // 换了简历，或者改的设置写进了题目里：原来的题目作废
       db.plans.delete(i.id);
       db.utterances.delete(i.id);
       i.has_plan = false;
@@ -1173,8 +1179,9 @@ export function createMockServer(options: MockOptions = {}) {
     }
     countSynth(i);
     i.prepare_error = null;
-    touch(i, contentChanged || voiceChanged ? "draft" : undefined);
-    return i;
+    // 改的设置不影响题目时，题目和语音都留着，状态不变
+    touch(i, reasons.length > 0 || voiceChanged ? "draft" : undefined);
+    return { ...i, replan_reasons: reasons };
   });
   on("DELETE", "/interviews/:id", ({ params }) => {
     const i = find.interview(params[0]);

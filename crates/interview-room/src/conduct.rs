@@ -23,8 +23,8 @@ use interview_core::status::{InterviewStatus, UtteranceKind};
 use interview_core::task_kind;
 use interview_engine::room::{self, Beat, BeatReport, Reported, RoomState, RoomStep};
 use interview_engine::{AnswerEnd, EngineError, FinishReason, InterviewConfig, InterviewPlan};
-use interview_llm::{ChatModel, ChatRequest, ChatStream, LlmError, Pricing};
-use interview_platform::http::{ErrorBody, Json, Path, serve_blob};
+use interview_llm::{ChatModel, ChatRequest, ChatStream, LlmError, Pricing, Usage};
+use interview_platform::http::{ErrorBody, Json, Path, Query, serve_blob};
 use interview_platform::tasks::{NewTask, Task, TaskQueue, TaskRegistry, TaskResult};
 use interview_platform::usage::{self, LlmUsage};
 use interview_platform::{ApiError, ApiResult};
@@ -41,7 +41,7 @@ use crate::access::RoomAccess;
 use crate::events::{self, EventSource, NewEvent};
 use crate::protocol::{AnswerSettings, NextStep, Progress, Utterance};
 use crate::session::{consent_agreed, parse_config};
-use crate::{AnswerTranscript, Deps};
+use crate::{AnswerTranscript, Deps, realtime};
 
 /// 候选人中途离开的面试由这个任务收掉。
 pub const WATCHDOG_TASK: &str = "room.watchdog";
@@ -67,17 +67,17 @@ pub(crate) fn register_tasks(registry: &mut TaskRegistry, deps: Deps) {
 // ───────────────────────── 读写面试的状态 ─────────────────────────
 
 #[derive(Debug, sqlx::FromRow)]
-struct Row {
-    status: InterviewStatus,
+pub(crate) struct Row {
+    pub(crate) status: InterviewStatus,
     plan: Option<Value>,
     config: Value,
-    runtime_state: Option<Value>,
+    pub(crate) runtime_state: Option<Value>,
     started_at: Option<DateTime<Utc>>,
     end_reason: Option<String>,
 }
 
 impl Row {
-    fn is_finished(&self) -> bool {
+    pub(crate) fn is_finished(&self) -> bool {
         matches!(
             self.status,
             InterviewStatus::Completed | InterviewStatus::Abandoned
@@ -85,7 +85,7 @@ impl Row {
     }
 
     /// 结束了的面试，页面该看到的结束原因。
-    fn finish_step(&self) -> NextStep {
+    pub(crate) fn finish_step(&self) -> NextStep {
         NextStep::Finish {
             reason: self
                 .end_reason
@@ -95,15 +95,24 @@ impl Row {
     }
 
     /// 面试已经进行了多少毫秒。
-    fn elapsed_ms(&self, now: DateTime<Utc>) -> i64 {
+    pub(crate) fn elapsed_ms(&self, now: DateTime<Utc>) -> i64 {
         self.started_at
             .map(|started| (now - started).num_milliseconds().max(0))
             .unwrap_or(0)
     }
+
+    /// 存着的进度是不是实时对话的。
+    pub(crate) fn is_realtime(&self) -> bool {
+        self.runtime_state.as_ref().is_some_and(realtime::is_state)
+    }
 }
 
 /// 读出一场面试。`lock` 为真时锁住这一行，到事务结束为止别的请求改不了它。
-async fn load(conn: &mut PgConnection, interview_id: Uuid, lock: bool) -> Result<Row, sqlx::Error> {
+pub(crate) async fn load(
+    conn: &mut PgConnection,
+    interview_id: Uuid,
+    lock: bool,
+) -> Result<Row, sqlx::Error> {
     let sql = if lock {
         "SELECT status, plan, config, runtime_state, started_at, end_reason
            FROM interviews WHERE id = $1 FOR UPDATE"
@@ -115,7 +124,7 @@ async fn load(conn: &mut PgConnection, interview_id: Uuid, lock: bool) -> Result
 }
 
 /// 这场面试的题目和配置。
-fn script(interview_id: Uuid, row: &Row) -> ApiResult<(InterviewPlan, InterviewConfig)> {
+pub(crate) fn script(interview_id: Uuid, row: &Row) -> ApiResult<(InterviewPlan, InterviewConfig)> {
     let Some(raw) = row.plan.clone().filter(|plan| !plan.is_null()) else {
         return Err(
             ApiError::conflict("面试还在准备中，请稍后再打开").with_code("interview_not_ready")
@@ -151,7 +160,7 @@ async fn save_state(
     Ok(())
 }
 
-fn engine_error(err: EngineError) -> ApiError {
+pub(crate) fn engine_error(err: EngineError) -> ApiError {
     match err {
         EngineError::InvalidState(message) => ApiError::conflict(message).with_code("seq_conflict"),
         EngineError::InvalidInput(message) => ApiError::invalid_field("end_reason", message),
@@ -160,7 +169,7 @@ fn engine_error(err: EngineError) -> ApiError {
 }
 
 /// 结束原因在协议里的写法。
-fn finish_reason(reason: FinishReason) -> &'static str {
+pub(crate) fn finish_reason(reason: FinishReason) -> &'static str {
     match reason {
         FinishReason::Completed => "completed",
         FinishReason::TimeUp => "time_up",
@@ -171,7 +180,7 @@ fn finish_reason(reason: FinishReason) -> &'static str {
 }
 
 /// 结束面试：改状态、记原因，同一个事务里把「转写和出报告」交出去。
-async fn close(
+pub(crate) async fn close(
     conn: &mut PgConnection,
     interview_id: Uuid,
     status: InterviewStatus,
@@ -198,16 +207,30 @@ async fn close(
     Ok(())
 }
 
+/// 面试是不是已经说到结束语了。进度读不出来按没有算。
+fn natural_finish(interview_id: Uuid, row: &Row) -> Option<FinishReason> {
+    if row.is_realtime() {
+        return realtime::parse(interview_id, row)
+            .ok()
+            .flatten()
+            .and_then(|state| state.natural_finish());
+    }
+    stored_state(interview_id, row)
+        .ok()
+        .flatten()
+        .and_then(|state| state.session.current.finished)
+}
+
 /// 候选人不在了（自己点了离开，或者断线没回来）时怎么收场。
 ///
 /// 结束语已经发出去了的，算正常结束：题都问完了，只是没等到页面报告结束语播完。
 async fn close_unattended(
     conn: &mut PgConnection,
     interview_id: Uuid,
-    state: Option<&RoomState>,
+    natural: Option<FinishReason>,
     reason: &str,
 ) -> Result<(), sqlx::Error> {
-    match state.and_then(|state| state.session.current.finished) {
+    match natural {
         Some(natural) => {
             close(
                 conn,
@@ -284,7 +307,7 @@ async fn decorate(deps: &Deps, interview_id: Uuid, step: &RoomStep) -> ApiResult
 }
 
 /// 引擎和平台各有一份句子的类别，取值相同。
-fn utterance_kind(kind: interview_engine::UtteranceKind) -> UtteranceKind {
+pub(crate) fn utterance_kind(kind: interview_engine::UtteranceKind) -> UtteranceKind {
     use interview_engine::UtteranceKind as Engine;
     match kind {
         Engine::Opening => UtteranceKind::Opening,
@@ -296,11 +319,11 @@ fn utterance_kind(kind: interview_engine::UtteranceKind) -> UtteranceKind {
     }
 }
 
-fn audio_url(key: &str) -> String {
+pub(crate) fn audio_url(key: &str) -> String {
     format!("/api/v1/room/utterances/{key}/audio")
 }
 
-fn clamp_i64(value: u64) -> i64 {
+pub(crate) fn clamp_i64(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
@@ -312,6 +335,9 @@ pub(crate) async fn resume_step(deps: &Deps, access: &RoomAccess) -> ApiResult<O
     let mut conn = deps.ctx.db.acquire().await?;
     let row = load(&mut conn, access.interview_id, false).await?;
     drop(conn);
+    if row.is_realtime() {
+        return realtime::resume_step(deps, access.interview_id, &row).await;
+    }
     match stored_state(access.interview_id, &row)? {
         Some(state) => {
             let step = decorate(deps, access.interview_id, &state.last).await?;
@@ -325,7 +351,7 @@ pub(crate) async fn resume_step(deps: &Deps, access: &RoomAccess) -> ApiResult<O
 ///
 /// 存着的那一步记的是它发出去那一刻的时间。页面刷新后拿它当面试时间轴的起点，
 /// 要是不换，刷新前后两段录像在时间轴上会叠在一起。
-fn at_elapsed(step: NextStep, elapsed_ms: i64) -> NextStep {
+pub(crate) fn at_elapsed(step: NextStep, elapsed_ms: i64) -> NextStep {
     match step {
         NextStep::Say {
             seq,
@@ -379,16 +405,34 @@ async fn start_interview(
     if row.is_finished() {
         return Ok(Json(row.finish_step()));
     }
+    if row.status == InterviewStatus::InProgress && row.is_realtime() {
+        // 实时对话的续面
+        tx.commit().await?;
+        return match realtime::resume_step(&deps, interview_id, &row).await? {
+            Some(step) => Ok(Json(step)),
+            None => Err(ApiError::internal(anyhow::anyhow!(
+                "面试 {interview_id} 在进行中，却没有存着进度"
+            ))),
+        };
+    }
     let mut resumed_at = None;
     let step = match (row.status, stored_state(interview_id, &row)?) {
         (InterviewStatus::InProgress, Some(state)) => {
             resumed_at = Some(row.elapsed_ms(Utc::now()));
-            state.last
+            Opened::Scripted(state.last)
         }
         (InterviewStatus::Invited | InterviewStatus::InProgress, _) => {
             let (plan, config) = script(interview_id, &row)?;
-            let (state, step) = room::open(&plan, &config).map_err(engine_error)?;
-            save_state(&mut tx, interview_id, &state).await?;
+            // 这场面试怎么进行，开始的时候定下来，中途不变
+            let opened = if realtime::enabled(&deps, &config).await {
+                let state = realtime::open(&deps, &plan, &config)?;
+                realtime::save(&mut tx, interview_id, &state).await?;
+                Opened::Realtime(Box::new(state))
+            } else {
+                let (state, step) = room::open(&plan, &config).map_err(engine_error)?;
+                save_state(&mut tx, interview_id, &state).await?;
+                Opened::Scripted(step)
+            };
             sqlx::query(
                 "UPDATE interviews
                     SET status = 'in_progress', started_at = COALESCE(started_at, now())
@@ -406,8 +450,12 @@ async fn start_interview(
                     .run_at(first_check),
             )
             .await?;
-            tracing::info!(%interview_id, "面试开始");
-            step
+            tracing::info!(
+                %interview_id,
+                realtime = matches!(opened, Opened::Realtime(_)),
+                "面试开始"
+            );
+            opened
         }
         _ => {
             return Err(
@@ -416,11 +464,20 @@ async fn start_interview(
         }
     };
     tx.commit().await?;
-    let step = decorate(&deps, interview_id, &step).await?;
+    let step = match step {
+        Opened::Scripted(step) => decorate(&deps, interview_id, &step).await?,
+        Opened::Realtime(state) => realtime::current_step(&deps, interview_id, &state).await?,
+    };
     Ok(Json(match resumed_at {
         Some(elapsed_ms) => at_elapsed(step, elapsed_ms),
         None => step,
     }))
+}
+
+/// 刚开始（或者接着面）的一场面试，第一步是什么。
+enum Opened {
+    Scripted(RoomStep),
+    Realtime(Box<realtime::RtState>),
 }
 
 // ───────────────────────── 推进 ─────────────────────────
@@ -440,7 +497,7 @@ pub enum AnswerEndReason {
 }
 
 impl AnswerEndReason {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Silence => "silence",
             Self::Button => "button",
@@ -516,6 +573,11 @@ async fn advance_interview(
     Json(request): Json<AdvanceRequest>,
 ) -> ApiResult<Json<NextStep>> {
     let interview_id = access.interview_id;
+    if is_realtime(&deps, interview_id).await? {
+        return Ok(Json(
+            realtime::advance(&deps, interview_id, &request).await?,
+        ));
+    }
     // 最多走三遍：判断完一段回答之后要重新看一次状态，才知道该给页面什么
     for _ in 0..3 {
         match advance_once(&deps, interview_id, &request).await? {
@@ -542,6 +604,12 @@ async fn advance_interview(
         }
     }
     Err(ApiError::unavailable("上一段回答还在处理，请稍后再试").with_code("answer_pending"))
+}
+
+/// 这场面试是不是按实时对话进行的。开始的时候定下来，之后不变，所以不用拿锁。
+async fn is_realtime(deps: &Deps, interview_id: Uuid) -> ApiResult<bool> {
+    let mut conn = deps.ctx.db.acquire().await?;
+    Ok(load(&mut conn, interview_id, false).await?.is_realtime())
 }
 
 async fn advance_once(
@@ -619,14 +687,15 @@ async fn advance_once(
 }
 
 /// 面试结束了，现场转写不用再留着。
-fn release_live(deps: &Deps, interview_id: Uuid) {
+pub(crate) fn release_live(deps: &Deps, interview_id: Uuid) {
     if let Some(live) = &deps.live {
         live.close_interview(interview_id);
     }
+    deps.realtime.forget(interview_id);
 }
 
 /// 页面报上来的几个时刻，已经收进合理的范围：不早于 0，不晚于服务端认为的现在。
-struct BeatTimes {
+pub(crate) struct BeatTimes {
     /// 服务端认为面试现在进行到了多少毫秒
     now_ms: i64,
     playback_start_ms: Option<i64>,
@@ -636,7 +705,7 @@ struct BeatTimes {
 }
 
 impl BeatTimes {
-    fn from_request(request: &AdvanceRequest, now_ms: i64) -> Self {
+    pub(crate) fn from_request(request: &AdvanceRequest, now_ms: i64) -> Self {
         let clamp = |value: Option<i64>| value.map(|ms| ms.clamp(0, now_ms + CLOCK_SLACK_MS));
         Self {
             now_ms,
@@ -648,13 +717,13 @@ impl BeatTimes {
     }
 
     /// 这一句（连同回答）结束的时刻。
-    fn end_ms(&self) -> i64 {
+    pub(crate) fn end_ms(&self) -> i64 {
         self.answer_end_ms
             .or(self.playback_end_ms)
             .unwrap_or(self.now_ms)
     }
 
-    fn answer_ms(&self) -> i64 {
+    pub(crate) fn answer_ms(&self) -> i64 {
         match (self.answer_start_ms, self.answer_end_ms) {
             (Some(start), Some(end)) => (end - start).max(0),
             _ => 0,
@@ -683,26 +752,15 @@ async fn record_turns(
     request: &AdvanceRequest,
     times: &BeatTimes,
 ) -> Result<(), sqlx::Error> {
-    let said_at = times
-        .playback_start_ms
-        .or(times.playback_end_ms)
-        .unwrap_or(times.now_ms);
-    sqlx::query(
-        "INSERT INTO interview_turns
-                (id, interview_id, seq, speaker, utterance_key, text, start_ms, end_ms)
-         VALUES ($1, $2, $3, 'interviewer', $4, $5, $6, $7)
-         ON CONFLICT (interview_id, seq) DO NOTHING",
+    record_interviewer_turn(
+        conn,
+        interview_id,
+        beat.seq,
+        &beat.utterance.key,
+        &beat.utterance.text,
+        times,
     )
-    .bind(interview_core::new_id())
-    .bind(interview_id)
-    .bind(interviewer_turn_seq(beat.seq))
-    .bind(&beat.utterance.key)
-    .bind(&beat.utterance.text)
-    .bind(said_at)
-    .bind(times.playback_end_ms)
-    .execute(&mut *conn)
     .await?;
-
     let Some(end_reason) = request.end_reason else {
         return Ok(());
     };
@@ -717,6 +775,57 @@ async fn record_turns(
         .as_ref()
         .map(|listen| listen.utterance_key.as_str())
         .unwrap_or(beat.utterance.key.as_str());
+    record_candidate_turn(
+        conn,
+        interview_id,
+        beat.seq,
+        answered_key,
+        end_reason,
+        times,
+    )
+    .await
+}
+
+/// 面试官说的一句记进对话。
+pub(crate) async fn record_interviewer_turn(
+    conn: &mut PgConnection,
+    interview_id: Uuid,
+    beat_seq: u32,
+    key: &str,
+    text: &str,
+    times: &BeatTimes,
+) -> Result<(), sqlx::Error> {
+    let said_at = times
+        .playback_start_ms
+        .or(times.playback_end_ms)
+        .unwrap_or(times.now_ms);
+    sqlx::query(
+        "INSERT INTO interview_turns
+                (id, interview_id, seq, speaker, utterance_key, text, start_ms, end_ms)
+         VALUES ($1, $2, $3, 'interviewer', $4, $5, $6, $7)
+         ON CONFLICT (interview_id, seq) DO NOTHING",
+    )
+    .bind(interview_core::new_id())
+    .bind(interview_id)
+    .bind(interviewer_turn_seq(beat_seq))
+    .bind(key)
+    .bind(text)
+    .bind(said_at)
+    .bind(times.playback_end_ms)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// 候选人的一段回答记进对话，文字先空着。`answered_key` 是这段话回答的那一句。
+pub(crate) async fn record_candidate_turn(
+    conn: &mut PgConnection,
+    interview_id: Uuid,
+    beat_seq: u32,
+    answered_key: &str,
+    end_reason: AnswerEndReason,
+    times: &BeatTimes,
+) -> Result<(), sqlx::Error> {
     let answered_at = times
         .answer_start_ms
         .or(times.playback_end_ms)
@@ -729,7 +838,7 @@ async fn record_turns(
     )
     .bind(interview_core::new_id())
     .bind(interview_id)
-    .bind(candidate_turn_seq(beat.seq))
+    .bind(candidate_turn_seq(beat_seq))
     .bind(answered_key)
     .bind(answered_at)
     .bind(times.answer_end_ms)
@@ -742,7 +851,7 @@ async fn record_turns(
 // ───────────────────────── 判断回答 ─────────────────────────
 
 /// 没配大模型时的占位。不带文字去判断时引擎不会调模型，所以它不会真的被用到。
-struct NoModel;
+pub(crate) struct NoModel;
 
 #[async_trait]
 impl ChatModel for NoModel {
@@ -820,58 +929,81 @@ async fn settle_pending(deps: &Deps, interview_id: Uuid) -> ApiResult<Option<Roo
     }
     save_state(&mut tx, interview_id, &settled.state).await?;
     if let Some(answer) = &answer {
-        let transcript = &answer.transcript.transcript;
-        sqlx::query(
-            "UPDATE interview_turns
-                SET text = $3, words = $4, confidence = $5, stt_engine = $6,
-                    transcript_source = 'live'
-              WHERE interview_id = $1 AND seq = $2 AND speaker = 'candidate'",
-        )
-        .bind(interview_id)
-        .bind(answer.turn_seq)
-        .bind(&answer.text)
-        .bind(json!(transcript.words().collect::<Vec<_>>()))
-        .bind(confidence(transcript))
-        .bind(&answer.transcript.engine)
-        .execute(&mut *tx)
-        .await?;
+        save_answer_text(&mut tx, interview_id, answer).await?;
     }
     tx.commit().await?;
 
-    if settled.usage.total_tokens() > 0 {
-        let thinking = serde_json::to_value(config.live_thinking)
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_owned));
-        let model_name = if plan.generation.model.is_empty() {
-            interview_llm::DEFAULT_MODEL
-        } else {
-            plan.generation.model.as_str()
-        };
-        usage::record(
-            &deps.ctx.db,
-            LlmUsage {
-                purpose: "interview.turn",
-                model: model_name,
-                thinking: thinking.as_deref(),
-                prompt_tokens: settled.usage.prompt_tokens,
-                completion_tokens: settled.usage.completion_tokens,
-                reasoning_tokens: settled.usage.reasoning_tokens,
-                cached_tokens: settled.usage.cache_hit_tokens,
-                cost_cny: Some(Pricing::FLASH_PEAK.cost_cny(&settled.usage)),
-                latency_ms: Some(u64::try_from(latency.as_millis()).unwrap_or(u64::MAX)),
-                interview_id: Some(interview_id),
-                task_id: None,
-            },
-        )
-        .await;
-    }
+    record_turn_usage(deps, interview_id, &plan, &config, &settled.usage, latency).await;
     Ok(settled.step)
 }
 
+/// 把转写出来的文字填进候选人那一段对话。
+pub(crate) async fn save_answer_text(
+    conn: &mut PgConnection,
+    interview_id: Uuid,
+    answer: &AnswerText,
+) -> Result<(), sqlx::Error> {
+    let transcript = &answer.transcript.transcript;
+    sqlx::query(
+        "UPDATE interview_turns
+            SET text = $3, words = $4, confidence = $5, stt_engine = $6,
+                transcript_source = 'live'
+          WHERE interview_id = $1 AND seq = $2 AND speaker = 'candidate'",
+    )
+    .bind(interview_id)
+    .bind(answer.turn_seq)
+    .bind(&answer.text)
+    .bind(json!(transcript.words().collect::<Vec<_>>()))
+    .bind(confidence(transcript))
+    .bind(&answer.transcript.engine)
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 面试中调了一次模型（判断回答，或者实时对话里决定怎么接话），把用量记下来。
+pub(crate) async fn record_turn_usage(
+    deps: &Deps,
+    interview_id: Uuid,
+    plan: &InterviewPlan,
+    config: &InterviewConfig,
+    spent: &Usage,
+    latency: Duration,
+) {
+    if spent.total_tokens() == 0 {
+        return;
+    }
+    let thinking = serde_json::to_value(config.live_thinking)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned));
+    let model_name = if plan.generation.model.is_empty() {
+        interview_llm::DEFAULT_MODEL
+    } else {
+        plan.generation.model.as_str()
+    };
+    usage::record(
+        &deps.ctx.db,
+        LlmUsage {
+            purpose: "interview.turn",
+            model: model_name,
+            thinking: thinking.as_deref(),
+            prompt_tokens: spent.prompt_tokens,
+            completion_tokens: spent.completion_tokens,
+            reasoning_tokens: spent.reasoning_tokens,
+            cached_tokens: spent.cache_hit_tokens,
+            cost_cny: Some(Pricing::FLASH_PEAK.cost_cny(spent)),
+            latency_ms: Some(u64::try_from(latency.as_millis()).unwrap_or(u64::MAX)),
+            interview_id: Some(interview_id),
+            task_id: None,
+        },
+    )
+    .await;
+}
+
 /// 候选人刚答完的那一段的转写，以及它在对话记录里的序号。
-struct AnswerText {
+pub(crate) struct AnswerText {
     turn_seq: i32,
-    text: String,
+    pub(crate) text: String,
     transcript: AnswerTranscript,
 }
 
@@ -879,7 +1011,7 @@ struct AnswerText {
 const ANSWER_LEAD_MS: i64 = 1_000;
 
 /// 把候选人最近的一段回答转成文字。没接语音识别、这一段没有起止时刻、识别不出来，都是 `None`。
-async fn transcribe_answer(
+pub(crate) async fn transcribe_answer(
     deps: &Deps,
     interview_id: Uuid,
     deadline: tokio::time::Instant,
@@ -937,16 +1069,28 @@ fn confidence(transcript: &Transcript) -> Option<f32> {
 
 // ───────────────────────── 面试官语音 ─────────────────────────
 
+#[derive(Debug, Deserialize)]
+struct AudioQuery {
+    /// 现场生成的话是其中的第几句
+    part: Option<u32>,
+}
+
 /// 面试官语音
 ///
 /// 「下一步」里 `audio_url` 和 `preload_audio_urls` 指向这里。只能取当前这一句、服务端让提前取的
 /// 那几句和已经播过的句子，别的返回 404：还没问到的题不能提前听。支持 `Range`。
+///
+/// 实时对话里现场生成的话按句子合成，同一段话的几句 key 相同，地址里用 `part` 区分是第几句。
+/// 这些语音只在轮到它（或者让提前取）的时候能取。
 #[utoipa::path(
     get,
     path = "/api/v1/room/utterances/{key}/audio",
     tag = "room",
     security(("invite_token" = [])),
-    params(("key" = String, Path, description = "这句话的 key")),
+    params(
+        ("key" = String, Path, description = "这句话的 key"),
+        ("part" = Option<u32>, Query, description = "现场生成的话是其中的第几句；提前合成的句子不带"),
+    ),
     responses(
         (status = 200, description = "音频", content_type = "audio/wav"),
         (status = 404, description = "没有这句话的语音，或者现在还不能取", body = ErrorBody),
@@ -957,6 +1101,7 @@ async fn room_utterance_audio(
     State(deps): State<Deps>,
     access: RoomAccess,
     Path(key): Path<String>,
+    Query(query): Query<AudioQuery>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     access.require_in_progress()?;
@@ -964,9 +1109,29 @@ async fn room_utterance_audio(
     let mut conn = deps.ctx.db.acquire().await?;
     let row = load(&mut conn, interview_id, false).await?;
     drop(conn);
-    let offered = match stored_state(interview_id, &row)?.map(|state| state.last) {
-        Some(RoomStep::Say(beat)) => beat.utterance.key == key || beat.preload_keys.contains(&key),
-        _ => false,
+    let offered = if row.is_realtime() {
+        let state = realtime::parse(interview_id, &row)?;
+        let found = state
+            .as_ref()
+            .and_then(|state| state.offered(&key, query.part));
+        if query.part.is_some() {
+            // 现场合成的一句：语音存在哪记在进度里
+            let Some(blob_key) = found.flatten() else {
+                return Err(ApiError::not_found("语音"));
+            };
+            return serve_blob(deps.ctx.blobs.as_ref(), blob_key, "audio/wav", &headers).await;
+        }
+        found.is_some()
+    } else {
+        if query.part.is_some() {
+            return Err(ApiError::not_found("语音"));
+        }
+        match stored_state(interview_id, &row)?.map(|state| state.last) {
+            Some(RoomStep::Say(beat)) => {
+                beat.utterance.key == key || beat.preload_keys.contains(&key)
+            }
+            _ => false,
+        }
     };
     let (already_said,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM interview_turns
@@ -1053,8 +1218,8 @@ async fn finish_interview(
             return Err(ApiError::conflict("面试还没有问完").with_code("interview_not_finished"));
         }
         FinishKind::CandidateLeft => {
-            let state = stored_state(interview_id, &row)?;
-            close_unattended(&mut tx, interview_id, state.as_ref(), "candidate_left").await?;
+            let natural = natural_finish(interview_id, &row);
+            close_unattended(&mut tx, interview_id, natural, "candidate_left").await?;
         }
     }
     tx.commit().await?;
@@ -1121,8 +1286,8 @@ async fn watchdog_task(deps: &Deps, task: Task) -> TaskResult {
     }
 
     let row = load(&mut tx, interview_id, false).await?;
-    let state = stored_state(interview_id, &row).ok().flatten();
-    close_unattended(&mut tx, interview_id, state.as_ref(), "connection_lost").await?;
+    let natural = natural_finish(interview_id, &row);
+    close_unattended(&mut tx, interview_id, natural, "connection_lost").await?;
     events::insert(
         &mut *tx,
         interview_id,
