@@ -6,7 +6,7 @@
 //!
 //! 1. 候选人答完一段，服务端把这段话转成文字（用的是上传上来的录像分片），交给引擎。
 //! 2. 引擎边想边出结果。提前合成好的句子（过渡语、下一题）直接排进队列；现场生成的追问和回应
-//!    按句子送去合成，合成好一句排一句。这样很短的接话（「明白。」）可以先播，后面的问句在它
+//!    按句子送去合成，合成好一句排一句。这样接话（「好的，我了解了。」）可以先播，后面的问句在它
 //!    播的时候合成。
 //! 3. 页面的上报在队列里有东西时马上返回，没有就等，等到有为止。
 //!
@@ -456,24 +456,15 @@ pub(crate) fn open(
     })
 }
 
-/// 面试官现场开口时最常说的头一句。
+/// 面试一开始，在后台把面试官现场开口的头一句（接话）用这场的音色合成一遍。
 ///
-/// 引擎要求追问和回应都先用一句很短的话接住候选人，再问。用真模型跑了三场（47 轮现场接话），
-/// 42 轮的头一句是这两句之一。英文面试还没量过，先不备。
-fn usual_openers(language: Language) -> &'static [&'static str] {
-    match language {
-        Language::Zh => &["明白。", "好的。"],
-        Language::En => &[],
-    }
-}
-
-/// 面试一开始，在后台把常说的头一句用这场的音色合成一遍。
-///
-/// 合成出来的不用存：[`LiveVoice`] 的实现按音色和文字缓存，现场说到同一句时马上就有。真引擎合成
-/// 这样一句短话也要两秒左右，备好了候选人答完就能先听到这一句，后面的问题在它播的时候接着合成。
-/// 同一个音色以前说过这几句的，这里只是几次缓存命中。合成不出来不影响面试，现场再合成就是了。
+/// 引擎保证追问和回应的第一句逐字是 [`interview_engine::openers`] 里的一句，每句念出来两秒左右，
+/// 所以把这份清单全备上，现场的第一句就都是现成的。合成出来的不用存：[`LiveVoice`] 的实现按音色和
+/// 文字缓存，现场说到同一句时马上就有。真引擎合成一句也要两三秒，备好了候选人答完就能先听到接话，
+/// 后面的问题在它播的时候接着合成。同一个音色以前说过这几句的，这里只是几次缓存命中。合成不出来
+/// 不影响面试，现场再合成就是了。
 pub(crate) fn warm_up(deps: &Deps, interview_id: Uuid, language: Language) {
-    let openers = usual_openers(language);
+    let openers = interview_engine::openers(language);
     if !deps.config.realtime_warm_up || openers.is_empty() || deps.voice.is_none() {
         return;
     }
@@ -485,7 +476,7 @@ pub(crate) fn warm_up(deps: &Deps, interview_id: Uuid, language: Language) {
         let voice_id = match voice_of(&deps, interview_id).await {
             Ok(voice_id) => voice_id,
             Err(err) => {
-                tracing::warn!(%interview_id, reason = %err, "没查到这场面试的音色，常说的接话没有提前合成");
+                tracing::warn!(%interview_id, reason = %err, "没查到这场面试的音色，接话没有提前合成");
                 return;
             }
         };
@@ -495,11 +486,11 @@ pub(crate) fn warm_up(deps: &Deps, interview_id: Uuid, language: Language) {
             match tokio::time::timeout(SYNTH_TIMEOUT, voice.speak(voice_id, language, text)).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(reason)) => {
-                    tracing::warn!(%interview_id, %reason, done, "常说的接话没能提前合成，现场说到再合成");
+                    tracing::warn!(%interview_id, %reason, done, "接话没能提前合成，现场说到再合成");
                     return;
                 }
                 Err(_) => {
-                    tracing::warn!(%interview_id, done, "提前合成常说的接话太慢，剩下的现场说到再合成");
+                    tracing::warn!(%interview_id, done, "提前合成接话太慢，剩下的现场说到再合成");
                     return;
                 }
             }
@@ -508,7 +499,7 @@ pub(crate) fn warm_up(deps: &Deps, interview_id: Uuid, language: Language) {
             %interview_id,
             sentences = openers.len(),
             total_ms = started.elapsed().as_millis(),
-            "常说的接话提前合成好了"
+            "接话提前合成好了"
         );
     });
 }
