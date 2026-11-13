@@ -98,6 +98,43 @@ impl LiveVoice for FakeVoice {
     }
 }
 
+/// 一次只念一句的假声音，像真的合成服务：记下每一句是什么时候排上队的，放行一句念一句。
+struct QueuedVoice {
+    gate: Semaphore,
+    asked: Mutex<Vec<String>>,
+}
+
+impl QueuedVoice {
+    /// 等到排过队的正好是这么多句，最多等两秒。
+    async fn wait_asked(&self, count: usize) -> Vec<String> {
+        for _ in 0..100 {
+            if self.asked.lock().unwrap().len() == count {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl LiveVoice for QueuedVoice {
+    async fn speak(
+        &self,
+        _voice_id: Option<VoiceId>,
+        _language: Language,
+        text: &str,
+    ) -> Result<SpokenAudio, String> {
+        self.asked.lock().unwrap().push(text.to_owned());
+        let permit = self.gate.acquire().await.map_err(|err| err.to_string())?;
+        permit.forget();
+        Ok(SpokenAudio {
+            wav: format!("现场合成：{text}").into_bytes(),
+            duration_ms: 1_200,
+        })
+    }
+}
+
 /// 假模型：第一行（怎么接）马上给，后面的（这道题的概括）等放行了才写完。
 struct SlowWriter {
     gate: Arc<Semaphore>,
@@ -1379,6 +1416,46 @@ async fn the_openers_are_voiced_as_soon_as_a_conversation_starts(pool: PgPool) {
     start(&app, &token).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(*voice.spoken.lock().unwrap(), openers);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn warming_up_gives_way_to_what_the_interviewer_says_on_the_spot(pool: PgPool) {
+    let voice = Arc::new(QueuedVoice {
+        gate: Semaphore::new(0),
+        asked: Mutex::default(),
+    });
+    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+        .with_llm(Some(Arc::new(ScriptedModel::new().reply(probe()))))
+        .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
+        .with_voice(voice.clone());
+    let app = common::app_from(deps).await;
+    let openers = interview_engine::openers(Language::Zh);
+    let (_, token) = prepared(&app, conversational()).await;
+
+    // 面试一开始就去备第一句接话，合成服务还在做
+    let opening = start(&app, &token).await;
+    assert_eq!(voice.wait_asked(1).await, [openers[0]]);
+
+    // 候选人很快答完了第一题，面试官现场要说话：接话排在正在做的那一句后面
+    let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
+    let answer = report(&q1, 200, "silence");
+    let (ack, ()) = tokio::join!(advance(&app, &token, &answer), async {
+        assert_eq!(voice.wait_asked(2).await, [openers[0], probe_ack()]);
+        // 备的那一句做完了。现场这一轮还没说完，下一句接话先不备，免得问句排到它后面
+        voice.gate.add_permits(1);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(voice.wait_asked(2).await.len(), 2, "提前合成没有让路");
+        // 现场的接话做完，紧跟着就是问句
+        voice.gate.add_permits(1);
+        assert_eq!(voice.wait_asked(3).await[2], QUESTION);
+        voice.gate.add_permits(1);
+    });
+    assert_eq!(text(&ack), probe_ack());
+
+    // 这一轮说完了，剩下的接话接着备
+    voice.gate.add_permits(100);
+    let asked = voice.wait_asked(openers.len() + 2).await;
+    assert_eq!(asked[3..], openers[1..]);
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
