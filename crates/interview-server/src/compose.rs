@@ -57,8 +57,6 @@ pub struct Composed {
 
 /// 把各模块装在一起。
 pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
-    // `tasks` 现在还没有模块登记，接入第一个带后台任务的 crate 时去掉这个 allow
-    #[allow(unused_mut, reason = "各线接入后会往里登记任务")]
     let mut tasks = TaskRegistry::new();
     let mut probes = StatusRegistry::new();
     probes.register(DatabaseProbe(ctx.db.clone()));
@@ -69,6 +67,9 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
     let mut api = OpenApiRouter::new();
 
     // ── ② 岗位和候选人：interview-talent、interview-raas ──
+    let talent = interview_talent::Deps::from_env(ctx.clone(), shared.llm.clone());
+    api = api.merge(interview_talent::router(talent.clone()));
+    interview_talent::register_tasks(&mut tasks, talent);
 
     // ── ③ AI 引擎：interview-engine 是纯库，由 interview-flow 调用，这里不用接 ──
 
