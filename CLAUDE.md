@@ -63,7 +63,17 @@ cargo run --release -p interview-stt --features sherpa --example transcribe -- �
 
 服务进程要用真的语音识别（面试后重新转写），同样加特性启动：`cargo run -p interview-server --features sherpa`，并设 `AI_INTERVIEW_STT_BACKEND=sherpa`。
 
-改了模块之间的约定（任务名和内容、面试状态怎么流转、别的模块要读的表），跑一遍端到端测试 `crates/interview-server/tests/e2e.rs`，流程变了就一起改它。
+用真模型和真语音识别完整跑一场面试（要 `DEEPSEEK_API_KEY`、上面的识别模型和 ffmpeg；候选人的声音是识别模型自带的示例录音；十道题的一场约 0.4 元，三分钟左右）：
+
+```bash
+export AI_INTERVIEW_STT_BACKEND=sherpa AI_INTERVIEW_STT_MODEL_DIR=~/.cache/ai-interview/stt-models
+export DATABASE_URL=$(scripts/dev-db.sh url)
+cargo test -p interview-server --features sherpa --test live -- --ignored --nocapture
+```
+
+它会打印题目、每一步等了多久、转写出来的回答、报告结论和大模型的花费。在 Mac 上再设 `AI_INTERVIEW_TTS_BACKEND=worker`，就连真的语音合成一起跑。
+
+改了模块之间的约定（任务名和内容、面试状态怎么流转、别的模块要读的表），跑一遍端到端测试 `crates/interview-server/tests/e2e.rs`，流程变了就一起改它。两个测试共用的部分在 `crates/interview-server/tests/common/`。
 
 改了 `crates/interview-stt/src/sherpa.rs` 要带着 `--features sherpa` 跑 clippy 和上面的测试，`scripts/check.sh` 不开这个特性。CI 里有单独的 `stt-sherpa` 任务跑这些。
 
