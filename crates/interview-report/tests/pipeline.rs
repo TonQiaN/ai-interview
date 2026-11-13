@@ -420,6 +420,10 @@ async fn every_step_shares_the_same_prompt_prefix() {
         .unwrap();
     let context = &prompts[0][..context_end];
     assert!(context.contains("s7"));
+    // 题目标了是第几题，模型在正文里才能写「第 2 题」，不用写 HR 看不懂的 id
+    assert!(context.contains("第 1 题（id：q1）：请介绍一下你主导的订单系统重构。"));
+    assert!(context.contains("  追问（id：q1.f1）：延迟具体是怎么降下来的？"));
+    assert!(context.contains("第 2 题（id：q2）：如果下单接口突然变慢，你会怎么排查？"));
     for (stage, request) in &requests {
         let prompt = request.messages[1].content.as_text();
         assert!(

@@ -259,10 +259,10 @@ pub(crate) fn render_context(
     out.push_str("\n>>>\n");
 
     out.push_str("\n# 题目\n");
-    for group in groups {
-        render_question(&mut out, group.root, false);
+    for (index, group) in groups.iter().enumerate() {
+        render_question(&mut out, group.root, Some(index + 1));
         for follow_up in &group.follow_ups {
-            render_question(&mut out, follow_up, true);
+            render_question(&mut out, follow_up, None);
         }
     }
 
@@ -350,9 +350,13 @@ fn render_list(out: &mut String, title: &str, items: &[String]) {
     }
 }
 
-fn render_question(out: &mut String, question: &Question, is_follow_up: bool) {
-    let prefix = if is_follow_up { "  （追问）" } else { "" };
-    let _ = write!(out, "{prefix}{}：{}", question.id, question.text.trim());
+/// `ordinal` 是第几题，追问没有。标出来是为了让模型在正文里写「第 3 题」：题目 id 是给程序用的，HR 看不懂。
+fn render_question(out: &mut String, question: &Question, ordinal: Option<usize>) {
+    let text = question.text.trim();
+    let _ = match ordinal {
+        Some(n) => write!(out, "第 {n} 题（id：{}）：{text}", question.id),
+        None => write!(out, "  追问（id：{}）：{text}", question.id),
+    };
     if let Some(intent) = &question.intent {
         let _ = write!(out, "\n    考察意图：{intent}");
     }
