@@ -70,9 +70,9 @@ impl ThinkingArg {
 #[derive(Serialize)]
 struct Run {
     /// 每道题的评分，没评的题不在里面。
-    ratings: BTreeMap<String, u8>,
+    ratings: BTreeMap<String, f32>,
     /// 每道题每一次评的分数（一道题评不止一次时才有）。
-    all_ratings: BTreeMap<String, Vec<u8>>,
+    all_ratings: BTreeMap<String, Vec<f32>>,
     /// 每道题的权重。
     weights: BTreeMap<String, f32>,
     score: Option<u8>,
@@ -268,7 +268,7 @@ fn print_record(id: &str, runs: &[Run]) {
 struct Summary {
     records: usize,
     /// 每道题几遍评分的最大值减最小值。
-    rating_spreads: Vec<u8>,
+    rating_spreads: Vec<f32>,
     /// 每份记录几遍总分的最大值减最小值。
     score_spreads: Vec<u8>,
     /// 每份记录总分的标准差。
@@ -288,11 +288,13 @@ impl Summary {
         let questions: std::collections::BTreeSet<&String> =
             runs.iter().flat_map(|run| run.ratings.keys()).collect();
         for question in questions {
-            let ratings: Vec<u8> = runs
+            let ratings: Vec<f32> = runs
                 .iter()
                 .filter_map(|run| run.ratings.get(question).copied())
                 .collect();
-            self.rating_spreads.push(spread(&ratings));
+            let highest = ratings.iter().copied().fold(f32::MIN, f32::max);
+            let lowest = ratings.iter().copied().fold(f32::MAX, f32::min);
+            self.rating_spreads.push(highest - lowest);
         }
         let scores: Vec<u8> = runs.iter().filter_map(|run| run.score).collect();
         if !scores.is_empty() {
@@ -326,17 +328,18 @@ impl Summary {
             self.records
         );
         let cells = self.rating_spreads.len();
-        let count = |wanted: &dyn Fn(u8) -> bool| {
+        let count = |wanted: &dyn Fn(f32) -> bool| {
             self.rating_spreads
                 .iter()
                 .filter(|spread| wanted(**spread))
                 .count()
         };
         println!(
-            "每题评分：{cells} 道题里，几遍完全一样的 {} 道，差 1 分的 {} 道，差 2 分以上的 {} 道",
-            count(&|s| s == 0),
-            count(&|s| s == 1),
-            count(&|s| s >= 2),
+            "每题评分：{cells} 道题里，几遍完全一样的 {} 道，差半分的 {} 道，差 1 分的 {} 道，差更多的 {} 道",
+            count(&|s| s < 0.25),
+            count(&|s| (0.25..0.75).contains(&s)),
+            count(&|s| (0.75..1.25).contains(&s)),
+            count(&|s| s >= 1.25),
         );
         println!(
             "总分：几遍之间最多差 {} 分，平均差 {:.1} 分，标准差平均 {:.2}",

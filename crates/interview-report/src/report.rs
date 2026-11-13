@@ -224,12 +224,12 @@ pub struct QuestionJudgement {
     pub answered: bool,
     /// 候选人说了什么。
     pub answer_summary: String,
-    /// 1 到 5 分：5 优秀，4 良好，3 合格，2 较弱，1 不合格。
-    pub rating: u8,
-    /// 这道题评了不止一次时，每一次给的分数，按评的先后排。只评一次时为空。
-    /// 几次的分数不一样，说明这道题的表现介于两档之间，`rating` 取的是中间那个。
+    /// 1 到 5 分，以 0.5 为一档：5 优秀，4 良好，3 合格，2 较弱，1 不合格；
+    /// 带 .5 的表示介于相邻两档之间，例如 3.5 是比合格好、又够不上良好。
+    pub rating: f32,
+    /// 这道题评了不止一次时，每一次给的分数，按评的先后排，`rating` 是它们的平均（取到 0.5）。只评一次时为空。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ratings: Vec<u8>,
+    pub ratings: Vec<f32>,
     pub rating_reason: String,
     #[serde(default, deserialize_with = "null_as_default")]
     #[schema(required = true)]

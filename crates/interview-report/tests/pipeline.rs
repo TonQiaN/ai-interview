@@ -463,7 +463,7 @@ async fn out_of_range_rating_is_sent_back_to_the_model() {
         .await
         .unwrap();
 
-    assert_eq!(report.questions[1].judgement.as_ref().unwrap().rating, 2);
+    assert_eq!(report.questions[1].judgement.as_ref().unwrap().rating, 2.0);
     assert_eq!(model.calls("question:q2"), 2);
     assert_eq!(report.meta.usage.calls, 8);
     // 第二次请求里带着上一次的输出和不合要求的原因

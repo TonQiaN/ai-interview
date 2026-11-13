@@ -278,12 +278,17 @@ async fn judge_question(
     if judgements.len() <= 1 {
         return judgements.pop().ok_or(last_error);
     }
-    let ratings: Vec<u8> = judgements.iter().map(|j| j.rating).collect();
-    let mut sorted = ratings.clone();
-    sorted.sort_unstable();
-    let middle = sorted[(sorted.len() - 1) / 2];
-    let position = ratings.iter().position(|r| *r == middle).unwrap_or(0);
+    // 分数取几次的平均，评语用分数离平均最近的那一次的
+    let ratings: Vec<f32> = judgements.iter().map(|j| j.rating).collect();
+    let mean =
+        ratings.iter().sum::<f32>() / f32::from(u8::try_from(ratings.len()).unwrap_or(u8::MAX));
+    let position = ratings
+        .iter()
+        .enumerate()
+        .min_by(|a, b| (a.1 - mean).abs().total_cmp(&(b.1 - mean).abs()))
+        .map_or(0, |(index, _)| index);
     let mut chosen = judgements.swap_remove(position);
+    chosen.rating = (mean * 2.0).round() / 2.0;
     chosen.ratings = ratings;
     Ok(chosen)
 }
@@ -329,7 +334,7 @@ fn overall_score(groups: &[QuestionGroup<'_>], questions: &[QuestionReview]) -> 
             .weight
             .filter(|w| w.is_finite() && *w > 0.0)
             .unwrap_or(1.0);
-        weighted += weight * f32::from(judgement.rating) * 20.0;
+        weighted += weight * judgement.rating * 20.0;
         total_weight += weight;
     }
     if total_weight <= 0.0 {
@@ -529,7 +534,14 @@ fn check_rating(name: &str, rating: Option<u8>) -> Result<(), String> {
 
 impl Checked for QuestionJudgement {
     fn check(&self) -> Result<(), String> {
-        check_rating("rating", Some(self.rating))
+        let rating = self.rating;
+        let half_step = (rating * 2.0).fract() == 0.0;
+        if (1.0..=5.0).contains(&rating) && half_step {
+            return Ok(());
+        }
+        Err(format!(
+            "rating 是 {rating}，必须在 1 到 5 之间，并且只能是整数或者带 .5"
+        ))
     }
 }
 impl Checked for RequirementMatch {}
