@@ -25,6 +25,7 @@ mod deepseek;
 mod error;
 mod model;
 mod pricing;
+mod redact;
 mod sse;
 pub mod testing;
 mod types;

@@ -7,6 +7,7 @@ use futures_util::{Stream, StreamExt, stream};
 use serde::de::DeserializeOwned;
 
 use crate::error::LlmError;
+use crate::redact::without_values;
 use crate::types::{ChatRequest, ChatResponse, FinishReason, Message, StreamEvent, Usage};
 
 /// 流式输出：一串事件，最后一个是 [`StreamEvent::Done`]。
@@ -74,6 +75,11 @@ pub async fn chat_json<T: DeserializeOwned>(
 ///
 /// `check` 返回的错误信息会原样发给模型，让它照着修改，所以要写成模型看得懂的话。
 /// 适合检查那些 JSON 格式表达不了的要求，例如「必问题一道都不能少」。
+///
+/// 模型输出里常常有候选人的简历、回答和评价，这些不能进日志。读不成 `T` 时，serde 的报错
+/// 会带着出错的值：发回给模型的那句保留原样，写进日志和 [`LlmError::InvalidJson`] 的那句
+/// 只留类型，不带值。`check` 返回的话会原样进日志和错误，所以不要在里面引用模型输出的内容，
+/// 说清是哪个字段、哪条要求就够了。
 pub async fn chat_json_checked<T, F>(
     model: &dyn ChatModel,
     mut request: ChatRequest,
@@ -103,7 +109,8 @@ where
             continue;
         }
 
-        let problem = match parse_json::<T>(&response.content) {
+        // told 是说给模型听的，可以引用它自己的输出；problem 要进日志和返回的错误，不能带输出的原文
+        let (told, problem) = match parse_json::<T>(&response.content) {
             Ok(value) => match check(&value) {
                 Ok(()) => {
                     return Ok(JsonReply {
@@ -113,15 +120,21 @@ where
                         response,
                     });
                 }
-                Err(message) => message,
+                Err(message) => (message.clone(), message),
             },
-            Err(error) => format!("JSON 的结构不对：{error}"),
+            Err(error) => {
+                let error = error.to_string();
+                (
+                    format!("JSON 的结构不对：{error}"),
+                    format!("JSON 的结构不对：{}", without_values(&error)),
+                )
+            }
         };
 
         tracing::warn!(attempt, %problem, "大模型输出的 JSON 不符合要求，让它修改");
         request.messages.push(Message::assistant(response.content));
         request.messages.push(Message::user(format!(
-            "上面的输出不符合要求：{problem}\n请修正后重新输出完整的 JSON，不要输出其他内容。"
+            "上面的输出不符合要求：{told}\n请修正后重新输出完整的 JSON，不要输出其他内容。"
         )));
         last_problem = Problem::Invalid(problem);
     }
@@ -211,6 +224,29 @@ mod tests {
                 .as_text()
                 .contains("JSON 的结构不对")
         );
+    }
+
+    #[tokio::test]
+    async fn errors_do_not_quote_what_the_model_wrote() {
+        // 模型把评价写进了应该是数字的字段，三次都没改对
+        let written = "候选人自述在某公司负责结算";
+        let bad = format!(r#"{{"score": "{written}"}}"#);
+        let model = ScriptedModel::new().reply(&bad).reply(&bad).reply(&bad);
+        let error = chat_json::<Answer>(&model, request()).await.unwrap_err();
+
+        let LlmError::InvalidJson { attempts, message } = &error else {
+            panic!("应该是 InvalidJson：{error}");
+        };
+        assert_eq!(*attempts, 3);
+        assert!(!error.to_string().contains("某公司"), "{error}");
+        assert!(
+            message.contains("invalid type: string, expected u8"),
+            "错误里要留下类型，方便排查：{message}"
+        );
+
+        // 发回给模型的那句是和它的对话，保留原样，它才知道哪里写错了
+        let told = model.requests()[1].messages[2].content.as_text();
+        assert!(told.contains(written), "{told}");
     }
 
     #[tokio::test]
