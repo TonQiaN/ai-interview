@@ -60,6 +60,7 @@ pub struct Synthesizer {
     backend: Arc<dyn TtsBackend>,
     cache: OnceLock<Arc<dyn AudioCache>>,
     max_attempts: u32,
+    live_diffusion_steps: Option<u32>,
 }
 
 impl Synthesizer {
@@ -68,6 +69,7 @@ impl Synthesizer {
             backend,
             cache: OnceLock::new(),
             max_attempts: 2,
+            live_diffusion_steps: None,
         }
     }
 
@@ -88,6 +90,17 @@ impl Synthesizer {
     pub fn with_max_attempts(mut self, max_attempts: u32) -> Self {
         self.max_attempts = max_attempts.max(1);
         self
+    }
+
+    /// 实时对话里现场合成的句子，声学生成走几步（见 [`Synthesizer::synthesize_live`]）。
+    /// `None`（默认）是不改，和预先合成的一样。
+    pub fn with_live_diffusion_steps(mut self, steps: Option<u32>) -> Self {
+        self.live_diffusion_steps = steps;
+        self
+    }
+
+    pub fn live_diffusion_steps(&self) -> Option<u32> {
+        self.live_diffusion_steps
     }
 
     pub fn backend_name(&self) -> &'static str {
@@ -131,6 +144,25 @@ impl Synthesizer {
             wav,
             from_cache: false,
         })
+    }
+
+    /// 合成实时对话里现场要说的一句话：候选人正等着，快比细要紧。
+    ///
+    /// 和 [`Synthesizer::synthesize`] 只差一点：设了 [`Synthesizer::with_live_diffusion_steps`]
+    /// 而请求自己没指定步数时，用设的步数。没设就完全一样。步数进缓存键，
+    /// 所以现场合成的和预先合成的不会互相拿错。
+    pub async fn synthesize_live(
+        &self,
+        request: &SynthesisRequest,
+    ) -> Result<Synthesized, TtsError> {
+        match (self.live_diffusion_steps, request.diffusion_steps) {
+            (Some(steps), None) => {
+                let mut request = request.clone();
+                request.diffusion_steps = Some(steps);
+                self.synthesize(&request).await
+            }
+            _ => self.synthesize(request).await,
+        }
     }
 
     /// 按顺序合成一批，结果的顺序和输入一致。
@@ -350,6 +382,46 @@ mod tests {
         assert!(second.from_cache);
         assert_eq!(second.wav, first.wav);
         assert_eq!(backend.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn live_synthesis_uses_the_configured_steps_and_its_own_cache_entries() {
+        let req = request(EngineId::Index2, "好的，这部分我了解了。");
+        let mut sixteen = req.clone();
+        sixteen.diffusion_steps = Some(16);
+
+        // 没配步数：现场合成和预先合成是同一条缓存
+        let (backend, _, synthesizer) = setup(FakeBackend::new());
+        let first = synthesizer.synthesize(&req).await.unwrap();
+        let live = synthesizer.synthesize_live(&req).await.unwrap();
+        assert!(live.from_cache);
+        assert_eq!(live.content_hash, first.content_hash);
+        assert_eq!(backend.calls(), 1);
+
+        // 配了 16 步：现场合成的单独一条，第二次命中它自己的缓存
+        let (backend, cache, synthesizer) = setup(FakeBackend::new());
+        let synthesizer = synthesizer.with_live_diffusion_steps(Some(16));
+        assert_eq!(synthesizer.live_diffusion_steps(), Some(16));
+        synthesizer.synthesize(&req).await.unwrap();
+        let live = synthesizer.synthesize_live(&req).await.unwrap();
+        assert!(!live.from_cache);
+        assert_eq!(live.content_hash, sixteen.content_hash());
+        assert_eq!(backend.calls(), 2);
+        assert_eq!(cache.len(), 2);
+        assert!(synthesizer.synthesize_live(&req).await.unwrap().from_cache);
+
+        // 请求自己指定了步数的，不被配置盖掉
+        let mut twelve = req.clone();
+        twelve.diffusion_steps = Some(12);
+        let live = synthesizer.synthesize_live(&twelve).await.unwrap();
+        assert_eq!(live.content_hash, twelve.content_hash());
+
+        // Breeze 没有这一步：配了也还是同一条缓存
+        let breeze = request(EngineId::Breeze2, "好的，这部分我了解了。");
+        let first = synthesizer.synthesize(&breeze).await.unwrap();
+        let live = synthesizer.synthesize_live(&breeze).await.unwrap();
+        assert!(live.from_cache);
+        assert_eq!(live.content_hash, first.content_hash);
     }
 
     #[tokio::test]

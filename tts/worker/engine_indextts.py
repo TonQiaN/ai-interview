@@ -31,6 +31,9 @@ EMOTIONS = {"happy", "sad", "angry", "afraid", "disgusted", "melancholic", "surp
 SAMPLE_RATE = 22_050
 # 段和段之间垫的静音，和研究时用的一样
 INTERVAL_SILENCE_MS = 200
+# 声学生成（flow matching）默认走几步，和研究时用的一样。请求里可以给别的步数：
+# 步数少了合成快（每段的固定开销主要花在这一步），音质会有变化，见 tts/worker/README.md
+DIFFUSION_STEPS = 25
 # 适配代码打印出这些话时，参考编码器用的是随机权重，输出不能要。
 # 它只在第一次处理参考录音时打印一次，之后不会再提醒，所以一旦见到就一直记着。
 BROKEN_REFERENCE_ENCODER = ("Failed to load semantic_codec weights", "Failed to load CAMPPlus")
@@ -181,7 +184,9 @@ class IndexTtsEngine:
     def load(self) -> None:
         _Shared.use(self.name, self.model_dir, self.memory_limit_gb, self.cache_limit_gb)
 
-    def synthesize(self, *, text, language, reference_path, emotion, emotion_strength, seed, **_ignored):
+    def synthesize(
+        self, *, text, language, reference_path, emotion, emotion_strength, seed, diffusion_steps=None, **_ignored
+    ):
         if reference_path is None:
             raise BadRequest("IndexTTS 只能克隆，必须给参考录音（voice.kind 要是 clone）")
         if emotion in (None, "", "neutral"):
@@ -197,7 +202,7 @@ class IndexTtsEngine:
         options = GenerateOptions(
             max_tokens=self.max_tokens,
             max_text_tokens=self.max_text_tokens,
-            diffusion_steps=25,
+            diffusion_steps=diffusion_steps or DIFFUSION_STEPS,
             interval_silence=INTERVAL_SILENCE_MS,
             emotion=emotion_weights,
             emo_alpha=emotion_strength,

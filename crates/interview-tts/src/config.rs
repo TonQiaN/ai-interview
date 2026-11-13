@@ -10,7 +10,8 @@ use interview_audio::Audio;
 use crate::backend::{EngineStatus, TtsBackend, TtsError};
 use crate::engine::EngineId;
 use crate::fake::FakeBackend;
-use crate::request::SynthesisRequest;
+use crate::request::{DIFFUSION_STEPS_MAX, DIFFUSION_STEPS_MIN, SynthesisRequest};
+use crate::synthesizer::Synthesizer;
 use crate::worker::WorkerBackend;
 
 /// 用哪个合成后端：`fake`（默认）或 `worker`。
@@ -19,6 +20,9 @@ pub const BACKEND_ENV_VAR: &str = "AI_INTERVIEW_TTS_BACKEND";
 pub const WORKER_URLS_ENV_VAR: &str = "AI_INTERVIEW_TTS_WORKER_URLS";
 /// worker 那边设的令牌。worker 和后端不在同一台机器上时必填。
 pub const WORKER_TOKEN_ENV_VAR: &str = "AI_INTERVIEW_TTS_WORKER_TOKEN";
+/// 实时对话里现场合成的句子，声学生成走几步。不设就和预先合成的一样（引擎默认的 25 步）。
+/// 只有 IndexTTS 用它；步数少了合成快，音质会有变化，实测见 `tts/worker/README.md`。
+pub const LIVE_DIFFUSION_STEPS_ENV_VAR: &str = "AI_INTERVIEW_TTS_LIVE_DIFFUSION_STEPS";
 
 /// 合成后端的种类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -64,6 +68,7 @@ pub struct TtsConfig {
     pub backend: TtsBackendKind,
     pub worker_urls: Vec<String>,
     pub worker_token: Option<String>,
+    pub live_diffusion_steps: Option<u32>,
 }
 
 impl fmt::Debug for TtsConfig {
@@ -73,12 +78,14 @@ impl fmt::Debug for TtsConfig {
             .field("backend", &self.backend)
             .field("worker_urls", &self.worker_urls)
             .field("has_worker_token", &self.worker_token.is_some())
+            .field("live_diffusion_steps", &self.live_diffusion_steps)
             .finish()
     }
 }
 
 impl TtsConfig {
-    /// 从环境变量读：[`BACKEND_ENV_VAR`]、[`WORKER_URLS_ENV_VAR`]、[`WORKER_TOKEN_ENV_VAR`]。
+    /// 从环境变量读：[`BACKEND_ENV_VAR`]、[`WORKER_URLS_ENV_VAR`]、[`WORKER_TOKEN_ENV_VAR`]、
+    /// [`LIVE_DIFFUSION_STEPS_ENV_VAR`]。
     pub fn from_env() -> Result<Self, TtsConfigError> {
         Self::from_lookup(|name| std::env::var(name).ok())
     }
@@ -104,10 +111,25 @@ impl TtsConfig {
                     .collect()
             })
             .unwrap_or_default();
+        let live_diffusion_steps = match get(LIVE_DIFFUSION_STEPS_ENV_VAR) {
+            Some(value) => Some(
+                value
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|steps| (DIFFUSION_STEPS_MIN..=DIFFUSION_STEPS_MAX).contains(steps))
+                    .ok_or_else(|| {
+                        TtsConfigError(format!(
+                            "{LIVE_DIFFUSION_STEPS_ENV_VAR} 要是 {DIFFUSION_STEPS_MIN} 到 {DIFFUSION_STEPS_MAX} 之间的整数，现在是 {value:?}"
+                        ))
+                    })?,
+            ),
+            None => None,
+        };
         Ok(Self {
             backend,
             worker_urls,
             worker_token: get(WORKER_TOKEN_ENV_VAR),
+            live_diffusion_steps,
         })
     }
 
@@ -129,16 +151,30 @@ impl TtsConfig {
     }
 }
 
-/// 按环境变量把合成后端建出来，服务进程启动时用。
+/// 按环境变量把合成后端建出来。
 ///
 /// 配置写错时不退回假后端（那样面试里放出来的会是测试音，而且没人发现），
 /// 而是给一个所有引擎都不可用的后端：服务照常启动，系统状态里能看到原因，合成请求明确失败。
 pub fn backend_from_env() -> Arc<dyn TtsBackend> {
-    match TtsConfig::from_env().and_then(|config| config.build()) {
-        Ok(backend) => backend,
+    synthesizer_parts(TtsConfig::from_env()).0
+}
+
+/// 按环境变量把合成入口建出来，服务进程启动时用。比 [`backend_from_env`] 多带上
+/// [`LIVE_DIFFUSION_STEPS_ENV_VAR`]。配置写错时和 [`backend_from_env`] 一样处理。缓存之后再接。
+pub fn synthesizer_from_env() -> Synthesizer {
+    let (backend, live_diffusion_steps) = synthesizer_parts(TtsConfig::from_env());
+    Synthesizer::new(backend).with_live_diffusion_steps(live_diffusion_steps)
+}
+
+fn synthesizer_parts(
+    config: Result<TtsConfig, TtsConfigError>,
+) -> (Arc<dyn TtsBackend>, Option<u32>) {
+    let built = config.and_then(|config| Ok((config.build()?, config.live_diffusion_steps)));
+    match built {
+        Ok(parts) => parts,
         Err(error) => {
             tracing::error!(reason = %error, "语音合成的配置不对，合成暂时不可用");
-            Arc::new(MisconfiguredBackend { reason: error.0 })
+            (Arc::new(MisconfiguredBackend { reason: error.0 }), None)
         }
     }
 }
@@ -231,6 +267,32 @@ mod tests {
             panic!("地址不带 http 时应该报错");
         };
         assert!(error.to_string().contains(WORKER_URLS_ENV_VAR), "{error}");
+    }
+
+    #[test]
+    fn live_diffusion_steps_are_optional_and_checked() {
+        assert_eq!(config(&[]).unwrap().live_diffusion_steps, None);
+        let set = config(&[(LIVE_DIFFUSION_STEPS_ENV_VAR, " 16 ")]).unwrap();
+        assert_eq!(set.live_diffusion_steps, Some(16));
+        for bad in ["0", "3", "51", "十六", "16.5", "-1"] {
+            let error = config(&[(LIVE_DIFFUSION_STEPS_ENV_VAR, bad)]).unwrap_err();
+            assert!(
+                error.to_string().contains(LIVE_DIFFUSION_STEPS_ENV_VAR),
+                "{bad}: {error}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_bad_step_count_makes_synthesis_fail_clearly() {
+        // 步数写错时不能悄悄按默认的来：和后端配置写错一样，合成明确失败
+        let (backend, steps) = synthesizer_parts(config(&[(LIVE_DIFFUSION_STEPS_ENV_VAR, "99")]));
+        assert_eq!(backend.name(), "misconfigured");
+        assert_eq!(steps, None);
+
+        let (backend, steps) = synthesizer_parts(config(&[(LIVE_DIFFUSION_STEPS_ENV_VAR, "12")]));
+        assert_eq!(backend.name(), "fake");
+        assert_eq!(steps, Some(12));
     }
 
     #[tokio::test]
