@@ -453,6 +453,145 @@ impl InterviewConfig {
     pub fn time_budget(&self) -> TimeBudget {
         TimeBudget::for_config(self)
     }
+
+    /// 配置从 `self` 改成 `new` 之后，已经出好的题目还能不能用。
+    ///
+    /// 能用的话不用重新出题，也不用重新合成语音。存新配置之前对已有的计划调一次
+    /// [`InterviewPlan::conform_to`](crate::InterviewPlan::conform_to)，它会把计划收拾到符合新配置。
+    pub fn plan_still_valid(&self, new: &Self) -> bool {
+        self.replan_reasons(new).is_empty()
+    }
+
+    /// 配置从 `self` 改成 `new` 之后，是哪些改动让已经出好的题目不能再用。
+    ///
+    /// 返回这些字段的名字，写法和 JSON 里的路径一样（例如 `interviewer.name`）。空的就是题目还能用。
+    ///
+    /// 字段分三类：
+    ///
+    /// - 只在面试进行时起作用的（模式、最短回答时间、单题最长时间、提前结束、两个思考模式）：
+    ///   怎么改题目都能用。出题时的思考模式只决定当时怎么出，改了不会让出好的题变得不对。
+    /// - 写进了题目和面试官的话里的（时长、轮次、语言、资历、面试官、公司介绍、HR 的各种要求、
+    ///   考察维度、是否核实简历、是否留提问环节）：一改就要重新出题。
+    /// - 只通过题数起作用的（指定题数、静音秒数、追问）：算出来的主问题数或者备用题数变了才要重出。
+    ///   追问另外还有一条：允许的追问次数变多了要重出，因为多出来的追问得提前写好；变少了不用。
+    pub fn replan_reasons(&self, new: &Self) -> Vec<&'static str> {
+        // 每个字段都在这里写出来，不用 `..`。以后加了新字段，这里不决定它算哪一类就编译不过。
+        let Self {
+            // 只在面试进行时起作用
+            mode: _,
+            early_stop:
+                EarlyStop {
+                    enabled: _,
+                    min_questions: _,
+                    poor_streak: _,
+                },
+            planning_thinking: _,
+            live_thinking: _,
+            // 静音秒数算在每道题的固定开销里，会影响题数；最长时间变小时由 conform_to 把超出的压下来
+            answer:
+                AnswerTiming {
+                    silence_sec,
+                    max_sec: _,
+                    min_sec: _,
+                },
+            // 写进了题目和面试官的话里
+            target_duration_minutes,
+            stage,
+            process_note,
+            language,
+            seniority,
+            interviewer: Interviewer { name, style },
+            company_intro,
+            focus_instructions,
+            must_ask_questions,
+            avoid_topics,
+            competencies,
+            screening_checks,
+            prior_notes,
+            verify_resume,
+            candidate_questions,
+            // 只通过题数起作用
+            question_count,
+            follow_ups:
+                FollowUps {
+                    enabled,
+                    max_per_question,
+                },
+        } = self;
+
+        let mut reasons = Vec::new();
+        let mut check = |field: &'static str, changed: bool| {
+            if changed {
+                reasons.push(field);
+            }
+        };
+
+        check(
+            "target_duration_minutes",
+            *target_duration_minutes != new.target_duration_minutes,
+        );
+        check("stage", *stage != new.stage);
+        check("process_note", *process_note != new.process_note);
+        check("language", *language != new.language);
+        check("seniority", *seniority != new.seniority);
+        check("interviewer.name", *name != new.interviewer.name);
+        check("interviewer.style", *style != new.interviewer.style);
+        check("company_intro", *company_intro != new.company_intro);
+        check(
+            "focus_instructions",
+            *focus_instructions != new.focus_instructions,
+        );
+        check(
+            "must_ask_questions",
+            *must_ask_questions != new.must_ask_questions,
+        );
+        check("avoid_topics", *avoid_topics != new.avoid_topics);
+        check("competencies", *competencies != new.competencies);
+        check(
+            "screening_checks",
+            *screening_checks != new.screening_checks,
+        );
+        check("prior_notes", *prior_notes != new.prior_notes);
+        check("verify_resume", *verify_resume != new.verify_resume);
+        check(
+            "candidate_questions",
+            *candidate_questions != new.candidate_questions,
+        );
+
+        // 只换掉影响题数的这三项，看题数变不变。上面那些字段也会影响题数，但它们本身已经算进原因了。
+        let probe = Self {
+            question_count: new.question_count,
+            answer: new.answer,
+            follow_ups: new.follow_ups,
+            ..self.clone()
+        };
+        let (before, after) = (self.time_budget(), probe.time_budget());
+        let counts_changed = before.question_count != after.question_count
+            || before.reserve_question_count != after.reserve_question_count;
+        let allowed = |enabled: bool, max: u32| if enabled { max } else { 0 };
+        let more_follow_ups = allowed(new.follow_ups.enabled, new.follow_ups.max_per_question)
+            > allowed(*enabled, *max_per_question);
+
+        check(
+            "question_count",
+            counts_changed && *question_count != new.question_count,
+        );
+        check(
+            "answer.silence_sec",
+            counts_changed && *silence_sec != new.answer.silence_sec,
+        );
+        check(
+            "follow_ups.enabled",
+            (counts_changed || more_follow_ups) && *enabled != new.follow_ups.enabled,
+        );
+        check(
+            "follow_ups.max_per_question",
+            (counts_changed || more_follow_ups)
+                && *max_per_question != new.follow_ups.max_per_question,
+        );
+
+        reasons
+    }
 }
 
 fn strs(items: &[String]) -> Vec<&str> {
@@ -624,6 +763,237 @@ mod tests {
                 "缺少 {expected}：{fields:?}"
             );
         }
+    }
+
+    /// 每个配置字段单独改一下，题目还能不能用。第三项是 `true` 表示要重新出题。
+    ///
+    /// 加了新的配置字段要在这里补一行，`every_config_field_is_classified` 会检查有没有漏。
+    type Case = (&'static str, fn(&mut InterviewConfig), bool);
+
+    fn single_field_cases() -> Vec<Case> {
+        vec![
+            // 只在面试进行时起作用：题目还能用
+            ("mode", |c| c.mode = InterviewMode::Conversational, false),
+            ("answer.max_sec", |c| c.answer.max_sec = 120, false),
+            ("answer.min_sec", |c| c.answer.min_sec = 5, false),
+            (
+                "early_stop.enabled",
+                |c| c.early_stop.enabled = false,
+                false,
+            ),
+            (
+                "early_stop.min_questions",
+                |c| c.early_stop.min_questions = 5,
+                false,
+            ),
+            (
+                "early_stop.poor_streak",
+                |c| c.early_stop.poor_streak = 4,
+                false,
+            ),
+            (
+                "planning_thinking",
+                |c| c.planning_thinking = Thinking::on(Effort::Max),
+                false,
+            ),
+            (
+                "live_thinking",
+                |c| c.live_thinking = Thinking::on(Effort::Low),
+                false,
+            ),
+            // 静音秒数小幅调整不改变题数：题目还能用
+            ("answer.silence_sec", |c| c.answer.silence_sec = 8, false),
+            // 写进了题目和面试官的话里：要重新出题
+            (
+                "target_duration_minutes",
+                |c| c.target_duration_minutes = 21,
+                true,
+            ),
+            ("stage", |c| c.stage = InterviewStage::InDepth, true),
+            (
+                "process_note",
+                |c| c.process_note = "这是终面。".to_owned(),
+                true,
+            ),
+            ("language", |c| c.language = Language::En, true),
+            ("seniority", |c| c.seniority = Seniority::Senior, true),
+            (
+                "interviewer.name",
+                |c| c.interviewer.name = "小林".to_owned(),
+                true,
+            ),
+            (
+                "interviewer.style",
+                |c| c.interviewer.style = InterviewerStyle::Warm,
+                true,
+            ),
+            (
+                "company_intro",
+                |c| c.company_intro = "我们做企业软件。".to_owned(),
+                true,
+            ),
+            (
+                "focus_instructions",
+                |c| c.focus_instructions = vec!["出一道逻辑推理题".to_owned()],
+                true,
+            ),
+            (
+                "must_ask_questions",
+                |c| c.must_ask_questions = vec!["你为什么想换工作？".to_owned()],
+                true,
+            ),
+            (
+                "avoid_topics",
+                |c| c.avoid_topics = vec!["上一家公司的薪资".to_owned()],
+                true,
+            ),
+            (
+                "competencies",
+                |c| {
+                    c.competencies = vec![Competency {
+                        name: "沟通表达".to_owned(),
+                        description: String::new(),
+                        weight: 4,
+                    }];
+                },
+                true,
+            ),
+            (
+                "screening_checks",
+                |c| c.screening_checks = vec!["最快到岗时间".to_owned()],
+                true,
+            ),
+            (
+                "prior_notes",
+                |c| c.prior_notes = "电话里说过能接受出差。".to_owned(),
+                true,
+            ),
+            ("verify_resume", |c| c.verify_resume = false, true),
+            (
+                "candidate_questions",
+                |c| c.candidate_questions = CandidateQuestions::Skip,
+                true,
+            ),
+            // 只通过题数起作用：这几个改法都让题数或者追问的数量变了
+            ("question_count", |c| c.question_count = Some(9), true),
+            ("follow_ups.enabled", |c| c.follow_ups.enabled = false, true),
+            (
+                "follow_ups.max_per_question",
+                |c| c.follow_ups.max_per_question = 2,
+                true,
+            ),
+        ]
+    }
+
+    #[test]
+    fn each_field_either_keeps_the_plan_or_forces_a_replan() {
+        let old = InterviewConfig::default();
+        assert!(old.plan_still_valid(&old));
+        for (field, change, replan) in single_field_cases() {
+            let mut new = old.clone();
+            change(&mut new);
+            assert_ne!(new, old, "{field} 这一行没有真的改到配置");
+            let expected = if replan { vec![field] } else { Vec::new() };
+            assert_eq!(old.replan_reasons(&new), expected, "{field}");
+            assert_eq!(old.plan_still_valid(&new), !replan, "{field}");
+        }
+    }
+
+    /// 把配置的 JSON 摊平成一个个字段路径，例如 `answer.silence_sec`。
+    fn leaf_paths(value: &serde_json::Value, prefix: &str, paths: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, inner) in map {
+                    let path = if prefix.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{prefix}.{key}")
+                    };
+                    leaf_paths(inner, &path, paths);
+                }
+            }
+            _ => paths.push(prefix.to_owned()),
+        }
+    }
+
+    #[test]
+    fn every_config_field_is_classified() {
+        let mut paths = Vec::new();
+        let json = serde_json::to_value(InterviewConfig::default()).unwrap();
+        leaf_paths(&json, "", &mut paths);
+        assert!(paths.len() > 20, "{paths:?}");
+        let cases = single_field_cases();
+        for path in paths {
+            assert!(
+                cases
+                    .iter()
+                    .any(|(field, _, _)| path == *field || path.starts_with(&format!("{field}."))),
+                "配置字段 {path} 没有写明改了之后题目还能不能用，在 single_field_cases 里补一行"
+            );
+        }
+    }
+
+    #[test]
+    fn count_related_fields_only_matter_when_the_counts_change() {
+        let old = InterviewConfig::default();
+        let budget = old.time_budget();
+
+        // 静音秒数调得很大，每道题的固定开销变多，题数变少
+        let mut new = old.clone();
+        new.answer.silence_sec = 30;
+        assert!(new.time_budget().question_count < budget.question_count);
+        assert_eq!(old.replan_reasons(&new), ["answer.silence_sec"]);
+
+        // 把题数固定成现在算出来的数：主问题数没变，但不再出备用题
+        let mut new = old.clone();
+        new.question_count = Some(budget.question_count);
+        assert_eq!(old.replan_reasons(&new), ["question_count"]);
+
+        // 固定题数之后再调静音秒数，题数不会变
+        let pinned = new;
+        let mut new = pinned.clone();
+        new.answer.silence_sec = 30;
+        assert!(pinned.plan_still_valid(&new));
+    }
+
+    #[test]
+    fn fewer_follow_ups_keep_the_plan_and_more_follow_ups_do_not() {
+        let mut two = InterviewConfig::default();
+        two.follow_ups.max_per_question = 2;
+        let mut one = two.clone();
+        one.follow_ups.max_per_question = 1;
+        let mut three = two.clone();
+        three.follow_ups.max_per_question = 3;
+
+        assert!(two.plan_still_valid(&one));
+        assert_eq!(two.replan_reasons(&three), ["follow_ups.max_per_question"]);
+
+        // 关着的时候改上限没有影响；打开就要补写追问
+        let mut off = two.clone();
+        off.follow_ups.enabled = false;
+        let mut off_three = off.clone();
+        off_three.follow_ups.max_per_question = 3;
+        assert!(off.plan_still_valid(&off_three));
+        assert_eq!(off.replan_reasons(&two), ["follow_ups.enabled"]);
+    }
+
+    #[test]
+    fn replan_reasons_list_every_change_that_matters() {
+        let old = InterviewConfig::default();
+        let mut new = old.clone();
+        new.live_thinking = Thinking::on(Effort::Low);
+        new.answer.silence_sec = 8;
+        new.language = Language::En;
+        new.interviewer.name = "小林".to_owned();
+        new.follow_ups.max_per_question = 2;
+        assert_eq!(
+            old.replan_reasons(&new),
+            [
+                "language",
+                "interviewer.name",
+                "follow_ups.max_per_question"
+            ]
+        );
     }
 
     #[test]
