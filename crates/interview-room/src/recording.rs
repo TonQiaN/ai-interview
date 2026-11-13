@@ -284,14 +284,31 @@ async fn put_chunk(
 
     let segment = find_segment(&deps, &access, track, segment_id).await?;
     let seq_i32 = i32::try_from(seq).map_err(|_| ApiError::invalid_field("seq", "分片序号太大"))?;
-    let exists: Option<(i32,)> = sqlx::query_as(
-        "SELECT seq FROM interview_recording_chunks WHERE recording_id = $1 AND seq = $2",
+    // 页面重试可能和上一次请求撞在一起。同一个分片一次只让一个请求往下走，
+    // 后到的等前一个写完再看：已经有了就直接算成功，登记的内容和存下来的文件不会对不上
+    let mut tx = deps.ctx.db.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("recording-chunk:{}:{seq}", segment.id))
+        .execute(&mut *tx)
+        .await?;
+    let exists: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT sha256 FROM interview_recording_chunks WHERE recording_id = $1 AND seq = $2",
     )
     .bind(segment.id)
     .bind(seq_i32)
-    .fetch_optional(&deps.ctx.db)
+    .fetch_optional(&mut *tx)
     .await?;
-    if exists.is_some() {
+    if let Some((stored,)) = exists {
+        // 页面重传的应该是同一份字节。内容不一样说明页面那边出了问题：保留先到的那一份，
+        // 照样告诉页面收到了（它拿到别的回答也没有办法补救），在日志里留一条，方便以后查
+        if stored.is_some_and(|stored| stored != digest) {
+            tracing::warn!(
+                interview_id = %access.interview_id,
+                recording_id = %segment.id,
+                seq,
+                "同一个分片第二次传来的内容和第一次不一样，保留了第一次的"
+            );
+        }
         return Ok(StatusCode::NO_CONTENT);
     }
     if segment.status != RecordingStatus::Uploading {
@@ -305,7 +322,7 @@ async fn put_chunk(
           WHERE r.interview_id = $1",
     )
     .bind(access.interview_id)
-    .fetch_one(&deps.ctx.db)
+    .fetch_one(&mut *tx)
     .await?;
     let size = i64::try_from(body.len()).unwrap_or(i64::MAX);
     if stored.saturating_add(size) > MAX_INTERVIEW_BYTES {
@@ -317,16 +334,16 @@ async fn put_chunk(
     deps.ctx.blobs.put(&key, body.clone()).await?;
     sqlx::query(
         "INSERT INTO interview_recording_chunks (recording_id, seq, blob_key, size_bytes, sha256)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (recording_id, seq) DO NOTHING",
+         VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(segment.id)
     .bind(seq_i32)
     .bind(&key)
     .bind(size)
     .bind(&digest)
-    .execute(&deps.ctx.db)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     // 面试还在进行时，顺手把这一块交给现场转写。结束之后传上来的是收尾的分片，不用再转
     if let Some(live) = &deps.live
         && access.status == InterviewStatus::InProgress

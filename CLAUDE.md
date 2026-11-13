@@ -21,7 +21,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                 # 全部测试
 cargo test -p interview-tts            # 只测一个 crate
 cargo test -p interview-tts <测试名>   # 只跑一个测试
-cargo test -p interview-server --test e2e   # 端到端：整个应用装起来，从 HR 登录走到出报告（外部依赖是假的；要 ffmpeg，没装就不测录像那一段）
+cargo test -p interview-server --test e2e   # 端到端：整个应用装起来，从 HR 登录走到出报告，逐题和实时对话各一场（外部依赖是假的；要 ffmpeg，没装就不测录像那一段和实时对话）
 cargo run -p interview-cli -- tts engines
 cargo run -p interview-server -- openapi   # 打印 OpenAPI 文档，不用数据库
 scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息不进 Git
@@ -73,6 +73,8 @@ cargo test -p interview-server --features sherpa --test live -- --ignored --noca
 ```
 
 它会打印题目、每一步等了多久、转写出来的回答、报告结论和大模型的花费。示例录音的内容和题目无关，模型听到三题答非所问就会提前结束面试，这是正常的。在 Mac 上再设 `AI_INTERVIEW_TTS_BACKEND=worker`，就连真的语音合成一起跑。
+
+这个测试还认几个变量：`AI_INTERVIEW_LIVE_MODE=conversational` 跑实时对话；`AI_INTERVIEW_LIVE_VOICE_WAV` 指一段参考录音，面试官就用克隆的声音（引擎读 `AI_INTERVIEW_TTS_ENGINE`，BreezeTTS2 还要用 `AI_INTERVIEW_LIVE_VOICE_TEXT_FILE` 给逐字稿），不设是兜底的设计音色；`AI_INTERVIEW_LIVE_QUESTIONS` 改题目数。
 
 改了模块之间的约定（任务名和内容、面试状态怎么流转、别的模块要读的表），跑一遍端到端测试 `crates/interview-server/tests/e2e.rs`，流程变了就一起改它。两个测试共用的部分在 `crates/interview-server/tests/common/`。
 

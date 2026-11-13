@@ -19,6 +19,15 @@
 //! 就提前结束，所以这一场通常问不完；录像的画面是测试图案，画面检查会说「画面里没有人」。想换成自己录的回答，把 `AI_INTERVIEW_LIVE_ANSWER_WAVS`
 //! 指到一个放 WAV 的目录。`AI_INTERVIEW_LIVE_QUESTIONS` 可以改题目数。
 //!
+//! 面试官的声音：默认是兜底的设计音色（BreezeTTS2，不要参考录音）。把 `AI_INTERVIEW_LIVE_VOICE_WAV`
+//! 指到一段参考录音，测试就照 HR 在后台的做法建一个克隆音色、传上录音、设成默认，
+//! 引擎读 `AI_INTERVIEW_TTS_ENGINE`（默认 IndexTTS 2）；逐字稿放在文件里，用
+//! `AI_INTERVIEW_LIVE_VOICE_TEXT_FILE` 指过去，可以不给。参考录音是真人的声音，只留在 Mac 上：
+//! 测试只打印引擎和录音的时长。
+//!
+//! `AI_INTERVIEW_LIVE_MODE=conversational` 跑实时对话：面试官现场接话，「等下一步」的时间里
+//! 包含现场转写、模型想好怎么接、合成第一句。
+//!
 //! 岗位和简历是合成的。
 
 use std::path::{Path, PathBuf};
@@ -31,6 +40,7 @@ use interview_platform::db::MIGRATOR;
 use interview_platform::testing::TestRequest;
 use interview_server::Shared;
 use interview_stt::{MODEL_DIR_ENV_VAR, TranscribeOptions};
+use interview_tts::{ENGINE_ENV_VAR, EngineId};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -40,6 +50,9 @@ use common::{World, ffmpeg};
 
 const ANSWER_WAVS_ENV_VAR: &str = "AI_INTERVIEW_LIVE_ANSWER_WAVS";
 const QUESTIONS_ENV_VAR: &str = "AI_INTERVIEW_LIVE_QUESTIONS";
+const VOICE_WAV_ENV_VAR: &str = "AI_INTERVIEW_LIVE_VOICE_WAV";
+const VOICE_TEXT_FILE_ENV_VAR: &str = "AI_INTERVIEW_LIVE_VOICE_TEXT_FILE";
+const MODE_ENV_VAR: &str = "AI_INTERVIEW_LIVE_MODE";
 
 const POSITION: &str = "负责订单和支付系统的后端开发：设计接口和数据模型，保证高峰期的稳定性，\
                         排查线上问题，和产品、前端、测试一起把需求做完。";
@@ -305,6 +318,81 @@ fn answer_clips() -> Vec<Audio> {
         .collect()
 }
 
+/// 设了 `AI_INTERVIEW_LIVE_VOICE_WAV` 就建一个克隆音色并设成默认，之后建的面试都用它。
+/// 走的是 HR 在后台用的那几个接口。
+///
+/// 参考录音是真人的声音：这里不打印路径、逐字稿和接口返回的内容，只打印引擎和时长。
+async fn clone_voice(w: &World) {
+    let Some(wav) = std::env::var_os(VOICE_WAV_ENV_VAR) else {
+        println!("\n== 面试官的声音：兜底的设计音色（没设 {VOICE_WAV_ENV_VAR}）==");
+        return;
+    };
+    let engine =
+        std::env::var(ENGINE_ENV_VAR).unwrap_or_else(|_| EngineId::DEFAULT.as_str().to_owned());
+    let recording = std::fs::read(&wav)
+        .unwrap_or_else(|error| panic!("读不了 {VOICE_WAV_ENV_VAR} 指的文件：{error}"));
+    let transcript = std::env::var_os(VOICE_TEXT_FILE_ENV_VAR).map(|path| {
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("读不了 {VOICE_TEXT_FILE_ENV_VAR} 指的文件：{error}"))
+            .trim()
+            .to_owned()
+    });
+    let spec = engine
+        .parse::<EngineId>()
+        .unwrap_or_else(|_| panic!("{ENGINE_ENV_VAR} 的值不是认识的引擎：{engine}"))
+        .spec();
+    assert!(
+        transcript.is_some() || !spec.requires_reference_transcript,
+        "{engine} 克隆声音必须带参考录音的逐字稿：把它存成文件，用 {VOICE_TEXT_FILE_ENV_VAR} 指过去"
+    );
+
+    let created = w
+        .hr(TestRequest::post("/api/v1/speech/voices").json(&json!({
+            "name": "实跑用的克隆音色",
+            "engine": engine,
+            "kind": "cloned",
+            "reference_transcript": transcript,
+        })))
+        .await;
+    assert_eq!(
+        created.status,
+        StatusCode::CREATED,
+        "建克隆音色失败（引擎 {engine}）"
+    );
+    let voice_uri = format!(
+        "/api/v1/speech/voices/{}",
+        created.json()["id"].as_str().unwrap()
+    );
+    let uploaded = w
+        .hr(TestRequest::put(format!("{voice_uri}/reference"))
+            .bytes("application/octet-stream", recording))
+        .await;
+    assert_eq!(
+        uploaded.status,
+        StatusCode::OK,
+        "上传参考录音失败：要一段 2 到 30 秒、能读出声音的录音"
+    );
+    let default = w
+        .hr(TestRequest::patch(&voice_uri).json(&json!({ "is_default": true })))
+        .await;
+    let voice = default.json();
+    assert_eq!(
+        (default.status, &voice["ready"]),
+        (StatusCode::OK, &json!(true)),
+        "克隆音色设不成默认：{}",
+        voice["not_ready_reason"]
+    );
+    println!(
+        "\n== 面试官的声音：{engine} 克隆，参考录音 {:.1} 秒，{} ==",
+        voice["reference_duration_ms"].as_f64().unwrap_or(0.0) / 1000.0,
+        if transcript.is_some() {
+            "带逐字稿"
+        } else {
+            "不带逐字稿"
+        }
+    );
+}
+
 fn subdirs(dir: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(dir)
         .unwrap_or_else(|error| panic!("读不了 {}：{error}", dir.display()))
@@ -382,6 +470,7 @@ async fn a_whole_interview_with_the_real_model_and_real_speech_recognition(pool:
     }
 
     let w = World::new(pool, shared).await;
+    clone_voice(&w).await;
 
     // ── HR：建岗位和候选人，上传简历 ──
     let phase = Instant::now();
@@ -423,6 +512,9 @@ async fn a_whole_interview_with_the_real_model_and_real_speech_recognition(pool:
                 .unwrap_or_else(|_| panic!("{QUESTIONS_ENV_VAR} 要是个数字"))
         );
     }
+    if let Ok(mode) = std::env::var(MODE_ENV_VAR) {
+        config["mode"] = json!(mode);
+    }
     let interview = w
         .hr_post(
             "/api/v1/interviews",
@@ -443,22 +535,35 @@ async fn a_whole_interview_with_the_real_model_and_real_speech_recognition(pool:
     assert_eq!(detail["status"], "ready", "{detail}");
     assert_eq!(detail["synth"]["failed"], 0, "{detail}");
     let utterances = w.hr_get(&format!("{uri}/utterances")).await;
+    let spoken_ms: i64 = utterances
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|utterance| utterance["audio_duration_ms"].as_i64())
+        .sum();
     println!(
-        "\n== 出题和合成：{:.1} 秒，{} 句话 ==",
+        "\n== 出题和合成：{:.1} 秒，{} 句话，语音共 {:.1} 秒 ==",
         phase.elapsed().as_secs_f64(),
-        utterances.as_array().map_or(0, Vec::len)
+        utterances.as_array().map_or(0, Vec::len),
+        spoken_ms as f64 / 1000.0
     );
     for utterance in utterances.as_array().into_iter().flatten() {
         println!(
-            "  {}：{}",
+            "  {}（{}，{:.1} 秒）：{}",
             utterance["key"].as_str().unwrap_or("?"),
+            utterance["tts_engine"].as_str().unwrap_or("?"),
+            utterance["audio_duration_ms"].as_f64().unwrap_or(0.0) / 1000.0,
             utterance["text"].as_str().unwrap_or("")
         );
     }
 
     // ── 候选人：打开链接，同意，开始 ──
     let token = w.invite(&uri).await;
-    w.open_and_consent(&token).await;
+    let session = w.open_and_consent(&token).await;
+    println!(
+        "\n== 面试方式：{} ==",
+        session["mode"].as_str().unwrap_or("?")
+    );
     let response = w.room(&token, "start", json!({})).await;
     assert_eq!(response.status, StatusCode::OK, "{}", response.text());
     let mut step = response.json();
@@ -509,7 +614,15 @@ async fn a_whole_interview_with_the_real_model_and_real_speech_recognition(pool:
             "replays": 0,
         });
         let asked = Instant::now();
-        let response = w.room(&token, "advance", report).await;
+        // 实时对话里面试官一时没想好，服务端会回 503 让页面过会儿再报一次；这里和页面一样重试
+        let mut retries = 0;
+        let response = loop {
+            let response = w.room(&token, "advance", report.clone()).await;
+            if response.status != StatusCode::SERVICE_UNAVAILABLE || retries == 3 {
+                break response;
+            }
+            retries += 1;
+        };
         assert_eq!(response.status, StatusCode::OK, "{}", response.text());
         println!(
             "  {key}：{}{}（等下一步 {:.1} 秒）",
@@ -521,6 +634,9 @@ async fn a_whole_interview_with_the_real_model_and_real_speech_recognition(pool:
             },
             asked.elapsed().as_secs_f64()
         );
+        if retries > 0 {
+            println!("    （服务端让重试了 {retries} 次）");
+        }
         steps.push((key, answers.then_some(slot.clip)));
         step = response.json();
     };
@@ -529,9 +645,13 @@ async fn a_whole_interview_with_the_real_model_and_real_speech_recognition(pool:
         steps.len(),
         phase.elapsed().as_secs_f64()
     );
-    // 示例录音的内容和题目没有关系：模型连着几题判断答非所问，就会提前结束
+    // 示例录音的内容和题目没有关系：模型连着几题判断答非所问，就会提前结束。
+    // 实时对话里模型有时直接选「结束」，记下来的原因是 candidate_request
     assert!(
-        matches!(reason.as_str(), "completed" | "poor_answers"),
+        matches!(
+            reason.as_str(),
+            "completed" | "poor_answers" | "candidate_request"
+        ),
         "{reason}：{steps:?}"
     );
     assert_eq!(w.hr_get(&uri).await["status"], "completed");

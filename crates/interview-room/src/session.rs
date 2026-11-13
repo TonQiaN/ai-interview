@@ -1,6 +1,8 @@
 //! 候选人打开链接后、开始面试前的接口：会话信息、同意事项、设备检测结果。
 
-use axum::extract::State;
+use axum::body::Bytes;
+use axum::extract::rejection::BytesRejection;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use chrono::{DateTime, Utc};
 use interview_engine::config::InterviewConfig;
@@ -25,7 +27,15 @@ pub(crate) fn router() -> OpenApiRouter<Deps> {
         .routes(routes!(get_session))
         .routes(routes!(post_consent))
         .routes(routes!(post_device_check))
+        .merge(
+            OpenApiRouter::new()
+                .routes(routes!(uplink_probe))
+                .layer(DefaultBodyLimit::max(MAX_PROBE_BYTES)),
+        )
 }
+
+/// 测上行网速时一次最多发多少字节。
+const MAX_PROBE_BYTES: usize = 1024 * 1024;
 
 /// 全局设置里放展示信息的那一项：`{ "company_name": "……" }`。
 pub const DISPLAY_SETTING_KEY: &str = "room.display";
@@ -351,5 +361,38 @@ async fn post_device_check(
         }],
     )
     .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 测上行网速
+///
+/// 设备检测时页面往这里发一段随机字节，按花了多久估算上传录像够不够快。
+/// 服务端收完就丢，什么都不存。结果由页面算好，随设备检测结果一起上报。
+#[utoipa::path(
+    post,
+    path = "/api/v1/room/uplink-probe",
+    tag = "room",
+    security(("invite_token" = [])),
+    request_body(content = Vec<u8>, content_type = "application/octet-stream"),
+    responses(
+        (status = 204, description = "收到了"),
+        (status = 409, description = "面试已经结束", body = ErrorBody),
+        (status = 413, description = "超过 1 MiB", body = ErrorBody),
+    )
+)]
+async fn uplink_probe(
+    access: RoomAccess,
+    body: Result<Bytes, BytesRejection>,
+) -> ApiResult<StatusCode> {
+    if access.stage() == RoomStage::Finished {
+        return Err(ApiError::conflict("面试已经结束"));
+    }
+    body.map_err(|rejection| {
+        if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            ApiError::payload_too_large("测速的内容太大")
+        } else {
+            ApiError::bad_request("测速的内容没有传完整")
+        }
+    })?;
     Ok(StatusCode::NO_CONTENT)
 }

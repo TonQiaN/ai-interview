@@ -50,6 +50,7 @@ import {
   matchLevelLabel,
   matchLevelTone,
   rating,
+  ratingSpread,
   recommendationLabel,
   recommendationTone,
   requirementVerdictLabel,
@@ -58,6 +59,7 @@ import {
   reviewFlagLabel,
   riskLabel,
   riskTone,
+  scoreRangeText,
   signalKindLabel,
   speakerLabel,
   stageName,
@@ -361,6 +363,7 @@ function Question({
 }) {
   const j = item.judgement;
   const t = item.timing;
+  const spread = j?.answered ? ratingSpread(j.ratings) : null;
   let badge: ReactNode;
   if (!item.asked) badge = <Badge plain>没问到</Badge>;
   else if (!j) badge = <Badge tone="danger">{failed ? "点评失败" : "没有点评"}</Badge>;
@@ -413,6 +416,7 @@ function Question({
               <strong>为什么是这个分：</strong>
               {j.rating_reason}
             </p>
+            {spread && <p className="oil-muted">{spread}。</p>}
             {j.strengths.length > 0 && (
               <>
                 <h4 className="adm-qa__h">答得好的</h4>
@@ -446,6 +450,7 @@ export function ReportView({ report, onSeek, onRegenerate }: ReportViewProps) {
   const failed = report.meta.failed_stages;
   const failedStage = (stage: string) => failed.some((f) => f.stage === stage);
   const t = report.timing;
+  const range = scoreRangeText(report.score_range);
   const usage = report.meta.usage;
   const cited = report.meta.evidence;
   const root = useRef<HTMLDivElement>(null);
@@ -510,7 +515,11 @@ export function ReportView({ report, onSeek, onRegenerate }: ReportViewProps) {
               <dt>综合分</dt>
               <dd>
                 {report.overall_score === null ? "没有评分" : `${report.overall_score} / 100`}
-                <small>重新生成会有几分的浮动，仅供参考</small>
+                <small>
+                  {range
+                    ? `重新生成大多落在 ${range} 之间，仅供参考`
+                    : "重新生成会有几分的浮动，仅供参考"}
+                </small>
               </dd>
             </div>
             <div>

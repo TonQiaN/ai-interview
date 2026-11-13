@@ -5,8 +5,8 @@
 //! ```
 //!
 //! - 输入是 `PlanInput` 的 JSON。计划文件不存在时会先出题并写到这个路径。
-//! - 人设和 `simulate` 一样：`strong`、`vague`、`faker`、`lost`、`quitter`，另外多一个 `curious`
-//!   （会反问、要求重复、最后提问）。
+//! - 人设和 `simulate` 一样：`strong`、`vague`、`faker`、`lost`、`quitter`，另外多两个：`curious`
+//!   （会反问、要求重复、最后提问）和 `offtopic`（说的话和题目完全无关，像是收到了别的声音）。
 //! - 思考强度：不写就用输入里的 `live_thinking`；`off`、`low`、`high`、`max` 会覆盖它。
 //!
 //! 读环境变量 `DEEPSEEK_API_KEY`，会产生少量费用。
@@ -47,6 +47,9 @@ fn persona(name: &str) -> Result<&'static str> {
         }
         "curious" => {
             "你做过简历上的事情，回答还算具体，每次 60 到 150 字。你比较爱互动：有时会先反问面试官一句（比如「您是指技术方案还是项目管理方面？」），有一次会说没听清请对方再说一遍，有一次会问这个岗位的团队多大。面试官最后问你有没有问题时，你会问两个问题：薪资范围和什么时候有结果。"
+        }
+        "offtopic" => {
+            "不管面试官问什么，你都像没听见一样，自顾自念一段和面试完全无关的内容：有时是英语语法讲解（比如现在完成时和一般过去时的区别），有时是一段菜谱，有时是天气预报。每次 30 到 80 字。你从不回应面试官的问题，从不提到面试、岗位和自己的经历，也从不说不想面试或者要结束。"
         }
         other => bail!("不认识的人设：{other}"),
     })
@@ -144,6 +147,10 @@ async fn main() -> Result<()> {
     let mut first_generated = Vec::new();
     let mut first_prepared = Vec::new();
     let mut totals = Vec::new();
+    let mut done_spoken = Vec::new();
+    let mut done_moved = Vec::new();
+    let mut saved_spoken = Vec::new();
+    let mut saved_moved = Vec::new();
     let mut counts = [0u32; 4];
     let mut turns = 0u32;
 
@@ -162,6 +169,7 @@ async fn main() -> Result<()> {
             answer_ms,
         };
         let started = Instant::now();
+        let mut done_at = None;
         let mut sink = |event: LiveEvent| {
             let at = started.elapsed().as_millis();
             match event {
@@ -175,6 +183,22 @@ async fn main() -> Result<()> {
                         utterance.key, utterance.text
                     );
                 }
+                LiveEvent::Done {
+                    listen, finished, ..
+                } => {
+                    done_at = Some(at as u64);
+                    match (listen, finished) {
+                        (Some(listen), _) => {
+                            println!(
+                                "  [{at:>5} 毫秒] 话都给出来了，接着听 [{}]",
+                                listen.utterance_key
+                            )
+                        }
+                        (None, finished) => {
+                            println!("  [{at:>5} 毫秒] 话都给出来了，面试结束 {finished:?}")
+                        }
+                    }
+                }
             }
         };
         let outcome = respond(&model, &plan, config, &state, &turn, &mut sink).await?;
@@ -182,6 +206,20 @@ async fn main() -> Result<()> {
         live_usage += outcome.usage;
         decisions.push(outcome.timing.decision_ms);
         totals.push(outcome.timing.total_ms);
+        if let Some(done_at) = done_at {
+            let saved = outcome.timing.total_ms.saturating_sub(done_at);
+            match outcome.action {
+                LiveAction::Probe | LiveAction::Reply => {
+                    done_spoken.push(done_at);
+                    saved_spoken.push(saved);
+                }
+                LiveAction::Next | LiveAction::End | LiveAction::Repeat => {
+                    done_moved.push(done_at);
+                    saved_moved.push(saved);
+                }
+                LiveAction::Wait => {}
+            }
+        }
         if let Some(first) = outcome.timing.first_speech_ms {
             match outcome.action {
                 LiveAction::Probe | LiveAction::Reply => first_generated.push(first),
@@ -242,6 +280,10 @@ async fn main() -> Result<()> {
     summarize("现场生成的第一句（追问、回应）", &mut first_generated);
     summarize("提前合成的第一句（下一题、结束）", &mut first_prepared);
     summarize("整轮模型输出完", &mut totals);
+    summarize("追问、回应：知道之后接着听", &mut done_spoken);
+    summarize("追问、回应：比等模型写完早了", &mut saved_spoken);
+    summarize("下一题、结束：知道之后听不听", &mut done_moved);
+    summarize("下一题、结束：比等模型写完早了", &mut saved_moved);
     println!(
         "面试官用量：输入 {} token（命中缓存 {}），输出 {} token；空闲时段 {:.4} 元，高峰时段 {:.4} 元",
         live_usage.prompt_tokens,
