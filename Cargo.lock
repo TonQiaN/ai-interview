@@ -1516,6 +1516,7 @@ dependencies = [
 name = "interview-room"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "axum",
  "chrono",
  "interview-core",
@@ -1523,7 +1524,9 @@ dependencies = [
  "interview-platform",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "sqlx",
+ "tempfile",
  "tokio",
  "tracing",
  "utoipa",
