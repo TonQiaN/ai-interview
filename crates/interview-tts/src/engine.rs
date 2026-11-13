@@ -97,7 +97,7 @@ impl fmt::Display for Language {
 }
 
 /// 一个引擎固定不变的能力和限制，来自 TTS 研究阶段的实测。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EngineSpec {
     pub id: EngineId,
     pub name: &'static str,
@@ -110,6 +110,12 @@ pub struct EngineSpec {
     pub max_text_chars: Option<usize>,
     /// 模型权重是否只许研究和非商业使用。
     pub non_commercial_only: bool,
+    /// 能不能不给参考录音、只用一句文字描述来设计音色。
+    pub supports_voice_design: bool,
+    /// 能不能直接指定情绪和强度（IndexTTS 的 8 种情绪）。
+    pub supports_emotion: bool,
+    /// 能不能用一句自然语言的导演指令控制演绎（Breeze）。
+    pub supports_instruction: bool,
 }
 
 const INDEX2: EngineSpec = EngineSpec {
@@ -120,6 +126,9 @@ const INDEX2: EngineSpec = EngineSpec {
     requires_reference_transcript: false,
     max_text_chars: None,
     non_commercial_only: false,
+    supports_voice_design: false,
+    supports_emotion: true,
+    supports_instruction: false,
 };
 
 const INDEX25: EngineSpec = EngineSpec {
@@ -136,6 +145,9 @@ const INDEX25: EngineSpec = EngineSpec {
     requires_reference_transcript: false,
     max_text_chars: None,
     non_commercial_only: false,
+    supports_voice_design: false,
+    supports_emotion: true,
+    supports_instruction: false,
 };
 
 const BREEZE2: EngineSpec = EngineSpec {
@@ -146,6 +158,9 @@ const BREEZE2: EngineSpec = EngineSpec {
     requires_reference_transcript: true,
     max_text_chars: Some(350),
     non_commercial_only: true,
+    supports_voice_design: true,
+    supports_emotion: false,
+    supports_instruction: true,
 };
 
 #[cfg(test)]
