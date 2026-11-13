@@ -169,6 +169,49 @@ describe("假后端", () => {
     expect(patched.data.error.code).toBe("interview_not_editable");
   });
 
+  it("改设置：不影响题目的留着题目，写进题目里的才作废", async () => {
+    await login(server);
+    const candidate = server.db.candidates[0];
+    const position = server.db.positions[0];
+    const template = server.db.templates[0];
+    if (!candidate || !position || !template) throw new Error("演示数据不完整");
+    const created = await call<Interview>(server, "POST", "/interviews", {
+      candidate_id: candidate.id,
+      position_id: position.id,
+      template_id: template.id,
+    });
+    const id = created.data.id;
+    await call(server, "POST", `/interviews/${id}/prepare`);
+    await vi.advanceTimersByTimeAsync(20_000);
+    type Updated = Interview & { replan_reasons: string[] };
+
+    // 提前结束只在面试进行时起作用：题目和语音都留着，状态不变
+    const config = created.data.config;
+    const kept = await call<Updated>(server, "PATCH", `/interviews/${id}`, {
+      config: {
+        ...config,
+        early_stop: { ...config.early_stop, enabled: !config.early_stop.enabled },
+      },
+    });
+    expect(kept.data.replan_reasons).toEqual([]);
+    expect(kept.data.status).toBe("ready");
+    expect(kept.data.has_plan).toBe(true);
+
+    // 时长写进了开场白：题目作废，回到草稿，并说明是哪一项
+    const replanned = await call<Updated>(server, "PATCH", `/interviews/${id}`, {
+      config: { ...kept.data.config, target_duration_minutes: config.target_duration_minutes + 10 },
+    });
+    expect(replanned.data.replan_reasons).toEqual(["target_duration_minutes"]);
+    expect(replanned.data.status).toBe("draft");
+    expect(replanned.data.has_plan).toBe(false);
+
+    // 本来就没有题目：原因是空的
+    const again = await call<Updated>(server, "PATCH", `/interviews/${id}`, {
+      config: { ...replanned.data.config, target_duration_minutes: config.target_duration_minutes },
+    });
+    expect(again.data.replan_reasons).toEqual([]);
+  });
+
   it("设置不合规时返回 422，按字段说明原因", async () => {
     await login(server);
     const candidate = server.db.candidates[0];
