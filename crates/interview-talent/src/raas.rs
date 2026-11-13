@@ -14,32 +14,14 @@ use interview_raas::{
 use crate::model::{PositionExtra, RaasPositionRef};
 use crate::position::PositionDraft;
 use crate::resume::normalize_phone;
-
-/// 岗位在我们这边的状态。和 `positions.status` 的取值一致。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImportedPositionStatus {
-    Open,
-    Paused,
-    Closed,
-}
-
-impl ImportedPositionStatus {
-    /// 写进 `positions.status` 的值。
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Paused => "paused",
-            Self::Closed => "closed",
-        }
-    }
-}
+use crate::store::positions::PositionStatus;
 
 /// 从 RAAS 导入的一个岗位。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedPosition {
     /// RAAS 里的岗位编号，存 `positions.external_ref`。
     pub external_ref: String,
-    pub status: ImportedPositionStatus,
+    pub status: PositionStatus,
     pub draft: PositionDraft,
 }
 
@@ -101,10 +83,10 @@ pub fn position_from_raas(detail: &JobPostingDetail) -> ImportedPosition {
 }
 
 /// RAAS 的岗位状态对应到我们的三种。拿不准的都算开放：导入进来就是为了安排面试。
-fn position_status(
+pub(crate) fn position_status(
     publish_status: Option<&str>,
     requirement_status: Option<&str>,
-) -> ImportedPositionStatus {
+) -> PositionStatus {
     let is = |wanted: &[&str]| {
         [publish_status, requirement_status]
             .into_iter()
@@ -112,11 +94,11 @@ fn position_status(
             .any(|status| wanted.contains(&status))
     };
     if is(&["closed", "terminated"]) {
-        ImportedPositionStatus::Closed
+        PositionStatus::Closed
     } else if is(&["paused", "suspended"]) {
-        ImportedPositionStatus::Paused
+        PositionStatus::Paused
     } else {
-        ImportedPositionStatus::Open
+        PositionStatus::Open
     }
 }
 
@@ -288,6 +270,22 @@ pub fn resume_markdown(detail: &CandidateDetail, record: Option<&ResumeRecord>) 
     out.trim_end().to_owned()
 }
 
+/// RAAS 的解析结果里有没有值得拼成简历的内容。只有姓名和联系方式的不算。
+pub fn has_resume_content(detail: &CandidateDetail, record: Option<&ResumeRecord>) -> bool {
+    let from_detail = !detail.work_experience.is_empty()
+        || !detail.education_history.is_empty()
+        || !detail.project_experience.is_empty()
+        || !detail.skills.is_empty();
+    let from_record = record.is_some_and(|record| {
+        record.summary.is_some()
+            || !record.work_history.is_empty()
+            || !record.education_history.is_empty()
+            || !record.project_history.is_empty()
+            || !record.skills_extracted.is_empty()
+    });
+    from_detail || from_record
+}
+
 fn push_field(fields: &mut Vec<String>, label: &str, value: Option<&str>) {
     if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
         fields.push(format!("{label}：{value}"));
@@ -428,7 +426,7 @@ mod tests {
         let imported = position_from_raas(&posting());
 
         assert_eq!(imported.external_ref, "jp-001");
-        assert_eq!(imported.status, ImportedPositionStatus::Open);
+        assert_eq!(imported.status, PositionStatus::Open);
         let draft = imported.draft;
         assert_eq!(draft.title, "高级后端工程师");
         assert_eq!(draft.department.as_deref(), Some("支付平台部"));
@@ -463,21 +461,21 @@ mod tests {
     fn maps_raas_statuses() {
         assert_eq!(
             position_status(Some("distributed"), Some("recruiting")),
-            ImportedPositionStatus::Open
+            PositionStatus::Open
         );
         assert_eq!(
             position_status(Some("paused"), Some("recruiting")),
-            ImportedPositionStatus::Paused
+            PositionStatus::Paused
         );
         assert_eq!(
             position_status(Some("distributed"), Some("suspended")),
-            ImportedPositionStatus::Paused
+            PositionStatus::Paused
         );
         assert_eq!(
             position_status(Some("paused"), Some("closed")),
-            ImportedPositionStatus::Closed
+            PositionStatus::Closed
         );
-        assert_eq!(position_status(None, None), ImportedPositionStatus::Open);
+        assert_eq!(position_status(None, None), PositionStatus::Open);
     }
 
     fn candidate() -> CandidateDetail {
