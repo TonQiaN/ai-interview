@@ -2,13 +2,14 @@
 
 面试引擎的基础模式：提前出好题，逐题问，候选人逐题答。纯逻辑，不碰数据库、网络和音频；模型通过 `interview-llm` 的 `ChatModel` 传进来。
 
-## 三块东西
+## 四块东西
 
 | 模块 | 做什么 | 存在哪 |
 | --- | --- | --- |
 | `config` | 一场面试的全部设置 `InterviewConfig`，`validate()` 检查，`time_budget()` 把时长换成题数和每题的答题时间 | `interviews.config` |
 | `planner` | `plan_interview(model, &PlanInput)` 出一份 `InterviewPlan`：面试官要说的每一句话、每道题的考察意图和评分要点、备用追问 | `interviews.plan` |
-| `session` | `start` 给出第一步，`advance` 根据候选人刚答完的一段给出下一步 | `interviews.runtime_state` |
+| `session` | `start` 给出第一步，`advance` 根据候选人刚答完的一段给出下一步 | 包在 `RoomState` 里 |
+| `room` | 把一步拆成一次播一句的节拍，给面试间直接用 | `interviews.runtime_state` |
 
 所有对外的类型都能序列化，也都带 `utoipa::ToSchema`。
 
@@ -54,6 +55,19 @@
 - 候选人明确说不想继续，就结束。
 
 没有转写文字时（比如语音识别还没接上），引擎按顺序把题问完，不追问也不提前结束。
+
+## 面试间怎么接（一次一句）
+
+面试间的协议是一次播一句，`room` 模块把上面的一步拆成一拍一拍，面试间只要存状态、调转写、调这三个函数：
+
+- `room::open(plan, config)`：第一拍（开场白）。
+- `room::report(plan, state, &BeatReport)`：前端报告一拍播完了，或者候选人答完了一段。纯函数。
+  - `Reported::Next`：把这一拍发给前端。
+  - `Reported::Answered`：候选人答完了。`ack` 有值就马上发给前端播（过渡语），同时在后台转写并调 `settle`；没有值（没开口）就直接调 `settle`，把它给的那一拍发给前端。
+  - `Reported::Waiting`：过渡语播完了，判断还没回来。等 `settle` 完成再调一次 `report`。后台任务丢了（比如进程重启）也是这个结果，重新调 `settle` 即可。
+- `room::settle(model, plan, config, state, transcript)`：判断这段回答并决定下一步。重复调用是安全的。
+
+每一拍带递增的 `seq`，上报时原样带回：上报当前这一拍就往下走，重复上报上一拍结果不变，其他序号报错（接口返回 409）。同一句话会出现在不同的拍里（没听到声音时重问、过渡语复用），所以幂等按 `seq` 判断。`RoomStep` 序列化出来就是 `{"action":"say","seq":…,"utterance":…,"expects_answer":…,"answer":…,"progress":…,"preload_keys":[…]}` 或 `{"action":"finish","reason":…}`，和 `docs/architecture/api.md` 里的面试间协议对应（`audio_url` 这些由面试间补上）。`RoomState` 整个存进 `interviews.runtime_state`，`state.last` 是断点续面时该重播的那一拍。
 
 ## 用真模型试
 
