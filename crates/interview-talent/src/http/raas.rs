@@ -836,13 +836,33 @@ async fn import_raas_candidates(
     let refs = request.cleaned_refs()?;
     let refresh = request.refresh;
     let (deps, raas) = (&deps, raas.as_ref());
-    let items = stream::iter(refs)
+    let mut items: Vec<CandidateImportItem> = stream::iter(refs)
         .map(|external_ref| async move {
             import_candidate(deps, raas, user.id, external_ref, refresh).await
         })
         .buffered(CONCURRENCY)
         .try_collect()
         .await?;
+    // 查重放在全部导完之后：几位候选人是同时导的，边导边查的话，
+    // 同一批里互相重复的两个人谁也看不到对方
+    for item in &mut items {
+        let touched = matches!(
+            item.outcome,
+            ImportOutcome::Created | ImportOutcome::Refreshed | ImportOutcome::Restored
+        );
+        let Some(candidate_id) = item.candidate_id.filter(|_| touched) else {
+            continue;
+        };
+        if let Some(candidate) = candidates::get(&deps.ctx.db, candidate_id).await? {
+            item.possible_duplicates = candidates::find_duplicates(
+                &deps.ctx.db,
+                Some(candidate.id),
+                candidate.email.as_deref(),
+                candidate.phone.as_deref(),
+            )
+            .await?;
+        }
+    }
     Ok(Json(CandidateImportResult { items }))
 }
 
@@ -963,13 +983,6 @@ async fn import_candidate(
     };
     tx.commit().await?;
 
-    let possible_duplicates = candidates::find_duplicates(
-        db,
-        Some(candidate.id),
-        candidate.email.as_deref(),
-        candidate.phone.as_deref(),
-    )
-    .await?;
     Ok(CandidateImportItem {
         external_ref,
         outcome,
@@ -977,7 +990,8 @@ async fn import_candidate(
         name: Some(candidate.name),
         resume: Some(resume),
         resume_id,
-        possible_duplicates,
+        // 全部导完之后由调用方统一查
+        possible_duplicates: Vec::new(),
         message: None,
     })
 }

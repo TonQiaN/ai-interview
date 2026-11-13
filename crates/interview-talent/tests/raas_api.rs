@@ -523,10 +523,14 @@ async fn falls_back_to_the_parsed_resume_when_the_file_is_missing_or_unreadable(
         assert_eq!(item["outcome"], "created", "{item}");
         assert_eq!(item["resume"], "queued", "{item}");
     }
-    // 两位的手机和邮箱一样，提醒可能是同一个人
+    // 两位的手机和邮箱一样，提醒可能是同一个人。两人是同时导的，也要互相看得到
     assert_eq!(
         result["items"][1]["possible_duplicates"][0]["id"],
         result["items"][0]["candidate_id"]
+    );
+    assert_eq!(
+        result["items"][0]["possible_duplicates"][0]["id"],
+        result["items"][1]["candidate_id"]
     );
 
     let resume_id = result["items"][0]["resume_id"].as_str().expect("有简历");
