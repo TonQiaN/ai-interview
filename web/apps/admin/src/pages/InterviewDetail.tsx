@@ -76,6 +76,7 @@ import {
   modeLabel,
   originLabel,
   relativeTime,
+  scoreRangeText,
   stageLabelOf,
   statusHint,
   styleLabel,
@@ -1356,10 +1357,13 @@ function Verdict({ interview }: { interview: Interview }) {
   const report = useReport(interview.id, interview.report?.status === "done");
   const content = report.data?.content;
   if (!content) return null;
+  const range = scoreRangeText(content.score_range);
   return (
     <>
       {typeof content.overall_score === "number" && (
-        <strong className="oil-num">{content.overall_score} 分</strong>
+        <strong className="oil-num" title={range ? `重新生成大多落在 ${range} 之间` : undefined}>
+          {content.overall_score} 分{range && `（${range}）`}
+        </strong>
       )}
       <RecommendationBadge value={content.recommendation.decision} />
     </>
