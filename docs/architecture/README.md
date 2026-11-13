@@ -217,6 +217,7 @@ HR 在后台看录像、文字记录、报告，写结论（interviews.decision�
 | `interview.prepare` | ① | 出题加预合成语音 |
 | `interview.synthesize` | ① | 重新合成一场面试里改过的话术 |
 | `recording.assemble` | ⑤ | 把分片合并成完整录像 |
+| `room.watchdog` | ⑤ | 面试开始后定时看候选人还在不在，太久没动静就结束面试（`abandoned`，原因 `connection_lost`） |
 | `interview.finalize` | ① | 面试结束后的转写 |
 | `report.generate` | ① | 生成分析报告 |
 
