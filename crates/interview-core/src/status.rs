@@ -220,6 +220,37 @@ mod tests {
         assert_check_matches("status", RecordingStatus::ALL);
     }
 
+    /// 接口文档里枚举的取值要和 JSON 里实际的值一样，前端的类型是照文档生成的。
+    fn assert_schema_matches<T>(all: &[T])
+    where
+        T: Copy + std::fmt::Display + utoipa::PartialSchema,
+    {
+        let schema = serde_json::to_value(T::schema()).unwrap();
+        let documented: Vec<&str> = schema["enum"]
+            .as_array()
+            .expect("枚举的 schema 里要有取值列表")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        let actual: Vec<String> = all.iter().map(ToString::to_string).collect();
+        assert_eq!(documented, actual);
+    }
+
+    #[test]
+    fn openapi_lists_the_same_values_as_json() {
+        assert_schema_matches(InterviewStatus::ALL);
+        assert_schema_matches(InterviewDecision::ALL);
+        assert_schema_matches(TaskStatus::ALL);
+        assert_schema_matches(ReportStatus::ALL);
+        assert_schema_matches(ParseStatus::ALL);
+        assert_schema_matches(Speaker::ALL);
+        assert_schema_matches(UtteranceKind::ALL);
+        assert_schema_matches(UtteranceSource::ALL);
+        assert_schema_matches(SynthStatus::ALL);
+        assert_schema_matches(RecordingTrack::ALL);
+        assert_schema_matches(RecordingStatus::ALL);
+    }
+
     #[test]
     fn serde_uses_the_same_text_as_the_database() {
         let json = serde_json::to_string(&InterviewStatus::PrepareFailed).unwrap();
