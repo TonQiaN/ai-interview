@@ -34,6 +34,10 @@ pub struct PreparePayload {
 }
 
 /// 入队一个准备任务。和改状态放在同一个事务里，保证「状态是 preparing」和「有任务在跑」同时成立。
+///
+/// 不用 `dedupe`：调用方先用条件更新把状态改成 `preparing`，同一时间只有一个请求能改成功，
+/// 重复入队已经挡住了。加了反而会出错：上一条任务把面试改成 `ready` 之后、任务队列把它记成
+/// 做完之前，新的请求会搭在那条马上结束的任务上，面试就一直停在 `preparing`。
 pub(crate) async fn enqueue(
     conn: &mut PgConnection,
     kind: &'static str,
@@ -41,8 +45,7 @@ pub(crate) async fn enqueue(
 ) -> Result<Uuid, sqlx::Error> {
     TaskQueue::enqueue_in(
         conn,
-        NewTask::new(kind, json!(PreparePayload { interview_id }))
-            .dedupe(format!("interview.prepare:{interview_id}")),
+        NewTask::new(kind, json!(PreparePayload { interview_id })),
     )
     .await
 }

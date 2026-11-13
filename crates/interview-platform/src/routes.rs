@@ -319,6 +319,79 @@ mod tests {
     }
 
     #[sqlx::test(migrator = "MIGRATOR")]
+    async fn the_cookie_is_renewed_when_the_session_is_extended(pool: PgPool) {
+        let ctx = testing::test_context(pool);
+        auth::create_admin_user(
+            &ctx.db,
+            "renew@example.com",
+            "测试 HR",
+            "long-enough-password",
+            "admin",
+        )
+        .await
+        .unwrap();
+        let app = app(&ctx);
+        let response = TestRequest::post("/api/v1/auth/login")
+            .json(&json!({ "email": "renew@example.com", "password": "long-enough-password" }))
+            .send(&app)
+            .await;
+        let cookie = response
+            .header(header::SET_COOKIE.as_str())
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+
+        // 刚登录，不用顺延，也就不重新种 cookie
+        let response = TestRequest::get("/api/v1/auth/me")
+            .header("cookie", &cookie)
+            .send(&app)
+            .await;
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.header(header::SET_COOKIE.as_str()), None);
+
+        // 过了一阵再来：库里的有效期顺延了，cookie 也要跟着顺延
+        sqlx::query("UPDATE admin_sessions SET last_seen_at = now() - interval '10 minutes'")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        let response = TestRequest::get("/api/v1/auth/me")
+            .header("cookie", &cookie)
+            .send(&app)
+            .await;
+        assert_eq!(response.status, StatusCode::OK);
+        let renewed = response
+            .header(header::SET_COOKIE.as_str())
+            .expect("顺延会话时要重新种 cookie");
+        assert!(renewed.starts_with(&cookie));
+        assert!(renewed.contains("Max-Age=1209600"));
+        assert!(renewed.contains("HttpOnly"));
+    }
+
+    #[sqlx::test(migrator = "MIGRATOR")]
+    async fn settings_changed_outside_the_api_still_get_a_new_updated_at(pool: PgPool) {
+        sqlx::query(
+            "INSERT INTO app_settings (key, value, updated_at)
+             VALUES ('demo', '1', now() - interval '1 day')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE app_settings SET value = '2' WHERE key = 'demo'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let fresh: bool = sqlx::query_scalar(
+            "SELECT updated_at > now() - interval '1 minute' FROM app_settings WHERE key = 'demo'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(fresh, "updated_at 应该由触发器更新");
+    }
+
+    #[sqlx::test(migrator = "MIGRATOR")]
     async fn settings_roundtrip_and_roles(pool: PgPool) {
         let ctx = testing::test_context(pool);
         let admin = testing::create_admin(&ctx).await;

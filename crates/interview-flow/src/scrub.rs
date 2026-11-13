@@ -49,16 +49,38 @@ fn scrub_emails(text: &str) -> String {
     out
 }
 
-/// 手机号：连续 11 位以上的数字，或者 3-4-4 这样用空格、短横线隔开的 11 位。
-/// 前面带的 `+86`、`86` 一起去掉。年份区间（`2019-2023`）这类不会被当成电话。
+/// 数字，全角的也算（从 PDF 里抽出来的简历偶尔是全角数字）。
+fn digit(c: char) -> Option<char> {
+    match c {
+        '0'..='9' => Some(c),
+        '０'..='９' => char::from_u32(c as u32 - '０' as u32 + '0' as u32),
+        _ => None,
+    }
+}
+
+fn is_separator(c: char) -> bool {
+    matches!(c, ' ' | '-' | '\u{a0}' | '–' | '—')
+}
+
+/// 电话号码最多由几段数字组成（`+86 138 0000 1234` 是四段，留一点余量）。
+const MAX_GROUPS: usize = 5;
+
+/// 去掉电话号码：
+///
+/// - 连续 11 位以上的数字（手机号，身份证号也顺带去掉）；
+/// - 用空格、短横线分段的 11 位手机号，分法不限（`138 0000 1234`、`1380-000-1234`）；
+/// - 前面带国家码的（`+86`、`86`、`0086`，和号码之间有没有分隔都算）；
+/// - `+` 开头、一共 10 到 15 位的国际号码。
+///
+/// 年份区间（`2019-2023`）、金额这类不会被当成电话。宁可多去掉一点，不漏掉。
 fn scrub_phones(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while i < chars.len() {
-        let at_boundary = i == 0 || !chars[i - 1].is_ascii_digit();
+        let at_boundary = i == 0 || digit(chars[i - 1]).is_none();
         if at_boundary
-            && (chars[i].is_ascii_digit() || chars[i] == '+')
+            && (digit(chars[i]).is_some() || chars[i] == '+')
             && let Some(end) = match_phone(&chars, i)
         {
             out.push_str(PHONE_MARK);
@@ -71,43 +93,50 @@ fn scrub_phones(text: &str) -> String {
     out
 }
 
+/// 从 `start` 开始是不是一个电话号码，是的话返回它结束的位置。
 fn match_phone(chars: &[char], start: usize) -> Option<usize> {
-    let mut i = start;
-    if chars[i] == '+' {
-        i += 1;
-        let code_start = i;
-        while i < chars.len() && chars[i].is_ascii_digit() && i - code_start < 3 {
+    let plus = chars[start] == '+';
+    let mut i = if plus { start + 1 } else { start };
+    let mut digits = String::new();
+    let mut matched = None;
+    for group in 0..MAX_GROUPS {
+        let from = i;
+        while let Some(d) = chars.get(i).copied().and_then(digit) {
+            digits.push(d);
             i += 1;
         }
-        if i == code_start {
-            return None;
+        let run = i - from;
+        if run == 0 {
+            break;
         }
-        if i < chars.len() && matches!(chars[i], ' ' | '-') {
+        // 一整段 11 位以上的数字，不管是什么都去掉
+        if (group == 0 && run >= 11) || looks_like_phone(&digits, plus) {
+            matched = Some(i);
+        }
+        // 段和段之间只隔一个分隔符
+        let next_is_digit = chars.get(i + 1).copied().and_then(digit).is_some();
+        if chars.get(i).copied().is_some_and(is_separator) && next_is_digit {
             i += 1;
+        } else {
+            break;
         }
     }
-    let digits = |from: usize| -> usize {
-        chars[from..]
-            .iter()
-            .take_while(|c| c.is_ascii_digit())
-            .count()
-    };
-    let run = digits(i);
-    if run >= 11 {
-        return Some(i + run);
-    }
-    // 3-4-4
-    if run == 3 {
-        let sep = |at: usize| at < chars.len() && matches!(chars[at], ' ' | '-');
-        let mut j = i + 3;
-        if sep(j) && digits(j + 1) == 4 {
-            j += 5;
-            if sep(j) && digits(j + 1) == 4 {
-                return Some(j + 5);
-            }
-        }
-    }
-    None
+    matched
+}
+
+fn looks_like_phone(digits: &str, plus: bool) -> bool {
+    let national = digits
+        .strip_prefix("0086")
+        .or_else(|| digits.strip_prefix("86"))
+        .filter(|rest| is_mobile(rest))
+        .unwrap_or(digits);
+    is_mobile(national) || (plus && (10..=15).contains(&digits.len()))
+}
+
+/// 大陆手机号：11 位，1 开头，第二位是 3 到 9。
+fn is_mobile(digits: &str) -> bool {
+    let bytes = digits.as_bytes();
+    bytes.len() == 11 && bytes[0] == b'1' && (b'3'..=b'9').contains(&bytes[1])
 }
 
 #[cfg(test)]
@@ -147,12 +176,43 @@ mod tests {
     }
 
     #[test]
+    fn removes_phones_glued_to_the_country_code() {
+        assert_eq!(scrub_contacts("+86138-0000-1234"), "[电话]");
+        assert_eq!(scrub_contacts("86138 0000 1234"), "[电话]");
+        assert_eq!(scrub_contacts("8613800001234"), "[电话]");
+        assert_eq!(scrub_contacts("0086-13800001234"), "[电话]");
+        assert_eq!(scrub_contacts("+8613800001234"), "[电话]");
+    }
+
+    #[test]
+    fn removes_phones_in_other_groupings() {
+        assert_eq!(scrub_contacts("电话：1380-000-1234；"), "电话：[电话]；");
+        assert_eq!(scrub_contacts("138-00001234"), "[电话]");
+        assert_eq!(scrub_contacts("１３８００００１２３４"), "[电话]");
+        assert_eq!(scrub_contacts("１３８ ００００ １２３４"), "[电话]");
+        // 国际号码
+        assert_eq!(scrub_contacts("+1 415 555 0100"), "[电话]");
+        // 身份证号这类长串数字也去掉
+        assert_eq!(scrub_contacts("证件 110101199001010014"), "证件 [电话]");
+    }
+
+    #[test]
+    fn keeps_what_follows_a_phone() {
+        assert_eq!(
+            scrub_contacts("13800001234 2019-2023 就读"),
+            "[电话] 2019-2023 就读"
+        );
+    }
+
+    #[test]
     fn keeps_dates_and_numbers() {
         let text =
             "2019-2023 就读，2021.03 - 2023.06 实习，带 12 人团队，营收 1200000 元，C++ 开发";
         assert_eq!(scrub_contacts(text), text);
         let ranges = "2019-03 2021-06";
         assert_eq!(scrub_contacts(ranges), ranges);
+        let more = "1998-2002 本科，N+1 补偿，3+2 学制，86 分，共 86 13 人，GPA 3.8 排名 12/300";
+        assert_eq!(scrub_contacts(more), more);
     }
 
     #[test]
