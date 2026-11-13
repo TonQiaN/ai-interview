@@ -22,7 +22,7 @@ tokio = { workspace = true, features = ["rt", "sync", "time"] }
 
 [dev-dependencies]
 anyhow.workspace = true
-futures-util.workspace = true
+interview-engine.workspace = true
 interview-llm.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

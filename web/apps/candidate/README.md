@@ -52,7 +52,7 @@ E2E_REAL=1 E2E_SPEECH_WAV=<一段有人说话的 WAV> pnpm e2e
 
 ## 目录
 
-- `src/lib/`：不依赖页面的逻辑，都有单元测试。`vad`（静音检测）、`turn`（一道题的状态机）、`interview`（逐题编排）、`recording` 和 `upload`（分片录制、断点续传）、`media`（采集、混音、屏幕常亮）、`events`（过程事件）、`api`（面试间接口，用 `@ai-interview/api-client` 生成的类型）、`flow`（链接、浏览器能力、上行测速）。
+- `src/lib/`：不依赖页面的逻辑，都有单元测试。`vad`（静音检测）、`turn`（一道题的状态机；静音从声音停下的那一刻算起，不含静音检测确认停止用的 0.4 秒）、`interview`（逐题编排）、`recording` 和 `upload`（分片录制、断点续传）、`media`（采集、混音、屏幕常亮）、`events`（过程事件）、`api`（面试间接口，用 `@ai-interview/api-client` 生成的类型）、`flow`（链接、浏览器能力、上行测速）。
 - `src/session/interview-session.ts`：把上面这些串成一场面试，页面只订阅它的状态。
 - `src/pages/`、`src/components/`：页面，用 `@ai-interview/ui` 的组件。
 - `e2e/`：端到端测试。后端的实现在 `crates/interview-room`。

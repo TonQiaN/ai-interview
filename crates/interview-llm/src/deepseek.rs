@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::LlmError;
 use crate::model::{ChatModel, ChatStream};
+use crate::redact::without_values;
 use crate::sse::{SseDecoder, SseLine};
 use crate::types::{
     ChatRequest, ChatResponse, Content, FinishReason, Message, Role, StreamEvent, Thinking,
@@ -241,9 +242,11 @@ impl StreamState {
                         self.pending.push_back(Ok(event));
                     }
                 }
-                Err(error) => {
-                    self.fail(LlmError::Decode(format!("流式数据不是预期的格式：{error}")))
-                }
+                // 这一行里可能有模型输出的片段，报错只留类型
+                Err(error) => self.fail(LlmError::Decode(format!(
+                    "流式数据不是预期的格式：{}",
+                    without_values(&error.to_string())
+                ))),
             },
         }
     }

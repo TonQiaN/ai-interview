@@ -38,7 +38,10 @@ export const DEFAULT_ENERGY_VAD_CONFIG: EnergyVadConfig = {
   floorWindowMs: 3000,
 };
 
-export type VadEvent = { type: "speech_start" } | { type: "speech_end" };
+export type VadEvent =
+  | { type: "speech_start" }
+  /** `quietMs`：判定停止说话的时候，已经安静了多久。声音其实是这么久之前停的。 */
+  | { type: "speech_end"; quietMs: number };
 
 export interface VadSnapshot {
   speaking: boolean;
@@ -112,10 +115,11 @@ export class EnergyVad {
     if (level < exitDb) {
       this.belowMs += frameMs;
       if (this.belowMs >= config.hangoverMs) {
+        const quietMs = this.belowMs;
         this.speaking = false;
         this.aboveMs = 0;
         this.belowMs = 0;
-        return { type: "speech_end" };
+        return { type: "speech_end", quietMs };
       }
     } else {
       this.belowMs = 0;

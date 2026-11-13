@@ -172,6 +172,23 @@ describe("逐题面试编排", () => {
     ]);
   });
 
+  it("静音从声音停下的那一刻算起，不把 VAD 确认停止的那一小会儿再等一遍", async () => {
+    const { api, runner } = setup([finish]);
+    void runner.run(say("q1"));
+    await quiet(runner, 2_000);
+    await feed(runner, 1_000, false);
+    await feed(runner, 4_000, true); // 声音在第 6.94 秒停下，VAD 到第 7.34 秒才确认
+    await feed(runner, 4_800, false);
+    expect(api.requests).toHaveLength(0);
+    // 设定的静音是 5 秒：第 11.94 秒之后的第一次检查就结束，不用等到第 12.34 秒
+    await feed(runner, 300, false);
+    expect(api.requests).toHaveLength(1);
+    const request = api.requests[0] as AdvanceRequest;
+    expect(request.end_reason).toBe("silence");
+    // 回答的结束时刻还是 VAD 确认停止的那一刻，转写取这一段时不会切掉最后一个字
+    expect(request.answer_end_ms).toBeGreaterThanOrEqual(7_300);
+  });
+
   it("同一句话说两次时，各自带回服务端给的序号", async () => {
     // 比如没听到回答，服务端让页面把同一题再问一遍
     const again = say("nudge", { expectsAnswer: false, audioMs: 1_000 });
