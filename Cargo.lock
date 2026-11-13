@@ -1544,6 +1544,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "utoipa",
  "utoipa-axum",
  "uuid",

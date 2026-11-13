@@ -2,12 +2,18 @@
 
 mod common;
 
+use std::ops::Range;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use axum::body::Bytes;
 
 use common::{TestApp, app, app_on, error_code, invited, run_tasks, started};
 use interview_platform::AppContext;
-use interview_platform::blob::LocalBlobStore;
+use interview_platform::blob::{BlobError, BlobMeta, BlobStore, LocalBlobStore, MemoryBlobStore};
 use interview_platform::config::PlatformConfig;
 use interview_platform::testing::{TestRequest, TestResponse};
 use interview_room::RoomConfig;
@@ -290,6 +296,134 @@ async fn chunks_are_checked_and_idempotent(pool: PgPool) {
         .send(&app.public)
         .await;
     assert_eq!(foreign_list.status, 404);
+}
+
+/// 一个写得慢的文件存储：内容是 `slow` 的那一次写入要多等一会儿。
+struct SlowStore {
+    inner: MemoryBlobStore,
+    slow: &'static [u8],
+}
+
+#[async_trait]
+impl BlobStore for SlowStore {
+    async fn put(&self, key: &str, data: Bytes) -> Result<(), BlobError> {
+        if data == self.slow {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        self.inner.put(key, data).await
+    }
+
+    async fn get(&self, key: &str) -> Result<Bytes, BlobError> {
+        self.inner.get(key).await
+    }
+
+    async fn get_range(&self, key: &str, range: Range<u64>) -> Result<Bytes, BlobError> {
+        self.inner.get_range(key, range).await
+    }
+
+    async fn head(&self, key: &str) -> Result<Option<BlobMeta>, BlobError> {
+        self.inner.head(key).await
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), BlobError> {
+        self.inner.delete(key).await
+    }
+
+    async fn list(&self, prefix: &str) -> Result<Vec<BlobMeta>, BlobError> {
+        self.inner.list(prefix).await
+    }
+
+    async fn concat(&self, sources: &[String], target: &str) -> Result<BlobMeta, BlobError> {
+        self.inner.concat(sources, target).await
+    }
+
+    fn local_path(&self, key: &str) -> Option<PathBuf> {
+        self.inner.local_path(key)
+    }
+}
+
+/// 页面重试和上一次请求撞在一起时，同一个分片会同时到两次。
+/// 不管谁先谁后，库里登记的大小、校验和，和存下来的内容必须是同一次请求的。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_same_chunk_arriving_at_once_is_stored_once(pool: PgPool) {
+    let blobs = SlowStore {
+        inner: MemoryBlobStore::new(),
+        slow: b"slow-bytes",
+    };
+    let ctx = AppContext::new(pool, Arc::new(blobs), PlatformConfig::for_tests());
+    let app = app_on(ctx, RoomConfig::default()).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+    assert_eq!(
+        open_segment(&app, &token, "camera", segment).await.status,
+        204
+    );
+
+    // 同一个序号同时来三次。第一次的内容写得慢，后两次在它写完之前就到了
+    let (slow, fast, again) = tokio::join!(
+        put_chunk(&app, &token, "camera", segment, 0, b"slow-bytes"),
+        async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            put_chunk(&app, &token, "camera", segment, 0, b"fast").await
+        },
+        async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            put_chunk(&app, &token, "camera", segment, 0, b"fast").await
+        },
+    );
+    for response in [&slow, &fast, &again] {
+        assert_eq!(response.status, 204, "{}", response.text());
+    }
+    // 不同的序号同时来，互不影响
+    let (one, two) = tokio::join!(
+        put_chunk(&app, &token, "camera", segment, 1, b"one"),
+        put_chunk(&app, &token, "camera", segment, 2, b"two"),
+    );
+    assert_eq!(one.status, 204);
+    assert_eq!(two.status, 204);
+
+    let rows: Vec<(i32, i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT c.seq, c.size_bytes, c.blob_key, c.sha256 FROM interview_recording_chunks c
+           JOIN interview_recordings r ON r.id = c.recording_id
+          WHERE r.interview_id = $1 ORDER BY c.seq",
+    )
+    .bind(interview_id)
+    .fetch_all(&app.ctx.db)
+    .await
+    .expect("查分片失败");
+    assert_eq!(
+        rows.iter().map(|row| row.0).collect::<Vec<_>>(),
+        vec![0, 1, 2],
+        "每个序号只留一行"
+    );
+
+    let (_, size, key, sha) = &rows[0];
+    let stored = app.ctx.blobs.get(key).await.expect("读分片失败");
+    assert_eq!(
+        i64::try_from(stored.len()).ok(),
+        Some(*size),
+        "登记的大小和存下来的内容不是同一次请求的"
+    );
+    assert_eq!(sha.as_deref(), Some(sha256_hex(&stored).as_str()));
+
+    // 合并出来的文件就是登记的这三片接起来
+    assert_eq!(
+        complete(&app, &token, "camera", segment, 3).await.status,
+        204
+    );
+    run_tasks(&app).await;
+    let items = recordings(&app, interview_id).await;
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["status"], "ready", "{}", items[0]);
+    assert_eq!(items[0]["size_bytes"], size + 6);
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
