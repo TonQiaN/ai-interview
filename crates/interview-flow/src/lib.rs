@@ -35,6 +35,7 @@ mod routes;
 pub mod scrub;
 mod store;
 mod templates;
+mod video_check;
 pub mod voice;
 
 /// 面试场次模块需要的东西。

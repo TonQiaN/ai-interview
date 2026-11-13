@@ -135,6 +135,16 @@ pub fn frame(interview_id: Uuid, at_ms: u64) -> String {
     format!("interviews/{interview_id}/frames/{at_ms}.jpg")
 }
 
+/// 一场面试里和录像画面检查有关的文件都在这个前缀下面（给 `BlobStore::list` 用）。
+pub fn frames_prefix(interview_id: Uuid) -> String {
+    format!("interviews/{interview_id}/frames")
+}
+
+/// 录像画面检查的结果（过程事件）。画面不会变，存下来之后重新生成报告时不用再看一遍。
+pub fn frame_events(interview_id: Uuid) -> String {
+    format!("interviews/{interview_id}/frames/events.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
