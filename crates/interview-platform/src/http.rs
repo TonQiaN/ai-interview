@@ -383,6 +383,9 @@ impl PageQuery {
 const MAX_WHOLE_BODY: u64 = 64 * 1024 * 1024;
 /// 带 `Range` 但没写结束位置时，一次返回这么多。
 const RANGE_CHUNK: u64 = 4 * 1024 * 1024;
+/// 带 `Range` 的请求一次最多返回这么多，不管它要多长。要得更多的，只给开头这一段，
+/// `Content-Range` 里写的是实际给的范围，客户端接着要剩下的（播放器本来就这么做）。
+const MAX_RANGE_BODY: u64 = 16 * 1024 * 1024;
 
 /// 把 BlobStore 里的一个文件作为响应返回，支持 `Range`（音频、录像拖动进度条要用）。
 ///
@@ -406,7 +409,7 @@ pub async fn serve_blob(
         .and_then(|v| v.to_str().ok())
     {
         Some(raw) => match parse_range(raw, size) {
-            Some(range) => Some(range),
+            Some(range) => Some(limit_range(range, MAX_RANGE_BODY)),
             None => {
                 let mut response = StatusCode::RANGE_NOT_SATISFIABLE.into_response();
                 insert_header(
@@ -445,6 +448,11 @@ pub async fn serve_blob(
         HeaderValue::from_static("private, max-age=300"),
     );
     Ok(response)
+}
+
+/// 把闭区间 `(start, end)` 截到最多 `max` 个字节，保留开头。
+fn limit_range((start, end): (u64, u64), max: u64) -> (u64, u64) {
+    (start, end.min(start.saturating_add(max.saturating_sub(1))))
 }
 
 fn insert_header(response: &mut Response, name: header::HeaderName, value: &str) {
@@ -486,8 +494,10 @@ mod tests {
     use bytes::Bytes;
     use http_body_util::BodyExt;
 
+    use std::ops::Range;
+
     use super::*;
-    use crate::blob::MemoryBlobStore;
+    use crate::blob::{BlobError, BlobMeta, MemoryBlobStore};
 
     async fn body_json(response: Response) -> Value {
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
@@ -579,6 +589,88 @@ mod tests {
             parse_range("bytes=0-", 100 * 1024 * 1024),
             Some((0, RANGE_CHUNK - 1))
         );
+    }
+
+    #[test]
+    fn long_ranges_are_cut_to_the_limit() {
+        assert_eq!(limit_range((0, 99), 1000), (0, 99));
+        assert_eq!(limit_range((0, 999), 1000), (0, 999));
+        assert_eq!(limit_range((0, 5000), 1000), (0, 999));
+        assert_eq!(limit_range((200, u64::MAX), 1000), (200, 1199));
+        assert_eq!(
+            limit_range((u64::MAX - 5, u64::MAX), 1000),
+            (u64::MAX - 5, u64::MAX)
+        );
+    }
+
+    /// 只有大小是真的，内容按需生成：用来测大文件，不用真的占那么多内存。
+    struct HugeBlob(u64);
+
+    #[async_trait::async_trait]
+    impl BlobStore for HugeBlob {
+        async fn put(&self, _key: &str, _data: Bytes) -> Result<(), BlobError> {
+            unimplemented!("测试用不到")
+        }
+        async fn get(&self, _key: &str) -> Result<Bytes, BlobError> {
+            panic!("大文件不该整个读进内存")
+        }
+        async fn get_range(&self, _key: &str, range: Range<u64>) -> Result<Bytes, BlobError> {
+            let len = range.end - range.start;
+            assert!(len <= MAX_RANGE_BODY, "一次读了 {len} 字节");
+            Ok(Bytes::from(vec![0u8; len as usize]))
+        }
+        async fn head(&self, key: &str) -> Result<Option<BlobMeta>, BlobError> {
+            Ok(Some(BlobMeta {
+                key: key.to_owned(),
+                size: self.0,
+            }))
+        }
+        async fn delete(&self, _key: &str) -> Result<(), BlobError> {
+            unimplemented!("测试用不到")
+        }
+        async fn list(&self, _prefix: &str) -> Result<Vec<BlobMeta>, BlobError> {
+            unimplemented!("测试用不到")
+        }
+        async fn concat(&self, _sources: &[String], _target: &str) -> Result<BlobMeta, BlobError> {
+            unimplemented!("测试用不到")
+        }
+        fn local_path(&self, _key: &str) -> Option<std::path::PathBuf> {
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn a_range_request_cannot_pull_a_huge_file_into_memory() {
+        let size = 10 * 1024 * 1024 * 1024;
+        let store = HugeBlob(size);
+        for (range, expected) in [
+            (
+                "bytes=0-9999999999",
+                format!("bytes 0-{}/{size}", MAX_RANGE_BODY - 1),
+            ),
+            (
+                "bytes=-9999999999",
+                format!(
+                    "bytes {}-{}/{size}",
+                    size - 9_999_999_999,
+                    size - 9_999_999_999 + MAX_RANGE_BODY - 1
+                ),
+            ),
+            ("bytes=100-199", format!("bytes 100-199/{size}")),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::RANGE, HeaderValue::from_str(range).unwrap());
+            let response = serve_blob(
+                &store,
+                "interviews/a/recording.webm",
+                "video/webm",
+                &headers,
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT, "{range}");
+            assert_eq!(response.headers()[header::CONTENT_RANGE], expected.as_str());
+        }
     }
 
     #[tokio::test]
