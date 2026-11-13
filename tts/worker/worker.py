@@ -23,6 +23,7 @@ import hmac
 import json
 import logging
 import os
+import queue
 import re
 import struct
 import sys
@@ -107,11 +108,42 @@ def wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
     return header + pcm
 
 
+class ModelThread:
+    """所有碰模型的事（加载、生成每一块音频）都交给这一个线程做。
+
+    HTTP 服务每来一个请求开一个新线程，而 MLX 的计算流是跟着线程走的：模型在一个线程里
+    加载或用过之后，换一个线程再用会报 `There is no Stream(...) in current thread`。
+    所以处理请求的线程不直接调引擎，而是把要做的事递给这个线程，等它做完拿结果。
+    """
+
+    def __init__(self):
+        self.jobs: queue.Queue = queue.Queue()
+        threading.Thread(target=self.run, name="tts-model", daemon=True).start()
+
+    def run(self) -> None:
+        while True:
+            function, reply = self.jobs.get()
+            try:
+                reply.put((True, function()))
+            except BaseException as error:  # noqa: BLE001  原样带回给等结果的线程
+                reply.put((False, error))
+
+    def call(self, function):
+        """在模型线程里执行 function，返回它的结果；它抛的异常在这里原样抛出。"""
+        reply: queue.Queue = queue.Queue(maxsize=1)
+        self.jobs.put((function, reply))
+        succeeded, value = reply.get()
+        if succeeded:
+            return value
+        raise value
+
+
 class Worker:
-    def __init__(self, engines: dict, references: ReferenceStore, token: str | None):
+    def __init__(self, engines: dict, references: ReferenceStore, token: str | None, model: ModelThread):
         self.engines = engines
         self.references = references
         self.token = token
+        self.model = model
         # 模型一次只能跑一条：GPU 只有一个，并发只会互相拖慢
         self.lock = threading.Lock()
 
@@ -274,15 +306,18 @@ class Handler(BaseHTTPRequestHandler):
             raise invalid("请求体不是合法的 JSON")
         engine, params = self.worker.prepare(body)
         stream = bool(body.get("stream"))
+        model = self.worker.model
         waited = time.monotonic()
-        with self.worker.lock:
+        with self.worker.lock, _closing_in(model, engine.synthesize(**params)) as chunks:
             started = time.monotonic()
             try:
-                chunks = engine.synthesize(**params)
-                first = next(chunks, None)
+                first = model.call(lambda: next(chunks, None))
             except WorkerError:
                 raise
             except Exception as error:  # noqa: BLE001
+                if getattr(error, "bad_request", False):
+                    # 引擎认为请求本身不对（比如 IndexTTS 没给参考录音）。这类错误的话是引擎自己写的，不带文本
+                    raise invalid(str(error))
                 log.exception("%s 合成失败", engine.name)
                 raise WorkerError(
                     HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -310,8 +345,13 @@ class Handler(BaseHTTPRequestHandler):
                         if data:
                             self.wfile.write(f"{len(data):X}\r\n".encode() + data + b"\r\n")
                             self.wfile.flush()
-                        piece = next(chunks, None)
+                        piece = model.call(lambda: next(chunks, None))
                     self.wfile.write(b"0\r\n\r\n")
+                except (BrokenPipeError, ConnectionResetError):
+                    # 调用方不等了（比如实时对话里候选人打断了面试官），不算出错，这条不再往下生成
+                    log.info("%s 流式合成到 %.1f 秒时调用方断开了", engine.name, total / 2 / sample_rate)
+                    self.close_connection = True
+                    return
                 except Exception:  # noqa: BLE001
                     # 头已经发出去了，没法再回错误：断开连接，让后端知道这段没合成完
                     log.exception("%s 流式合成中途失败", engine.name)
@@ -319,7 +359,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
             else:
                 try:
-                    data = pcm16(first) + b"".join(pcm16(piece) for piece in chunks)
+                    pieces = [pcm16(first)]
+                    while (piece := model.call(lambda: next(chunks, None))) is not None:
+                        pieces.append(pcm16(piece))
+                    data = b"".join(pieces)
                 except Exception as error:  # noqa: BLE001
                     log.exception("%s 合成失败", engine.name)
                     raise WorkerError(
@@ -343,6 +386,23 @@ class Handler(BaseHTTPRequestHandler):
         )
 
 
+class _closing_in:
+    """用完（或中途放弃）时在模型线程里关掉引擎的生成器，让它在那个线程里收尾。"""
+
+    def __init__(self, model: ModelThread, chunks):
+        self.model = model
+        self.chunks = chunks
+
+    def __enter__(self):
+        return self.chunks
+
+    def __exit__(self, *_exc) -> None:
+        try:
+            self.model.call(self.chunks.close)
+        except Exception:  # noqa: BLE001
+            log.exception("收尾时出错")
+
+
 ENGINE_NAMES = ("index2", "index25", "breeze2")
 
 
@@ -355,9 +415,14 @@ def build_engines(names: list[str], args) -> dict:
             from engine_fake import FakeEngine
 
             engines[name] = FakeEngine(name)
+        elif name == "breeze2":
+            from engine_breeze import BreezeEngine
+
+            engines[name] = BreezeEngine(Path(args.models))
         else:
-            # 三个真引擎的适配（engine_indextts.py、engine_breeze.py）要先在 Mac 上验证，还没合入
-            raise SystemExit("真引擎的适配还没合入，现在只能带 --fake 跑")
+            from engine_indextts import IndexTtsEngine
+
+            engines[name] = IndexTtsEngine(name, Path(args.models), args.memory_limit_gb)
     if not engines:
         raise SystemExit("--engines 至少要给一个引擎")
     return engines
@@ -383,13 +448,15 @@ def main() -> None:
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     engines = build_engines([name.strip() for name in args.engines.split(",") if name.strip()], args)
+    model = ModelThread()
     if args.preload:
-        for engine in engines.values():
+        # 倒着加载：IndexTTS 的两个版本内存里只留一个，这样留下的是 --engines 里排第一的那个
+        for engine in reversed(list(engines.values())):
             started = time.monotonic()
-            engine.load()
+            model.call(engine.load)
             log.info("%s 加载完成，%.1f 秒", engine.name, time.monotonic() - started)
 
-    Handler.worker = Worker(engines, ReferenceStore(Path(args.state) / "references"), token)
+    Handler.worker = Worker(engines, ReferenceStore(Path(args.state) / "references"), token, model)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.daemon_threads = True
     port = server.server_address[1]
