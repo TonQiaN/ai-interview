@@ -54,7 +54,8 @@ test("从打开链接到面试完成：逐题问答，静音自动进入下一�
   for (const box of boxes) await box.check();
   await agree.click();
 
-  // 设备检测：三项都通过才能下一步
+  // 设备检测：三项都通过才能下一步；网速是自己测的，不用候选人操作
+  await expect(page.getByText("上传速度够用")).toBeVisible();
   await button(page, "允许使用摄像头和麦克风").click();
   await expect(page.getByText("听到你的声音了")).toBeVisible();
   await expect(button(page, "下一步")).toBeDisabled();
@@ -75,6 +76,7 @@ test("从打开链接到面试完成：逐题问答，静音自动进入下一�
   const reports = state.events.filter((event) => event.kind === "device_report");
   expect(reports).toHaveLength(1);
   expect(reports[0]?.payload).toMatchObject({ camera: "ok", microphone: "ok", speaker: "ok" });
+  expect(reports[0]?.payload.uplink_kbps, "测出来的上行网速").toBeGreaterThan(0);
 
   // 面试官的每一句都记了播放起止；每道题答完有一句过渡，最后问候选人有没有问题，再说结束语
   expect(spokenKeys(state)).toEqual(SPOKEN_IN_ORDER);
@@ -97,6 +99,9 @@ test("从打开链接到面试完成：逐题问答，静音自动进入下一�
   const kinds = eventKinds(state);
   expect(kinds).toContain("interview_started");
   expect(kinds).toContain("interview_finished");
+  // 开始面试时申请了屏幕常亮，申请的结果记了下来
+  const wakeLock = state.events.find((event) => event.kind === "screen_wake_lock");
+  expect(wakeLock?.payload).toMatchObject({ supported: true });
 
   // 一段录像；有画面有声音，时长盖住整场面试
   const [recording] = state.recordings;
@@ -115,6 +120,45 @@ test("从打开链接到面试完成：逐题问答，静音自动进入下一�
     expect(streams).toContain("audio");
     expect(recording.duration_ms).toBeGreaterThan((lastTurn?.end_ms ?? 0) - 1500);
   }
+});
+
+test("网速测不出来或者偏慢时提醒候选人，但不拦着", async ({ page }) => {
+  const interview = seedInterview();
+  // 先让测速的请求发不出去
+  await page.route("**/api/v1/room/uplink-probe", (route) => route.abort());
+  await open(page, interview.token);
+  await button(page, "开始准备").click();
+  for (const box of await page.getByRole("checkbox").all()) await box.check();
+  await button(page, "同意并继续").click();
+  await expect(page.getByText("没有测出上传速度")).toBeVisible();
+
+  // 再让它按每秒 200 千比特慢慢传：比录像的码率低，传不过来
+  await page.unroute("**/api/v1/room/uplink-probe");
+  await page.route("**/api/v1/room/uplink-probe", async (route) => {
+    const bytes = route.request().postDataBuffer()?.byteLength ?? 0;
+    await new Promise((resolve) => setTimeout(resolve, (bytes * 8) / 200));
+    await route.continue();
+  });
+  await button(page, "重新测速").click();
+  await expect(page.getByText("上传速度偏慢")).toBeVisible();
+  await expect(button(page, "重新测速")).toBeVisible();
+
+  // 网速慢不影响往下走
+  await button(page, "允许使用摄像头和麦克风").click();
+  await expect(page.getByText("听到你的声音了")).toBeVisible();
+  await button(page, "播放提示音").click();
+  await button(page, "听到了").click();
+  await button(page, "下一步").click();
+  await expect(button(page, "开始面试")).toBeVisible();
+
+  await expect
+    .poll(() => {
+      const report = roomState(interview).events.find((event) => event.kind === "device_report");
+      return Number(report?.payload.uplink_kbps ?? 0);
+    })
+    .toBeGreaterThan(100);
+  const report = roomState(interview).events.find((event) => event.kind === "device_report");
+  expect(Number(report?.payload.uplink_kbps)).toBeLessThan(400);
 });
 
 test("链接过期、被撤销、无效或不完整时，说清楚原因", async ({ page }) => {

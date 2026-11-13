@@ -56,6 +56,8 @@ export interface RoomApi extends UploadApi {
   getSession(): Promise<RoomSession>;
   postConsent(version: string, agreedKeys: string[]): Promise<void>;
   postDeviceCheck(report: DeviceCheckReport): Promise<void>;
+  /** 测上行网速用：发一段字节，服务端收完就丢。 */
+  probeUplink(bytes: ArrayBuffer): Promise<void>;
   start(): Promise<NextStep>;
   advance(request: AdvanceRequest): Promise<NextStep>;
   /** 取面试官语音的字节。地址来自「下一步」里的 audio_url。 */
@@ -138,6 +140,18 @@ export class HttpRoomApi implements RoomApi {
   async postDeviceCheck(report: DeviceCheckReport): Promise<void> {
     await this.run((signal) =>
       this.client.POST("/api/v1/room/device-check", { body: report, signal }),
+    );
+  }
+
+  async probeUplink(bytes: ArrayBuffer): Promise<void> {
+    await this.run((signal) =>
+      this.client.POST("/api/v1/room/uplink-probe", {
+        // 和上传分片一样：请求体是原样的字节
+        body: bytes as unknown as number[],
+        bodySerializer: () => bytes,
+        headers: { "Content-Type": "application/octet-stream" },
+        signal,
+      }),
     );
   }
 
