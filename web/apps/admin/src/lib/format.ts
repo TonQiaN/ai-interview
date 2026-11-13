@@ -382,6 +382,17 @@ export const eventLabel: Record<string, string> = {
   events_dropped: "有事件没有记下来",
   face_count_changed: "画面里的人数变了",
   frames_checked: "抽查录像画面",
+  screen_wake_lock: "屏幕常亮",
+  upload_stalled: "录像传不上去",
+  upload_recovered: "录像又传上去了",
+  upload_finished: "录像传完了",
+};
+
+/** 录像为什么传不上去 */
+const uploadStallCauseLabel: Record<string, string> = {
+  retrying: "请求失败，正在重试",
+  offline: "断网了",
+  failed: "重试也没用",
 };
 
 export type EventSeverity = "info" | "notice" | "warning";
@@ -399,10 +410,29 @@ export function eventSeverity(kind: string): EventSeverity {
       "recording_gap",
       "recording_error",
       "interview_abandoned",
+      // 录像传不上去是设备和网络的事，不是候选人的行为，只作提示
+      "upload_stalled",
     ].includes(kind)
   )
     return "notice";
   return "info";
+}
+
+type TimedEvent = { kind: string; at_ms?: number | null; occurred_at: string };
+
+/**
+ * 过程记录里一条事件排在什么时候：有时间轴位置的写位置；没有的（比如刷新页面后补报的、
+ * 面试结束后录像才传完的）按发生的时刻说是开始前、面试中还是结束后。
+ */
+export function eventWhen(event: TimedEvent, events: TimedEvent[]): string {
+  if (typeof event.at_ms === "number") return clock(event.at_ms);
+  const at = Date.parse(event.occurred_at);
+  const started = events.find((e) => e.kind === "interview_started");
+  if (!started || Number.isNaN(at) || at < Date.parse(started.occurred_at)) return "开始前";
+  const ended = events.find(
+    (e) => e.kind === "interview_finished" || e.kind === "interview_abandoned",
+  );
+  return ended && at > Date.parse(ended.occurred_at) ? "结束后" : "面试中";
 }
 
 /** 成对事件里「回来」的那一条。时间轴上不单独标，离开了多久记在离开的那条上 */
@@ -410,6 +440,7 @@ export const RETURN_OF: Record<string, string> = {
   visibility_visible: "visibility_hidden",
   window_focus: "window_blur",
   network_online: "network_offline",
+  upload_recovered: "upload_stalled",
 };
 
 type EventLike = { kind: string; payload: Record<string, unknown> };
@@ -433,7 +464,7 @@ export function eventNote(event: EventLike): string | null {
   const p = event.payload ?? {};
   const parts: string[] = [];
   const away = num(p.duration_ms);
-  if (away) parts.push(`离开了 ${duration(away)}`);
+  if (away && event.kind !== "upload_stalled") parts.push(`离开了 ${duration(away)}`);
   const chars = num(p.chars);
   if (chars !== null) parts.push(`${chars} 个字`);
   const count = num(p.count);
@@ -458,6 +489,35 @@ export function eventNote(event: EventLike): string | null {
   if (event.kind === "interview_finished") {
     const reason = str(p.reason);
     if (reason) parts.push(endReasonLabel[reason] ?? reason);
+  }
+  if (event.kind === "screen_wake_lock") {
+    if (p.held === true) parts.push("已开启");
+    else if (p.held === false)
+      parts.push(`${p.supported === false ? "浏览器不支持" : "没申请到"}，手机可能中途锁屏`);
+  }
+  if (event.kind === "upload_stalled") {
+    const cause = str(p.cause);
+    if (cause) parts.push(uploadStallCauseLabel[cause] ?? cause);
+    const pending = num(p.pending_chunks);
+    if (pending) parts.push(`还有 ${pending} 片没传`);
+    const failures = num(p.failures);
+    if (failures) parts.push(`连续失败 ${failures} 次`);
+    const gaveUp = num(p.gave_up_after_ms);
+    if (gaveUp !== null) parts.push(`${duration(gaveUp)}后放弃重试`);
+    // 停了多久是「又传上去了」那条带来的，到最后也没恢复的没有
+    if (away) parts.push(`停了 ${duration(away)}`);
+  }
+  if (event.kind === "upload_recovered") {
+    const stalled = num(p.stalled_ms);
+    if (stalled !== null) parts.push(`停了 ${duration(stalled)}`);
+    const failures = num(p.failures);
+    if (failures) parts.push(`中间失败 ${failures} 次`);
+  }
+  if (event.kind === "upload_finished") {
+    const bytes = num(p.uploaded_bytes);
+    if (bytes !== null) parts.push(`共 ${fileSize(bytes)}`);
+    const wait = num(p.wait_ms);
+    if (wait !== null) parts.push(`面试结束后等了 ${duration(wait)}`);
   }
   if (Array.isArray(p.kinds)) {
     const names = p.kinds.map((k) => deviceKindLabel[String(k)] ?? String(k));
@@ -491,6 +551,7 @@ export function eventNote(event: EventLike): string | null {
 /**
  * 把成对的事件合起来：「回到页面」那条带着离开了多久，把它记到前面「切出页面」那条上，
  * 「回到页面」本身不再单独列出来。这样时间轴上一次离开只有一个点。
+ * 录像「又传上去了」和「传不上去」也是这样一对。
  */
 export function foldEvents<T extends EventLike>(events: T[]): T[] {
   const out: T[] = [];
@@ -503,11 +564,15 @@ export function foldEvents<T extends EventLike>(events: T[]): T[] {
     for (let i = out.length - 1; i >= 0; i -= 1) {
       const leave = out[i];
       if (leave?.kind !== leaveKind) continue;
-      if (leave.payload?.duration_ms === undefined && event.payload?.duration_ms !== undefined)
-        out[i] = {
-          ...leave,
-          payload: { ...leave.payload, duration_ms: event.payload.duration_ms },
-        };
+      // 回来的那条带着离开了多久（录像上传叫 stalled_ms）和中间失败了几次，记到离开的那条上
+      const carried: Record<string, unknown> = {};
+      const away = event.payload?.duration_ms ?? event.payload?.stalled_ms;
+      if (leave.payload?.duration_ms === undefined && away !== undefined)
+        carried.duration_ms = away;
+      if (leave.payload?.failures === undefined && event.payload?.failures !== undefined)
+        carried.failures = event.payload.failures;
+      if (Object.keys(carried).length > 0)
+        out[i] = { ...leave, payload: { ...leave.payload, ...carried } };
       break;
     }
   }
