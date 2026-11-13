@@ -2,7 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use interview_core::{
-    InterviewDecision, InterviewStatus, ReportStatus, SynthStatus, UtteranceKind, UtteranceSource,
+    InterviewDecision, InterviewStatus, ReportStatus, Speaker, SynthStatus, UtteranceKind,
+    UtteranceSource,
 };
 use interview_engine::{ConfigLimits, InterviewConfig, TimeBudget};
 use serde::{Deserialize, Serialize};
@@ -44,12 +45,15 @@ pub struct PositionBrief {
     pub department: Option<String>,
 }
 
-/// 面试详情里的报告摘要。
-#[derive(Debug, Clone, Serialize, ToSchema)]
+/// 一份分析报告的进度。报告本身用 `GET /interviews/{id}/report` 取。
+#[derive(Debug, Clone, Serialize, ToSchema, sqlx::FromRow)]
 pub struct ReportBrief {
     pub id: Uuid,
+    /// 第几版。每次重新生成加一
     pub version: i32,
     pub status: ReportStatus,
+    /// 生成失败的原因，给人看的。只有 `failed` 时有
+    pub error: Option<String>,
     pub generated_at: Option<DateTime<Utc>>,
 }
 
@@ -197,4 +201,73 @@ pub struct UpdateTemplate {
     pub name: Option<String>,
     pub description: Option<String>,
     pub config: Option<InterviewConfig>,
+}
+
+/// 一个字（或一个英文单词）和它在面试时间轴上的起止毫秒。
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TranscriptWord {
+    pub w: String,
+    pub s: i64,
+    pub e: i64,
+}
+
+/// 对话记录里的一段：一方连续说的一段话。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TurnView {
+    pub id: Uuid,
+    pub seq: i32,
+    pub speaker: Speaker,
+    /// 面试官的话是它自己的 key；候选人的话是它在回答的那一句的 key
+    pub utterance_key: Option<String>,
+    pub text: String,
+    /// 相对面试开始的毫秒，和录像同一条时间轴
+    pub start_ms: i64,
+    pub end_ms: Option<i64>,
+    /// 逐字时间戳。没有时是空的
+    pub words: Vec<TranscriptWord>,
+    /// 语音识别的置信度，0 到 1
+    pub confidence: Option<f32>,
+    /// `live` 是面试中实时转写的，`final` 是面试后重新转写的
+    pub transcript_source: String,
+    /// 候选人这段回答是怎么结束的：`silence`、`button`、`timeout`、`no_speech`
+    pub end_reason: Option<String>,
+}
+
+/// 带时间戳的对话记录。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TranscriptView {
+    pub items: Vec<TurnView>,
+}
+
+/// 看哪一版报告。
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ReportQuery {
+    /// 第几版。不填看最新生成好的那一版
+    pub version: Option<i32>,
+}
+
+/// 一份生成好的分析报告。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ReportView {
+    pub id: Uuid,
+    pub version: i32,
+    pub generated_at: Option<DateTime<Utc>>,
+    /// 报告内容
+    #[schema(value_type = interview_report::InterviewReport)]
+    pub content: serde_json::Value,
+}
+
+/// 这场面试的所有报告版本，新的在前。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ReportList {
+    pub items: Vec<ReportBrief>,
+}
+
+/// HR 的结论。
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct DecisionRequest {
+    pub decision: InterviewDecision,
+    /// 备注，可以不填
+    pub note: Option<String>,
 }

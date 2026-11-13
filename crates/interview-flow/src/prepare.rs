@@ -24,9 +24,8 @@ use serde_json::json;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use crate::scrub::scrub_contacts;
 use crate::store::{self, InterviewRow, SynthResult};
-use crate::{Deps, voice};
+use crate::{Deps, context, voice};
 
 /// 两个任务共用的 payload。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,8 +47,8 @@ pub(crate) async fn enqueue(
     .await
 }
 
-/// 准备没成。
-enum Stop {
+/// 后台任务没做成。
+pub(crate) enum Stop {
     /// 要 HR 处理，原因写在面试上
     Failed(String),
     /// 过一会儿再试
@@ -62,7 +61,7 @@ impl<E: Into<anyhow::Error>> From<E> for Stop {
     }
 }
 
-fn failed(message: impl Into<String>) -> Stop {
+pub(crate) fn failed(message: impl Into<String>) -> Stop {
     Stop::Failed(message.into())
 }
 
@@ -161,64 +160,26 @@ async fn generate_plan(
     };
     let db = &deps.ctx.db;
 
-    // 各列的读法见 docs/architecture/data-model.md 的「出题和写报告时怎么读岗位和简历」
-    let (title, company, description, requirements): (String, Option<String>, String, String) =
-        sqlx::query_as(
-            "SELECT title, extra->>'client_name', description, requirements \
-             FROM positions WHERE id = $1",
-        )
-        .bind(row.position_id)
-        .fetch_one(db)
-        .await?;
+    let job = context::job(db, row.position_id).await?;
     let (name,): (String,) = sqlx::query_as("SELECT name FROM candidates WHERE id = $1")
         .bind(row.candidate_id)
         .fetch_one(db)
         .await?;
-    // interview_text 是去掉了姓名和联系方式的简历；老数据没有这一列时退回全文
-    const RESUME: &str = "SELECT COALESCE(interview_text, text_content), parse_status FROM resumes";
-    let resume: Option<(Option<String>, String)> =
-        match row.resume_id {
-            Some(resume_id) => {
-                sqlx::query_as(&format!("{RESUME} WHERE id = $1"))
-                    .bind(resume_id)
-                    .fetch_optional(db)
-                    .await?
-            }
-            None => sqlx::query_as(&format!(
-                "{RESUME} WHERE candidate_id = $1 ORDER BY is_primary DESC, created_at DESC LIMIT 1"
-            ))
-            .bind(row.candidate_id)
-            .fetch_optional(db)
-            .await?,
-        };
-    let resume_text = match resume {
-        Some((_, status)) if status == "pending" || status == "running" => {
-            return Err(Stop::Retry(anyhow::anyhow!(
-                "简历还在解析，等它解析完再出题"
-            )));
-        }
-        Some((text, _)) => text.unwrap_or_default(),
-        None => String::new(),
-    };
-
-    let mut job_description = description.trim().to_owned();
-    if !requirements.trim().is_empty() {
-        if !job_description.is_empty() {
-            job_description.push_str("\n\n");
-        }
-        job_description.push_str("任职要求：\n");
-        job_description.push_str(requirements.trim());
+    let resume = context::resume(db, row.candidate_id, row.resume_id).await?;
+    if resume.parsing {
+        return Err(Stop::Retry(anyhow::anyhow!(
+            "简历还在解析，等它解析完再出题"
+        )));
     }
     let input = PlanInput {
         job: JobContext {
-            title,
-            company: company.unwrap_or_default(),
-            description: job_description,
+            title: job.title,
+            company: job.company,
+            description: job.description,
         },
         candidate: CandidateContext {
             name,
-            // 电话和邮箱出题用不上，不发给大模型。interview_text 里本来就没有，这里再挡一道
-            resume_text: scrub_contacts(&resume_text),
+            resume_text: resume.text,
         },
         config: config.clone(),
     };

@@ -17,6 +17,19 @@ pub struct TestApp {
     pub router: Router,
 }
 
+impl TestApp {
+    /// 同一个应用（同一个数据库、同一批存好的文件）配上大模型之后的样子。
+    pub async fn with_model(&self, model: Arc<dyn ChatModel>) -> TestApp {
+        let admin = testing::create_admin(&self.ctx).await;
+        let deps = Deps::new(self.ctx.clone(), Some(model));
+        let (router, _api) = interview_talent::router(deps).split_for_parts();
+        TestApp {
+            ctx: self.ctx.clone(),
+            router: testing::as_admin(router, admin),
+        }
+    }
+}
+
 /// 不带大模型的应用。
 pub async fn app(pool: PgPool) -> TestApp {
     build(pool, None).await

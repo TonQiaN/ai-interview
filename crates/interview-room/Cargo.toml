@@ -9,16 +9,18 @@ publish.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 axum = { workspace = true }
 chrono = { workspace = true }
 interview-core = { workspace = true, features = ["sqlx"] }
 interview-engine = { workspace = true }
+interview-llm = { workspace = true }
 interview-platform = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 sqlx = { workspace = true }
-tokio = { workspace = true, features = ["fs", "process", "time"] }
+tokio = { workspace = true, features = ["fs", "process", "rt", "sync", "time"] }
 tracing = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { workspace = true }

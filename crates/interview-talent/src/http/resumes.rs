@@ -205,11 +205,22 @@ async fn reparse_resume(
 ) -> ApiResult<(StatusCode, Json<Resume>)> {
     deps.require_llm()?;
     let db = &deps.ctx.db;
+    let Some(current) = resumes::get(db, id).await? else {
+        return Err(ApiError::not_found("简历"));
+    };
+    // 上传简历建的候选人，如果第一次没解析成，名字还是占位的，这次解析出来要换上真名。
+    // HR 已经改过名字的不动
+    let adopt_name = current.is_primary
+        && candidates::get(db, current.candidate_id)
+            .await?
+            .is_some_and(|candidate| {
+                upload::is_placeholder_name(&candidate, current.file_name.as_deref())
+            });
     let mut tx = db.begin().await?;
     if !resumes::reset_for_parse(&mut tx, id).await? {
         return Err(ApiError::not_found("简历"));
     }
-    TaskQueue::enqueue_in(&mut tx, parse_task(id, false)).await?;
+    TaskQueue::enqueue_in(&mut tx, parse_task(id, adopt_name)).await?;
     tx.commit().await?;
     let resume = resumes::get(db, id)
         .await?

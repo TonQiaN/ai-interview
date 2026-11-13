@@ -3,10 +3,12 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { ApiError, http, type Query } from "./http";
 import type {
   AdminUser,
-  Candidate,
+  CandidateDetail,
   CandidateInput,
+  CandidateListItem,
   ConfigDefaults,
   Decision,
+  ImportedCandidate,
   Interview,
   InterviewConfig,
   InterviewEvent,
@@ -15,13 +17,19 @@ import type {
   InterviewSummary,
   InterviewTemplate,
   Invite,
+  LoginInput,
   Page,
   Position,
+  PositionDraft,
   PositionInput,
+  RaasCandidate,
+  RaasCandidateImportItem,
   RaasPosition,
+  RaasPositionImportItem,
   RaasStatus,
   Recording,
   Resume,
+  ResumeDetail,
   SpeechEngine,
   SystemStatus,
   Transcript,
@@ -53,8 +61,7 @@ export function useMe() {
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { username: string; password: string }) =>
-      http.post<AdminUser>("/auth/login", input),
+    mutationFn: (input: LoginInput) => http.post<AdminUser>("/auth/login", input),
     onSuccess: (user) => {
       qc.clear();
       qc.setQueryData(["me"], user);
@@ -113,6 +120,13 @@ export function useSavePosition(id?: string) {
   });
 }
 
+/** 把粘贴的岗位描述整理成表单能用的草稿，不保存 */
+export function useDraftPosition() {
+  return useMutation({
+    mutationFn: (text: string) => http.post<PositionDraft>("/positions/draft", { text }),
+  });
+}
+
 export function useDeletePosition() {
   const qc = useQueryClient();
   return useMutation({
@@ -142,7 +156,10 @@ export function useImportRaasPositions() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (refs: string[]) =>
-      http.post<{ imported: Position[] }>("/raas/positions/import", { refs }),
+      http.post<{ items: RaasPositionImportItem[] }>("/raas/positions/import", {
+        refs,
+        refresh: false,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["positions"] });
       qc.invalidateQueries({ queryKey: ["raas-positions"] });
@@ -154,33 +171,48 @@ export function useImportRaasPositions() {
 
 const busy = (s: string | null | undefined) => s === "pending" || s === "running";
 
+/**
+ * 简历读完了、画像还在生成。后端先把简历标成读完，再花十来秒生成画像，
+ * 中间没有单独的状态，所以按时间判断：读完两分钟之内画像还没跟上，就当它还在生成。
+ */
+export function profilePending(c: CandidateListItem, now = Date.now()): boolean {
+  const resume = c.primary_resume;
+  if (resume?.parse_status !== "done" || !resume.parsed_at) return false;
+  const parsedAt = Date.parse(resume.parsed_at);
+  if (c.profile_updated_at && Date.parse(c.profile_updated_at) >= parsedAt) return false;
+  return now - parsedAt < 120_000;
+}
+
+/** 这位候选人的简历或画像还在处理，页面要接着刷新 */
+export const candidateBusy = (c: CandidateListItem) =>
+  busy(c.primary_resume?.parse_status) || profilePending(c);
+
 export function useCandidates(query: Query = {}) {
   return useQuery({
     queryKey: ["candidates", query],
-    queryFn: () => http.get<Page<Candidate>>("/candidates", query),
+    queryFn: () => http.get<Page<CandidateListItem>>("/candidates", query),
     placeholderData: keepPreviousData,
     // 有简历在解析就接着刷新，解析完自动停
-    refetchInterval: (q) =>
-      q.state.data?.items.some((c) => busy(c.profile_status)) ? 1500 : false,
+    refetchInterval: (q) => (q.state.data?.items.some(candidateBusy) ? 2000 : false),
   });
 }
 
 export function useCandidate(id: string | undefined) {
   return useQuery({
     queryKey: ["candidate", id],
-    queryFn: () => http.get<Candidate>(`/candidates/${id}`),
+    queryFn: () => http.get<CandidateDetail>(`/candidates/${id}`),
     enabled: Boolean(id),
-    refetchInterval: (q) => (busy(q.state.data?.profile_status) ? 1500 : false),
+    refetchInterval: (q) => (q.state.data && candidateBusy(q.state.data) ? 2000 : false),
   });
 }
 
 export function useSaveCandidate(id?: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: Partial<CandidateInput>) =>
+    mutationFn: (input: CandidateInput) =>
       id
-        ? http.patch<Candidate>(`/candidates/${id}`, input)
-        : http.post<Candidate>("/candidates", input),
+        ? http.patch<CandidateDetail>(`/candidates/${id}`, input)
+        : http.post<CandidateDetail>("/candidates", input),
     onSuccess: (c) => {
       qc.invalidateQueries({ queryKey: ["candidates"] });
       qc.setQueryData(["candidate", c.id], c);
@@ -206,7 +238,7 @@ function fileForm(file: File): FormData {
 export function useImportResume() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (file: File) => http.post<Candidate>("/candidates/import", fileForm(file)),
+    mutationFn: (file: File) => http.post<ImportedCandidate>("/candidates/import", fileForm(file)),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["candidates"] }),
   });
 }
@@ -214,31 +246,89 @@ export function useImportResume() {
 export function useResumes(candidateId: string | undefined) {
   return useQuery({
     queryKey: ["resumes", candidateId],
-    queryFn: () => http.get<List<Resume>>(`/candidates/${candidateId}/resumes`),
+    queryFn: () => http.get<Page<Resume>>(`/candidates/${candidateId}/resumes`, { page_size: 50 }),
     enabled: Boolean(candidateId),
-    refetchInterval: (q) => (q.state.data?.items.some((r) => busy(r.parse_status)) ? 1500 : false),
+    refetchInterval: (q) => (q.state.data?.items.some((r) => busy(r.parse_status)) ? 2000 : false),
   });
 }
 
-export function useUploadResume(candidateId: string) {
+/** 一份简历读出来的内容：经历、教育、项目 */
+export function useResume(id: string | null | undefined) {
+  return useQuery({
+    queryKey: ["resume", id],
+    queryFn: () => http.get<ResumeDetail>(`/resumes/${id}`),
+    enabled: Boolean(id),
+  });
+}
+
+function useResumeChanged(candidateId: string) {
   const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: ["resumes", candidateId] });
+    qc.invalidateQueries({ queryKey: ["resume"] });
+    qc.invalidateQueries({ queryKey: ["candidate", candidateId] });
+    qc.invalidateQueries({ queryKey: ["candidates"] });
+  };
+}
+
+export function useUploadResume(candidateId: string) {
+  const changed = useResumeChanged(candidateId);
   return useMutation({
     mutationFn: (file: File) =>
       http.post<Resume>(`/candidates/${candidateId}/resumes`, fileForm(file)),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["resumes", candidateId] });
-      qc.invalidateQueries({ queryKey: ["candidate", candidateId] });
+    onSuccess: changed,
+  });
+}
+
+/** 让大模型把这份简历重新读一遍 */
+export function useReparseResume(candidateId: string) {
+  const changed = useResumeChanged(candidateId);
+  return useMutation({
+    mutationFn: (resumeId: string) => http.post<Resume>(`/resumes/${resumeId}/parse`),
+    onSuccess: changed,
+  });
+}
+
+export function useDeleteResume(candidateId: string) {
+  const changed = useResumeChanged(candidateId);
+  return useMutation({
+    mutationFn: (resumeId: string) => http.delete(`/resumes/${resumeId}`),
+    onSuccess: changed,
+  });
+}
+
+/** 按现在的主简历重新生成画像。接口等生成完才返回，大概十秒 */
+export function useRegenerateProfile(candidateId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => http.post<CandidateDetail>(`/candidates/${candidateId}/profile/regenerate`),
+    onSuccess: (c) => {
+      qc.setQueryData(["candidate", candidateId], c);
+      qc.invalidateQueries({ queryKey: ["candidates"] });
     },
   });
 }
 
-export function useRegenerateProfile(candidateId: string) {
+export function useRaasCandidates(query: Query, enabled: boolean) {
+  return useQuery({
+    queryKey: ["raas-candidates", query],
+    queryFn: () => http.get<Page<RaasCandidate>>("/raas/candidates", query),
+    enabled,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useImportRaasCandidates() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => http.post<Candidate>(`/candidates/${candidateId}/profile/regenerate`),
+    mutationFn: (refs: string[]) =>
+      http.post<{ items: RaasCandidateImportItem[] }>("/raas/candidates/import", {
+        refs,
+        refresh: false,
+      }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["candidate", candidateId] });
-      qc.invalidateQueries({ queryKey: ["resumes", candidateId] });
+      qc.invalidateQueries({ queryKey: ["candidates"] });
+      qc.invalidateQueries({ queryKey: ["raas-candidates"] });
     },
   });
 }

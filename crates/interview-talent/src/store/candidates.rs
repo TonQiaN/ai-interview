@@ -397,13 +397,17 @@ pub async fn find_duplicates(
 /// 用简历里读出来的信息补全候选人的基本信息：已经有值的不动。
 ///
 /// `adopt_name` 为真时用简历里的姓名替换现有的（上传简历自动建的候选人，原来的名字是占位的）。
+///
+/// 只有这份简历现在还是主简历时才写。读简历要十几秒，这期间可能有更新的简历传上来顶替了它，
+/// 所以在写的那一刻再确认一次。返回有没有写。
 pub async fn fill_from_resume(
     db: &PgPool,
     id: Uuid,
+    resume_id: Uuid,
     resume: &ParsedResume,
     adopt_name: bool,
-) -> sqlx::Result<()> {
-    sqlx::query(
+) -> sqlx::Result<bool> {
+    let done = sqlx::query(
         "UPDATE candidates
          SET name = CASE WHEN $2 AND $3::text IS NOT NULL THEN $3 ELSE name END,
              email = COALESCE(email, $4),
@@ -411,7 +415,9 @@ pub async fn fill_from_resume(
              current_title = COALESCE(current_title, $6),
              current_company = COALESCE(current_company, $7),
              location = COALESCE(location, $8)
-         WHERE id = $1 AND archived_at IS NULL",
+         WHERE id = $1 AND archived_at IS NULL
+           AND EXISTS (SELECT 1 FROM resumes
+                       WHERE resumes.id = $9 AND resumes.candidate_id = $1 AND resumes.is_primary)",
     )
     .bind(id)
     .bind(adopt_name)
@@ -421,9 +427,31 @@ pub async fn fill_from_resume(
     .bind(&resume.current_title)
     .bind(&resume.current_company)
     .bind(&resume.location)
+    .bind(resume_id)
     .execute(db)
     .await?;
-    Ok(())
+    Ok(done.rows_affected() == 1)
+}
+
+/// 存一份根据某份简历生成的画像。只有这份简历现在还是主简历时才存，返回有没有存。
+pub async fn set_profile_from_resume(
+    db: &PgPool,
+    id: Uuid,
+    resume_id: Uuid,
+    profile: &CandidateProfile,
+) -> sqlx::Result<bool> {
+    let done = sqlx::query(
+        "UPDATE candidates SET profile = $2, profile_updated_at = now()
+         WHERE id = $1
+           AND EXISTS (SELECT 1 FROM resumes
+                       WHERE resumes.id = $3 AND resumes.candidate_id = $1 AND resumes.is_primary)",
+    )
+    .bind(id)
+    .bind(Json(profile))
+    .bind(resume_id)
+    .execute(db)
+    .await?;
+    Ok(done.rows_affected() == 1)
 }
 
 /// 存画像。

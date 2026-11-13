@@ -20,6 +20,7 @@ use interview_llm::{ChatModel, DeepSeekClient};
 use interview_platform::AppContext;
 use interview_platform::status::{ComponentStatus, DatabaseProbe, StatusProbe, StatusRegistry};
 use interview_platform::tasks::TaskRegistry;
+use interview_stt::{SttConfig, Transcriber};
 use interview_tts::{FakeBackend, Synthesizer, backend_from_env};
 use utoipa_axum::router::OpenApiRouter;
 
@@ -31,6 +32,9 @@ pub struct Shared {
     /// 语音合成。后端由 `AI_INTERVIEW_TTS_BACKEND` 决定：默认是输出测试音的假后端，
     /// `worker` 是 Mac 上跑真模型的 worker（见 `tts/worker/README.md`）。
     pub synth: Arc<Synthesizer>,
+    /// 语音识别。按环境变量建（`AI_INTERVIEW_STT_BACKEND`，默认是假后端）；建不出来时是 `None`，
+    /// 服务照常启动，面试后不重新转写。
+    pub stt: Option<Arc<dyn Transcriber>>,
 }
 
 /// 不需要任何外部依赖的语音合成：输出测试音的假后端。
@@ -39,8 +43,8 @@ fn fake_synth() -> Arc<Synthesizer> {
 }
 
 impl Shared {
-    /// 按环境变量创建。
-    pub fn from_env() -> Self {
+    /// 按环境变量创建。真的语音识别后端要在这里加载模型，可能要几秒钟。
+    pub async fn from_env() -> Self {
         let llm = match DeepSeekClient::from_env() {
             Ok(client) => Some(Arc::new(client) as Arc<dyn ChatModel>),
             Err(err) => {
@@ -48,9 +52,23 @@ impl Shared {
                 None
             }
         };
+        let stt = match SttConfig::from_env() {
+            Ok(config) => match config.build().await {
+                Ok(stt) => Some(stt),
+                Err(err) => {
+                    tracing::warn!(reason = %err, "语音识别启动不了，面试后不会重新转写");
+                    None
+                }
+            },
+            Err(err) => {
+                tracing::warn!(reason = %err, "语音识别的配置不对，面试后不会重新转写");
+                None
+            }
+        };
         Self {
             llm,
             synth: Arc::new(Synthesizer::new(backend_from_env())),
+            stt,
         }
     }
 
@@ -59,6 +77,7 @@ impl Shared {
         Self {
             llm: None,
             synth: fake_synth(),
+            stt: None,
         }
     }
 }
@@ -96,7 +115,8 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
     probes.register(FfmpegProbe(Ffmpeg::from_env()));
 
     // ── ⑤ 候选人面试间：interview-room ──
-    let room = interview_room::Deps::new(ctx.clone(), interview_room::RoomConfig::from_env());
+    let room = interview_room::Deps::new(ctx.clone(), interview_room::RoomConfig::from_env())
+        .with_llm(shared.llm.clone());
     api = api.merge(interview_room::router(room.clone()));
     interview_room::register_tasks(&mut tasks, room);
 
@@ -105,6 +125,7 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
         ctx: ctx.clone(),
         llm: shared.llm.clone(),
         synth: shared.synth.clone(),
+        stt: shared.stt.clone(),
     };
     api = api.merge(interview_flow::router(flow.clone()));
     interview_flow::register_tasks(&mut tasks, flow);

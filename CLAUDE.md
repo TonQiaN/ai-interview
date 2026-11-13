@@ -60,6 +60,8 @@ cargo test -p interview-stt --features sherpa --test sherpa_live -- --ignored --
 cargo run --release -p interview-stt --features sherpa --example transcribe -- 录音.wav
 ```
 
+服务进程要用真的语音识别（面试后重新转写），同样加特性启动：`cargo run -p interview-server --features sherpa`，并设 `AI_INTERVIEW_STT_BACKEND=sherpa`。
+
 改了 `crates/interview-stt/src/sherpa.rs` 要带着 `--features sherpa` 跑 clippy 和上面的测试，`scripts/check.sh` 不开这个特性。CI 里有单独的 `stt-sherpa` 任务跑这些。
 
 面试中候选人的声音是从上传的录像分片里取的：`interview_audio::Ffmpeg` 调系统里的 ffmpeg 解码，`interview_stt::RecordingTranscript` 边收分片边转写（用法见 `docs/speech/stt.md`）。相关测试要装 ffmpeg（`AI_INTERVIEW_FFMPEG` 可以指路径），本机没装会跳过，CI 里装了。

@@ -11,30 +11,50 @@ import {
   Textarea,
   useToast,
 } from "@ai-interview/ui";
-import { FileUp, UserPlus } from "lucide-react";
+import { CloudDownload, FileUp, UserPlus } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
-import { errorMessage } from "../api/http";
-import { useCandidates, useImportResume, useSaveCandidate } from "../api/queries";
-import type { Candidate, CandidateInput } from "../api/types";
+import { Link, useNavigate, useSearchParams } from "react-router";
+import { ApiError, errorMessage } from "../api/http";
+import {
+  profilePending,
+  useCandidates,
+  useImportRaasCandidates,
+  useImportResume,
+  useRaasCandidates,
+  useSaveCandidate,
+} from "../api/queries";
+import type {
+  CandidateInput,
+  CandidateListItem,
+  CandidateSource,
+  DuplicateHint,
+  RaasCandidate,
+} from "../api/types";
 import { Empty, Pager, Person, QueryView, SearchInput } from "../components/common";
+import { RaasImportDialog } from "../components/RaasImportDialog";
 import { relativeTime } from "../lib/format";
 
-const sourceLabel: Record<Candidate["source"], string> = {
+const sourceLabel: Record<CandidateSource, string> = {
   manual: "手动添加",
-  resume: "上传简历",
+  upload: "上传简历",
   raas: "RAAS",
 };
 
-export const emptyCandidate: CandidateInput = {
+/** 上传简历能收的文件。Word 后端读不了，要先另存为 PDF */
+export const RESUME_ACCEPT = ".pdf,.txt,.md,.png,.jpg,.jpeg,.webp";
+export const RESUME_HINT = "PDF、图片、纯文本都可以，每份不超过 20MB。Word 文档请先另存为 PDF。";
+
+/** 候选人基本信息表单里的值 */
+export type CandidateForm = Required<Omit<CandidateInput, "allow_duplicate">>;
+
+export const emptyCandidate: CandidateForm = {
   name: "",
   phone: null,
   email: null,
   current_title: null,
   current_company: null,
-  years_of_experience: null,
   location: null,
-  note: null,
+  notes: null,
 };
 
 /** 候选人基本信息的表单，新建和编辑共用 */
@@ -42,46 +62,56 @@ export function CandidateFields({
   value,
   onChange,
 }: {
-  value: CandidateInput;
-  onChange: (next: CandidateInput) => void;
+  value: CandidateForm;
+  onChange: (next: CandidateForm) => void;
 }) {
-  const text = (key: keyof CandidateInput) => ({
-    value: (value[key] as string | null) ?? "",
+  const text = (key: keyof CandidateForm) => ({
+    value: value[key] ?? "",
     onChange: (e: { target: { value: string } }) =>
       onChange({ ...value, [key]: e.target.value || (key === "name" ? "" : null) }),
   });
   return (
     <div className="adm-form-grid">
       <Field label="姓名" required>
-        {({ id }) => <Input id={id} {...text("name")} autoFocus />}
+        {({ id }) => <Input id={id} {...text("name")} />}
       </Field>
       <Field label="所在城市">{({ id }) => <Input id={id} {...text("location")} />}</Field>
       <Field label="手机">{({ id }) => <Input id={id} type="tel" {...text("phone")} />}</Field>
       <Field label="邮箱">{({ id }) => <Input id={id} type="email" {...text("email")} />}</Field>
       <Field label="现在的职位">{({ id }) => <Input id={id} {...text("current_title")} />}</Field>
       <Field label="现在的公司">{({ id }) => <Input id={id} {...text("current_company")} />}</Field>
-      <Field label="工作年限">
-        {({ id }) => (
-          <Input
-            id={id}
-            type="number"
-            min={0}
-            max={60}
-            value={value.years_of_experience ?? ""}
-            onChange={(e) =>
-              onChange({
-                ...value,
-                years_of_experience:
-                  e.target.value === "" ? null : Math.max(0, Number(e.target.value)),
-              })
-            }
-          />
-        )}
-      </Field>
       <Field label="备注" className="adm-span">
-        {({ id }) => <Textarea id={id} rows={3} {...text("note")} />}
+        {({ id }) => <Textarea id={id} rows={3} {...text("notes")} />}
       </Field>
     </div>
+  );
+}
+
+/** 接口说「已经有这个人了」时，带回来的那些候选人 */
+function duplicatesOf(error: unknown): DuplicateHint[] | null {
+  if (!(error instanceof ApiError) || error.code !== "duplicate_candidate") return null;
+  const list = (error.details as { duplicates?: DuplicateHint[] } | null)?.duplicates;
+  return Array.isArray(list) ? list : [];
+}
+
+/** 可能是同一个人的候选人，一人一行，点了去看 */
+export function DuplicateList({ items }: { items: DuplicateHint[] }) {
+  return (
+    <ul className="adm-plain-list">
+      {items.map((d) => (
+        <li key={d.id}>
+          <Link to={`/candidates/${d.id}`} className="adm-link">
+            {d.name}
+          </Link>
+          <span className="oil-muted">
+            {" "}
+            {[d.current_title, d.current_company, `${relativeTime(d.created_at)}添加`]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -89,15 +119,23 @@ function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
   const save = useSaveCandidate();
   const [value, setValue] = useState(emptyCandidate);
+  const duplicates = duplicatesOf(save.error);
+
+  function create(allowDuplicate: boolean) {
+    save.mutate(
+      { ...value, allow_duplicate: allowDuplicate },
+      {
+        onSuccess: (c) => {
+          setValue(emptyCandidate);
+          onClose();
+          navigate(`/candidates/${c.id}`);
+        },
+      },
+    );
+  }
   function submit(e: FormEvent) {
     e.preventDefault();
-    save.mutate(value, {
-      onSuccess: (c) => {
-        setValue(emptyCandidate);
-        onClose();
-        navigate(`/candidates/${c.id}`);
-      },
-    });
+    create(false);
   }
   return (
     <Dialog
@@ -121,11 +159,82 @@ function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
       }
     >
       <form id="add-candidate" onSubmit={submit} className="oil-stack">
-        {save.error && <Banner tone="danger">{errorMessage(save.error)}</Banner>}
+        {duplicates ? (
+          <Banner
+            tone="warning"
+            title="手机号或邮箱和已有的候选人一样"
+            actions={
+              <Button size="sm" variant="secondary" onClick={() => create(true)}>
+                不是同一个人，照样添加
+              </Button>
+            }
+          >
+            <DuplicateList items={duplicates} />
+          </Banner>
+        ) : (
+          save.error && <Banner tone="danger">{errorMessage(save.error)}</Banner>
+        )}
         <CandidateFields value={value} onChange={setValue} />
       </form>
     </Dialog>
   );
+}
+
+function RaasDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const run = useImportRaasCandidates();
+  return (
+    <RaasImportDialog
+      open={open}
+      onClose={onClose}
+      title="从 RAAS 导入候选人"
+      unit="位候选人"
+      searchPlaceholder="搜姓名、公司或职位"
+      fallback="现在可以先上传简历。"
+      list={useRaasCandidates}
+      run={run}
+      itemName={(item) => item.name ?? item.external_ref}
+      doneMessage={(items) => {
+        const reading = items.filter((i) => i.resume === "queued").length;
+        return reading > 0
+          ? `导入了 ${items.length} 位候选人，${reading} 份简历正在读`
+          : `导入了 ${items.length} 位候选人`;
+      }}
+      row={(c: RaasCandidate) => ({
+        ref: c.external_ref,
+        title: c.name ?? "没有姓名",
+        sub: [
+          c.current_title,
+          c.current_company,
+          c.current_city,
+          c.degree,
+          c.experience_years == null ? null : `${c.experience_years} 年`,
+          c.latest_application_job_title ? `投了 ${c.latest_application_job_title}` : null,
+        ],
+        imported: Boolean(c.imported_candidate_id),
+      })}
+    />
+  );
+}
+
+/** 列表里「画像」那一格：简历读到哪一步了，读完显示几个核心技能 */
+function ProfileCell({ candidate: c }: { candidate: CandidateListItem }) {
+  const status = c.primary_resume?.parse_status;
+  if (status === "pending" || status === "running") return <Badge tone="info">正在读简历</Badge>;
+  if (status === "failed") return <Badge tone="danger">简历没读出来</Badge>;
+  if (profilePending(c)) return <Badge tone="info">正在生成画像</Badge>;
+  if (c.profile.core_skills.length > 0) {
+    return (
+      <span className="oil-row oil-row--wrap" style={{ "--oil-gap": "4px" } as React.CSSProperties}>
+        {c.profile.core_skills.slice(0, 3).map((s) => (
+          <Badge key={s.name} plain>
+            {s.name}
+          </Badge>
+        ))}
+      </span>
+    );
+  }
+  if (c.profile.headline) return <span>{c.profile.headline}</span>;
+  return <span className="oil-muted">{c.primary_resume ? "还没有画像" : "没有简历"}</span>;
 }
 
 export function CandidatesPage() {
@@ -138,6 +247,7 @@ export function CandidatesPage() {
   const importResume = useImportResume();
   const [adding, setAdding] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   async function upload(files: File[]) {
     let ok = 0;
@@ -171,6 +281,13 @@ export function CandidatesPage() {
         description="上传简历就行，姓名、经历和画像由大模型读出来。"
         actions={
           <>
+            <Button
+              variant="secondary"
+              icon={<CloudDownload aria-hidden="true" />}
+              onClick={() => setImporting(true)}
+            >
+              从 RAAS 导入
+            </Button>
             <Button
               variant="secondary"
               icon={<UserPlus aria-hidden="true" />}
@@ -208,7 +325,6 @@ export function CandidatesPage() {
                     <th>现在</th>
                     <th>年限</th>
                     <th>画像</th>
-                    <th>面试</th>
                     <th>来源</th>
                     <th>更新</th>
                   </tr>
@@ -230,30 +346,12 @@ export function CandidatesPage() {
                         )}
                       </td>
                       <td className="oil-num">
-                        {c.years_of_experience === null ? "—" : `${c.years_of_experience} 年`}
+                        {c.profile.years_of_experience == null
+                          ? "—"
+                          : `${c.profile.years_of_experience} 年`}
                       </td>
                       <td>
-                        {c.profile_status === "pending" || c.profile_status === "running" ? (
-                          <Badge tone="info">解析中</Badge>
-                        ) : c.profile_status === "failed" ? (
-                          <Badge tone="danger">解析失败</Badge>
-                        ) : c.profile ? (
-                          <span
-                            className="oil-row oil-row--wrap"
-                            style={{ "--oil-gap": "4px" } as React.CSSProperties}
-                          >
-                            {c.profile.skills.slice(0, 3).map((s) => (
-                              <Badge key={s} plain>
-                                {s}
-                              </Badge>
-                            ))}
-                          </span>
-                        ) : (
-                          <span className="oil-muted">没有简历</span>
-                        )}
-                      </td>
-                      <td className="oil-num">
-                        {c.interview_count > 0 ? `${c.interview_count} 场` : "—"}
+                        <ProfileCell candidate={c} />
                       </td>
                       <td className="oil-muted">{sourceLabel[c.source]}</td>
                       <td className="oil-muted">{relativeTime(c.updated_at)}</td>
@@ -275,10 +373,10 @@ export function CandidatesPage() {
       <Dialog open={uploading} onClose={() => setUploading(false)} title="上传简历">
         <div className="oil-stack">
           <Dropzone
-            accept=".pdf,.doc,.docx,.txt,.md,.png,.jpg,.jpeg"
+            accept={RESUME_ACCEPT}
             multiple
             title={importResume.isPending ? "正在上传…" : "把简历拖到这里，或者点一下选择文件"}
-            hint="PDF、Word、图片都可以，一次可以传多份，每份不超过 20MB。"
+            hint={`一次可以传多份。${RESUME_HINT}`}
             onFiles={(files) => void upload(files)}
           />
           <p className="oil-muted" style={{ margin: 0, fontSize: "var(--oil-text-sm)" }}>
@@ -287,6 +385,7 @@ export function CandidatesPage() {
         </div>
       </Dialog>
       <AddDialog open={adding} onClose={() => setAdding(false)} />
+      <RaasDialog open={importing} onClose={() => setImporting(false)} />
     </>
   );
 }

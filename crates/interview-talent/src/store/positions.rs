@@ -197,6 +197,8 @@ pub async fn imported_ids(
 }
 
 /// 用来源系统里最新的内容覆盖一个导入的岗位，归档的顺便恢复。
+///
+/// 用工形式例外：来源系统没给的时候留着现有的（RAAS 没有这一项，是 HR 在我们这边填的）。
 pub async fn overwrite_from_source(
     db: &PgPool,
     id: Uuid,
@@ -204,7 +206,8 @@ pub async fn overwrite_from_source(
 ) -> sqlx::Result<Position> {
     sqlx::query_as(&format!(
         "UPDATE positions
-         SET title = $2, department = $3, location = $4, employment_type = $5, seniority = $6,
+         SET title = $2, department = $3, location = $4,
+             employment_type = COALESCE($5, employment_type), seniority = $6,
              description = $7, requirements = $8, extra = $9, status = $10,
              external_synced_at = now(), archived_at = NULL
          WHERE id = $1

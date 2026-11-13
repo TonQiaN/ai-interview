@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use axum::http::StatusCode;
 use common::{TestApp, app, app_with_model, multipart_file, run_tasks};
-use interview_llm::LlmError;
 use interview_llm::testing::ScriptedModel;
+use interview_llm::{ChatModel, ChatRequest, ChatStream, LlmError};
 use interview_platform::testing::TestRequest;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -430,4 +430,206 @@ async fn reads_a_pdf_resume_page_by_page(pool: PgPool) {
     assert_eq!(parsed["text_content"], "# 林知夏\n\n高级后端工程师");
     // 转写、整理、画像各一次
     assert_eq!(model.requests().len(), 3);
+}
+
+/// 在第 `at` 次调用大模型之前先做一件事的假模型。用来模拟「大模型还在算的时候，别处发生了变化」。
+struct Interrupted {
+    inner: ScriptedModel,
+    at: usize,
+    calls: std::sync::atomic::AtomicUsize,
+    hook: Box<dyn Fn() -> futures_util::future::BoxFuture<'static, ()> + Send + Sync>,
+}
+
+impl Interrupted {
+    fn new<F, Fut>(inner: ScriptedModel, at: usize, hook: F) -> Arc<Self>
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        Arc::new(Self {
+            inner,
+            at,
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            hook: Box::new(move || Box::pin(hook())),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl ChatModel for Interrupted {
+    async fn chat_stream(&self, request: ChatRequest) -> Result<ChatStream, LlmError> {
+        let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if call == self.at {
+            (self.hook)().await;
+        }
+        self.inner.chat_stream(request).await
+    }
+}
+
+async fn candidate(app: &TestApp, id: &str) -> Value {
+    let response = TestRequest::get(format!("/api/v1/candidates/{id}"))
+        .send(&app.router)
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    response.json()
+}
+
+/// 模拟「有更新的简历传上来，这一份不再是主简历」。
+fn demote(
+    pool: PgPool,
+    resume_id: String,
+) -> impl Fn() -> futures_util::future::BoxFuture<'static, ()> {
+    move || {
+        let (pool, resume_id) = (pool.clone(), resume_id.clone());
+        Box::pin(async move {
+            sqlx::query("UPDATE resumes SET is_primary = false WHERE id = $1::uuid")
+                .bind(resume_id)
+                .execute(&pool)
+                .await
+                .expect("改得了");
+        })
+    }
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_resume_replaced_while_being_read_does_not_touch_the_candidate(pool: PgPool) {
+    let app = app(pool.clone()).await;
+    let candidate_id = new_candidate(&app).await;
+    let (_, uploaded) = upload(&app, &candidate_id, "简历.txt", RESUME_TEXT.as_bytes()).await;
+    let id = uploaded["id"].as_str().expect("有 id").to_owned();
+
+    // 大模型读这份简历的时候，它被更新的简历顶替了
+    let model = Interrupted::new(
+        ScriptedModel::new().reply(EXTRACTION).reply(PROFILE),
+        0,
+        demote(pool.clone(), id.clone()),
+    );
+    assert_eq!(run_tasks(&app.ctx, Some(model.clone())).await, 1);
+
+    // 简历自己照常解析完，但不拿它去补候选人的信息，也不为它生成画像
+    assert_eq!(resume(&app, &id).await["parse_status"], "done");
+    let detail = candidate(&app, &candidate_id).await;
+    assert_eq!(detail["phone"], Value::Null);
+    assert_eq!(detail["profile"]["headline"], "");
+    assert_eq!(model.inner.requests().len(), 1, "不该再花一次调用去写画像");
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_profile_from_a_replaced_resume_is_not_saved(pool: PgPool) {
+    let app = app(pool.clone()).await;
+    let candidate_id = new_candidate(&app).await;
+    let (_, uploaded) = upload(&app, &candidate_id, "简历.txt", RESUME_TEXT.as_bytes()).await;
+    let id = uploaded["id"].as_str().expect("有 id").to_owned();
+
+    // 画像生成到一半，这份简历被更新的简历顶替了
+    let model = Interrupted::new(
+        ScriptedModel::new().reply(EXTRACTION).reply(PROFILE),
+        1,
+        demote(pool.clone(), id.clone()),
+    );
+    assert_eq!(run_tasks(&app.ctx, Some(model)).await, 1);
+
+    assert_eq!(resume(&app, &id).await["parse_status"], "done");
+    let detail = candidate(&app, &candidate_id).await;
+    assert_eq!(detail["profile"]["headline"], "");
+    // 被顶替之前补上的基本信息留着
+    assert_eq!(detail["phone"], "13800001234");
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn reparsing_while_the_profile_is_being_written_runs_again(pool: PgPool) {
+    let base = app(pool.clone()).await;
+    let candidate_id = new_candidate(&base).await;
+    let (_, uploaded) = upload(&base, &candidate_id, "简历.txt", RESUME_TEXT.as_bytes()).await;
+    let id = uploaded["id"].as_str().expect("有 id").to_owned();
+
+    // 简历已经读完、正在写画像的时候，HR 点了「重新解析」
+    let router = app_with_model(pool.clone(), Arc::new(ScriptedModel::new()))
+        .await
+        .router;
+    let uri = format!("/api/v1/resumes/{id}/parse");
+    let model = Interrupted::new(
+        ScriptedModel::new()
+            .reply(EXTRACTION)
+            .reply(PROFILE)
+            .reply(EXTRACTION)
+            .reply(PROFILE),
+        1,
+        move || {
+            let (router, uri) = (router.clone(), uri.clone());
+            async move {
+                let response = TestRequest::post(&uri).send(&router).await;
+                assert_eq!(response.status, StatusCode::ACCEPTED, "{}", response.text());
+            }
+        },
+    );
+    run_tasks(&base.ctx, Some(model.clone())).await;
+    skip_backoff(&pool).await;
+    run_tasks(&base.ctx, Some(model.clone())).await;
+
+    // 不能停在「排队中」没人管：要再读一遍
+    let parsed = resume(&base, &id).await;
+    assert_eq!(parsed["parse_status"], "done", "{parsed}");
+    assert_eq!(model.inner.requests().len(), 4);
+    skip_backoff(&pool).await;
+    assert_eq!(run_tasks(&base.ctx, Some(model)).await, 0);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn reparsing_replaces_a_placeholder_name_but_not_one_hr_typed(pool: PgPool) {
+    // 没配大模型的时候上传两份简历建候选人：解析失败，名字还是文件名
+    let offline = app(pool).await;
+    let mut imported = Vec::new();
+    for file_name in ["后端-简历.txt", "前端-简历.txt"] {
+        // 两份内容不一样，免得被当成同一份文件
+        let content = format!("{RESUME_TEXT}\n\n来自 {file_name}");
+        let (content_type, body) = multipart_file("file", Some(file_name), content.as_bytes());
+        let response = TestRequest::post("/api/v1/candidates/import")
+            .bytes(&content_type, body)
+            .send(&offline.router)
+            .await;
+        assert_eq!(response.status, StatusCode::ACCEPTED, "{}", response.text());
+        let body = response.json();
+        imported.push((
+            body["candidate"]["id"].as_str().expect("有 id").to_owned(),
+            body["resume"]["id"].as_str().expect("有 id").to_owned(),
+        ));
+    }
+    run_tasks(&offline.ctx, None).await;
+    let (kept_placeholder, renamed) = (&imported[0], &imported[1]);
+    assert_eq!(
+        candidate(&offline, &kept_placeholder.0).await["name"],
+        "后端-简历"
+    );
+
+    // 第二位的名字 HR 手工改过
+    let patched = TestRequest::patch(format!("/api/v1/candidates/{}", renamed.0))
+        .json(&json!({"name": "周既白"}))
+        .send(&offline.router)
+        .await;
+    assert_eq!(patched.status, StatusCode::OK, "{}", patched.text());
+
+    // 配好大模型之后重新解析
+    let model = Arc::new(
+        ScriptedModel::new()
+            .reply(EXTRACTION)
+            .reply(PROFILE)
+            .reply(EXTRACTION)
+            .reply(PROFILE),
+    );
+    let online = offline.with_model(model.clone()).await;
+    for (_, resume_id) in &imported {
+        let response = TestRequest::post(format!("/api/v1/resumes/{resume_id}/parse"))
+            .send(&online.router)
+            .await;
+        assert_eq!(response.status, StatusCode::ACCEPTED, "{}", response.text());
+    }
+    assert_eq!(run_tasks(&online.ctx, Some(model)).await, 2);
+
+    // 占位的名字换成简历里的姓名，HR 改过的不动
+    assert_eq!(
+        candidate(&online, &kept_placeholder.0).await["name"],
+        "林知夏"
+    );
+    assert_eq!(candidate(&online, &renamed.0).await["name"], "周既白");
 }

@@ -250,7 +250,9 @@ async fn extract(
 {EXTRACT_FORMAT}\n\n\
 要求：\n\
 - 原文没有的信息填 null，列表填 []，不要猜。\n\
-- description、summary、self_evaluation 照抄原文，不要压缩或改写。\n\
+- description、summary、self_evaluation 照抄原文，不要压缩或改写。\
+只有一个例外：这几段里如果夹着手机号、邮箱、微信号、QQ 号、家庭住址、证件号，把这些去掉不抄，\
+联系方式只放在 phone、email 这些专门的字段里。\n\
 - 时间写成 YYYY-MM，只有年份就写 YYYY。还在职或还在进行的，end 填 null、is_current 填 true。\n\
 - work_experience、education、projects 都按时间从近到远排。\n\
 - years_of_experience 按全职工作经历的起止时间算到今天（{today}），保留一位小数；\

@@ -72,6 +72,7 @@ fn posting(id: &str, title: &str) -> Value {
         "headcount": 2,
         "work_years": "5 年以上",
         "degree_requirement": "本科",
+        "recruitment_type": "社招",
         "salary_range": "30-45K",
         "expected_level": "P6",
         "responsibility": "负责清结算核心服务。",
@@ -290,10 +291,12 @@ async fn importing_a_position_keeps_local_edits_unless_refreshed(pool: PgPool) {
         position["extra"]["raas"]["job_requisition_id"],
         "JRQ-20261101-0001"
     );
+    // RAAS 的「社招」是招聘类型，不是用工形式
+    assert!(position["employment_type"].is_null());
 
     // HR 在我们这边改了名字，再导一次不该被盖掉
     let patched = TestRequest::patch(format!("/api/v1/positions/{id}"))
-        .json(&json!({"title": "后端负责人"}))
+        .json(&json!({"title": "后端负责人", "employment_type": "全职"}))
         .send(&app.router)
         .await;
     assert_eq!(patched.status, StatusCode::OK, "{}", patched.text());
@@ -307,6 +310,9 @@ async fn importing_a_position_keeps_local_edits_unless_refreshed(pool: PgPool) {
     assert_eq!(refreshed["items"][0]["outcome"], "refreshed");
     assert_eq!(refreshed["items"][0]["position_id"], id.as_str());
     assert_eq!(refreshed["items"][0]["title"], "高级后端工程师");
+    // 用工形式 RAAS 里没有，HR 填的留着
+    let position = get(&app, &format!("/api/v1/positions/{id}")).await;
+    assert_eq!(position["employment_type"], "全职");
 
     // 归档以后再导入，恢复原来那一条，不另建
     let archived = TestRequest::delete(format!("/api/v1/positions/{id}"))
@@ -573,6 +579,49 @@ async fn a_candidate_without_any_resume_gets_basics_only(pool: PgPool) {
     assert_eq!(detail["name"], "周既白");
     assert!(detail["primary_resume"].is_null());
     assert_eq!(run_tasks(&app.ctx, None).await, 0);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn refreshing_does_not_replace_a_name_hr_typed(pool: PgPool) {
+    // RAAS 里没填姓名，简历原件一开始也取不到：候选人先用占位的名字
+    let server = raas().await;
+    mount_get(
+        &server,
+        "/api/v1/candidates/c-9",
+        json!({
+            "candidate_id": "c-9",
+            "mobile": "13800005678",
+            "latest_resume_id": "res-9",
+            "resume_original_filename": "简历.txt"
+        }),
+    )
+    .await;
+    let model = model();
+    let app = app_with_raas(pool, &server.uri(), Some(model.clone())).await;
+    let result = import(&app, "candidates", &["c-9"], false).await;
+    let item = &result["items"][0];
+    assert_eq!(item["outcome"], "created");
+    assert!(item["resume_id"].is_null());
+    let id = item["candidate_id"].as_str().expect("有 id").to_owned();
+
+    // HR 自己把名字填上了
+    let patched = TestRequest::patch(format!("/api/v1/candidates/{id}"))
+        .json(&json!({"name": "周既白"}))
+        .send(&app.router)
+        .await;
+    assert_eq!(patched.status, StatusCode::OK, "{}", patched.text());
+
+    // 之后简历原件能取到了，带 refresh 再导一次
+    mount_resume_file(&server, "c-9", RESUME_FILE.as_bytes()).await;
+    let refreshed = import(&app, "candidates", &["c-9"], true).await;
+    assert_eq!(refreshed["items"][0]["outcome"], "refreshed");
+    assert_eq!(refreshed["items"][0]["resume"], "queued");
+    assert_eq!(run_tasks(&app.ctx, Some(model)).await, 1);
+
+    // 简历读出来了，但 HR 填的名字不会被简历上的姓名换掉
+    let detail = get(&app, &format!("/api/v1/candidates/{id}")).await;
+    assert_eq!(detail["primary_resume"]["parse_status"], "done");
+    assert_eq!(detail["name"], "周既白");
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]

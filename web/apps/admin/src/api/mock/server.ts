@@ -5,8 +5,12 @@
  * 真后端的接口就绪后，把 VITE_API_MOCK 设成 0 就走真接口，这个目录只留给演示和测试用。
  */
 import type {
+  AdminUser,
   Candidate,
+  CandidateDetail,
   CandidateInput,
+  CandidateListItem,
+  DuplicateHint,
   Interview,
   InterviewInput,
   InterviewStatus,
@@ -14,8 +18,12 @@ import type {
   Invite,
   Page,
   Position,
+  PositionDraft,
   PositionInput,
+  RaasCandidateImportItem,
+  RaasPositionImportItem,
   Resume,
+  ResumeDetail,
   SystemStatus,
   Utterance,
   Voice,
@@ -25,13 +33,39 @@ import { sampleReport, sampleUtterances } from "./samples";
 import {
   buildSeed,
   configDefaults,
+  emptyExtra,
+  emptyProfile,
   engines,
   iso,
   newId,
+  parsedFrom,
+  profileFrom,
+  raasCandidates,
   raasPositions,
   type Seed,
+  type SeedProfile,
   sampleForPosition,
 } from "./seed";
+
+/** 新上传的简历「读」出来的内容。假后端不看文件，每份都是这一套 */
+const uploadedProfile: SeedProfile = {
+  summary: "4 年后端经验，做过订单和库存系统，熟悉 Java 和 Go，正在转 Rust。",
+  highlights: ["负责过订单系统的分库分表", "写过内部的压测工具"],
+  skills: ["Java", "Go", "MySQL", "Redis", "Rust（学习中）"],
+  experiences: [
+    {
+      company: "示例科技",
+      title: "后端工程师",
+      start: "2022-07",
+      end: null,
+      summary: "负责订单和库存服务。",
+    },
+  ],
+  education: [
+    { school: "示例大学", degree: "本科", major: "软件工程", start: "2018-09", end: "2022-06" },
+  ],
+  to_verify: ["「分库分表」是方案设计还是迁移执行"],
+};
 
 interface MockOptions {
   /** 每个请求延迟多久，毫秒。测试里设成 0 */
@@ -108,8 +142,8 @@ export function createMockServer(options: MockOptions = {}) {
   const latencyMs = options.latencyMs ?? 220;
   const jobMs = options.jobMs ?? 4200;
   const db: Seed = buildSeed();
-  // 每个假后端各有一份，导入过的标记不互相影响
-  const raas = structuredClone(raasPositions);
+  /** 假后端里 RAAS 是不是「连得上」。测试可以改它 */
+  const raas = { configured: true, reachable: true };
   let loggedIn = false;
   try {
     loggedIn = sessionStorage.getItem(SESSION_KEY) === "1";
@@ -149,47 +183,86 @@ export function createMockServer(options: MockOptions = {}) {
     i.updated_at = iso(0);
   }
 
-  /** 简历解析：过一会儿把画像填上 */
+  const primaryResume = (candidateId: string): Resume | null =>
+    db.resumes.find((r) => r.candidate_id === candidateId && r.is_primary) ?? null;
+
+  const listItem = (c: Candidate): CandidateListItem => ({
+    ...c,
+    primary_resume: primaryResume(c.id),
+  });
+
+  const sameContact = (a: Candidate, phone?: string | null, email?: string | null) =>
+    Boolean((phone && a.phone === phone) || (email && a.email === email));
+
+  const hint = (c: Candidate): DuplicateHint => ({
+    id: c.id,
+    name: c.name,
+    current_title: c.current_title,
+    current_company: c.current_company,
+    created_at: c.created_at,
+  });
+
+  const detail = (c: Candidate): CandidateDetail => ({
+    ...listItem(c),
+    possible_duplicates: db.candidates
+      .filter((other) => other !== c && sameContact(other, c.phone, c.email))
+      .map(hint),
+  });
+
+  const findResume = (id: string | undefined): Resume => {
+    const r = db.resumes.find((x) => x.id === id);
+    if (!r) throw notFound("简历");
+    return r;
+  };
+
+  /** 新简历成为主简历，原来的主简历让位 */
+  function addResume(c: Candidate, file: FormDataEntryValue | null): Resume {
+    const size = file instanceof File ? file.size : 240_000;
+    if (size > 20 * 1024 * 1024) throw new HttpError(413, "payload_too_large", "简历不能超过 20MB");
+    for (const r of db.resumes) if (r.candidate_id === c.id) r.is_primary = false;
+    const r: Resume = {
+      id: newId(),
+      candidate_id: c.id,
+      file_name: file instanceof File ? file.name : "简历.pdf",
+      content_type: file instanceof File && file.type ? file.type : "application/pdf",
+      size_bytes: size,
+      has_file: true,
+      is_primary: true,
+      parse_status: "pending",
+      parse_error: null,
+      parsed_at: null,
+      created_at: iso(0),
+      updated_at: iso(0),
+    };
+    db.resumes.push(r);
+    parseResume(r, c);
+    return r;
+  }
+
+  /** 把画像填上，顺便补上候选人空着的基本信息 */
+  function fillProfile(c: Candidate) {
+    c.current_title ??= "后端工程师";
+    c.current_company ??= "示例科技";
+    c.location ??= "杭州";
+    c.profile = profileFrom(uploadedProfile, { title: c.current_title ?? null, years: 4 });
+    c.profile_updated_at = iso(0);
+    c.updated_at = iso(0);
+  }
+
+  /** 简历解析：过一会儿读完，再过一会儿画像出来（和真后端一样分两步） */
   function parseResume(resume: Resume, candidate: Candidate) {
     resume.parse_status = "running";
     resume.parse_error = null;
-    candidate.profile_status = "running";
     later(jobMs, () => {
+      if (!db.resumes.includes(resume)) return;
       resume.parse_status = "done";
-      candidate.profile_status = "done";
+      resume.parsed_at = iso(0);
+      resume.updated_at = iso(0);
       if (candidate.name === "解析中…")
-        candidate.name = resume.file_name.replace(/[-_ ]?简历.*$|\.[a-z]+$/gi, "") || "新候选人";
-      candidate.current_title ??= "后端工程师";
-      candidate.current_company ??= "示例科技";
-      candidate.years_of_experience ??= 4;
-      candidate.location ??= "杭州";
-      candidate.phone ??= "13800000099";
-      candidate.email ??= "candidate@example.com";
-      candidate.profile = {
-        summary: "4 年后端经验，做过订单和库存系统，熟悉 Java 和 Go，正在转 Rust。",
-        highlights: ["负责过订单系统的分库分表", "写过内部的压测工具"],
-        skills: ["Java", "Go", "MySQL", "Redis", "Rust（学习中）"],
-        experiences: [
-          {
-            company: "示例科技",
-            title: "后端工程师",
-            start: "2022-07",
-            end: null,
-            summary: "负责订单和库存服务。",
-          },
-        ],
-        education: [
-          {
-            school: "示例大学",
-            degree: "本科",
-            major: "软件工程",
-            start: "2018-09",
-            end: "2022-06",
-          },
-        ],
-        to_verify: ["「分库分表」是方案设计还是迁移执行"],
-      };
-      candidate.updated_at = iso(0);
+        candidate.name =
+          (resume.file_name ?? "").replace(/[-_ ]?简历.*$|\.[a-z0-9]+$/gi, "") || "新候选人";
+      db.parsed.set(resume.id, parsedFrom(uploadedProfile, candidate));
+      if (resume.is_primary) later(jobMs / 3, () => fillProfile(candidate));
     });
   }
 
@@ -253,6 +326,13 @@ export function createMockServer(options: MockOptions = {}) {
     if (i.status === "invited" && !hasActive) touch(i, "ready");
   }
 
+  const me: AdminUser = {
+    id: "0193a000-0000-7000-8000-0000000000a1",
+    email: "hr@example.com",
+    display_name: "招聘同事",
+    role: "admin",
+  };
+
   const routes: Route[] = [];
   const on = (method: string, path: string, handler: Handler, isPublic = false) => {
     const pattern = new RegExp(`^${path.replace(/:[a-z_]+/g, "([^/]+)")}$`);
@@ -264,21 +344,18 @@ export function createMockServer(options: MockOptions = {}) {
     "POST",
     "/auth/login",
     ({ body }) => {
-      const { username, password } = (body ?? {}) as { username?: string; password?: string };
-      if (!username?.trim() || !password)
-        throw new HttpError(422, "validation_failed", "请输入账号和密码");
-      if (password === "wrong") throw new HttpError(401, "invalid_credentials", "账号或密码不对");
+      const { email, password } = (body ?? {}) as { email?: string; password?: string };
+      if (!email?.trim() || !password)
+        throw new HttpError(422, "validation_failed", "请输入邮箱和密码");
+      if (password === "wrong") throw new HttpError(401, "invalid_credentials", "邮箱或密码不对");
+      me.email = email.trim();
       loggedIn = true;
       try {
         sessionStorage.setItem(SESSION_KEY, "1");
       } catch {
         // 存不了就只在这次页面里算登录
       }
-      return {
-        id: "0193a000-0000-7000-8000-00000000hr01",
-        username: username.trim(),
-        display_name: "招聘同事",
-      };
+      return me;
     },
     true,
   );
@@ -296,39 +373,61 @@ export function createMockServer(options: MockOptions = {}) {
     },
     true,
   );
-  on("GET", "/auth/me", () => ({
-    id: "0193a000-0000-7000-8000-00000000hr01",
-    username: "hr",
-    display_name: "招聘同事",
-  }));
+  on("GET", "/auth/me", () => me);
 
   on(
     "GET",
     "/system/status",
     (): SystemStatus => ({
+      version: "演示",
       components: [
-        { key: "database", name: "数据库", ok: true, detail: null },
-        { key: "llm", name: "大模型（DeepSeek Flash）", ok: true, detail: "余额充足" },
+        { name: "database", state: "ok" },
+        { name: "llm", state: "ok", message: "deepseek-flash，思考模式可以在面试设置里开关" },
         {
-          key: "tts",
-          name: "语音合成",
-          ok: true,
-          detail: "IndexTTS 2、IndexTTS 2.5 可用；BreezeTTS2 没有加载",
+          name: "tts",
+          state: "degraded",
+          message: "IndexTTS 2、IndexTTS 2.5 可用；BreezeTTS2 没有加载",
         },
-        { key: "stt", name: "语音识别", ok: true, detail: null },
-        { key: "raas", name: "RAAS", ok: true, detail: "只读连接正常" },
+        { name: "stt", state: "ok" },
+        { name: "raas", state: "ok", message: "只读连接正常" },
       ],
     }),
   );
 
   // ───────── 岗位 ─────────
+  const live = <T extends { archived_at?: string | null }>(x: T) => !x.archived_at;
+
+  function newPosition(input: PositionInput, extra: Partial<Position> = {}): Position {
+    return {
+      title: input.title.trim(),
+      department: input.department ?? null,
+      location: input.location ?? null,
+      employment_type: input.employment_type ?? null,
+      seniority: input.seniority ?? null,
+      description: input.description ?? "",
+      requirements: input.requirements ?? "",
+      extra: { ...emptyExtra, ...input.extra },
+      status: input.status ?? "open",
+      id: newId(),
+      source: "manual",
+      external_ref: null,
+      external_synced_at: null,
+      archived_at: null,
+      created_by: me.id,
+      created_at: iso(0),
+      updated_at: iso(0),
+      ...extra,
+    };
+  }
+
   on("GET", "/positions", ({ query }) => {
     const status = query.get("status");
     const list = db.positions
       .filter(
         (p) =>
+          live(p) &&
           (!status || p.status === status) &&
-          matches(query.get("q"), p.title, p.department, p.location),
+          matches(query.get("q"), p.title, p.department, p.location, p.extra.client_name),
       )
       .sort(byNewest);
     return paginate(list, query);
@@ -337,73 +436,224 @@ export function createMockServer(options: MockOptions = {}) {
     const input = body as PositionInput;
     if (!input.title?.trim())
       throw new HttpError(422, "validation_failed", "岗位名称不能为空", { title: "不能为空" });
-    const p: Position = {
-      ...input,
-      id: newId(),
-      source: "manual",
-      external_ref: null,
-      interview_count: 0,
-      created_at: iso(0),
-      updated_at: iso(0),
-    };
+    const p = newPosition(input);
     db.positions.push(p);
     return p;
   });
+  on("POST", "/positions/draft", ({ body }): PositionDraft => {
+    const text = ((body as { text?: string }).text ?? "").trim();
+    if (!text) throw new HttpError(422, "validation_failed", "先贴一段岗位描述");
+    const lines = text.split("\n").map((l) => l.trim());
+    const [title = "", ...rest] = lines.filter(Boolean);
+    const cut = rest.findIndex((l) => /要求|任职|资格/.test(l));
+    const duty = cut < 0 ? rest : rest.slice(0, cut);
+    const need = cut < 0 ? [] : rest.slice(cut + 1);
+    return {
+      title: title.slice(0, 40),
+      department: null,
+      location: /(北京|上海|杭州|深圳|广州|成都)/.exec(text)?.[1] ?? null,
+      employment_type: "全职",
+      seniority: null,
+      description: duty.join("\n"),
+      requirements: need.join("\n"),
+      extra: { ...emptyExtra, hard_requirements: need.slice(0, 3) },
+    };
+  });
   on("GET", "/positions/:id", ({ params }) => find.position(params[0]));
-  on("PATCH", "/positions/:id", ({ params, body }) =>
-    Object.assign(find.position(params[0]), body as Partial<PositionInput>, { updated_at: iso(0) }),
-  );
+  on("PATCH", "/positions/:id", ({ params, body }) => {
+    const p = Object.assign(find.position(params[0]), body as Partial<PositionInput>, {
+      updated_at: iso(0),
+    });
+    for (const i of db.interviews)
+      if (i.position.id === p.id)
+        i.position = { id: p.id, title: p.title, department: p.department ?? null };
+    return p;
+  });
   on("DELETE", "/positions/:id", ({ params }) => {
-    const p = find.position(params[0]);
-    db.positions = db.positions.filter((x) => x !== p);
+    find.position(params[0]).archived_at = iso(0);
     return null;
   });
 
-  on("GET", "/raas/status", () => ({ available: true, message: null }));
-  on("GET", "/raas/positions", ({ query }) =>
-    paginate(
-      raas.filter((p) => matches(query.get("q"), p.title, p.client_name, p.location, p.ref)),
-      query,
-    ),
-  );
-  on("POST", "/raas/positions/import", ({ body }) => {
+  // ───────── RAAS ─────────
+  const raasReady = () => {
+    if (!raas.configured || !raas.reachable)
+      throw new HttpError(503, "raas_unavailable", "现在连不上 RAAS，稍后再试");
+  };
+  const importedPosition = (ref: string) =>
+    db.positions.find((p) => p.source === "raas" && p.external_ref === ref);
+  const importedCandidate = (ref: string) =>
+    db.candidates.find((c) => c.source === "raas" && c.external_ref === ref);
+  const refsOf = (body: unknown): string[] => {
     const refs = (body as { refs?: string[] }).refs ?? [];
-    const imported: Position[] = [];
-    for (const ref of refs) {
-      const r = raas.find((x) => x.ref === ref);
-      if (!r || r.already_imported) continue;
-      r.already_imported = true;
-      const p: Position = {
-        id: newId(),
-        title: r.title,
-        department: r.client_name,
-        location: r.location,
-        employment_type: "全职",
-        salary_range: null,
-        headcount: r.headcount,
-        description: `（从 RAAS 导入）${r.title}：负责相关系统的设计、开发和维护，和团队一起按期交付。`,
-        requirements: "3 年以上相关经验。\n沟通顺畅，能独立推进任务。",
-        status: "open",
-        source: "raas",
-        external_ref: r.ref,
-        interview_count: 0,
-        created_at: iso(0),
-        updated_at: iso(0),
-      };
+    if (refs.length === 0) throw new HttpError(422, "validation_failed", "没有选要导入的");
+    if (refs.length > 20) throw new HttpError(422, "validation_failed", "一次最多导入 20 个");
+    return refs;
+  };
+
+  on("GET", "/raas/status", () => ({
+    ...raas,
+    message: raas.configured && raas.reachable ? null : "演示数据里把 RAAS 关掉了",
+  }));
+  on("GET", "/raas/positions", ({ query }) => {
+    raasReady();
+    return paginate(
+      raasPositions
+        .filter((p) => matches(query.get("q"), p.title, p.client_name, ...p.cities, p.external_ref))
+        .map((p) => ({ ...p, imported_position_id: importedPosition(p.external_ref)?.id ?? null })),
+      query,
+    );
+  });
+  on("POST", "/raas/positions/import", ({ body }) => {
+    raasReady();
+    const items = refsOf(body).map((ref): RaasPositionImportItem => {
+      const r = raasPositions.find((x) => x.external_ref === ref);
+      if (!r)
+        return {
+          external_ref: ref,
+          outcome: "failed",
+          position_id: null,
+          title: null,
+          message: "RAAS 里找不到这个岗位",
+        };
+      const existing = importedPosition(ref);
+      if (existing) {
+        const restored = Boolean(existing.archived_at);
+        existing.archived_at = null;
+        return {
+          external_ref: ref,
+          outcome: restored ? "restored" : "already_imported",
+          position_id: existing.id,
+          title: existing.title,
+          message: null,
+        };
+      }
+      const title = r.title ?? "没有名称";
+      const p = newPosition(
+        {
+          title,
+          department: r.department ?? null,
+          location: r.cities.join("、") || null,
+          employment_type: "全职",
+          description: `${title}：负责相关系统的设计、开发和维护，和团队一起按期交付。`,
+          requirements: "3 年以上相关经验。\n沟通顺畅，能独立推进任务。",
+          status: r.status,
+          extra: {
+            ...emptyExtra,
+            client_name: r.client_name ?? null,
+            salary_range: r.salary_range ?? null,
+            headcount: r.headcount == null ? null : `${r.headcount} 人`,
+            degree_requirement: r.degree_requirement ?? null,
+            experience_requirement: r.work_years ?? null,
+          },
+        },
+        { source: "raas", external_ref: ref, external_synced_at: iso(0) },
+      );
       db.positions.push(p);
-      imported.push(p);
-    }
-    return { imported };
+      return { external_ref: ref, outcome: "created", position_id: p.id, title, message: null };
+    });
+    return { items };
+  });
+  on("GET", "/raas/candidates", ({ query }) => {
+    raasReady();
+    return paginate(
+      raasCandidates
+        .filter((c) => matches(query.get("q"), c.name, c.current_title, c.current_company))
+        .map((c) => ({
+          ...c,
+          imported_candidate_id: importedCandidate(c.external_ref)?.id ?? null,
+        })),
+      query,
+    );
+  });
+  on("POST", "/raas/candidates/import", ({ body }) => {
+    raasReady();
+    const items = refsOf(body).map((ref): RaasCandidateImportItem => {
+      const r = raasCandidates.find((x) => x.external_ref === ref);
+      if (!r)
+        return {
+          external_ref: ref,
+          outcome: "failed",
+          candidate_id: null,
+          name: null,
+          message: "RAAS 里找不到这位候选人",
+          possible_duplicates: [],
+          resume: null,
+          resume_id: null,
+        };
+      const existing = importedCandidate(ref);
+      if (existing) {
+        const restored = Boolean(existing.archived_at);
+        existing.archived_at = null;
+        return {
+          external_ref: ref,
+          outcome: restored ? "restored" : "already_imported",
+          candidate_id: existing.id,
+          name: existing.name,
+          message: null,
+          possible_duplicates: [],
+          resume: "unchanged",
+          resume_id: primaryResume(existing.id)?.id ?? null,
+        };
+      }
+      const c = newCandidate(
+        {
+          name: r.name ?? "没有姓名",
+          current_title: r.current_title,
+          current_company: r.current_company,
+          location: r.current_city,
+        },
+        { source: "raas", external_ref: ref, external_synced_at: iso(0) },
+      );
+      db.candidates.push(c);
+      const resume = addResume(c, null);
+      return {
+        external_ref: ref,
+        outcome: "created",
+        candidate_id: c.id,
+        name: c.name,
+        message: null,
+        possible_duplicates: [],
+        resume: "queued",
+        resume_id: resume.id,
+      };
+    });
+    return { items };
   });
 
   // ───────── 候选人 ─────────
+  function newCandidate(input: CandidateInput, extra: Partial<Candidate> = {}): Candidate {
+    return {
+      name: input.name.trim(),
+      phone: input.phone ?? null,
+      email: input.email ?? null,
+      current_title: input.current_title ?? null,
+      current_company: input.current_company ?? null,
+      location: input.location ?? null,
+      notes: input.notes ?? null,
+      id: newId(),
+      source: "manual",
+      profile: emptyProfile,
+      profile_updated_at: null,
+      external_ref: null,
+      external_synced_at: null,
+      archived_at: null,
+      created_by: me.id,
+      created_at: iso(0),
+      updated_at: iso(0),
+      ...extra,
+    };
+  }
+
   on("GET", "/candidates", ({ query }) =>
     paginate(
       db.candidates
-        .filter((c) =>
-          matches(query.get("q"), c.name, c.phone, c.email, c.current_title, c.current_company),
+        .filter(
+          (c) =>
+            live(c) &&
+            matches(query.get("q"), c.name, c.phone, c.email, c.current_title, c.current_company),
         )
-        .sort(byNewest),
+        .sort(byNewest)
+        .map(listItem),
       query,
     ),
   );
@@ -411,104 +661,72 @@ export function createMockServer(options: MockOptions = {}) {
     const input = body as CandidateInput;
     if (!input.name?.trim())
       throw new HttpError(422, "validation_failed", "姓名不能为空", { name: "不能为空" });
-    const c: Candidate = {
-      ...input,
-      id: newId(),
-      source: "manual",
-      profile: null,
-      profile_status: null,
-      interview_count: 0,
-      created_at: iso(0),
-      updated_at: iso(0),
-    };
+    const duplicates = db.candidates.filter(
+      (c) => live(c) && sameContact(c, input.phone, input.email),
+    );
+    if (duplicates.length > 0 && !input.allow_duplicate)
+      throw new HttpError(409, "duplicate_candidate", "手机号或邮箱和已有的候选人一样", {
+        duplicates: duplicates.map(hint),
+      });
+    const c = newCandidate(input);
     db.candidates.push(c);
-    return c;
+    return detail(c);
   });
   on("POST", "/candidates/import", ({ raw }) => {
     const file = raw instanceof FormData ? raw.get("file") : null;
-    const fileName = file instanceof File ? file.name : "简历.pdf";
-    const size = file instanceof File ? file.size : 240_000;
-    if (size > 20 * 1024 * 1024) throw new HttpError(413, "payload_too_large", "简历不能超过 20MB");
-    const c: Candidate = {
-      id: newId(),
-      name: "解析中…",
-      phone: null,
-      email: null,
-      current_title: null,
-      current_company: null,
-      years_of_experience: null,
-      location: null,
-      source: "resume",
-      note: null,
-      profile: null,
-      profile_status: "pending",
-      interview_count: 0,
-      created_at: iso(0),
-      updated_at: iso(0),
-    };
-    const r: Resume = {
-      id: newId(),
-      candidate_id: c.id,
-      file_name: fileName,
-      mime_type: "application/pdf",
-      size_bytes: size,
-      parse_status: "pending",
-      parse_error: null,
-      created_at: iso(0),
-    };
+    const c = newCandidate({ name: "解析中…" }, { source: "upload" });
     db.candidates.push(c);
-    db.resumes.push(r);
-    parseResume(r, c);
-    return c;
+    try {
+      return { candidate: c, resume: addResume(c, file) };
+    } catch (e) {
+      db.candidates = db.candidates.filter((x) => x !== c);
+      throw e;
+    }
   });
-  on("GET", "/candidates/:id", ({ params }) => find.candidate(params[0]));
+  on("GET", "/candidates/:id", ({ params }) => detail(find.candidate(params[0])));
   on("PATCH", "/candidates/:id", ({ params, body }) => {
-    const c = Object.assign(find.candidate(params[0]), body as Partial<CandidateInput>, {
-      updated_at: iso(0),
-    });
+    const { allow_duplicate: _allow, ...patch } = body as Partial<CandidateInput>;
+    const c = Object.assign(find.candidate(params[0]), patch, { updated_at: iso(0) });
     for (const i of db.interviews)
       if (i.candidate.id === c.id)
-        i.candidate = { id: c.id, name: c.name, current_title: c.current_title };
-    return c;
+        i.candidate = { id: c.id, name: c.name, current_title: c.current_title ?? null };
+    return detail(c);
   });
   on("DELETE", "/candidates/:id", ({ params }) => {
-    const c = find.candidate(params[0]);
-    db.candidates = db.candidates.filter((x) => x !== c);
+    find.candidate(params[0]).archived_at = iso(0);
     return null;
   });
-  on("GET", "/candidates/:id/resumes", ({ params }) => {
+  on("GET", "/candidates/:id/resumes", ({ params, query }) => {
     find.candidate(params[0]);
-    return { items: db.resumes.filter((r) => r.candidate_id === params[0]).sort(byNewest) };
+    return paginate(db.resumes.filter((r) => r.candidate_id === params[0]).sort(byNewest), query);
   });
-  on("POST", "/candidates/:id/resumes", ({ params, raw }) => {
-    const c = find.candidate(params[0]);
-    const file = raw instanceof FormData ? raw.get("file") : null;
-    const r: Resume = {
-      id: newId(),
-      candidate_id: c.id,
-      file_name: file instanceof File ? file.name : "简历.pdf",
-      mime_type: "application/pdf",
-      size_bytes: file instanceof File ? file.size : 240_000,
-      parse_status: "pending",
-      parse_error: null,
-      created_at: iso(0),
-    };
-    db.resumes.push(r);
-    parseResume(r, c);
-    return r;
+  on("POST", "/candidates/:id/resumes", ({ params, raw }) =>
+    addResume(find.candidate(params[0]), raw instanceof FormData ? raw.get("file") : null),
+  );
+  on("GET", "/resumes/:id", ({ params }): ResumeDetail => {
+    const r = findResume(params[0]);
+    return { ...r, text_content: null, interview_text: null, parsed: db.parsed.get(r.id) ?? null };
   });
   on("POST", "/resumes/:id/parse", ({ params }) => {
-    const r = db.resumes.find((x) => x.id === params[0]);
-    if (!r) throw notFound("简历");
+    const r = findResume(params[0]);
     parseResume(r, find.candidate(r.candidate_id));
     return r;
   });
+  on("DELETE", "/resumes/:id", ({ params }) => {
+    const r = findResume(params[0]);
+    db.resumes = db.resumes.filter((x) => x !== r);
+    db.parsed.delete(r.id);
+    // 删的是主简历，剩下的里面最新的一份顶上
+    const rest = db.resumes.filter((x) => x.candidate_id === r.candidate_id).sort(byNewest);
+    if (r.is_primary && rest[0]) rest[0].is_primary = true;
+    return null;
+  });
   on("POST", "/candidates/:id/profile/regenerate", ({ params }) => {
     const c = find.candidate(params[0]);
-    const r = db.resumes.find((x) => x.candidate_id === c.id);
-    if (!r) throw conflict("这位候选人还没有简历，先上传一份");
-    parseResume(r, c);
-    return c;
+    const r = primaryResume(c.id);
+    if (r?.parse_status !== "done") throw conflict("这位候选人还没有读完的简历，先上传一份");
+    fillProfile(c);
+    return detail(c);
   });
 
   // ───────── 语音 ─────────
@@ -612,8 +830,8 @@ export function createMockServer(options: MockOptions = {}) {
     const i: Interview = {
       id: newId(),
       status: "draft",
-      candidate: { id: c.id, name: c.name, current_title: c.current_title },
-      position: { id: p.id, title: p.title, department: p.department },
+      candidate: { id: c.id, name: c.name, current_title: c.current_title ?? null },
+      position: { id: p.id, title: p.title, department: p.department ?? null },
       mode: input.config.mode,
       expected_duration_min: input.config.expected_duration_min,
       started_at: null,
@@ -634,8 +852,6 @@ export function createMockServer(options: MockOptions = {}) {
       decided_at: null,
     };
     db.interviews.push(i);
-    c.interview_count += 1;
-    p.interview_count += 1;
     return i;
   });
   on("GET", "/interviews/:id", ({ params }) => find.interview(params[0]));

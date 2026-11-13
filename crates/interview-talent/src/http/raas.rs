@@ -912,8 +912,6 @@ async fn import_candidate(
     let source = fetch_resume(raas, &detail).await?;
 
     let imported = candidate_from_raas(&detail);
-    // RAAS 里没填姓名的，等简历读出来再用简历上的
-    let adopt_name = detail.name.is_none();
     let new = NewCandidate {
         name: imported.name,
         email: imported.email,
@@ -958,6 +956,10 @@ async fn import_candidate(
             Err(error) => return Err(error.into()),
         },
     };
+
+    // RAAS 里没填姓名的，名字是占位的，等简历读出来再用简历上的。
+    // 看的是候选人现在的名字：以前导入过、HR 已经把名字填上的，不能再被简历上的换掉
+    let adopt_name = upload::is_placeholder_name(&candidate, None);
 
     let (resume, resume_id) = match source {
         ResumeSource::File(upload) => {
