@@ -40,13 +40,14 @@ draft ──prepare──▶ preparing ──成功──▶ ready ──（面�
 
 几条规则：
 
-- 现在只转写有单独答题录音的轮次（`interview_turns.audio_blob_key`，WAV）。从整段录像里按时间切出回答再转写，等 `interview-audio` 的解码函数合进来之后接。
+- 回答的声音按起止时间从合并好的录像里取（要 ffmpeg）；对话记录上挂了单独录音的（`interview_turns.audio_blob_key`）用那份录音。
 - 语音识别没配、没就绪或者中途不可用，就保留面试当时的文字，报告照常生成。某一句识别出来是空的，也保留原来的文字。
 - 假的语音识别后端（默认）返回的是固定文字，不是候选人说的话，收尾时不采用它的结果：文字保持面试当时的样子。
 - 报告每次生成一个新版本（`version` 递增），旧的留着。同一场面试同时只有一份在生成；`interview.finalize` 重复执行不会多出报告，「重新生成」才会。
 - 候选人一句都没答、没配大模型：报告直接记成 `failed` 并写明原因，不进任务队列。
 - 大模型出错交给任务队列重试，重试用完报告记成 `failed`。
 - 报告用的思考强度跟出题一样，取面试配置里的 `planning_thinking`。大模型的用量记在 `llm_usage`，用途是 `report.generate`。
+- 写报告之前检查录像画面（`video_check.rs`，调 `interview_report::frames`）：从摄像头录像里每隔几秒抽一帧，让大模型看画面里有几个人、有没有手机，看到的情况作为过程事件交给报告。结果存在 `interviews/{id}/frames/events.json`，录像没变就一直用它，任务重试和「重新生成」都不再看图；不正常的帧存成 `frames/{at_ms}.jpg`。没有摄像头录像、没装 ffmpeg、模型出错时跳过，报告照常生成并写明画面没有检查。用量记在 `llm_usage`，用途是 `report.frames`。
 - 发给大模型的内容：岗位、简历（`resumes.interview_text`，不带姓名和联系方式的那版）、面试配置、题目和评分要点、对话记录、过程事件。
 
 ## 给别的线

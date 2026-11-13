@@ -5,7 +5,7 @@
 //! 数据都是合成的；候选人的录像是 ffmpeg 现场生成的测试音加测试图案。
 //!
 //! 这个测试看的是模块之间接得上：岗位和候选人（②）→ 出题和合成（①③④）→ 面试间和录像（⑤）
-//! → 从录像里取回答重新转写（①④）→ 报告（①⑦）。每个模块自己的细节由各自的测试负责。
+//! → 从录像里取回答重新转写（①④）→ 录像画面检查和报告（①⑦）。每个模块自己的细节由各自的测试负责。
 //!
 //! 本机没装 ffmpeg 时不传录像，报告那一步断言的是「没有回答，评不了」；CI 里装了，没装会失败。
 
@@ -17,7 +17,9 @@ use axum::http::StatusCode;
 use bytes::Bytes;
 use interview_audio::{Audio, Ffmpeg};
 use interview_llm::testing::ScriptedModel;
-use interview_llm::{ChatModel, ChatRequest, ChatResponse, FinishReason, LlmError, Usage};
+use interview_llm::{
+    ChatModel, ChatRequest, ChatResponse, Content, ContentPart, FinishReason, LlmError, Usage,
+};
 use interview_platform::db::MIGRATOR;
 use interview_platform::testing::TestRequest;
 use interview_server::Shared;
@@ -104,6 +106,46 @@ fn planning() -> [String; 3] {
     ]
 }
 
+/// 面试结束后模型的回答：带图片的是录像画面检查，其余是写报告。
+fn after_interview_reply(request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+    let images = request.messages.get(1).map_or(0, |message| {
+        let Content::Parts(parts) = &message.content else {
+            return 0;
+        };
+        parts
+            .iter()
+            .filter(|part| matches!(part, ContentPart::ImageUrl { .. }))
+            .count()
+    });
+    if images == 0 {
+        return report_reply(request);
+    }
+    // 每次请求的第一张图里有两个人，其余的正常。复核时一次只发一张图，所以看法前后一致
+    let frames: Vec<Value> = (1..=images)
+        .map(|index| {
+            json!({ "index": index, "clear": true, "people": if index == 1 { 2 } else { 1 },
+                    "phone": false, "note": "测试" })
+        })
+        .collect();
+    Ok(scripted(json!({ "frames": frames }).to_string()))
+}
+
+fn scripted(content: String) -> ChatResponse {
+    ChatResponse {
+        content,
+        reasoning_content: None,
+        tool_calls: Vec::new(),
+        finish_reason: FinishReason::Stop,
+        usage: Usage {
+            prompt_tokens: 100,
+            completion_tokens: 10,
+            ..Usage::default()
+        },
+        model: "scripted".to_owned(),
+        system_fingerprint: None,
+    }
+}
+
 /// 写报告时模型的回答。报告的几步是并发的，谁先调用不确定，所以按提示词里的任务标题来答。
 fn report_reply(request: &ChatRequest) -> Result<ChatResponse, LlmError> {
     // 重试时后面会追加消息，所以认任务只看第一条用户消息
@@ -147,19 +189,13 @@ fn report_reply(request: &ChatRequest) -> Result<ChatResponse, LlmError> {
         .find(|(marker, _)| task.contains(marker))
         .map(|(_, reply)| (*reply).to_owned())
         .ok_or_else(|| LlmError::Config("测试没有给这一步准备回答".to_owned()))?;
-    Ok(ChatResponse {
-        content,
-        reasoning_content: None,
-        tool_calls: Vec::new(),
-        finish_reason: FinishReason::Stop,
-        usage: Usage::default(),
-        model: "scripted".to_owned(),
-        system_fingerprint: None,
-    })
+    Ok(scripted(content))
 }
 
 /// 写报告最多会调用模型多少次：每道问到的题一次（含追问），另外五步各一次，留些余量。
 const REPORT_CALLS: usize = 24;
+/// 检查录像画面最多会调用模型多少次：两分钟的录像抽二十几帧，八张一批，不正常的帧各复核两次。
+const FRAME_CALLS: usize = 16;
 
 /// 候选人每一段回答，语音识别转写出来的文字。
 const ANSWER: &str = "我负责订单拆分模块，把同步调用改成了消息队列。";
@@ -231,7 +267,8 @@ fn camera_recording(ffmpeg: &Ffmpeg, seconds: u32) -> Bytes {
 }
 
 /// 假的大模型、语音合成和语音识别。
-fn shared() -> Shared {
+/// 装配用的外部依赖，和假模型本身（测试要看它收到了什么）。
+fn shared() -> (Shared, Arc<ScriptedModel>) {
     let [brief, draft, review] = planning();
     let mut llm = ScriptedModel::new()
         .reply(EXTRACTION)
@@ -239,20 +276,24 @@ fn shared() -> Shared {
         .reply(brief)
         .reply(draft)
         .reply(review);
-    for _ in 0..REPORT_CALLS {
-        llm = llm.reply_fn(report_reply);
+    // 报告写两次：面试结束后自动出一份，HR 再点一次「重新生成」
+    for _ in 0..2 * REPORT_CALLS + FRAME_CALLS {
+        llm = llm.reply_fn(after_interview_reply);
     }
+    let llm = Arc::new(llm);
     let stt = ScriptedStt(FakeTranscriber::with_script([ANSWER; 16]));
-    Shared {
-        llm: Some(Arc::new(llm) as Arc<dyn ChatModel>),
+    let shared = Shared {
+        llm: Some(llm.clone() as Arc<dyn ChatModel>),
         synth: Arc::new(Synthesizer::new(Arc::new(FakeBackend::new()))),
         stt: Some(Arc::new(stt) as Arc<dyn Transcriber>),
-    }
+    };
+    (shared, llm)
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn a_whole_interview_from_login_to_wrap_up(pool: PgPool) {
-    let w = World::new(pool, shared()).await;
+    let (shared, llm) = shared();
+    let w = World::new(pool, shared).await;
 
     // ── HR：建岗位和候选人，上传简历 ──
     let position = w
@@ -493,4 +534,66 @@ async fn a_whole_interview_from_login_to_wrap_up(pool: PgPool) {
             >= 3,
         "{questions:?}"
     );
+
+    // 写报告之前检查了录像画面：看到的情况和网页采集的事件一起交给了诚信评估
+    let integrity = llm
+        .requests()
+        .iter()
+        .filter_map(|request| request.messages.get(1))
+        .map(|message| message.content.as_text())
+        .find(|task| task.contains("# 任务：找出作弊和诚信方面的迹象"))
+        .expect("报告有诚信评估这一步");
+    assert!(integrity.contains("frames_checked"), "{integrity}");
+    assert!(integrity.contains("face_count_changed"), "{integrity}");
+    // 检查的结果存了下来（下次不用再看），不正常的帧也存了；用量记了一笔
+    let stored = w
+        .ctx
+        .blobs
+        .list(&format!("interviews/{id}/frames"))
+        .await
+        .unwrap();
+    assert!(
+        stored.iter().any(|blob| blob.key.ends_with("/events.json")),
+        "{stored:?}"
+    );
+    assert!(
+        stored.iter().any(|blob| blob.key.ends_with(".jpg")),
+        "{stored:?}"
+    );
+    let frame_usage: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM llm_usage WHERE purpose = 'report.frames'")
+            .fetch_one(&w.ctx.db)
+            .await
+            .unwrap();
+    assert_eq!(frame_usage, 1);
+
+    // HR 点「重新生成」：画面不会变，直接用存下来的结果，不再让模型看图
+    let image_requests = |llm: &ScriptedModel| {
+        llm.requests()
+            .iter()
+            .filter(|request| {
+                request.messages.iter().any(|message| {
+                    matches!(&message.content, Content::Parts(parts)
+                        if parts.iter().any(|part| matches!(part, ContentPart::ImageUrl { .. })))
+                })
+            })
+            .count()
+    };
+    let looked = image_requests(&llm);
+    assert!(looked >= 3, "看图的请求只有 {looked} 次");
+    w.hr_post(
+        &format!("{uri}/report/regenerate"),
+        json!({}),
+        StatusCode::ACCEPTED,
+    )
+    .await;
+    w.run_tasks().await;
+    let reports = w.hr_get(&format!("{uri}/reports")).await;
+    let reports = reports["items"].as_array().expect("报告列表");
+    assert_eq!(reports.len(), 2, "{reports:?}");
+    assert!(
+        reports.iter().all(|report| report["status"] == "done"),
+        "{reports:?}"
+    );
+    assert_eq!(image_requests(&llm), looked);
 }

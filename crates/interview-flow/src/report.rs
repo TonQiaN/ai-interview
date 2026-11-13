@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::prepare::{Stop, failed};
 use crate::store::{self, ReportRow};
-use crate::{Deps, record};
+use crate::{Deps, record, video_check};
 
 const NO_ANSWERS: &str = "候选人没有作答，没有可以分析的内容";
 const NO_MODEL: &str =
@@ -119,7 +119,13 @@ async fn generate(deps: &Deps, task: &Task, payload: &ReportPayload) -> Result<V
     let config = row
         .config()
         .map_err(|e| failed(format!("面试配置读不出来：{e}")))?;
-    let record = record::assemble(db, &row, &turns).await?;
+    let mut record = record::assemble(db, &row, &turns).await?;
+
+    // 录像画面里看到的情况（人数不对、有手机）和网页采集的事件放在一起，按时间排好
+    let seen = video_check::events(deps, task, row.id).await?;
+    let frame_events = seen.len();
+    record.events.extend(seen);
+    record.events.sort_by_key(|event| event.at_ms);
 
     // 写报告不赶时间，和出题用同一档思考
     let options = AnalyzeOptions {
@@ -136,13 +142,7 @@ async fn generate(deps: &Deps, task: &Task, payload: &ReportPayload) -> Result<V
         })?;
 
     let meta = &report.meta;
-    let spent = Usage {
-        prompt_tokens: meta.usage.prompt_tokens,
-        completion_tokens: meta.usage.completion_tokens,
-        reasoning_tokens: meta.usage.reasoning_tokens,
-        cache_hit_tokens: meta.usage.cache_hit_tokens,
-        cache_miss_tokens: meta.usage.cache_miss_tokens,
-    };
+    let spent = llm_usage(&meta.usage);
     usage::record(
         db,
         LlmUsage {
@@ -164,6 +164,7 @@ async fn generate(deps: &Deps, task: &Task, payload: &ReportPayload) -> Result<V
     let summary = json!({
         "calls": meta.usage.calls,
         "failed_stages": meta.failed_stages.len(),
+        "frame_events": frame_events,
     });
     let schema_version = i32::try_from(SCHEMA_VERSION).unwrap_or(i32::MAX);
     store::finish_report(
@@ -174,4 +175,15 @@ async fn generate(deps: &Deps, task: &Task, payload: &ReportPayload) -> Result<V
     )
     .await?;
     Ok(summary)
+}
+
+/// 报告这边记的用量，换成算费用用的那种。
+pub(crate) fn llm_usage(usage: &interview_report::report::Usage) -> Usage {
+    Usage {
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+        cache_hit_tokens: usage.cache_hit_tokens,
+        cache_miss_tokens: usage.cache_miss_tokens,
+    }
 }
