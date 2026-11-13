@@ -75,6 +75,16 @@ impl ReportModel {
         requests.iter().filter(|(s, _)| s == stage).count()
     }
 
+    /// 某一步第一次调用时发给模型的文字。
+    fn sent_to(&self, stage: &str) -> String {
+        let requests = self.requests.lock().unwrap();
+        requests
+            .iter()
+            .find(|(s, _)| s == stage)
+            .map(|(_, prompt)| prompt.clone())
+            .unwrap_or_default()
+    }
+
     /// 发给模型的全部文字，拼在一起。
     fn everything_sent(&self) -> String {
         let requests = self.requests.lock().unwrap();
@@ -583,6 +593,97 @@ async fn report_still_comes_out_when_speech_recognition_is_down(pool: PgPool) {
     let h = h.with_review(Some(model), None);
     assert_eq!(h.run_tasks().await, 1);
     assert_eq!(h.transcript(&id).await[1]["transcript_source"], "live");
+}
+
+/// 实时对话里面试官现场说的话，面试间会在 `interview_utterances` 里各登记一行
+/// （`source = 'live'`，不预先合成）。现场追问的 key 是「题目 key.p序号」，
+/// 回应候选人的话是「题目 key.r序号」。约定见 `docs/architecture/api.md` 的「实时对话」。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn what_the_interviewer_said_live_is_filed_under_its_question(pool: PgPool) {
+    const PROBE: &str = "重构的时候你自己写了哪一部分代码？";
+    const PROBE_ANSWER: &str = "库存扣减那一块是我写的，改成了先预占再确认。";
+    const REPLY: &str = "团队现在八个人，后端五个。";
+    const AFTER_REPLY: &str = "明白了，那我接着说，我主要负责下单和支付回调。";
+
+    let h = harness(pool).await;
+    let id = h.ready_interview().await;
+    let interview_id: Uuid = id.parse().unwrap();
+    let planned = h.utterances(&id).await.len();
+    for (key, seq, kind, text) in [
+        ("q1.p1", 100_010, "follow_up", PROBE),
+        ("q2.r1", 100_030, "other", REPLY),
+    ] {
+        sqlx::query(
+            "INSERT INTO interview_utterances (interview_id, key, seq, kind, text, source, synth_status) \
+             VALUES ($1, $2, $3, $4, $5, 'live', 'skipped')",
+        )
+        .bind(interview_id)
+        .bind(key)
+        .bind(seq)
+        .bind(kind)
+        .bind(text)
+        .execute(&h.ctx.db)
+        .await
+        .unwrap();
+    }
+    let turns = [
+        Turn::interviewer(0, "opening", "你好，我是 AI 面试官。", 0, 5),
+        Turn::interviewer(1, "q1", "先请你用一分钟左右介绍一下自己。", 6, 10),
+        Turn::candidate(2, "q1", "我做了三年后端，重构过订单系统。", 11, 16),
+        Turn::interviewer(3, "q1.p1", PROBE, 18, 22),
+        Turn::candidate(4, "q1.p1", PROBE_ANSWER, 23, 30),
+        Turn::interviewer(5, "q2", "你自己具体负责哪一块？", 32, 36),
+        Turn::candidate(6, "q2", "先问一下，团队现在多少人？", 37, 40),
+        Turn::interviewer(7, "q2.r1", REPLY, 42, 46),
+        // 回应之后候选人接着说的，面试间记在正在问的那道题下面
+        Turn::candidate(8, "q2", AFTER_REPLY, 47, 55),
+        Turn::interviewer(9, "closing", "今天就到这里，谢谢你。", 57, 60),
+    ];
+    for turn in turns {
+        h.turn(&id, turn).await;
+    }
+    h.finish(&id, "completed").await;
+
+    let model = Arc::new(ReportModel::complete());
+    let h = h.with_review(Some(model.clone()), None);
+    assert_eq!(h.run_tasks().await, 2);
+    let detail = h.detail(&id).await;
+    assert_eq!(detail["report"]["status"], "done", "{detail}");
+
+    // 模型评第一道题时，看得到现场追问问的是什么
+    assert!(model.sent_to("question:q1").contains(PROBE));
+
+    // 报告里还是计划内的三道题，现场的话不单独成题
+    let report = h.get(&format!("/api/v1/interviews/{id}/report")).await;
+    let questions = report.json()["content"]["questions"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(questions.len(), 3, "{questions:?}");
+    let turns = h.transcript(&id).await;
+    let ids = |range: std::ops::RangeInclusive<usize>| -> Vec<Value> {
+        range.map(|index| turns[index]["id"].clone()).collect()
+    };
+    // 现场追问和对它的回答算在它追的那道题里
+    assert_eq!(questions[0]["asked"], true);
+    assert_eq!(questions[0]["segment_ids"], json!(ids(1..=4)));
+    assert_eq!(questions[0]["timing"]["candidate_speaking_ms"], 12_000);
+    // 面试官回应之后候选人接着说的，还是算在那道题里
+    assert_eq!(questions[1]["asked"], true);
+    assert_eq!(questions[1]["segment_ids"], json!(ids(5..=8)));
+    assert_eq!(questions[1]["timing"]["candidate_speaking_ms"], 11_000);
+    assert_eq!(questions[2]["asked"], false);
+
+    // 现场说的话不算在「准备好了几句语音」里，HR 看每句话时能看到它们
+    assert_eq!(detail["synth"]["total"], planned);
+    let lines = h.utterances(&id).await;
+    assert_eq!(lines.len(), planned + 2);
+    let live: Vec<&Value> = lines
+        .iter()
+        .filter(|line| line["source"] == "live")
+        .collect();
+    assert_eq!(live.len(), 2);
+    assert!(live.iter().all(|line| line["has_audio"] == false));
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
