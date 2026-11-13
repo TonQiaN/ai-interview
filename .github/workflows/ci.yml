@@ -124,6 +124,8 @@ jobs:
       - name: shell 语法
         run: |
           for f in scripts/*.sh crates/*/scripts/*.sh; do bash -n "$f"; done
+      - name: Python 语法
+        run: python3 -m py_compile tts/worker/*.py crates/interview-stt/bench/*.py
 
   # 总闸：分支保护只需要把这一条设成必过。新加的 job 要加进 needs，否则它红了也挡不住合并。
   all-checks-passed:

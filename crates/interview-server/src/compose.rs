@@ -19,7 +19,7 @@ use interview_llm::{ChatModel, DeepSeekClient};
 use interview_platform::AppContext;
 use interview_platform::status::{ComponentStatus, DatabaseProbe, StatusProbe, StatusRegistry};
 use interview_platform::tasks::TaskRegistry;
-use interview_tts::{FakeBackend, Synthesizer};
+use interview_tts::{FakeBackend, Synthesizer, backend_from_env};
 use utoipa_axum::router::OpenApiRouter;
 
 /// 多个模块共用、又不属于平台的东西。
@@ -27,12 +27,13 @@ use utoipa_axum::router::OpenApiRouter;
 pub struct Shared {
     /// 大模型。没配密钥时是 `None`：服务照常启动，用到大模型的功能返回 503。
     pub llm: Option<Arc<dyn ChatModel>>,
-    /// 语音合成。现在只有输出测试音的假后端，接 Mac 上真模型的后端由语音线换掉 [`default_synth`]。
+    /// 语音合成。后端由 `AI_INTERVIEW_TTS_BACKEND` 决定：默认是输出测试音的假后端，
+    /// `worker` 是 Mac 上跑真模型的 worker（见 `tts/worker/README.md`）。
     pub synth: Arc<Synthesizer>,
 }
 
-/// 现在用的语音合成后端。
-fn default_synth() -> Arc<Synthesizer> {
+/// 不需要任何外部依赖的语音合成：输出测试音的假后端。
+fn fake_synth() -> Arc<Synthesizer> {
     Arc::new(Synthesizer::new(Arc::new(FakeBackend::new())))
 }
 
@@ -48,7 +49,7 @@ impl Shared {
         };
         Self {
             llm,
-            synth: default_synth(),
+            synth: Arc::new(Synthesizer::new(backend_from_env())),
         }
     }
 
@@ -56,7 +57,7 @@ impl Shared {
     pub fn none() -> Self {
         Self {
             llm: None,
-            synth: default_synth(),
+            synth: fake_synth(),
         }
     }
 }
@@ -76,6 +77,9 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
     probes.register(DatabaseProbe(ctx.db.clone()));
     probes.register(LlmProbe {
         configured: shared.llm.is_some(),
+    });
+    probes.register(TtsProbe {
+        synth: shared.synth.clone(),
     });
 
     let mut api = OpenApiRouter::new();
@@ -131,5 +135,43 @@ impl StatusProbe for LlmProbe {
         } else {
             ComponentStatus::not_configured(self.name(), "没有设置环境变量 DEEPSEEK_API_KEY")
         }
+    }
+}
+
+/// 语音合成的后端和三个引擎各自能不能用。只问 worker 的状态，不真的合成。
+struct TtsProbe {
+    synth: Arc<Synthesizer>,
+}
+
+#[async_trait]
+impl StatusProbe for TtsProbe {
+    fn name(&self) -> &'static str {
+        "tts"
+    }
+
+    async fn check(&self) -> ComponentStatus {
+        let backend = self.synth.backend_name();
+        let engines = self.synth.status().await;
+        let ready = engines.iter().filter(|engine| engine.ready).count();
+        let reason = engines
+            .iter()
+            .find_map(|engine| (!engine.ready).then(|| engine.detail.clone()).flatten())
+            .unwrap_or_else(|| "没有说明原因".to_owned());
+        let status = if backend == "fake" {
+            ComponentStatus::not_configured(
+                self.name(),
+                "现在是输出测试音的假后端。要用真模型，设 AI_INTERVIEW_TTS_BACKEND=worker 并启动 Mac 上的 worker",
+            )
+        } else if ready == engines.len() {
+            ComponentStatus::ok(self.name())
+        } else if ready > 0 {
+            ComponentStatus::degraded(
+                self.name(),
+                format!("{} 个引擎里只有 {ready} 个能用：{reason}", engines.len()),
+            )
+        } else {
+            ComponentStatus::down(self.name(), format!("三个引擎都用不了：{reason}"))
+        };
+        status.with_details(serde_json::json!({ "backend": backend, "engines": engines }))
     }
 }

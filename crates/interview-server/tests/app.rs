@@ -86,7 +86,10 @@ async fn health_docs_and_default_deny(pool: PgPool) {
             )
         })
         .collect();
-    assert_eq!(names, ["database=ok", "llm=not_configured"]);
+    assert_eq!(
+        names,
+        ["database=ok", "llm=not_configured", "tts=not_configured"]
+    );
 
     // 首页跳到 HR 后台
     let response = TestRequest::get("/").send(&router).await;
