@@ -3,7 +3,8 @@
 //! 判断全部交给模型，这里把「怎么判断」讲清楚。提示词改了就把 [`PROMPT_VERSION`] 加一，
 //! 报告里会记下版本，方便对比不同版本的效果。
 
-use crate::transcript::QuestionGroup;
+use crate::record::Segment;
+use crate::transcript::{QuestionGroup, segment_alias};
 
 /// 提示词版本。
 pub const PROMPT_VERSION: u32 = 2;
@@ -59,10 +60,22 @@ pub(crate) const ALIGNMENT_TASK: &str = r#"# 任务：把转写分到各道题�
 }"#;
 
 /// 评价一道题的作答。
-pub(crate) fn question_task(group: &QuestionGroup<'_>) -> String {
-    let segments = match (group.segments.first(), group.segments.last()) {
-        (Some(first), Some(last)) => format!("片段 {} 到 {}", first.id, last.id),
-        _ => "这道题没有被问到，转写里没有对应的片段".to_owned(),
+pub(crate) fn question_task(group: &QuestionGroup<'_>, transcript: &[Segment]) -> String {
+    // 和转写里一样用短编号
+    let alias = |segment: &Segment| {
+        transcript
+            .iter()
+            .position(|s| s.id == segment.id)
+            .map(segment_alias)
+    };
+    let range = group
+        .segments
+        .first()
+        .zip(group.segments.last())
+        .and_then(|(first, last)| alias(first).zip(alias(last)));
+    let segments = match range {
+        Some((first, last)) => format!("片段 {first} 到 {last}"),
+        None => "这道题没有被问到，转写里没有对应的片段".to_owned(),
     };
     format!(
         r#"# 任务：评价候选人对题目 {id} 的作答
