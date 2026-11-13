@@ -8,7 +8,8 @@ use async_trait::async_trait;
 use common::{TestApp, agree, create_invite, error_code, interview_status, prepared, run_tasks};
 use interview_llm::testing::ScriptedModel;
 use interview_platform::testing::{self, TestRequest, TestResponse};
-use interview_room::{AnswerTranscriber, Deps, RoomConfig};
+use interview_room::{AnswerTranscriber, AnswerTranscript, Deps, RoomConfig};
+use interview_stt::{Segment, Transcript};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
@@ -542,13 +543,31 @@ impl FakeTranscriber {
 
 #[async_trait]
 impl AnswerTranscriber for FakeTranscriber {
-    async fn answer_text(&self, interview_id: Uuid, start_ms: i64, end_ms: i64) -> Option<String> {
+    async fn answer(
+        &self,
+        interview_id: Uuid,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Option<AnswerTranscript> {
         self.asked
             .lock()
             .unwrap()
             .push((interview_id, start_ms, end_ms));
         let _permit = self.gate.acquire().await.ok()?;
-        self.text.map(str::to_owned)
+        let (start_ms, end_ms) = (start_ms as u64, end_ms as u64);
+        Some(AnswerTranscript {
+            transcript: Transcript {
+                segments: vec![Segment {
+                    start_ms,
+                    end_ms,
+                    text: self.text?.to_owned(),
+                    words: Vec::new(),
+                    confidence: Some(0.5),
+                }],
+                audio_duration_ms: end_ms - start_ms,
+            },
+            engine: "test".to_owned(),
+        })
     }
 }
 
@@ -610,9 +629,10 @@ async fn a_weak_answer_gets_the_prepared_follow_up(pool: PgPool) {
     assert_eq!(follow_up["progress"]["index"], 1, "追问不算新的一题");
 
     // 识别的是候选人刚答的那一段，文字记进了对话
+    // 从面试官那句话播完（230）算起，到候选人答完（290）
     assert_eq!(
         transcriber.asked.lock().unwrap().as_slice(),
-        [(interview_id, 240, 290)]
+        [(interview_id, 230, 290)]
     );
     let answer = turns(&app, interview_id)
         .await
@@ -620,6 +640,18 @@ async fn a_weak_answer_gets_the_prepared_follow_up(pool: PgPool) {
         .find(|turn| turn.1 == "candidate")
         .unwrap();
     assert_eq!(answer.3, "我们团队做了很多事情。");
+    let stored: (Option<String>, Option<f32>, String) = sqlx::query_as(
+        "SELECT stt_engine, confidence, transcript_source FROM interview_turns
+          WHERE interview_id = $1 AND speaker = 'candidate'",
+    )
+    .bind(interview_id)
+    .fetch_one(&app.ctx.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored,
+        (Some("test".to_owned()), Some(0.5), "live".to_owned())
+    );
 
     // 模型只调了一次，用量记了账
     assert_eq!(model.requests().len(), 1);
