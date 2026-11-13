@@ -42,7 +42,7 @@ pub struct World {
     /// HR 登录后的 cookie
     cookie: String,
     /// 文件存在这个临时目录里，和线上一样是本机磁盘
-    _files: TempDir,
+    files: TempDir,
 }
 
 impl World {
@@ -87,8 +87,13 @@ impl World {
             router: app.router,
             runner,
             cookie,
-            _files: files,
+            files,
         }
+    }
+
+    /// 文件存在哪个目录。测试结束时这个目录会被删掉。
+    pub fn files_dir(&self) -> &std::path::Path {
+        self.files.path()
     }
 
     /// HR 的请求。
