@@ -85,22 +85,11 @@ pub(crate) async fn events(
         ..FrameOptions::default()
     };
     let started = Instant::now();
-    // 放到单独的线程上等：抽帧那边的 future 里有按引用借的并发流，编译器证明不了它能跨线程
-    //（报「Send 不够通用」），不能直接放进任务的 future。在那个线程上等不要求它能跨线程。
     let segment_count = segments.len();
-    let runtime = tokio::runtime::Handle::current();
-    let checked = tokio::task::spawn_blocking(move || {
-        runtime.block_on(observe_video(&segments, model.as_ref(), &options))
-    })
-    .await;
-    let observed = match checked {
-        Ok(Ok(observed)) => observed,
-        Ok(Err(err)) => {
-            tracing::warn!(%interview_id, %err, "录像画面检查失败，照常出报告");
-            return Ok(Vec::new());
-        }
+    let observed = match observe_video(&segments, model.as_ref(), &options).await {
+        Ok(observed) => observed,
         Err(err) => {
-            tracing::warn!(%interview_id, %err, "录像画面检查中断了，照常出报告");
+            tracing::warn!(%interview_id, %err, "录像画面检查失败，照常出报告");
             return Ok(Vec::new());
         }
     };
