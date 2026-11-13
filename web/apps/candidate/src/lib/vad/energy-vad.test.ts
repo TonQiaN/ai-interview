@@ -37,7 +37,7 @@ describe("EnergyVad", () => {
     expect(feed(vad, -65, 1000)).toEqual([]);
     expect(feed(vad, -25, 1000)).toEqual([{ type: "speech_start" }]);
     expect(vad.snapshot().speaking).toBe(true);
-    expect(feed(vad, -65, 1000)).toEqual([{ type: "speech_end" }]);
+    expect(feed(vad, -65, 1000)).toEqual([{ type: "speech_end", quietMs: 400 }]);
     expect(vad.snapshot().speaking).toBe(false);
   });
 
@@ -66,7 +66,7 @@ describe("EnergyVad", () => {
     // 在噪声之上说话仍然能检测到
     expect(feed(vad, -22, 500)).toEqual([{ type: "speech_start" }]);
     // 回到噪声水平算停止
-    expect(feed(vad, -42, 1000)).toEqual([{ type: "speech_end" }]);
+    expect(feed(vad, -42, 1000)).toEqual([{ type: "speech_end", quietMs: 400 }]);
   });
 
   it("安静中途突然出现持续噪声：几秒内适应，之后不再当成说话", () => {
@@ -74,7 +74,7 @@ describe("EnergyVad", () => {
     feed(vad, -65, 2000);
     // 空调启动
     const during = feed(vad, -42, 5000);
-    expect(during.at(-1)).toEqual({ type: "speech_end" });
+    expect(during.at(-1)).toEqual({ type: "speech_end", quietMs: 400 });
     expect(vad.snapshot().speaking).toBe(false);
     expect(feed(vad, -42, 20_000)).toEqual([]);
     // 在噪声之上说话仍然能检测到
@@ -91,7 +91,7 @@ describe("EnergyVad", () => {
     }
     expect(events).toEqual([{ type: "speech_start" }]);
     expect(vad.snapshot().floorDb).toBeLessThan(-55);
-    expect(feed(vad, -60, 1000)).toEqual([{ type: "speech_end" }]);
+    expect(feed(vad, -60, 1000)).toEqual([{ type: "speech_end", quietMs: 400 }]);
   });
 
   it("极安静的环境里，很轻的声音不会被当成说话", () => {

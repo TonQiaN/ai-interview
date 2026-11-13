@@ -50,6 +50,39 @@ describe("逐题状态机", () => {
     expect(state).toMatchObject({ phase: "ended", reason: "silence" });
   });
 
+  it("静音从声音真正停下的那一刻算起，回答的结束时刻还是听出停止的那一刻", () => {
+    // VAD 等声音停了 400 毫秒才报「停止说话」
+    const state = run(
+      [
+        { type: "speech_start", at: 12_000 },
+        { type: "speech_end", at: 40_000, quietMs: 400 },
+        { type: "tick", at: 44_500 },
+      ],
+      listening(),
+    );
+    expect(state).toMatchObject({ phase: "listening", silenceSince: 39_600 });
+    expect(viewTurn(state, 44_500, config).silenceRemainingMs).toBe(100);
+
+    const ended = reduceTurn(state, { type: "tick", at: 44_600 }, config);
+    expect(ended).toMatchObject({
+      phase: "ended",
+      reason: "silence",
+      lastSpeechEndAt: 40_000,
+      endedAt: 44_600,
+    });
+  });
+
+  it("报上来的安静时长再离谱，静音也不会从开口之前算起", () => {
+    const state = run(
+      [
+        { type: "speech_start", at: 12_000 },
+        { type: "speech_end", at: 12_300, quietMs: 60_000 },
+      ],
+      listening(),
+    );
+    expect(state).toMatchObject({ phase: "listening", silenceSince: 12_000 });
+  });
+
   it("开口后连续静音达到设定时长算答完", () => {
     const state = run(
       [
