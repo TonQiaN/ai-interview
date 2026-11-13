@@ -62,6 +62,9 @@ pub struct RoomConfig {
     pub realtime_done_silence_ms: u32,
     /// 模型说还没说完的，这次停顿等到这么多毫秒才算说完
     pub realtime_wait_silence_ms: u32,
+    /// 实时对话里，面试官说话时一听到候选人出声页面就先停下来；之后候选人的声音再持续这么多毫秒
+    /// 才算插话，不到的（咳嗽、嗯一声）从停下的地方接着播。0 是不让插话，面试官每句话都说完
+    pub realtime_barge_in_ms: u32,
 }
 
 impl RoomConfig {
@@ -175,6 +178,19 @@ impl RoomConfig {
             );
             default.realtime_wait_silence_ms
         });
+        let realtime_barge_in_ms = env_parse(
+            "AI_INTERVIEW_ROOM_REALTIME_BARGE_IN_MS",
+            default.realtime_barge_in_ms,
+        )
+        .ok()
+        .filter(|ms| *ms == 0 || (200..=3_000).contains(ms))
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "AI_INTERVIEW_ROOM_REALTIME_BARGE_IN_MS 要么是 0（不开），要么在 200 到 3000 之间，这次用默认值 {}",
+                default.realtime_barge_in_ms
+            );
+            default.realtime_barge_in_ms
+        });
         Self {
             invite_ttl_hours,
             camera_required,
@@ -186,6 +202,7 @@ impl RoomConfig {
             realtime_pause_check_ms,
             realtime_done_silence_ms,
             realtime_wait_silence_ms,
+            realtime_barge_in_ms,
             recording: RecordingSettings {
                 timeslice_ms,
                 ..default.recording.clone()
@@ -211,6 +228,7 @@ impl Default for RoomConfig {
             realtime_pause_check_ms: 500,
             realtime_done_silence_ms: 1_000,
             realtime_wait_silence_ms: 3_000,
+            realtime_barge_in_ms: 400,
         }
     }
 }
