@@ -6,18 +6,20 @@
 
 ```bash
 pnpm -C web install
-pnpm -C web --filter @ai-interview/admin dev     # http://localhost:5173/admin/
-pnpm -C web --filter @ai-interview/admin test    # 单元测试
-pnpm -C web --filter @ai-interview/admin build   # 产物在 web/dist/admin，由 interview-server 挂在 /admin/
+scripts/dev.sh                                        # 先起后端（127.0.0.1:8080），终端里会打印本机的管理员账号
+pnpm -C web --filter @ai-interview/admin dev          # http://localhost:5173/admin/，/api 转给本机后端
+pnpm -C web --filter @ai-interview/admin dev:demo     # 不用后端，用演示数据
+pnpm -C web --filter @ai-interview/admin test         # 单元测试
+pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin，由 interview-server 挂在 /admin/
 ```
+
+后台默认请求真实后端。所有请求都走 `@ai-interview/api-client` 的客户端（`src/api/http.ts` 里的 `api`），路径、参数和返回的类型由后端的 OpenAPI 文档生成，后端改了接口这里编译就会报错。
 
 ## 演示数据
 
-后台现在默认用浏览器里的一套假后端（`src/api/mock/`），右上角会显示「演示数据」。这时邮箱和密码随便填都能进（密码填 `wrong` 可以看登录失败的样子），所有改动只存在内存里，刷新就没了。
+`dev:demo` 和 `build:demo`（也就是 `--mode demo`，或者设 `VITE_API_MOCK=1`）会把请求交给浏览器里的一套假后端（`src/api/mock/`），右上角显示「演示数据」。这时邮箱和密码随便填都能进（密码填 `wrong` 可以看登录失败的样子），所有改动只存在内存里，刷新就没了。正常构建的产物里不带假后端。
 
-演示数据里的面试、逐字稿和报告来自分析报告线的合成样例（`crates/interview-report/samples/`），人名、手机号、邮箱都是编的。
-
-设 `VITE_API_MOCK=0` 就改成请求真实后端（开发时 `/api` 会转到 `http://127.0.0.1:8080`）。所有页面都已经按真实接口写好，类型直接取自 `@ai-interview/api-client` 生成的结果，假后端返回的也是同样的结构。
+演示数据里的面试、逐字稿和报告来自分析报告线的合成样例（`crates/interview-report/samples/`），人名、手机号、邮箱都是编的。假后端返回的结构和真实接口一样，测试（`src/api/mock/server.test.ts`）也是对着它跑的。
 
 演示数据里没有语音模型，试听和参考录音播放的是一段提示音，页面顶上会有一句说明。真实后端没连上 Mac 上的模型时也是这样（接口会返回 `simulated: true`）。
 

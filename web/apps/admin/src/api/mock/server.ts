@@ -2,7 +2,7 @@
  * 假后端：在浏览器内存里实现 docs/architecture/api.md 里 HR 后台用到的接口。
  *
  * 它接的是 fetch 这一层：页面和数据请求的代码不知道后面是真是假。
- * 真后端的接口就绪后，把 VITE_API_MOCK 设成 0 就走真接口，这个目录只留给演示和测试用。
+ * 只在演示模式（`pnpm dev:demo`、`pnpm build:demo`）和测试里用，正常构建不会带上它。
  */
 
 import { estimateBudget } from "../../lib/budget";
@@ -219,6 +219,19 @@ function configIssues(config: InterviewConfig): Record<string, string> | null {
 
 const SESSION_KEY = "ai-interview-mock-session";
 
+// 测试环境里 Request 读出来的 Blob、FormData 和全局的不是同一个类，所以按长相认，不用 instanceof
+const isBlobLike = (v: unknown): v is Blob =>
+  typeof v === "object" &&
+  v !== null &&
+  typeof (v as Blob).size === "number" &&
+  typeof (v as Blob).arrayBuffer === "function";
+const isFileLike = (v: unknown): v is File => isBlobLike(v) && typeof (v as File).name === "string";
+const isFormLike = (v: unknown): v is FormData =>
+  typeof v === "object" &&
+  v !== null &&
+  typeof (v as FormData).get === "function" &&
+  typeof (v as FormData).append === "function";
+
 export function createMockServer(options: MockOptions = {}) {
   const latencyMs = options.latencyMs ?? 220;
   const jobMs = options.jobMs ?? 4200;
@@ -298,14 +311,14 @@ export function createMockServer(options: MockOptions = {}) {
 
   /** 新简历成为主简历，原来的主简历让位 */
   function addResume(c: Candidate, file: FormDataEntryValue | null): Resume {
-    const size = file instanceof File ? file.size : 240_000;
+    const size = isFileLike(file) ? file.size : 240_000;
     if (size > 20 * 1024 * 1024) throw new HttpError(413, "payload_too_large", "简历不能超过 20MB");
     for (const r of db.resumes) if (r.candidate_id === c.id) r.is_primary = false;
     const r: Resume = {
       id: newId(),
       candidate_id: c.id,
-      file_name: file instanceof File ? file.name : "简历.pdf",
-      content_type: file instanceof File && file.type ? file.type : "application/pdf",
+      file_name: isFileLike(file) ? file.name : "简历.pdf",
+      content_type: isFileLike(file) && file.type ? file.type : "application/pdf",
       size_bytes: size,
       has_file: true,
       is_primary: true,
@@ -817,7 +830,7 @@ export function createMockServer(options: MockOptions = {}) {
     return detail(c);
   });
   on("POST", "/candidates/import", ({ raw }) => {
-    const file = raw instanceof FormData ? raw.get("file") : null;
+    const file = isFormLike(raw) ? raw.get("file") : null;
     const c = newCandidate({ name: "解析中…" }, { source: "upload" });
     db.candidates.push(c);
     try {
@@ -850,7 +863,7 @@ export function createMockServer(options: MockOptions = {}) {
     return paginate(db.resumes.filter((r) => r.candidate_id === params[0]).sort(byNewest), query);
   });
   on("POST", "/candidates/:id/resumes", ({ params, raw }) =>
-    addResume(find.candidate(params[0]), raw instanceof FormData ? raw.get("file") : null),
+    addResume(find.candidate(params[0]), isFormLike(raw) ? raw.get("file") : null),
   );
   on("GET", "/resumes/:id", ({ params }): ResumeDetail => {
     const r = findResume(params[0]);
@@ -962,7 +975,7 @@ export function createMockServer(options: MockOptions = {}) {
   on("PUT", "/speech/voices/:id/reference", ({ params, raw }) => {
     const v = find.voice(params[0]);
     if (v.kind === "designed") throw conflict("用文字描述设计的音色不需要参考录音");
-    const size = raw instanceof Blob ? raw.size : 0;
+    const size = isBlobLike(raw) ? raw.size : 0;
     if (size === 0) throw new HttpError(422, "empty_file", "这个文件是空的");
     if (size > 20 * 1024 * 1024)
       throw new HttpError(413, "payload_too_large", "参考录音不能超过 20MB");
@@ -1328,6 +1341,15 @@ export function createMockServer(options: MockOptions = {}) {
     return paginate(list, query);
   });
 
+  /** 接口客户端给的是 Request 对象，请求体要从它身上读出来 */
+  async function requestBody(request: Request): Promise<BodyInit | undefined> {
+    if (request.method === "GET" || request.method === "HEAD" || !request.body) return undefined;
+    const type = request.headers.get("content-type") ?? "";
+    if (type.includes("multipart/form-data")) return request.formData();
+    if (type.includes("application/json")) return request.text();
+    return request.blob();
+  }
+
   async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const request = typeof input === "string" || input instanceof URL ? null : input;
     const url = new URL(request ? request.url : String(input), "http://mock.local");
@@ -1348,7 +1370,7 @@ export function createMockServer(options: MockOptions = {}) {
         const m = route.pattern.exec(path);
         if (!m) continue;
         if (!route.public && !loggedIn) throw new HttpError(401, "unauthenticated", "请先登录");
-        const raw = init?.body;
+        const raw = init?.body ?? (request ? await requestBody(request) : undefined);
         const body = typeof raw === "string" && raw ? JSON.parse(raw) : null;
         const result = await route.handler({
           params: m.slice(1).map(decodeURIComponent),
