@@ -157,7 +157,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 
 - 列表和详情是实时去 RAAS 查的，`{ref}` 是 RAAS 里的编号（列表里的 `external_ref`）。已经导入过的带 `imported_position_id` 或 `imported_candidate_id`。候选人的列表和详情不带手机和邮箱，导入以后在我们这边看。
 - 导入是同步的，请求体 `{"refs": [...], "refresh": false}`，一次最多 20 条。每条各自成功或失败，返回 `items[]`，看 `outcome`：`created`、`already_imported`、`refreshed`、`restored`（原来归档了，这次恢复）、`failed`（原因在 `message`）。
-- 已经导入过的默认不动。`refresh` 为真时：岗位用 RAAS 的最新内容覆盖；候选人的基本信息只补空的，RAAS 里有新简历就导进来设成主简历。
+- 已经导入过的默认不动。`refresh` 为真时：岗位用 RAAS 的最新内容覆盖（用工形式 RAAS 里没有，留着我们这边填的）；候选人的基本信息只补空的，RAAS 里有新简历就导进来设成主简历。
 - 候选人的简历优先取 RAAS 里的原始文件，没有或者读不了（比如 Word）就用 RAAS 的解析结果拼一份文字版，都交给 `resume.parse` 任务。`items[].resume` 是 `queued`、`unchanged`、`none`（RAAS 里没有简历）或 `failed`（取简历时 RAAS 出错，人已经建好，稍后带 `refresh` 再导）。
 - RAAS 没配置或登录不上是 503（`raas_unavailable`），RAAS 暂时访问不了是 502（`raas_error`）。
 
