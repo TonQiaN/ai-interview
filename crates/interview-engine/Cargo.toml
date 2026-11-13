@@ -1,0 +1,24 @@
+[package]
+name = "interview-engine"
+description = "AI 面试引擎：面试配置、出题规划、逐题问答的会话状态机"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+interview-llm.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+utoipa.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
