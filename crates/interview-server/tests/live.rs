@@ -15,7 +15,8 @@
 //!
 //! 候选人的声音用识别模型压缩包里自带的示例录音（公开的测试语料，不是真人候选人），
 //! 所以回答的内容和题目没有关系：这里看的是整条链路走得通、转写对得上时间，
-//! 还有报告会不会如实说「答非所问」。想换成自己录的回答，把 `AI_INTERVIEW_LIVE_ANSWER_WAVS`
+//! 还有模型会不会如实说「答非所问」。面试中模型听得到回答（现场转写），连着几题答非所问
+//! 就提前结束，所以这一场通常问不完；录像的画面是测试图案，画面检查会说「画面里没有人」。想换成自己录的回答，把 `AI_INTERVIEW_LIVE_ANSWER_WAVS`
 //! 指到一个放 WAV 的目录。`AI_INTERVIEW_LIVE_QUESTIONS` 可以改题目数。
 //!
 //! 岗位和简历是合成的。
@@ -528,7 +529,11 @@ async fn a_whole_interview_with_the_real_model_and_real_speech_recognition(pool:
         steps.len(),
         phase.elapsed().as_secs_f64()
     );
-    assert_eq!(reason, "completed", "{steps:?}");
+    // 示例录音的内容和题目没有关系：模型连着几题判断答非所问，就会提前结束
+    assert!(
+        matches!(reason.as_str(), "completed" | "poor_answers"),
+        "{reason}：{steps:?}"
+    );
     assert_eq!(w.hr_get(&uri).await["status"], "completed");
 
     // ── 面试结束：合并录像，重新转写，写报告 ──
@@ -643,6 +648,13 @@ async fn a_whole_interview_with_the_real_model_and_real_speech_recognition(pool:
         );
     }
     println!("  合计：{total:.4} 元");
+    // 面试中模型判断过回答（现场转写接上了），写报告前检查过录像画面
+    for expected in ["interview.turn", "report.frames"] {
+        assert!(
+            usage.iter().any(|(purpose, ..)| purpose == expected),
+            "大模型用量里没有 {expected}"
+        );
+    }
     println!(
         "  语音识别：{}（{}）",
         stt_status.backend,
