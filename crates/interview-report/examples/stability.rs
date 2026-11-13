@@ -39,8 +39,8 @@ struct Cli {
     judgements: Option<u32>,
     #[arg(long, default_value = "crates/interview-report/samples")]
     samples: PathBuf,
-    /// 同时进行的分析数
-    #[arg(long, default_value_t = 8)]
+    /// 同时进行的分析数。开得太大接口会吃不消，输出被中途截断
+    #[arg(long, default_value_t = 3)]
     parallel: usize,
     /// 每一遍的结果存到这个目录（每份记录一个文件）。不填就不存
     #[arg(long)]
@@ -157,10 +157,14 @@ async fn main() -> Result<()> {
             let (model, options, limit) = (&model, &options, &limit);
             move |_| async move {
                 let _permit = limit.acquire().await;
-                let report = analyze(record, model, options)
-                    .await
-                    .with_context(|| format!("分析 {id} 失败"))?;
-                anyhow::Ok(Run::from_report(record, &report))
+                match analyze(record, model, options).await {
+                    Ok(report) => Some(Run::from_report(record, &report)),
+                    Err(error) => {
+                        // 一遍失败不该让别的白跑，记下来接着算
+                        eprintln!("{id} 有一遍分析失败：{error}");
+                        None
+                    }
+                }
             }
         })
     });
@@ -168,16 +172,9 @@ async fn main() -> Result<()> {
 
     let mut total = Usage::default();
     let mut summary = Summary::default();
+    let mut analyses = 0;
     for (id, _) in &records {
-        let runs = results
-            .by_ref()
-            .take(cli.runs)
-            .collect::<Result<Vec<Run>>>()?;
-        print_record(id, &runs);
-        summary.add(&runs);
-        for run in &runs {
-            add_usage(&mut total, &run.usage);
-        }
+        let runs: Vec<Run> = results.by_ref().take(cli.runs).flatten().collect();
         if let Some(out) = &cli.out {
             std::fs::create_dir_all(out)?;
             std::fs::write(
@@ -185,9 +182,19 @@ async fn main() -> Result<()> {
                 serde_json::to_string_pretty(&runs)?,
             )?;
         }
+        if runs.is_empty() {
+            println!("\n== {id}：每一遍都失败了");
+            continue;
+        }
+        print_record(id, &runs);
+        summary.add(&runs);
+        analyses += runs.len();
+        for run in &runs {
+            add_usage(&mut total, &run.usage);
+        }
     }
     summary.print(cli.runs);
-    println!("\n{}", usage_line(&total, records.len() * cli.runs));
+    println!("\n{}", usage_line(&total, analyses));
     Ok(())
 }
 
@@ -314,7 +321,10 @@ impl Summary {
     }
 
     fn print(&self, runs: usize) {
-        println!("\n== 合计：{} 份记录，各 {runs} 遍", self.records);
+        println!(
+            "\n== 合计：{} 份记录，各 {runs} 遍（失败的不算）",
+            self.records
+        );
         let cells = self.rating_spreads.len();
         let count = |wanted: &dyn Fn(u8) -> bool| {
             self.rating_spreads
