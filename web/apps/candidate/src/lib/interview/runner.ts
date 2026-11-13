@@ -266,7 +266,7 @@ export class InterviewRunner<B> {
   handleLevel = (frame: LevelFrame): void => {
     const event = this.vad.process(frame.rms, frame.frameMs);
     if (!event || this.turn?.phase !== "listening" || this.turn.pausedAt !== null) return;
-    this.dispatch({ type: event.type, at: this.now() });
+    this.dispatch({ ...event, at: this.now() });
   };
 
   // ── 内部 ──

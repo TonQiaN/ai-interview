@@ -74,6 +74,8 @@ export type TurnState =
       speaking: boolean;
       /** 静音从什么时候开始算；在说话或还没开过口时是 null。 */
       silenceSince: number | null;
+      /** 最后一次听出「停止说话」的时刻；在说话或还没开过口时是 null。回答的结束时刻用它。 */
+      speechEndedAt: number | null;
       /** 是否已经提示过「请开始回答」。 */
       promptShown: boolean;
       /** 暂停开始的时刻（设备被打断等）；没有暂停是 null。 */
@@ -98,7 +100,11 @@ export type TurnEvent =
   /** reading 状态下候选人点了「开始回答」。 */
   | { type: "user_ready"; at: number }
   | { type: "speech_start"; at: number }
-  | { type: "speech_end"; at: number }
+  /**
+   * 听出候选人停止说话。`quietMs` 是这时已经安静了多久：VAD 要等声音停一小会儿才敢下结论，
+   * 静音从声音真正停下的那一刻算起，不然每次都多等这一小会儿。
+   */
+  | { type: "speech_end"; at: number; quietMs?: number }
   /** 候选人点了「我答完了」。 */
   | { type: "user_done"; at: number }
   /** 倒计时期间候选人点了「继续回答」。 */
@@ -123,6 +129,7 @@ function startListening(at: number, replaysUsed: number): TurnState {
     firstSpeechAt: null,
     speaking: false,
     silenceSince: null,
+    speechEndedAt: null,
     promptShown: false,
     pausedAt: null,
   };
@@ -137,7 +144,7 @@ function end(state: Listening, reason: TurnEndReason, at: number): TurnState {
     replaysUsed: state.replaysUsed,
     listenStartedAt: state.listenStartedAt,
     firstSpeechAt: state.firstSpeechAt,
-    lastSpeechEndAt: state.speaking ? at : state.silenceSince,
+    lastSpeechEndAt: state.speaking ? at : state.speechEndedAt,
     endedAt: at,
   };
 }
@@ -192,6 +199,7 @@ export function reduceTurn(
           firstSpeechAt: state.firstSpeechAt === null ? null : state.firstSpeechAt + shift,
           speaking: false,
           silenceSince: state.firstSpeechAt === null ? null : event.at,
+          speechEndedAt: state.firstSpeechAt === null ? null : event.at,
         };
       }
 
@@ -206,17 +214,24 @@ export function reduceTurn(
             ...next,
             speaking: true,
             silenceSince: null,
+            speechEndedAt: null,
             firstSpeechAt: next.firstSpeechAt ?? event.at,
           };
         }
 
-        case "speech_end":
+        case "speech_end": {
           if (!state.speaking) return state;
+          // 声音是 quietMs 之前停的。时钟再怎么抖，也不会早于候选人开口
+          const quietSince = Math.max(
+            event.at - Math.max(0, event.quietMs ?? 0),
+            state.firstSpeechAt ?? event.at,
+          );
           return checkTimeouts(
-            { ...state, speaking: false, silenceSince: event.at },
+            { ...state, speaking: false, silenceSince: quietSince, speechEndedAt: event.at },
             event.at,
             config,
           );
+        }
 
         case "user_continue":
           // 只有在静音计时期间才有意义：重新开始计静音。
