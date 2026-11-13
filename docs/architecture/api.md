@@ -86,6 +86,8 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 
 音频和录像通过接口取，接口检查权限后从 BlobStore 读出来，支持 `Range` 请求（播放器拖进度条要用）。不暴露 BlobStore 的键和磁盘路径。
 
+一次响应最多返回 16 MB：`Range` 要的范围更长时只给开头的 16 MB，`Content-Range` 里写的是实际返回的范围，客户端接着要剩下的（`<audio>`、`<video>` 会自己处理）。不带 `Range` 时，64 MB 以内的文件整个返回，更大的返回 400，要分段取。
+
 ### 后台任务
 
 耗时的操作（解析简历、准备面试、生成报告）立刻返回 202 和任务信息，结果通过资源自身的状态字段体现（比如 `resumes.parse_status`、`interviews.status`、`interview_reports.status`）。前端轮询资源，不用关心任务表。

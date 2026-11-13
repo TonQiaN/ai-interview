@@ -85,11 +85,27 @@ pub fn tts_cache(content_hash: &str) -> String {
 }
 
 /// 面试官的一句话。`utterance_key` 是 `interview_utterances.key`。
+///
+/// 不同的 key 得到不同的文件：`q1` 和 `Q1` 清洗后是同一段，这时在后面加上原 key 的哈希，
+/// 免得两句话的音频互相覆盖。本来就合规的 key（`q1`、`q1.f1`）不加，文件名保持好认。
 pub fn utterance_audio(interview_id: Uuid, utterance_key: &str) -> String {
-    format!(
-        "interviews/{interview_id}/utterances/{}.wav",
-        sanitize_segment(utterance_key)
-    )
+    let segment = sanitize_segment(utterance_key);
+    if segment == utterance_key {
+        format!("interviews/{interview_id}/utterances/{segment}.wav")
+    } else {
+        format!(
+            "interviews/{interview_id}/utterances/{segment}-{:016x}.wav",
+            fnv1a(utterance_key.as_bytes())
+        )
+    }
+}
+
+/// FNV-1a 哈希（64 位）。只用来给文件名去重，不用于安全相关的地方。
+/// 自己写是因为结果要长期稳定，标准库的哈希不保证跨版本一致。
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 /// 录制分片。
@@ -140,6 +156,28 @@ mod tests {
         for key in keys {
             assert_eq!(validate(&key), Ok(()), "{key}");
         }
+    }
+
+    #[test]
+    fn utterance_keys_that_sanitize_the_same_get_different_files() {
+        let id = Uuid::nil();
+        // 合规的 key 原样用
+        assert_eq!(
+            utterance_audio(id, "q1.f1"),
+            format!("interviews/{id}/utterances/q1.f1.wav")
+        );
+        let keys = ["q1", "Q1", "q 1", "q-1", "q/1", ".q1", "追问", "问题"];
+        let files: std::collections::HashSet<String> =
+            keys.iter().map(|key| utterance_audio(id, key)).collect();
+        assert_eq!(files.len(), keys.len(), "{files:?}");
+        for file in &files {
+            assert_eq!(validate(file), Ok(()), "{file}");
+        }
+        // 结果是稳定的：同一个 key 每次都得到同一个文件
+        assert_eq!(
+            utterance_audio(id, "Q1"),
+            format!("interviews/{id}/utterances/q1-093f1307b5cfa677.wav")
+        );
     }
 
     #[test]

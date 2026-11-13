@@ -56,6 +56,14 @@ impl Task {
     }
 }
 
+/// 入队时撞上同 key 的任务、它又正好结束，最多重来几次。
+const ENQUEUE_ATTEMPTS: usize = 5;
+
+/// 「这条任务还归这次执行」的条件：在执行中、是这个执行器领的、还是这一次尝试。
+/// 执行器卡住太久，任务会被回收并重新领走；之后旧的那次执行不能再碰它。
+/// 参数顺序固定：`$1` 任务 id、`$2` 执行器 id、`$3` 第几次尝试。
+const OWNED: &str = "id = $1 AND status = 'running' AND locked_by = $2 AND attempts = $3";
+
 const TASK_COLUMNS: &str = "id, kind, payload, status, priority, attempts, max_attempts, run_at, \
                             dedupe_key, last_error, result, created_at, finished_at";
 
@@ -128,32 +136,39 @@ impl TaskQueue {
     /// 在调用方的事务里入队：业务数据和任务要么都写进去，要么都没有。
     pub async fn enqueue_in(conn: &mut PgConnection, task: NewTask) -> Result<Uuid, sqlx::Error> {
         let id = interview_core::new_id();
-        let inserted: Option<Uuid> = sqlx::query_scalar(
-            "INSERT INTO tasks (id, kind, payload, dedupe_key, run_at, priority, max_attempts)
-             VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7)
-             ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'running')
-             DO NOTHING
-             RETURNING id",
-        )
-        .bind(id)
-        .bind(&task.kind)
-        .bind(&task.payload)
-        .bind(&task.dedupe_key)
-        .bind(task.run_at)
-        .bind(task.priority)
-        .bind(task.max_attempts)
-        .fetch_optional(&mut *conn)
-        .await?;
-        if let Some(id) = inserted {
-            return Ok(id);
+        // 撞上同 key 的任务时返回它。那条任务可能正好在这两句之间结束，这时再插一次；
+        // 连着几次都这样说明有别的问题，报错。
+        for _ in 0..ENQUEUE_ATTEMPTS {
+            let inserted: Option<Uuid> = sqlx::query_scalar(
+                "INSERT INTO tasks (id, kind, payload, dedupe_key, run_at, priority, max_attempts)
+                 VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7)
+                 ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'running')
+                 DO NOTHING
+                 RETURNING id",
+            )
+            .bind(id)
+            .bind(&task.kind)
+            .bind(&task.payload)
+            .bind(&task.dedupe_key)
+            .bind(task.run_at)
+            .bind(task.priority)
+            .bind(task.max_attempts)
+            .fetch_optional(&mut *conn)
+            .await?;
+            if let Some(id) = inserted {
+                return Ok(id);
+            }
+            let existing: Option<Uuid> = sqlx::query_scalar(
+                "SELECT id FROM tasks WHERE dedupe_key = $1 AND status IN ('queued', 'running')",
+            )
+            .bind(&task.dedupe_key)
+            .fetch_optional(&mut *conn)
+            .await?;
+            if let Some(id) = existing {
+                return Ok(id);
+            }
         }
-        // 撞上了没结束的同 key 任务，返回它
-        sqlx::query_scalar(
-            "SELECT id FROM tasks WHERE dedupe_key = $1 AND status IN ('queued', 'running')",
-        )
-        .bind(&task.dedupe_key)
-        .fetch_one(&mut *conn)
-        .await
+        Err(sqlx::Error::RowNotFound)
     }
 
     pub async fn get(&self, id: Uuid) -> Result<Option<Task>, sqlx::Error> {
@@ -399,14 +414,24 @@ impl TaskRunner {
             tokio::select! {
                 joined = &mut job => break joined,
                 _ = heartbeat.tick() => {
-                    let beat = sqlx::query(
-                        "UPDATE tasks SET locked_at = now() WHERE id = $1 AND status = 'running'",
-                    )
+                    let beat = sqlx::query(&format!(
+                        "UPDATE tasks SET locked_at = now() WHERE {OWNED}"
+                    ))
                     .bind(id)
+                    .bind(&self.worker_id)
+                    .bind(attempts)
                     .execute(&self.db)
                     .await;
-                    if let Err(e) = beat {
-                        tracing::warn!(task_id = %id, error = %e, "任务心跳写入失败");
+                    match beat {
+                        Ok(done) if done.rows_affected() == 0 => {
+                            // 这条任务已经不归这次执行了（太久没心跳被回收，可能已经有别的执行器在跑）。
+                            // 停下来，结果也不写，免得盖掉新一次执行的结果。
+                            tracing::error!(task_id = %id, %kind, attempts, "任务已被回收，放弃这次执行");
+                            job.abort();
+                            return;
+                        }
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!(task_id = %id, error = %e, "任务心跳写入失败"),
                     }
                 }
             }
@@ -416,66 +441,91 @@ impl TaskRunner {
         let finish = match outcome {
             Ok(Ok(result)) => {
                 tracing::info!(task_id = %id, %kind, elapsed_ms, "任务完成");
-                self.mark_succeeded(id, result).await
+                self.mark_succeeded(id, attempts, result).await
             }
             Ok(Err(TaskError::Retry(err))) if attempts < max_attempts => {
                 let delay = retry_delay(attempts);
                 tracing::warn!(task_id = %id, %kind, attempts, error = %format!("{err:#}"), retry_in_sec = delay.as_secs(), "任务失败，稍后重试");
-                self.mark_retry(id, &format!("{err:#}"), delay).await
+                self.mark_retry(id, attempts, &format!("{err:#}"), delay)
+                    .await
             }
             Ok(Err(TaskError::Retry(err) | TaskError::Fatal(err))) => {
                 tracing::error!(task_id = %id, %kind, attempts, error = %format!("{err:#}"), "任务失败");
-                self.mark_failed(id, &format!("{err:#}")).await
+                self.mark_failed(id, attempts, &format!("{err:#}")).await
             }
             Err(join_error) => {
                 tracing::error!(task_id = %id, %kind, error = %join_error, "任务处理函数崩溃");
-                self.mark_failed(id, &format!("处理函数崩溃：{join_error}"))
+                self.mark_failed(id, attempts, &format!("处理函数崩溃：{join_error}"))
                     .await
             }
         };
-        if let Err(e) = finish {
-            tracing::error!(task_id = %id, error = %e, "写任务结果失败，任务会在超时后被放回队列");
+        match finish {
+            Ok(true) => {}
+            Ok(false) => {
+                tracing::error!(task_id = %id, %kind, attempts, "任务已被回收，这次执行的结果没有写进去");
+            }
+            Err(e) => {
+                tracing::error!(task_id = %id, error = %e, "写任务结果失败，任务会在超时后被放回队列");
+            }
         }
     }
 
-    async fn mark_succeeded(&self, id: Uuid, result: Option<Value>) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE tasks SET status = 'succeeded', result = $2, last_error = NULL,
+    /// 下面三个写结果的函数都只在任务还归这次执行时才写（见 [`OWNED`]），返回写没写进去。
+    async fn mark_succeeded(
+        &self,
+        id: Uuid,
+        attempts: i32,
+        result: Option<Value>,
+    ) -> Result<bool, sqlx::Error> {
+        let done = sqlx::query(&format!(
+            "UPDATE tasks SET status = 'succeeded', result = $4, last_error = NULL,
                     finished_at = now(), locked_by = NULL, locked_at = NULL
-             WHERE id = $1",
-        )
+             WHERE {OWNED}"
+        ))
         .bind(id)
+        .bind(&self.worker_id)
+        .bind(attempts)
         .bind(result)
         .execute(&self.db)
-        .await
-        .map(|_| ())
+        .await?;
+        Ok(done.rows_affected() == 1)
     }
 
-    async fn mark_retry(&self, id: Uuid, error: &str, delay: Duration) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE tasks SET status = 'queued', last_error = $2,
-                    run_at = now() + make_interval(secs => $3), locked_by = NULL, locked_at = NULL
-             WHERE id = $1",
-        )
+    async fn mark_retry(
+        &self,
+        id: Uuid,
+        attempts: i32,
+        error: &str,
+        delay: Duration,
+    ) -> Result<bool, sqlx::Error> {
+        let done = sqlx::query(&format!(
+            "UPDATE tasks SET status = 'queued', last_error = $4,
+                    run_at = now() + make_interval(secs => $5), locked_by = NULL, locked_at = NULL
+             WHERE {OWNED}"
+        ))
         .bind(id)
+        .bind(&self.worker_id)
+        .bind(attempts)
         .bind(error)
         .bind(delay.as_secs_f64())
         .execute(&self.db)
-        .await
-        .map(|_| ())
+        .await?;
+        Ok(done.rows_affected() == 1)
     }
 
-    async fn mark_failed(&self, id: Uuid, error: &str) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE tasks SET status = 'failed', last_error = $2,
+    async fn mark_failed(&self, id: Uuid, attempts: i32, error: &str) -> Result<bool, sqlx::Error> {
+        let done = sqlx::query(&format!(
+            "UPDATE tasks SET status = 'failed', last_error = $4,
                     finished_at = now(), locked_by = NULL, locked_at = NULL
-             WHERE id = $1",
-        )
+             WHERE {OWNED}"
+        ))
         .bind(id)
+        .bind(&self.worker_id)
+        .bind(attempts)
         .bind(error)
         .execute(&self.db)
-        .await
-        .map(|_| ())
+        .await?;
+        Ok(done.rows_affected() == 1)
     }
 
     /// 执行它的进程死掉的任务（很久没有心跳）：还有次数就放回队列，没有就标记失败。
@@ -725,6 +775,62 @@ mod tests {
         let task = queue.get(id).await.unwrap().unwrap();
         assert_eq!(task.status, TaskStatus::Succeeded);
         assert_eq!(task.attempts, 2);
+    }
+
+    #[sqlx::test(migrator = "MIGRATOR")]
+    async fn a_reclaimed_task_is_not_overwritten_by_the_old_run(pool: PgPool) {
+        let queue = TaskQueue::new(pool.clone());
+        let id = queue
+            .enqueue(NewTask::new("demo.slow", json!({})))
+            .await
+            .unwrap();
+        // 处理函数跑到一半，任务被回收、又被另一个执行器领走（第 2 次尝试）
+        let mut registry = TaskRegistry::new();
+        let db = pool.clone();
+        registry.register_fn("demo.slow", move |task| {
+            let db = db.clone();
+            async move {
+                sqlx::query(
+                    "UPDATE tasks SET locked_by = 'someone-else', attempts = 2 WHERE id = $1",
+                )
+                .bind(task.id)
+                .execute(&db)
+                .await
+                .map_err(TaskError::retry)?;
+                Ok(Some(json!({ "from": "old run" })))
+            }
+        });
+        assert_eq!(runner(&pool, registry).run_until_idle().await.unwrap(), 1);
+
+        let task = queue.get(id).await.unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
+        assert_eq!(task.attempts, 2);
+        assert_eq!(task.result, None);
+    }
+
+    #[sqlx::test(migrator = "MIGRATOR")]
+    async fn enqueue_with_a_dedupe_key_survives_the_other_task_finishing(pool: PgPool) {
+        let queue = TaskQueue::new(pool.clone());
+        let first = queue
+            .enqueue(NewTask::new("demo.ok", json!({})).dedupe("same"))
+            .await
+            .unwrap();
+        assert_eq!(
+            queue
+                .enqueue(NewTask::new("demo.ok", json!({})).dedupe("same"))
+                .await
+                .unwrap(),
+            first
+        );
+        // 同 key 的任务结束之后，再入队得到一条新的
+        let mut registry = TaskRegistry::new();
+        registry.register_fn("demo.ok", |_task| async move { Ok(None) });
+        assert_eq!(runner(&pool, registry).run_until_idle().await.unwrap(), 1);
+        let second = queue
+            .enqueue(NewTask::new("demo.ok", json!({})).dedupe("same"))
+            .await
+            .unwrap();
+        assert_ne!(second, first);
     }
 
     #[sqlx::test(migrator = "MIGRATOR")]

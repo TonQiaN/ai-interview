@@ -725,6 +725,34 @@ async fn locked_states_cannot_be_edited(pool: PgPool) {
     }
 }
 
+/// 准备任务先把面试改成 `ready`，随后任务队列才把这条任务记成做完。HR 正好在这中间
+/// 又点了一次准备：新的请求不能搭在那条马上就结束的任务上，不然面试会一直停在 `preparing`。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn preparing_again_while_the_last_task_is_wrapping_up_still_runs(pool: PgPool) {
+    let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;
+    let id = h.create(config()).await;
+    assert_eq!(h.prepare(&id).await["status"], "ready");
+
+    // 回到「面试已经是 ready，任务还没记成做完」的那一刻
+    sqlx::query("UPDATE tasks SET status = 'running', finished_at = NULL")
+        .execute(&h.ctx.db)
+        .await
+        .unwrap();
+    let response = TestRequest::post(format!("/api/v1/interviews/{id}/prepare"))
+        .send(&h.app)
+        .await;
+    assert_eq!(response.status, StatusCode::ACCEPTED, "{}", response.text());
+    sqlx::query(
+        "UPDATE tasks SET status = 'succeeded', finished_at = now() WHERE status = 'running'",
+    )
+    .execute(&h.ctx.db)
+    .await
+    .unwrap();
+
+    assert_eq!(h.run_tasks().await, 1, "第二次准备要有自己的任务");
+    assert_eq!(h.detail(&id).await["status"], "ready");
+}
+
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn cancelling_stops_a_running_preparation(pool: PgPool) {
     let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;
