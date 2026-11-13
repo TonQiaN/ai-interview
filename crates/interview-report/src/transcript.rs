@@ -311,7 +311,17 @@ pub(crate) fn render_context(
          是这个浏览器能采集哪几类信号，in_app_browser 是所在的内置浏览器（微信这一类，里面窗口失焦可能采不到）。\
          某类信号采集不到时，没有记录不等于没有发生。\n\
          frames_checked、face_count_changed、phone_visible 这三种不是网页采集的，\
-         是面试结束后从摄像头录像里每隔几秒抽一帧、由模型看图得到的。\n",
+         是面试结束后从摄像头录像里每隔几秒抽一帧、由模型看图得到的。\n\
+         device_report、screen_wake_lock、upload_stalled、upload_finished 说的是候选人的设备和网络，\
+         和候选人做了什么无关。device_report 是面试前的设备检测，uplink_kbps 是测出来的上行网速（千比特每秒）。\
+         screen_wake_lock 的 held 为 false 表示没拿到屏幕常亮，手机中途可能自动锁屏，录像会断。\
+         upload_stalled 是录像传不动了：cause 是原因（retrying 请求失败在重试，offline 断网，failed 重试也没用），\
+         持续时间是过了多久又传动的，failures 是中间连续失败了几次；持续时间写「-」的是到最后都没有恢复。\
+         upload_finished 是面试结束后录像全部传完了。\
+         录像是边录边传的，面试中候选人说的话也是从传上来的录像里识别的。传不动的时候录像先存在候选人的浏览器里，\
+         恢复之后补传。所以停顿恢复了的，最后的录像和转写都是完整的，不要说那一段可能缺内容；\
+         只是停顿的那段时间面试官可能没听到回答、请候选人再说一遍。\
+         一直没恢复、也没有 upload_finished 的，停顿之后的录像、转写和画面检查才可能缺一截。\n",
     );
     if record.events.is_empty() {
         out.push_str("（面试网页全程在采集，没有记录到切出页面、粘贴、退出全屏这类事件。）\n");

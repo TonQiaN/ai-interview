@@ -58,6 +58,7 @@ let events = ProctorEvent::from_raw(vec![
 它做三件事：
 
 - 面试间把「离开」和「回来」分两条报（`visibility_hidden` 和 `visibility_visible`、`window_blur` 和 `window_focus`、`network_offline` 和 `network_online`、`recording_gap` 和 `device_recovered`），离开了多久写在「回来」那条的 `duration_ms` 里。这里合成一条：保留「离开」，补上持续时间。报告里引用这条事件的证据，时间就是离开的那一段，HR 点一下能跳到录像的对应位置。
+- 录像上传的 `upload_stalled`（传不动了）和 `upload_recovered`（又传动了）也合成一条：保留 `upload_stalled`，持续时间是停了多久，说明里带上中间连续失败的次数 `failures`。同一次停顿里重试变成彻底失败时面试间会再报一条 `upload_stalled`，它并进前一条：`cause` 改成 `failed`，`gave_up_after_ms` 是重试了多久才放弃的。没有持续时间的 `upload_stalled` 表示到最后都没有恢复。
 - 面试开始之前的事件（打开页面、设备检测）`at_ms` 是空，照样保留，给模型看的时候写成「开始前」。
 - 其余事件带的数据转成一行文字放进 `detail`。
 
@@ -302,6 +303,10 @@ cargo run -p interview-report --example lab -- frames 录像.webm --record 记�
 # 给样例加上语音识别那样的错字，再评估一遍
 cargo run -p interview-report --example lab -- noise --percent 8 --out /tmp/noisy
 cargo run -p interview-report --example lab -- evaluate --samples /tmp/noisy
+# 给样例加上网络差时面试间会报的事件（网速慢、没拿到屏幕常亮、录像三次传不动），再评估一遍。不调用模型
+cargo run -p interview-report --example lab -- network --out /tmp/flaky
+cargo run -p interview-report --example lab -- network --unrecovered --out /tmp/lost   # 最后一次没恢复，录像没传完
+cargo run -p interview-report --example lab -- evaluate --samples /tmp/flaky
 # 同一份记录分析几遍，看评分、总分和各个结论前后差多少（8 份各 4 遍约 7 元、13 分钟）
 cargo run --release -p interview-report --example stability -- --runs 4 --thinking high --out /tmp/stability
 ```
