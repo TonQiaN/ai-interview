@@ -89,11 +89,13 @@ function SessionView({ session }: { session: InterviewSession }) {
         <DevicePage
           room={room}
           device={snapshot.device}
+          network={snapshot.network}
           cameraStream={session.cameraStream}
           subscribeLevel={session.subscribeLevel}
           onRequest={() => void session.requestDevices()}
           onPlayTestSound={() => void session.playTestSound()}
           onConfirmSpeaker={() => session.confirmSpeaker()}
+          onRetestNetwork={() => void session.checkNetwork()}
           onNext={() => session.finishDeviceCheck()}
         />
       );
