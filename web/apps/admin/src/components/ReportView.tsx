@@ -40,7 +40,7 @@ import {
   credibilityLabel,
   credibilityTone,
   duration,
-  eventLabel,
+  eventEvidenceText,
   focusVerdictLabel,
   focusVerdictTone,
   fullTime,
@@ -54,6 +54,7 @@ import {
   recommendationTone,
   requirementVerdictLabel,
   requirementVerdictTone,
+  resumeQuote,
   reviewFlagLabel,
   riskLabel,
   riskTone,
@@ -89,16 +90,14 @@ function Quote({ evidence, onSeek }: { evidence: Evidence; onSeek: Seek }) {
           <FileText aria-hidden="true" size={12} /> 简历
         </span>
         <span>
-          “{evidence.quote}”{mark}
+          “{resumeQuote(evidence.quote)}”{mark}
         </span>
       </div>
     );
   }
 
   const text =
-    evidence.source === "event"
-      ? (eventLabel[evidence.quote] ?? evidence.quote)
-      : `“${evidence.quote}”`;
+    evidence.source === "event" ? eventEvidenceText(evidence.quote) : `“${evidence.quote}”`;
   const who =
     evidence.source === "event"
       ? "过程记录"

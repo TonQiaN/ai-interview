@@ -1,7 +1,7 @@
 //! 本地联调和端到端测试用的小工具：造一场准备好的面试，或者看一场面试现在的状态。
 //!
 //! ```text
-//! cargo run -p interview-room --example demo -- seed [--silence-sec 2] [--min-sec 1] [--max-sec 60] [--tone-ms 800]
+//! cargo run -p interview-room --example demo -- seed [--silence-sec 2] [--min-sec 1] [--max-sec 60] [--tone-ms 800] [--realtime 1]
 //! cargo run -p interview-room --example demo -- state <面试的 ID>
 //! ```
 //!
@@ -48,6 +48,8 @@ struct SeedOptions {
     min_sec: u32,
     max_sec: u32,
     tone_ms: u32,
+    /// 配成实时对话。服务进程接了大模型、语音识别和语音合成时才真的按实时对话进行
+    realtime: bool,
 }
 
 impl SeedOptions {
@@ -57,6 +59,7 @@ impl SeedOptions {
             min_sec: 1,
             max_sec: 60,
             tone_ms: 800,
+            realtime: false,
         };
         let mut rest = args.iter();
         while let Some(name) = rest.next() {
@@ -70,6 +73,7 @@ impl SeedOptions {
                 "--min-sec" => options.min_sec = value,
                 "--max-sec" => options.max_sec = value,
                 "--tone-ms" => options.tone_ms = value,
+                "--realtime" => options.realtime = value != 0,
                 _ => bail!("不认识的选项 {name}"),
             }
         }
@@ -179,6 +183,7 @@ async fn insert_invite(
 /// 造一场题目和语音都备好、已经发出链接的面试。另外附一条过期的和一条撤销了的链接。
 async fn seed(ctx: &AppContext, options: &SeedOptions) -> anyhow::Result<Value> {
     let config = json!({
+        "mode": if options.realtime { "conversational" } else { "scripted" },
         "answer": {
             "silence_sec": options.silence_sec,
             "min_sec": options.min_sec,

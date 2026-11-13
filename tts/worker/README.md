@@ -163,9 +163,23 @@ IndexTTS 2 和 2.5 在同一个进程里，内存里一次只留一个版本，�
 - 带 `--preload` 启动：IndexTTS 的 worker 7.5 到 9.7 秒（两个版本各加载一次，含参考编码器），BreezeTTS2 的 worker 5.2 到 8.5 秒。
 - IndexTTS 的 worker 稳定占 22 GB，峰值 29 GB，超过了 `--memory-limit-gb` 设的 28。BreezeTTS2 的 worker 7 到 8 GB。两个 worker 同时常驻约 30 GB，64 GB 的机器放得下。
 
+### 读出来的字对不对
+
+2026-11-13 用 Mac 上已有的 Whisper large-v3-turbo（`mlx-whisper`，研究阶段评测错字率用的同一套）把合成出来的音频听写了一遍，和原文比（去掉标点、繁体转简体后算编辑距离）。没有整句读错、漏句或者重复读的。
+
+| 哪一批 | 文件数 | 字数 | 不一致 | 不一致在哪 |
+| --- | ---: | ---: | ---: | --- |
+| 后端连真引擎那一遍的输出（一句问候、一句提问、一句追问） | 13 | 226 | 4 | IndexTTS 2 和 BreezeTTS2 带情绪或导演指令的问候各一处「你好」听成「您好」；BreezeTTS2 克隆把「最近」听成「最新」、多听出一个「的」 |
+| 首块测量时的四句话，两三句和一句的（31 字、60 字） | 8 | 364 | 1 | IndexTTS 2.5 的「扛住」听成「扛出」 |
+| 同上，长段（123 字） | 4 | 492 | 2 | IndexTTS 2 和 2.5 都把结尾的「降级」听成「降低」。「一千万」听写成「1000万」不算 |
+| 同上，两个字的应答「明白。」 | 4 | 8 | 2 个文件 | BreezeTTS2 克隆和 IndexTTS 2.5 的这一条听写出来完全不对。不到一秒的音频识别本来就不稳，也可能是读得不清楚 |
+
+这些不一致是合成读错了还是识别听错了，机器分不出来，要人听。值得听的：BreezeTTS2 克隆的提问和追问、两个 IndexTTS 长段的结尾、两个字的应答。文件在 Mac 的 `data/worker-live/` 和 `data/worker-eval/` 下（不进 Git）。
+
 ### 还没验证的
 
-- 读出来的字对不对没有用语音识别核对，也没有人听过。只核对了时长、音量和静音比例。试听文件在 Mac 的 `data/worker-eval/` 下（不进 Git）。
+- 没有人听过。上面只是机器听写，音色像不像、语气自不自然、有没有杂音，听写看不出来。
+- 两个字的应答能不能用还不确定（见上表最后一行）。实时对话里的接话正是这种很短的句子。
 - 并发：模型一次只跑一条，多场面试同时进行时会排队。
 
 ### 实现上要知道的
@@ -175,6 +189,41 @@ IndexTTS 2 和 2.5 在同一个进程里，内存里一次只留一个版本，�
 - IndexTTS 一段生成到 token 上限被截断时，worker 记一条警告，这段的结尾可能不完整。
 - BreezeTTS2 的适配代码没有装进它的环境，只是放在 `vendor/breeze-tts-mlx` 目录下，worker 启动时把这个目录加进 Python 的搜索路径。
 - BreezeTTS2 的日志里会出现 `Residual tail decode detected`，是适配代码在最后一块帧数不满时自己打的，不影响输出。
+
+## 用后端连真引擎走一遍
+
+`crates/interview-tts/tests/worker_live.rs` 用后端的 `WorkerBackend` 连真的 worker，把每个引擎走一遍：克隆音色整段合成、流式、说到一半被打断后接着合成下一句、IndexTTS 的情绪、BreezeTTS2 的导演指令和文字设计音色，最后用默认引擎批量合成三条题目并检查缓存。每段音频核对采样率、音量和时长，不核对读出来的字。
+
+先按「启动」起好两个 worker，然后：
+
+```bash
+export AI_INTERVIEW_TTS_WORKER_URLS=http://127.0.0.1:7801,http://127.0.0.1:7802
+export AI_INTERVIEW_TTS_LIVE_REFERENCE=$REPO/voices/r001/reference.wav
+export AI_INTERVIEW_TTS_LIVE_TRANSCRIPT=参考录音的逐字稿        # 测 breeze2 的克隆时必填
+cargo test -p interview-tts --test worker_live -- --ignored --nocapture
+```
+
+`AI_INTERVIEW_TTS_LIVE_ENGINES=index2,breeze2` 只测其中几个引擎。`AI_INTERVIEW_TTS_LIVE_OUT_DIR=目录` 把合成出来的音频存成 WAV 方便人听；克隆出来的是真人的声音，这个目录要放在不进 Git 的地方（比如 `data/` 下）。测试只打印时间、时长和采样率，不打印逐字稿。
+
+改了 `worker.py`、引擎适配或者 `crates/interview-tts/src/worker.rs`，在 Mac 上跑一遍这个测试。CI 跑不了它。
+
+2026-11-13 在同一台 M3 Max 上连跑两遍，两遍都通过，每遍 63 到 65 秒。参考录音是后端现传给 worker 的。下面是第二遍（worker 已经热了）的数字，单位秒：
+
+| 引擎 | 整段（一句问候） | 流式（一句提问）第一块 / 全部 | 打断后的下一句 | 情绪或导演指令 | 设计音色 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| IndexTTS 2 | 2.42 | 3.51 / 3.51 | 6.19 | 2.43 | 不支持 |
+| IndexTTS 2.5 | 4.11 | 2.91 / 2.91 | 5.69 | 2.34 | 不支持 |
+| BreezeTTS2 | 1.83 | 0.23 / 3.80 | 3.34 | 2.89 | 3.28 |
+
+批量三条题目（一条重复）8.86 秒，同一句再要一次走缓存 0.013 秒。采样率、音量、时长三个引擎都对。
+
+读这些数字要知道的：
+
+- IndexTTS 2.5 的「整段」含了从 2 切到 2.5 重新加载模型的时间，同一个 worker 上紧接着的同长度请求是 2.3 到 2.4 秒。批量的第一条同理（从 2.5 切回 2），那一条用了约 5.9 秒，第二条约 3 秒。面试里只用一个版本就没有这笔开销。
+- IndexTTS 的流式第一块等于全部：一句话只有一段，段内不是流式。
+- IndexTTS「打断后的下一句」里有约 3 秒是在排队，等被打断的那一段算完。BreezeTTS2 打断后马上就停。
+- worker 刚起来的第一条请求偏慢（第一遍 IndexTTS 2 整段 3.56 秒，BreezeTTS2 整段 3.42 秒）。
+- 测的时候机器不是空闲的，系统负载 5 上下。
 
 ## 日志
 

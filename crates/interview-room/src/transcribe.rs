@@ -403,6 +403,10 @@ impl LiveTranscripts {
 
 #[async_trait]
 impl AnswerTranscriber for LiveTranscripts {
+    async fn available(&self) -> bool {
+        self.engine().await.is_some()
+    }
+
     async fn answer(
         &self,
         interview_id: Uuid,

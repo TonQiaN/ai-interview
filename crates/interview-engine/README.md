@@ -20,6 +20,23 @@
 
 `ConfigLimits::current()` 给出各项的取值范围，后台表单可以直接用。
 
+### 改了配置，题目还能不能用
+
+出一份题要一分多钟，所以不是每次改配置都该重出。`old.plan_still_valid(&new)` 回答「配置从 old 改成 new，已经出好的题还能不能用」，`old.replan_reasons(&new)` 列出是哪些字段让题目不能用了（写法和 JSON 路径一样，可以直接提示给 HR）。
+
+| 改了什么 | 题目 |
+| --- | --- |
+| 模式、最短回答时间、单题最长时间、提前结束的条件、出题和面试中的思考模式 | 还能用 |
+| 时长、轮次定位、流程说明、语言、资历、面试官的名字和风格、公司介绍、考察要求、必问题、不能问的话题、考察维度、基本条件、沟通备注、是否核实简历、是否留提问环节 | 重新出 |
+| 静音秒数、指定题数、追问开关 | 算出来的主问题数或备用题数变了才重新出 |
+| 每题追问次数 | 调少了还能用，调多了重新出（多出来的追问要提前写好） |
+
+时长改一分钟也要重出，因为开场白里说了这场面试大概多久。
+
+题目还能用的时候，存配置之前对计划调一次 `plan.conform_to(&new)`：它把超过单题最长时间的预期回答时间压到上限，去掉超出追问上限的追问，重新算预计时长，返回计划有没有变。面试官要说的话只会少不会变，已经合成的语音都还能用。
+
+新加配置字段时，`replan_reasons` 里不写明它算哪一类就编译不过，测试里的 `single_field_cases` 也要补一行。
+
 ## 出题
 
 三次模型调用：
@@ -79,9 +96,11 @@ let (state, first) = live::open(&plan, &config)?;
 let outcome = live::respond(&model, &plan, &config, &state, &turn, &mut sink).await?;
 ```
 
-每轮调一次模型，流式输出，第一行就是决定（追问、回应、下一题、结束）。`sink` 陆续收到 `LiveEvent`：`Speak` 是现场生成的一句话，拿到就送去合成；`Play` 是播一句提前合成好的。已经问完的题在上下文里只留一行概括，所以每轮发给模型的内容大小不随面试变长。追问次数、时间够不够、换题、提前结束都由代码决定，规则和逐题模式相同。
+每轮调一次模型，流式输出，第一行就是决定（追问、回应、下一题、结束、重念题目、接着听）。`sink` 陆续收到 `LiveEvent`：`Speak` 是现场生成的一句话，拿到就送去合成；`Play` 是播一句提前合成好的；`Done` 表示这一轮要说的话都给出来了，并带着说完之后是接着听还是面试结束，不用等函数返回。已经问完的题在上下文里只留一行概括，所以每轮发给模型的内容大小不随面试变长。追问次数、时间够不够、换题、提前结束都由代码决定，规则和逐题模式相同。
 
-实测模型大约 1 秒做出决定，一场面试的模型费用两三分钱。做法、实测数字、整条链路的延迟预算和还没解决的问题见 [docs/realtime.md](docs/realtime.md)。
+候选人只是停了一下时也可以来问，用 `live::respond_with` 多传一个 `TurnContext`：`paused` 表示只是停了一下，模型觉得话没说完就回答「接着听」，说完了就照常给出怎么接，不用另外调一次模型判断；`interrupted` 表示候选人打断了面试官、断在哪里，引擎算出候选人实际听到了哪一部分，没听全题目就重念。
+
+实测模型大约 1 秒做出决定，一场面试的模型费用两三分钱；停顿和打断的 29 个例子各跑 3 遍，87 次里判对 86 到 87 次。做法、实测数字、整条链路的延迟预算和还没解决的问题见 [docs/realtime.md](docs/realtime.md)。
 
 ## 用真模型试
 
@@ -89,9 +108,10 @@ let outcome = live::respond(&model, &plan, &config, &state, &turn, &mut sink).aw
 cargo run -p interview-engine --example plan -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
 cargo run -p interview-engine --example simulate -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json lost
 cargo run -p interview-engine --example converse -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
+cargo run -p interview-engine --example turn_taking -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
 ```
 
-`simulate` 让模型扮演候选人，人设有 `strong`（经验扎实）、`vague`（说话空泛）、`faker`（简历注水）、`lost`（大多答不上来）、`quitter`（中途不想面了）。`converse` 是实时对话模式的同一件事，多一个人设 `curious`（爱反问、最后会提问），最后一个参数可以写 `off`、`low`、`high`、`max` 指定思考强度。`fixtures/` 里的岗位和简历都是编的。
+`simulate` 让模型扮演候选人，人设有 `strong`（经验扎实）、`vague`（说话空泛）、`faker`（简历注水）、`lost`（大多答不上来）、`quitter`（中途不想面了）。`converse` 是实时对话模式的同一件事，多一个人设 `curious`（爱反问、最后会提问），最后一个参数可以写 `off`、`low`、`high`、`max` 指定思考强度。`turn_taking` 测实时对话里候选人停顿时「说完了没有」和被打断以后怎么接，一组有标准答案的例子，打印判对了多少、用了多久。`fixtures/` 里的岗位和简历都是编的。
 
 2026-11-13 用 deepseek-flash 实测：
 

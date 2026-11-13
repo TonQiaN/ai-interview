@@ -523,6 +523,22 @@ pub(crate) async fn audio_recordings(
     .await
 }
 
+/// 合并好的摄像头录像，按在时间轴上的先后排。
+pub(crate) async fn camera_recordings(
+    db: &PgPool,
+    interview_id: Uuid,
+) -> Result<Vec<RecordingRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT track, blob_key, start_ms, duration_ms FROM interview_recordings \
+         WHERE interview_id = $1 AND status = 'ready' AND blob_key IS NOT NULL \
+           AND track = 'camera' \
+         ORDER BY start_ms, segment",
+    )
+    .bind(interview_id)
+    .fetch_all(db)
+    .await
+}
+
 /// `interview_reports` 的一行。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub(crate) struct ReportRow {

@@ -19,10 +19,12 @@ import {
   readBrowserEnvironment,
 } from "../lib/flow/capabilities";
 import { readInviteToken } from "../lib/flow/link";
+import { measureUplinkKbps } from "../lib/flow/uplink";
 import { InterviewRunner, levelFromDb, type RunnerSnapshot } from "../lib/interview/runner";
 import { AudioGraph, type LevelFrame } from "../lib/media/audio-graph";
 import { CaptureError, requestCapture, stopStream } from "../lib/media/capture";
 import type { MediaErrorKind } from "../lib/media/errors";
+import { ScreenWakeLock } from "../lib/media/wake-lock";
 import { recorderFactory } from "../lib/recording/create-recorder";
 import { SegmentRecorder } from "../lib/recording/segment-recorder";
 import { Timeline } from "../lib/timeline";
@@ -74,12 +76,20 @@ export interface DeviceState {
   speaker: "idle" | "playing" | "confirmed";
 }
 
+/** 上行网速的检测。量不出来（failed）或者偏慢都不拦候选人。 */
+export interface NetworkState {
+  status: "idle" | "testing" | "measured" | "failed";
+  /** 量出来的上行（千比特每秒）。 */
+  uplinkKbps: number | null;
+}
+
 export interface SessionSnapshot {
   stage: SessionStage;
   problem: ProblemKind | null;
   capability: CapabilityReport | null;
   room: RoomSession | null;
   device: DeviceState;
+  network: NetworkState;
   /** 有操作正在进行（按钮显示加载中）。 */
   busy: boolean;
   /** 上一次操作失败的提示。 */
@@ -122,6 +132,7 @@ export class InterviewSession {
     capability: null,
     room: null,
     device: INITIAL_DEVICE,
+    network: { status: "idle", uplinkKbps: null },
     busy: false,
     actionError: null,
     runner: null,
@@ -142,6 +153,7 @@ export class InterviewSession {
   private graph: AudioGraph | null = null;
   private recorder: SegmentRecorder | null = null;
   private runner: InterviewRunner<AudioBuffer> | null = null;
+  private wakeLock: ScreenWakeLock | null = null;
   private readonly cleanups: Array<() => void> = [];
   private trackCleanups: Array<() => void> = [];
   private disposed = false;
@@ -288,6 +300,7 @@ export class InterviewSession {
     const room = this.snapshot.room;
     if (!room) return;
     this.patch({ stage: room.consent.agreed ? "device" : "consent", actionError: null });
+    if (room.consent.agreed) void this.checkNetwork();
   }
 
   async agree(agreedKeys: string[]): Promise<void> {
@@ -299,7 +312,24 @@ export class InterviewSession {
         room: { ...room, consent: { ...room.consent, agreed: true } },
         stage: "device",
       });
+      void this.checkNetwork();
     });
+  }
+
+  /**
+   * 量一次上行网速。进入设备检测时自己开始，候选人也可以点「重新测速」。
+   * 量的时候候选人可以照常检查摄像头和麦克风。
+   */
+  async checkNetwork(): Promise<void> {
+    const api = this.api;
+    if (!api || this.snapshot.network.status === "testing") return;
+    this.patch({ network: { status: "testing", uplinkKbps: null } });
+    try {
+      const uplinkKbps = await measureUplinkKbps({ send: (bytes) => api.probeUplink(bytes) });
+      this.patch({ network: { status: "measured", uplinkKbps } });
+    } catch {
+      this.patch({ network: { status: "failed", uplinkKbps: null } });
+    }
   }
 
   private pageTargets(): PageTargets {
@@ -375,7 +405,7 @@ export class InterviewSession {
 
   /** 设备检测做完，进入「准备开始」。 */
   finishDeviceCheck(): void {
-    const { device, capability } = this.snapshot;
+    const { device, capability, network } = this.snapshot;
     if (device.permission !== "granted") return;
     // 检测结果只是给 HR 排查问题用的，发不出去不拦候选人
     void this.api
@@ -383,7 +413,7 @@ export class InterviewSession {
         camera: device.hasVideo ? "ok" : "skipped",
         microphone: device.micHeard ? "ok" : "failed",
         speaker: device.speaker === "confirmed" ? "ok" : "skipped",
-        uplink_kbps: null,
+        uplink_kbps: network.uplinkKbps,
         recording_mime: capability?.recordingMime ?? null,
         user_agent: navigator.userAgent,
       })
@@ -408,6 +438,7 @@ export class InterviewSession {
       this.collector?.record("interview_started", { resumed: room.stage === "in_progress" });
 
       await this.startRecording();
+      void this.keepScreenOn();
       window.addEventListener("beforeunload", this.warnBeforeUnload);
       this.cleanups.push(() => window.removeEventListener("beforeunload", this.warnBeforeUnload));
 
@@ -450,6 +481,18 @@ export class InterviewSession {
       this.patch({ problem: problemOf(error) });
       await this.finish("aborted", false);
     }
+  }
+
+  /** 面试中不让屏幕自己熄灭。要在按钮点击里调用；申请不到不影响面试。 */
+  private async keepScreenOn(): Promise<void> {
+    this.wakeLock ??= new ScreenWakeLock(
+      "wakeLock" in navigator ? navigator.wakeLock : undefined,
+      document,
+    );
+    const lock = this.wakeLock;
+    const held = await lock.acquire();
+    // 记下来：屏幕中途熄灭导致录像断掉时，HR 能看出是不是因为这个
+    this.collector?.record("screen_wake_lock", { supported: lock.supported, held });
   }
 
   private async startRecording(): Promise<void> {
@@ -559,6 +602,7 @@ export class InterviewSession {
     const recorder = this.recorder;
     this.recorder = null;
     await recorder?.stop().catch(() => {});
+    void this.wakeLock?.release();
     for (const off of this.trackCleanups) off();
     this.trackCleanups = [];
     stopStream(this.stream);
@@ -610,6 +654,7 @@ export class InterviewSession {
     this.disposed = true;
     void this.collector?.flush({ keepalive: true });
     this.runner?.stop();
+    void this.wakeLock?.release();
     for (const off of this.trackCleanups) off();
     for (const off of this.cleanups.splice(0)) off();
     stopStream(this.stream);

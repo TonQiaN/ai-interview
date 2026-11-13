@@ -131,12 +131,23 @@ pub struct CreateInterview {
 
 /// 改一场面试。只传要改的字段。
 ///
-/// 改了配置或简历，已经出好的题目会作废，要重新准备；只换音色的话题目保留，只重新合成语音。
+/// 换了简历，或者改的配置写进了题目里，已经出好的题目会作废，要重新准备；
+/// 改的配置不影响题目时题目和语音都保留；只换音色的话题目保留，只重新合成语音。
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct UpdateInterview {
     pub config: Option<InterviewConfig>,
     pub resume_id: Option<Uuid>,
     pub voice_id: Option<Uuid>,
+}
+
+/// 改完之后的面试。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct UpdatedInterview {
+    #[serde(flatten)]
+    pub interview: InterviewDetail,
+    /// 这次改动让已经出好的题目作废了的话，是哪些字段导致的（配置里的路径，比如
+    /// `interviewer.name`；换了简历是 `resume_id`）。题目还能用、或者本来就没出题时是空的
+    pub replan_reasons: Vec<String>,
 }
 
 /// 开始准备时的选项。

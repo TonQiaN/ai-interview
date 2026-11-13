@@ -19,13 +19,13 @@
 两种面试模式，配置里选：
 
 - **逐题模式**（基础，先做完）：题目和语音都在面试前准备好，一题一题问，候选人静音超过设定秒数算答完。
-- **实时模式**（进阶）：面试官根据回答现场追问，语音现场合成。
+- **实时对话**（进阶，第一版已有）：候选人说完一段，面试官现场接话（追问、回应反问或进入下一题），现场生成的话现场合成。配置成实时对话但大模型、语音合成、语音识别缺一样时，按逐题模式进行。
 
 ## 技术栈
 
 | 部分 | 选择 | 说明 |
 | --- | --- | --- |
-| 后端 | Rust，axum 0.8，tokio | 一个进程：HTTP 接口、WebSocket、后台任务、静态文件 |
+| 后端 | Rust，axum 0.8，tokio | 一个进程：HTTP 接口、后台任务、静态文件 |
 | 数据库 | PostgreSQL 16，sqlx 0.8 | 迁移放 `migrations/`，服务启动时自动执行 |
 | 文件存储 | `BlobStore` 抽象，本地磁盘起步 | 简历、音频、录像。库里只存键。以后可以换成 S3 兼容的对象存储 |
 | 后台任务 | Postgres 表 `tasks` 加 `SKIP LOCKED` | 不引入消息队列 |
@@ -35,7 +35,7 @@
 | 语音识别 | 后端进程内运行的本地模型 | 语音线选型 |
 | 前端 | TypeScript，React 19，Vite，pnpm workspace | 两个单页应用：HR 后台和候选人面试页 |
 | 前端工具 | Biome（lint 和格式化），Vitest，Playwright | 数据请求用 TanStack Query 加 openapi-fetch |
-| 实时通道 | WebSocket，16 kHz 单声道 PCM16 | 不用 WebRTC |
+| 实时对话的通道 | 和逐题模式同一套 HTTP 协议 | 第一版不另开通道：录制、断网补传、刷新续面都沿用逐题模式的。用 WebSocket 上传 16 kHz 单声道 PCM16（服务端判断说完没有、打断、边合成边播）是以后的优化，不用 WebRTC |
 
 为什么前端不用 Rust：候选人页重度依赖浏览器的媒体接口（摄像头、麦克风、录制、音频处理），而且多半在手机浏览器里打开，这些在 TypeScript 生态里成熟，用 Rust 编译到 WebAssembly 要手写大量绑定。Rust 仍是主体：后端、AI 引擎、语音、分析都是 Rust。
 
@@ -51,6 +51,7 @@ HR 浏览器 ─────┘   （axum，一个进程）     ├── DeepSe
 - `interview-server` 同时托管两个前端的构建产物：HR 后台在 `/admin/`，候选人页在 `/i/`，接口在 `/api/v1/`。
 - 开发时两个前端各起一个 Vite 开发服务器（后台 5173，候选人页 5174），把 `/api` 代理到后端的 8080。
 - 后台任务的执行器和 HTTP 服务在同一个进程里。
+- 现在只支持单进程部署。除了登录限流这类进程内的状态，面试中的现场转写和实时对话都要求一场面试由同一个进程服务到底（谁在等下一句、哪场面试正在想，记在进程内存里）。要部署多个实例，得先处理这些。
 
 ## 目录和归属
 
@@ -73,7 +74,7 @@ HR 浏览器 ─────┘   （axum，一个进程）     ├── DeepSe
 | `crates/interview-stt` | ④ | 语音识别 |
 | `crates/interview-audio` | ④ | WAV 读写、重采样、静音检测 |
 | `tts/` | ④ | TTS 资料、版本锁定、Python worker |
-| `crates/interview-room` | ⑤ | 面试链接、同意记录、候选人侧接口和 WebSocket、录制上传 |
+| `crates/interview-room` | ⑤ | 面试链接、同意记录、候选人侧接口（逐题和实时对话）、录制上传 |
 | `crates/interview-report` | ⑦ | 分析报告。纯库：输入一份面试记录，输出报告 |
 | `web/apps/candidate` | ⑤ | 候选人面试页 |
 | `web/apps/admin` | ⑥ | HR 管理后台 |
@@ -186,7 +187,9 @@ HR 可以在 `ready` 之后看题、改题；改过的话术重新合成。
 候选人打开 /i/#<令牌> → 取会话信息 → 同意 → 设备检测 → 开始（in_progress，时间轴零点）
 逐题模式：播放 utterance 的音频 → 候选人回答（前端做静音检测）→ POST /room/advance
           → interview-room 调 interview-engine 的状态机决定下一句（下一题、追问、结束）
-实时模式：WebSocket 上行麦克风 PCM，下行面试官语音和控制消息
+实时对话：协议和逐题模式一样。候选人答完后 advance 等面试官的第一句准备好才返回
+          → interview-room 用现场转写的文字调 interview-engine 的 live 模块决定怎么接
+          → 现场生成的话按句子合成，合成好一句发一句，并登记到 interview_utterances（source = 'live'）
 全程：浏览器分片上传录像；切屏等过程事件批量上报
 结束：状态变 completed，入队 interview.finalize
 ```
@@ -203,6 +206,8 @@ interview.finalize（interview-flow）
   → 入队 report.generate
 report.generate（interview-flow）
   → 组装面试记录（岗位、简历、配置、plan、turns、events）
+  → 从摄像头录像里抽帧，让大模型看画面里的人数和有没有手机（interview-report 的 frames），
+    看到的情况作为过程事件加进记录。结果存下来，重新生成报告时不再看。检查不成不影响出报告
   → 调 interview-report 生成报告，存 interview_reports（每次生成一个新版本）
 HR 在后台看录像、文字记录、报告，写结论（interviews.decision）
 ```

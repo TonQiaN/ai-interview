@@ -19,7 +19,8 @@ use sherpa_onnx::{
 use tokio::sync::oneshot;
 
 use crate::transcriber::{
-    SessionProgress, SttError, SttStatus, TranscribeOptions, TranscribeSession, Transcriber,
+    SessionProgress, StreamingOptions, SttError, SttStatus, TranscribeOptions, TranscribeSession,
+    Transcriber,
 };
 use crate::transcript::{Segment, Transcript};
 use crate::words::{Token, join_words, words_from_tokens};
@@ -40,6 +41,12 @@ const VAD_WINDOW: usize = 512;
 /// VAD 内部缓冲的长度。要放得下最长的一段话再加余量。
 const VAD_BUFFER_SECS: f32 = 60.0;
 const SAMPLE_RATE: u64 = REALTIME_SAMPLE_RATE as u64;
+/// 中间结果：VAD 判断「开始说话」时，往前多带这么多采样（0.4 秒），免得丢掉第一个字。
+const PREROLL_SAMPLES: usize = 6_400;
+/// 中间结果：至少攒够这么多新的采样（0.6 秒）才重新识别一次。
+const PARTIAL_MIN_STEP: usize = 9_600;
+/// 一段话允许的最短停顿。再短的话，正常说话的换气都会把句子切开。
+const MIN_SILENCE_FLOOR_MS: u64 = 200;
 
 /// sherpa 后端的配置。
 #[derive(Debug, Clone, PartialEq)]
@@ -161,20 +168,36 @@ impl Transcriber for SherpaTranscriber {
 
     async fn start_session(
         &self,
+        options: &TranscribeOptions,
+    ) -> Result<Box<dyn TranscribeSession>, SttError> {
+        self.start_streaming_session(options, &StreamingOptions::default())
+            .await
+    }
+
+    async fn start_streaming_session(
+        &self,
         _options: &TranscribeOptions,
+        streaming: &StreamingOptions,
     ) -> Result<Box<dyn TranscribeSession>, SttError> {
         let (commands, inbox) = mpsc::channel();
         let (ready, started) = oneshot::channel();
         let shared = Arc::clone(&self.shared);
+        let mut vad = shared.vad.clone();
+        if let Some(min_silence_ms) = streaming.min_silence_ms {
+            vad.silero_vad.min_silence_duration =
+                min_silence_ms.max(MIN_SILENCE_FLOOR_MS) as f32 / 1_000.0;
+        }
+        let partials = streaming.partials;
         thread::Builder::new()
             .name("stt-session".to_owned())
-            .spawn(move || run_session(&shared, &inbox, ready))
+            .spawn(move || run_session(&shared, &vad, partials, &inbox, ready))
             .map_err(|error| SttError::Unavailable(format!("开不了转写线程：{error}")))?;
         started.await.map_err(|_| worker_gone())??;
         Ok(Box::new(SherpaSession {
             commands,
             segments: Vec::new(),
             progress: SessionProgress::default(),
+            partial: None,
         }))
     }
 }
@@ -183,10 +206,11 @@ fn worker_gone() -> SttError {
     SttError::Backend("转写线程意外退出了".to_owned())
 }
 
-/// 会话线程回给调用方的东西：新定下来的段，和现在的进度。
+/// 会话线程回给调用方的东西：新定下来的段、现在的进度、还没定下来的那一小段的中间结果。
 struct Update {
     segments: Vec<Segment>,
     progress: SessionProgress,
+    partial: Option<String>,
 }
 
 type Reply = oneshot::Sender<Result<Update, SttError>>;
@@ -200,6 +224,7 @@ struct SherpaSession {
     commands: mpsc::Sender<Command>,
     segments: Vec<Segment>,
     progress: SessionProgress,
+    partial: Option<String>,
 }
 
 impl SherpaSession {
@@ -213,6 +238,7 @@ impl SherpaSession {
             .map_err(|_| worker_gone())?;
         let update = answer.await.map_err(|_| worker_gone())??;
         self.progress = update.progress;
+        self.partial = update.partial;
         self.segments.extend(update.segments.iter().cloned());
         Ok(update.segments)
     }
@@ -239,6 +265,10 @@ impl TranscribeSession for SherpaSession {
         }
     }
 
+    fn partial(&self) -> Option<String> {
+        self.partial.clone()
+    }
+
     async fn finish(mut self: Box<Self>) -> Result<Transcript, SttError> {
         self.request(|reply| Command::Finish { reply }).await?;
         Ok(Transcript {
@@ -251,10 +281,12 @@ impl TranscribeSession for SherpaSession {
 /// 会话线程的主体。调用方丢掉会话后通道关闭，线程自己退出。
 fn run_session(
     shared: &Shared,
+    vad: &VadModelConfig,
+    partials: bool,
     inbox: &mpsc::Receiver<Command>,
     ready: oneshot::Sender<Result<(), SttError>>,
 ) {
-    let Some(vad) = VoiceActivityDetector::create(&shared.vad, VAD_BUFFER_SECS) else {
+    let Some(vad) = VoiceActivityDetector::create(vad, VAD_BUFFER_SECS) else {
         let _ = ready.send(Err(SttError::Unavailable("VAD 模型加载失败".to_owned())));
         return;
     };
@@ -267,7 +299,14 @@ fn run_session(
         waiting: Vec::new(),
         received: 0,
         fed: 0,
-        last_voiced: None,
+        heard_speech: false,
+        speaking: false,
+        quiet_since: None,
+        partials,
+        preroll: Vec::new(),
+        speech: Vec::new(),
+        partial: None,
+        partial_at: 0,
     };
     while let Ok(command) = inbox.recv() {
         match command {
@@ -291,8 +330,24 @@ struct Worker<'a> {
     received: u64,
     /// 已经交给 VAD 多少采样。
     fed: u64,
-    /// VAD 最近一次判断「正在说话」时，已经交给它多少采样。
-    last_voiced: Option<u64>,
+    /// VAD 有没有判断过「正在说话」。
+    heard_speech: bool,
+    /// 上一个窗口 VAD 是不是判断「正在说话」。
+    speaking: bool,
+    /// 从第几个采样开始安静的。VAD 要等停顿够长才判断「说完了」，那时候其实已经安静了一会儿，
+    /// 所以一段话定下来时这里记的是这段话的结尾，不是 VAD 改口的时刻。
+    /// 只是一声咳嗽、没成段的，才从 VAD 改口的时刻算。
+    quiet_since: Option<u64>,
+    /// 要不要中间结果。
+    partials: bool,
+    /// 没人说话时，最近的一小截音频。开始说话时接在 `speech` 前面。
+    preroll: Vec<f32>,
+    /// 正在说、还没定下来的这段话的音频（只在要中间结果时攒）。
+    speech: Vec<f32>,
+    /// 这段话到现在的中间结果。
+    partial: Option<String>,
+    /// 上次出中间结果时 `speech` 有多长。
+    partial_at: usize,
 }
 
 impl Worker<'_> {
@@ -304,20 +359,69 @@ impl Worker<'_> {
         let mut used = 0;
         // 一个窗口一个窗口地喂，每喂一个就把切出来的段取走，VAD 的缓冲才不会被长音频撑爆
         while self.waiting.len() - used >= VAD_WINDOW {
-            self.vad
-                .accept_waveform(&self.waiting[used..used + VAD_WINDOW]);
+            let window = used..used + VAD_WINDOW;
+            self.vad.accept_waveform(&self.waiting[window.clone()]);
             used += VAD_WINDOW;
             self.fed += VAD_WINDOW as u64;
-            if self.vad.detected() {
-                self.last_voiced = Some(self.fed);
+            let speaking = self.vad.detected();
+            if speaking {
+                self.heard_speech = true;
+            } else if self.speaking {
+                self.quiet_since = Some(self.fed);
             }
-            self.drain(&mut segments)?;
+            self.speaking = speaking;
+            if let Some(end) = self.drain(&mut segments)? {
+                self.quiet_since = Some(end);
+                // 这段话定下来了，中间结果作废。被强行切开的长句，后半句从这里重新攒
+                self.speech.clear();
+                self.partial = None;
+                self.partial_at = 0;
+            }
+            if self.partials {
+                self.keep_for_partial(window, speaking);
+            }
         }
         self.waiting.drain(..used);
+        if self.partials && self.vad.detected() {
+            self.refresh_partial()?;
+        }
         Ok(Update {
             segments,
             progress: self.progress(),
+            partial: self.partial.clone(),
         })
+    }
+
+    /// 把刚喂给 VAD 的这个窗口留下来，给中间结果用。
+    fn keep_for_partial(&mut self, window: std::ops::Range<usize>, speaking: bool) {
+        let samples = &self.waiting[window];
+        if speaking {
+            if self.speech.is_empty() {
+                self.speech.append(&mut self.preroll);
+            }
+            self.speech.extend_from_slice(samples);
+        } else {
+            self.preroll.extend_from_slice(samples);
+            let extra = self.preroll.len().saturating_sub(PREROLL_SAMPLES);
+            self.preroll.drain(..extra);
+        }
+    }
+
+    /// 正在说的这段话攒够了新的音频，就重新识别一遍，更新中间结果。
+    ///
+    /// 每次都是从这段话的开头识别，所以话越长越费时间。隔多久识别一次跟着话的长度涨
+    /// （至少 0.6 秒，或者这段话长度的八分之一），保证花在中间结果上的 CPU 有上限。
+    fn refresh_partial(&mut self) -> Result<(), SttError> {
+        let step = PARTIAL_MIN_STEP.max(self.speech.len() / 8);
+        if self.speech.len() < self.partial_at + step {
+            return Ok(());
+        }
+        self.partial_at = self.speech.len();
+        let (tokens, _) = self.decode(&self.speech)?;
+        let text = tokens.concat();
+        let text = text.trim();
+        self.partial = (!text.is_empty()).then(|| text.to_owned());
+        Ok(())
     }
 
     fn finish(&mut self) -> Result<Update, SttError> {
@@ -329,21 +433,43 @@ impl Worker<'_> {
         self.vad.flush();
         let mut segments = Vec::new();
         self.drain(&mut segments)?;
+        self.partial = None;
         Ok(Update {
             segments,
             progress: self.progress(),
+            partial: None,
         })
     }
 
-    /// 把 VAD 已经切好的段取出来识别。
-    fn drain(&mut self, segments: &mut Vec<Segment>) -> Result<(), SttError> {
+    /// 把 VAD 已经切好的段取出来识别。取出过段时，返回最后一段在第几个采样结束。
+    fn drain(&mut self, segments: &mut Vec<Segment>) -> Result<Option<u64>, SttError> {
+        let mut end = None;
         while let Some(speech) = self.vad.front() {
+            end = Some(u64::try_from(speech.start()).unwrap_or(0) + speech.samples().len() as u64);
             let recognized = self.recognize(&speech);
             drop(speech);
             self.vad.pop();
             segments.extend(recognized?);
         }
-        Ok(())
+        Ok(end)
+    }
+
+    /// 识别一段音频，返回 token 和每个 token 的开始时间（秒，相对这段音频的开头；模型没给时是 `None`）。
+    fn decode(&self, samples: &[f32]) -> Result<(Vec<String>, Option<Vec<f32>>), SttError> {
+        let recognizer = &self.shared.recognizer;
+        let stream = recognizer.create_stream();
+        stream.accept_waveform(
+            i32::try_from(REALTIME_SAMPLE_RATE).unwrap_or(16_000),
+            samples,
+        );
+        recognizer.decode(&stream);
+        let result = stream
+            .get_result()
+            .ok_or_else(|| SttError::Backend("识别模型没有返回结果".to_owned()))?;
+        let timestamps = result
+            .timestamps
+            .filter(|timestamps| timestamps.len() == result.tokens.len());
+        Ok((result.tokens, timestamps))
     }
 
     /// 识别一段话。没认出字来（比如只是咳嗽）返回 `None`。
@@ -351,25 +477,11 @@ impl Worker<'_> {
         let start_ms = u64::try_from(speech.start()).unwrap_or(0) * 1_000 / SAMPLE_RATE;
         let end_ms = start_ms + speech.samples().len() as u64 * 1_000 / SAMPLE_RATE;
 
-        let recognizer = &self.shared.recognizer;
-        let stream = recognizer.create_stream();
-        stream.accept_waveform(
-            i32::try_from(REALTIME_SAMPLE_RATE).unwrap_or(16_000),
-            speech.samples(),
-        );
-        recognizer.decode(&stream);
-        let result = stream
-            .get_result()
-            .ok_or_else(|| SttError::Backend("识别模型没有返回结果".to_owned()))?;
-
         // 模型给每个 token 一个开始时间（秒，相对这段话的开头）。万一没给，就均匀铺开
-        let count = result.tokens.len() as u64;
+        let (texts, timestamps) = self.decode(speech.samples())?;
+        let count = texts.len() as u64;
         let span_ms = end_ms - start_ms;
-        let timestamps = result
-            .timestamps
-            .filter(|timestamps| timestamps.len() == result.tokens.len());
-        let tokens: Vec<Token<'_>> = result
-            .tokens
+        let tokens: Vec<Token<'_>> = texts
             .iter()
             .enumerate()
             .map(|(index, text)| {
@@ -399,14 +511,14 @@ impl Worker<'_> {
     fn progress(&self) -> SessionProgress {
         let audio_ms = self.received * 1_000 / SAMPLE_RATE;
         let in_speech = self.vad.detected();
-        let silence_ms = match self.last_voiced {
+        let silence_ms = match self.quiet_since {
             _ if in_speech => 0,
-            Some(last_voiced) => (self.received - last_voiced) * 1_000 / SAMPLE_RATE,
+            Some(since) => self.received.saturating_sub(since) * 1_000 / SAMPLE_RATE,
             None => audio_ms,
         };
         SessionProgress {
             audio_ms,
-            heard_speech: self.last_voiced.is_some(),
+            heard_speech: self.heard_speech,
             in_speech,
             silence_ms,
         }

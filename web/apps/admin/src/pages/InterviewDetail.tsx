@@ -63,6 +63,7 @@ import {
 } from "../components/common";
 import { ReplayPlayer } from "../components/ReplayPlayer";
 import { ReportView } from "../components/ReportView";
+import { useVoiceName, VoicePicker } from "../components/VoicePicker";
 import {
   categoryLabel,
   decisionLabel,
@@ -82,6 +83,7 @@ import {
   synthStatusTone,
   thinkingLabel,
 } from "../lib/format";
+import { updateOutcome } from "../lib/replan";
 
 type Tab = "overview" | "questions" | "invites" | "replay" | "report";
 
@@ -222,6 +224,7 @@ function bullets(key: string, items: string[]): ReactNode {
 
 function ConfigSummary({ interview }: { interview: Interview }) {
   const { config, time_budget: budget } = interview;
+  const voiceName = useVoiceName();
   const lists: Array<[string, string[]]> = [
     ["重点考察", config.focus_instructions],
     ["必须问的题", config.must_ask_questions],
@@ -276,6 +279,7 @@ function ConfigSummary({ interview }: { interview: Interview }) {
           "面试官",
           `自称「${config.interviewer.name || "AI 面试官"}」，${styleLabel[config.interviewer.style]}的口吻`,
         ],
+        ["声音", voiceName(interview.voice_id)],
         [
           "模型",
           `DeepSeek Flash。出题时思考${thinkingLabel(config.planning_thinking)}；面试中思考${thinkingLabel(config.live_thinking)}`,
@@ -371,10 +375,12 @@ function EditConfigDialog({
   const save = useUpdateInterview(interview.id);
   const toast = useToast();
   const [config, setConfig] = useState<InterviewConfig>(interview.config);
+  const [voiceId, setVoiceId] = useState<string | null>(interview.voice_id ?? null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: 只在打开的那一刻取一次，免得后台刷新把正在改的内容冲掉
   useEffect(() => {
     if (!open) return;
     setConfig(structuredClone(interview.config));
+    setVoiceId(interview.voice_id ?? null);
     save.reset();
   }, [open]);
   return (
@@ -392,10 +398,16 @@ function EditConfigDialog({
             loading={save.isPending}
             onClick={() =>
               save.mutate(
-                { config: cleanConfig(config) },
+                { config: cleanConfig(config), voice_id: voiceId },
                 {
-                  onSuccess: () => {
-                    toast(interview.has_plan ? "设置改了，题目需要重新生成" : "设置已保存");
+                  onSuccess: (updated) => {
+                    toast(
+                      updateOutcome({
+                        hadPlan: interview.has_plan,
+                        voiceChanged: (updated.voice_id ?? null) !== (interview.voice_id ?? null),
+                        reasons: updated.replan_reasons,
+                      }),
+                    );
                     onClose();
                   },
                 },
@@ -410,10 +422,17 @@ function EditConfigDialog({
       <div className="oil-stack">
         {interview.has_plan && (
           <Banner tone="warning">
-            题目已经按原来的设置出好了。改了设置之后，题目和语音要重新生成。
+            题目已经按原来的设置出好了。时长、第几轮、面试官、考察要求这类写进题目里的设置改了，题目和语音要重新生成；答题节奏、提前结束、模型怎么想这类只在面试进行时起作用的，改了题目和语音都留着；只换声音的话，题目不变，语音重新合成。
           </Banner>
         )}
         {save.error && <Banner tone="danger">{errorMessage(save.error)}</Banner>}
+        <VoicePicker
+          value={voiceId}
+          onChange={setVoiceId}
+          allowDefault={!interview.voice_id}
+          disabled={save.isPending}
+          error={fieldErrors(save.error).voice_id}
+        />
         <ConfigForm
           value={config}
           onChange={setConfig}

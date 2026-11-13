@@ -6,6 +6,7 @@
 //! | [`access`] | 候选人的身份：校验链接里的令牌 |
 //! | [`session`] | 会话信息、同意事项、设备检测结果 |
 //! | [`conduct`] | 逐题面试的进行：开始、推进、面试官语音、结束 |
+//! | [`realtime`] | 实时对话：候选人说完一段，面试官现场接话 |
 //! | [`events`] | 过程事件：页面上报、HR 查看 |
 //! | [`recording`] | 录制：分片上传、合并、HR 回放 |
 //! | [`transcribe`] | 现场转写：从上传的录像分片里取候选人说了什么 |
@@ -22,6 +23,7 @@ use interview_llm::ChatModel;
 use interview_platform::AppContext;
 use interview_platform::tasks::TaskRegistry;
 use interview_stt::{Transcriber, Transcript};
+use realtime::Hub;
 use utoipa_axum::router::OpenApiRouter;
 use uuid::Uuid;
 
@@ -32,11 +34,13 @@ pub mod consent;
 pub mod events;
 pub mod invites;
 pub mod protocol;
+pub mod realtime;
 pub mod recording;
 pub mod session;
 pub mod transcribe;
 
 pub use config::RoomConfig;
+pub use interview_engine::Language;
 pub use transcribe::LiveTranscripts;
 
 /// 候选人一段回答的转写。
@@ -61,6 +65,38 @@ pub trait AnswerTranscriber: Send + Sync {
         start_ms: i64,
         end_ms: i64,
     ) -> Option<AnswerTranscript>;
+
+    /// 现在能不能转写。实时对话靠它听候选人说了什么，不能转写的时候面试按逐题进行。
+    async fn available(&self) -> bool {
+        true
+    }
+}
+
+/// 音色的 ID（`voices.id`）。
+pub type VoiceId = Uuid;
+
+/// 现场合成出来的一句话。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpokenAudio {
+    /// WAV 文件的字节
+    pub wav: Vec<u8>,
+    pub duration_ms: u64,
+}
+
+/// 面试官的声音：实时对话里现场生成的追问和回应靠它念出来。
+///
+/// 面试间不关心用的是哪个引擎、哪个音色，只要求和这场面试提前合成的那些句子是同一个声音。
+/// 服务进程里的实现在 `interview-server` 的 `compose.rs`。
+#[async_trait]
+pub trait LiveVoice: Send + Sync {
+    /// 用这场面试的音色（`interviews.voice_id`，没指定是 `None`）把一句话合成出来。
+    /// 出错时返回给人看的原因，面试间会改成只显示文字。
+    async fn speak(
+        &self,
+        voice_id: Option<VoiceId>,
+        language: Language,
+        text: &str,
+    ) -> Result<SpokenAudio, String>;
 }
 
 /// 同一场面试的回答一次只判断一段。按面试的 ID 分到这么多把锁上：两场面试偶尔分到同一把，
@@ -78,6 +114,10 @@ pub struct Deps {
     pub transcriber: Option<Arc<dyn AnswerTranscriber>>,
     /// 现场转写。接了的话，录像分片存好后要喂给它
     pub(crate) live: Option<Arc<LiveTranscripts>>,
+    /// 面试官的声音。没接时实时对话不可用，配置成实时对话的面试按逐题进行
+    pub voice: Option<Arc<dyn LiveVoice>>,
+    /// 实时对话里谁在等下一句、哪场面试正在想怎么接话
+    pub(crate) realtime: Arc<Hub>,
     settle_locks: Arc<Vec<tokio::sync::Mutex<()>>>,
 }
 
@@ -89,6 +129,8 @@ impl Deps {
             llm: None,
             transcriber: None,
             live: None,
+            voice: None,
+            realtime: Arc::new(Hub::default()),
             settle_locks: Arc::new(
                 (0..SETTLE_LOCKS)
                     .map(|_| tokio::sync::Mutex::new(()))
@@ -115,6 +157,12 @@ impl Deps {
             self.transcriber = Some(live.clone());
             self.live = Some(live);
         }
+        self
+    }
+
+    /// 接上面试官的声音，实时对话要用。
+    pub fn with_voice(mut self, voice: Arc<dyn LiveVoice>) -> Self {
+        self.voice = Some(voice);
         self
     }
 

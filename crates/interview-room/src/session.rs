@@ -1,6 +1,8 @@
 //! 候选人打开链接后、开始面试前的接口：会话信息、同意事项、设备检测结果。
 
-use axum::extract::State;
+use axum::body::Bytes;
+use axum::extract::rejection::BytesRejection;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use chrono::{DateTime, Utc};
 use interview_engine::config::InterviewConfig;
@@ -12,20 +14,28 @@ use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::Deps;
 use crate::access::{RoomAccess, RoomStage};
 use crate::conduct;
 use crate::config::RecordingSettings;
 use crate::consent::{CONSENT_VERSION, ConsentItem, consent_items};
 use crate::events::{self, NewEvent};
 use crate::protocol::{AnswerSettings, NextStep, RoomMode};
+use crate::{Deps, realtime};
 
 pub(crate) fn router() -> OpenApiRouter<Deps> {
     OpenApiRouter::new()
         .routes(routes!(get_session))
         .routes(routes!(post_consent))
         .routes(routes!(post_device_check))
+        .merge(
+            OpenApiRouter::new()
+                .routes(routes!(uplink_probe))
+                .layer(DefaultBodyLimit::max(MAX_PROBE_BYTES)),
+        )
 }
+
+/// 测上行网速时一次最多发多少字节。
+const MAX_PROBE_BYTES: usize = 1024 * 1024;
 
 /// 全局设置里放展示信息的那一项：`{ "company_name": "……" }`。
 pub const DISPLAY_SETTING_KEY: &str = "room.display";
@@ -78,17 +88,38 @@ pub(crate) fn parse_config(interview_id: uuid::Uuid, raw: Value) -> InterviewCon
 
 /// 这场面试用哪种方式进行。
 ///
-/// 实时对话的通道还没接上，配置成实时对话的面试先按逐题进行：题目和语音是同一份，
-/// 只是追问用提前写好的，不现场生成。
-pub(crate) fn room_mode(_config: &InterviewConfig) -> RoomMode {
-    RoomMode::Scripted
+/// 已经开始的面试看它存着的进度是哪一种（开始的时候定下来，中途不变）；还没开始的看现在
+/// 能不能按实时对话进行。配置成实时对话但条件不够（没有大模型、语音识别或面试官的声音）的面试
+/// 按逐题进行：题目和语音是同一份，只是追问用提前写好的，不现场生成。
+async fn room_mode(deps: &Deps, config: &InterviewConfig, state: Option<&Value>) -> RoomMode {
+    let realtime = match state.filter(|state| !state.is_null()) {
+        Some(state) => realtime::is_state(state),
+        None => realtime::enabled(deps, config).await,
+    };
+    if realtime {
+        RoomMode::Realtime
+    } else {
+        RoomMode::Scripted
+    }
 }
 
-pub(crate) fn answer_settings(config: &InterviewConfig) -> AnswerSettings {
-    AnswerSettings {
-        silence_sec: config.answer.silence_sec,
-        max_sec: config.answer.max_sec,
-        min_sec: config.answer.min_sec,
+fn answer_settings(deps: &Deps, config: &InterviewConfig, mode: RoomMode) -> AnswerSettings {
+    let answer = &config.answer;
+    match mode {
+        RoomMode::Scripted => AnswerSettings {
+            silence_sec: answer.silence_sec,
+            max_sec: answer.max_sec,
+            min_sec: answer.min_sec,
+        },
+        RoomMode::Realtime => {
+            let window =
+                realtime::answer_window(deps, answer.silence_sec, answer.max_sec, answer.min_sec);
+            AnswerSettings {
+                silence_sec: window.silence_sec,
+                max_sec: window.max_sec,
+                min_sec: window.min_sec,
+            }
+        }
     }
 }
 
@@ -122,13 +153,14 @@ pub(crate) async fn consent_agreed(deps: &Deps, access: &RoomAccess) -> ApiResul
     )
 )]
 async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<Json<RoomSession>> {
-    let (raw_config, position_title, candidate_name, end_reason): (
+    let (raw_config, position_title, candidate_name, end_reason, runtime_state): (
         Value,
         String,
         String,
         Option<String>,
+        Option<Value>,
     ) = sqlx::query_as(
-        "SELECT i.config, p.title, c.name, i.end_reason
+        "SELECT i.config, p.title, c.name, i.end_reason, i.runtime_state
            FROM interviews i
            JOIN positions p ON p.id = i.position_id
            JOIN candidates c ON c.id = i.candidate_id
@@ -138,6 +170,7 @@ async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<
     .fetch_one(&deps.ctx.db)
     .await?;
     let config = parse_config(access.interview_id, raw_config);
+    let mode = room_mode(&deps, &config, runtime_state.as_ref()).await;
 
     let display: Option<(Value,)> = sqlx::query_as("SELECT value FROM app_settings WHERE key = $1")
         .bind(DISPLAY_SETTING_KEY)
@@ -165,7 +198,7 @@ async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<
         position_title,
         company_name,
         candidate_name,
-        mode: room_mode(&config),
+        mode,
         expected_duration_sec: config.target_duration_minutes.saturating_mul(60),
         camera_required: deps.config.camera_required,
         consent: ConsentState {
@@ -174,7 +207,7 @@ async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<
             agreed: consent_agreed(&deps, &access).await?,
         },
         recording: deps.config.recording.clone(),
-        answer: answer_settings(&config),
+        answer: answer_settings(&deps, &config, mode),
         elapsed_ms: access.elapsed_ms(Utc::now()),
         resume: conduct::resume_step(&deps, &access).await?,
         end_reason: end_reason.filter(|_| access.stage() == RoomStage::Finished),
@@ -328,5 +361,38 @@ async fn post_device_check(
         }],
     )
     .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 测上行网速
+///
+/// 设备检测时页面往这里发一段随机字节，按花了多久估算上传录像够不够快。
+/// 服务端收完就丢，什么都不存。结果由页面算好，随设备检测结果一起上报。
+#[utoipa::path(
+    post,
+    path = "/api/v1/room/uplink-probe",
+    tag = "room",
+    security(("invite_token" = [])),
+    request_body(content = Vec<u8>, content_type = "application/octet-stream"),
+    responses(
+        (status = 204, description = "收到了"),
+        (status = 409, description = "面试已经结束", body = ErrorBody),
+        (status = 413, description = "超过 1 MiB", body = ErrorBody),
+    )
+)]
+async fn uplink_probe(
+    access: RoomAccess,
+    body: Result<Bytes, BytesRejection>,
+) -> ApiResult<StatusCode> {
+    if access.stage() == RoomStage::Finished {
+        return Err(ApiError::conflict("面试已经结束"));
+    }
+    body.map_err(|rejection| {
+        if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            ApiError::payload_too_large("测速的内容太大")
+        } else {
+            ApiError::bad_request("测速的内容没有传完整")
+        }
+    })?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -221,6 +221,39 @@ async fn device_check_is_kept_as_an_event(pool: PgPool) {
     assert_eq!(bad.status, 422);
 }
 
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn uplink_probe_takes_bytes_and_keeps_nothing(pool: PgPool) {
+    let app = app(pool).await;
+    let (interview_id, token) = invited(&app).await;
+    let probe = |bytes: usize, token: &str| {
+        TestRequest::post("/api/v1/room/uplink-probe")
+            .bearer(token)
+            .bytes("application/octet-stream", vec![7u8; bytes])
+    };
+
+    let response = probe(512 * 1024, &token).send(&app.public).await;
+    assert_eq!(response.status, 204, "{}", response.text());
+
+    // 测速不留下任何东西
+    let (events,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM interview_events WHERE interview_id = $1")
+            .bind(interview_id)
+            .fetch_one(&app.ctx.db)
+            .await
+            .unwrap();
+    assert_eq!(events, 0);
+
+    let too_big = probe(1024 * 1024 + 1, &token).send(&app.public).await;
+    assert_eq!(too_big.status, 413, "{}", too_big.text());
+
+    let stranger = probe(16, "不是令牌").send(&app.public).await;
+    assert_eq!(stranger.status, 401);
+
+    set_status(&app.ctx, interview_id, "completed").await;
+    let after = probe(16, &token).send(&app.public).await;
+    assert_eq!(after.status, 409, "面试结束以后不再测速");
+}
+
 fn event(kind: &str, at_ms: Option<i64>, second: u32, payload: Value) -> Value {
     json!({
         "kind": kind,

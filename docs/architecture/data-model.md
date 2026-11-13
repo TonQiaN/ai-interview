@@ -25,8 +25,8 @@
 | `resumes` | ② | 简历。原件在 BlobStore，`text_content` 是全文（给 HR 看），`parsed` 是结构化结果，`interview_text` 是去掉联系方式、给大模型出题和写报告用的文字。解析失败的原因在 `parse_error`；解析成功但要提醒 HR 的事（PDF 页数超过上限、后面没读）在 `parse_warning` |
 | `voices` | ④ | 面试官音色。克隆用的参考录音在 BlobStore，表里记它的时长和哈希 |
 | `interview_templates` | ① | 面试配置模板 |
-| `interviews` | ① | 一场面试。`config`、`plan`、`runtime_state` 三个 JSONB 的结构归 ③ |
-| `interview_utterances` | ①（④ 回填音频字段，⑤ 在实时模式下追加） | 面试官要说的每一句话和它的音频 |
+| `interviews` | ① | 一场面试。`config`、`plan` 两个 JSONB 的结构归 ③；`runtime_state` 是面试间（⑤）自己的进度，别的模块不要读 |
+| `interview_utterances` | ①（④ 回填音频字段，⑤ 在实时对话里追加） | 面试官要说的每一句话和它的音频 |
 | `interview_invites` | ⑤ | 面试链接 |
 | `interview_consents` | ⑤ | 同意记录 |
 | `interview_recordings`、`interview_recording_chunks` | ⑤ | 录制轨道和分片 |
@@ -103,7 +103,8 @@ draft ──prepare──> preparing ──成功──> ready ──生成链�
 `interview_utterances` 一行是面试官要说的一句话。
 
 - `key` 在一场面试里稳定唯一，来自 `InterviewPlan`，比如 `opening`、`q1`、`q1.f1`、`closing`。
-- 计划内的（`source = 'planned'`）在准备阶段写入并预合成；实时模式下现场生成的（`source = 'live'`）在说的时候写入。
+- 计划内的（`source = 'planned'`）在准备阶段写入并预合成。
+- 实时对话里现场生成的（`source = 'live'`）在说的时候写入，一段话一行：现场追问的 `key` 是 `<题目>.p<N>`（`kind` 是 `follow_up`），回应候选人的话是 `<题目>.r<N>`（`kind` 是 `other`），`seq` 从 100000 起，`synth_status` 是 `skipped`，没有 `audio_blob_key`（现场合成的语音在 `interviews/{id}/utterances/{key}.s{N}.wav`，只供面试中播放）。面试后整理记录时，`key` 去掉最后一段就是它所属的题目，现场的问答并进那道题里评。
 - 音频合成好后回填 `audio_blob_key`、`audio_duration_ms`，`synth_status` 变 `done`。
 - HR 改了某句话的文本，就把这一行的 `synth_status` 改回 `pending` 并重新合成。
 
@@ -121,7 +122,8 @@ BlobStore 用字符串键，全小写，斜杠分层。库里只存键。约定�
 | `interviews/{interview_id}/recordings/{track}/{segment}/chunks/{seq}` | 录制分片 | ⑤ |
 | `interviews/{interview_id}/recordings/{track}/{segment}/recording.{ext}` | 合并后的录像 | ⑤ |
 | `interviews/{interview_id}/answers/{turn_seq}.wav` | 单段回答的音频 | ⑤ |
-| `interviews/{interview_id}/frames/{at_ms}.jpg` | 从录像里抽的帧 | ⑦ |
+| `interviews/{interview_id}/frames/{at_ms}.jpg` | 录像画面检查里不正常的帧（人数不对、有手机） | ①（内容由 ⑦ 的 `frames` 产出） |
+| `interviews/{interview_id}/frames/events.json` | 录像画面检查的结果，重新生成报告时复用 | ① |
 
 本地磁盘实现把它们放在 `AI_INTERVIEW_DATA_DIR/blobs/` 下。这个目录不进 Git。
 
@@ -131,7 +133,7 @@ BlobStore 用字符串键，全小写，斜杠分层。库里只存键。约定�
 | --- | --- | --- |
 | `interviews.config`、`interview_templates.config` | `interview_engine::InterviewConfig` | ③ |
 | `interviews.plan` | `interview_engine::InterviewPlan` | ③ |
-| `interviews.runtime_state` | `interview_engine` 的会话状态 | ③ |
+| `interviews.runtime_state` | 面试间的进度：逐题模式是 `interview_engine` 的会话状态，实时对话是面试间自己的结构（带 `live` 键）。只有 `interview-room` 读写 | ⑤ |
 | `interview_reports.content` | `interview_report::InterviewReport` | ⑦ |
 | `candidates.profile`、`resumes.parsed`、`positions.extra` | `interview_talent` 里的类型 | ② |
 | `voices.settings` | `interview_tts` 里的类型 | ④ |

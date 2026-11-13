@@ -330,7 +330,11 @@ export function PositionsPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
-  const status = params.get("status") ?? "";
+  const statusParam = params.get("status");
+  // 地址栏里的值可能是随手改的，不认识的当成没筛选
+  const status = (Object.keys(positionStatusLabel) as PositionStatus[]).find(
+    (s) => s === statusParam,
+  );
   const page = Number(params.get("page") ?? 1) || 1;
   const positions = usePositions({ q, status, page, page_size: 20 });
   const [adding, setAdding] = useState(false);
@@ -373,7 +377,7 @@ export function PositionsPage() {
         />
         <Segmented
           aria-label="按状态筛选"
-          value={status === "open" || status === "paused" || status === "closed" ? status : "all"}
+          value={status ?? "all"}
           options={[
             { value: "all", label: "全部" },
             { value: "open", label: "在招" },

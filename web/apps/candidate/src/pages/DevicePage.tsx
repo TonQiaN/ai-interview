@@ -6,23 +6,26 @@ import {
   Stage,
   Steps,
 } from "@ai-interview/ui";
-import { Camera, Mic, Volume2 } from "lucide-react";
+import { Camera, Mic, Volume2, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CameraPreview } from "../components/CameraPreview";
 import { MicMeter } from "../components/MicMeter";
 import type { RoomSession } from "../lib/api/room-types";
-import type { DeviceState } from "../session/interview-session";
+import { judgeUplink } from "../lib/flow/uplink";
+import type { DeviceState, NetworkState } from "../session/interview-session";
 import { MEDIA_ERROR_TEXT } from "../text";
 import { FLOW_STEPS } from "./WelcomePage";
 
 export interface DevicePageProps {
   room: RoomSession;
   device: DeviceState;
+  network: NetworkState;
   cameraStream: MediaStream | null;
   subscribeLevel: (listener: (level: number) => void) => () => void;
   onRequest: () => void;
   onPlayTestSound: () => void;
   onConfirmSpeaker: () => void;
+  onRetestNetwork: () => void;
   onNext: () => void;
 }
 
@@ -33,11 +36,13 @@ export function DevicePage(props: DevicePageProps) {
   const {
     room,
     device,
+    network,
     cameraStream,
     subscribeLevel,
     onRequest,
     onPlayTestSound,
     onConfirmSpeaker,
+    onRetestNetwork,
     onNext,
   } = props;
   const granted = device.permission === "granted";
@@ -57,6 +62,13 @@ export function DevicePage(props: DevicePageProps) {
   const speakerDone = device.speaker === "confirmed";
   const allPassed = granted && device.micHeard && speakerDone;
   const canContinue = allPassed || (granted && speakerDone && micSlow);
+
+  // 没有摄像头时只录声音，对网速的要求低得多。还没授权时不知道有没有摄像头，先按录像算
+  const recordingBits =
+    room.recording.audio_bits_per_second +
+    (granted && !device.hasVideo ? 0 : room.recording.video_bits_per_second);
+  const networkSlow =
+    network.uplinkKbps !== null && judgeUplink(network.uplinkKbps, recordingBits) === "slow";
 
   const pending: DeviceCheckState =
     device.permission === "requesting"
@@ -184,6 +196,45 @@ export function DevicePage(props: DevicePageProps) {
           </div>
         )}
       </DeviceCheckCard>
+
+      <DeviceCheckCard
+        state={
+          network.status === "testing"
+            ? "checking"
+            : network.status === "measured"
+              ? networkSlow
+                ? "failed"
+                : "passed"
+              : "idle"
+        }
+        icon={<Wifi />}
+        title="网络"
+        description={networkText(network, networkSlow, room.mode === "realtime")}
+      >
+        {(network.status === "failed" || networkSlow) && (
+          <div className="oil-row oil-row--wrap">
+            <Button variant="secondary" size="sm" onClick={onRetestNetwork}>
+              重新测速
+            </Button>
+          </div>
+        )}
+      </DeviceCheckCard>
     </Stage>
   );
+}
+
+/** 网络这一项的说明。网速慢或者量不出来都不拦候选人，只是提前说清楚会怎样、能怎么办。 */
+function networkText(network: NetworkState, slow: boolean, realtime: boolean): string {
+  switch (network.status) {
+    case "idle":
+    case "testing":
+      return "正在测上传速度，面试的录像要边录边传。";
+    case "failed":
+      return "没有测出上传速度，可能是网络不稳定。可以继续，建议先确认网络正常。";
+    case "measured":
+      if (!slow) return "上传速度够用。";
+      return realtime
+        ? "上传速度偏慢，面试官的回应可能会变慢，结束后还要多等一会儿才能传完录像。建议换一个网络，比如靠近路由器，或者改用手机流量。"
+        : "上传速度偏慢，可以面试，但结束后要多等一会儿才能传完录像。建议换一个网络，比如靠近路由器，或者改用手机流量。";
+  }
 }

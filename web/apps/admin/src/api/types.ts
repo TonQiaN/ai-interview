@@ -2,8 +2,7 @@
  * 接口的数据类型。
  *
  * 都取自后端的 OpenAPI 文档（@ai-interview/api-client），后端改了字段这里编译就会报错。
- * 例外是「语音」一段：音色和试听的接口后端还没有，那一段是照 docs/architecture/api.md
- * 的路径先写的，只在演示数据下能用。
+ * 这里只是起个顺手的名字，再加上少数几个页面自己用的类型。
  */
 
 import type { Schemas } from "@ai-interview/api-client";
@@ -64,57 +63,37 @@ export type ResumeDetail = Resume & {
 };
 
 export type Candidate = Schemas["Candidate"];
-export type CandidateListItem = Candidate & { primary_resume: Resume | null };
-export type CandidateDetail = CandidateListItem & { possible_duplicates: DuplicateHint[] };
+export type CandidateListItem = Schemas["CandidateListItem"];
+export type CandidateDetail = Schemas["CandidateDetail"];
 
 export type CandidateInput = Schemas["CreateCandidate"];
 
 /** 上传简历建候选人的返回 */
-export interface ImportedCandidate {
-  candidate: Candidate;
-  resume: Resume;
-}
+export type ImportedCandidate = Schemas["ImportedCandidate"];
 
 // ───────── 语音 ─────────
 
-export type EngineId = "index2" | "index25" | "breeze2";
+export type EngineId = Schemas["EngineId"];
+export type SpeechEngine = Schemas["EngineInfo"];
+export type EngineList = Schemas["EngineList"];
+export type VoiceKind = Schemas["VoiceKind"];
+export type Voice = Schemas["VoiceView"];
+export type VoiceSettings = Schemas["VoiceSettings"];
+export type VoiceStyle = Schemas["Style"];
+export type Emotion = Schemas["Emotion"];
+export type VoiceLanguage = Schemas["Language"];
+export type CreateVoice = Schemas["CreateVoice"];
+export type UpdateVoice = Schemas["UpdateVoice"];
+export type PreviewRequest = Schemas["PreviewRequest"];
 
-export interface SpeechEngine {
-  id: EngineId;
-  name: string;
-  languages: string[];
-  capabilities: string[];
-  requires_reference_audio: boolean;
-  requires_reference_transcript: boolean;
-  max_text_chars: number | null;
-  non_commercial_only: boolean;
-  available: boolean;
-  unavailable_reason: string | null;
-  is_default: boolean;
-}
-
-export interface Voice {
-  id: string;
-  name: string;
-  engine: EngineId;
-  /** 克隆的音色有参考录音；没有参考录音的是用文字描述设计出来的 */
-  cloned: boolean;
-  has_reference: boolean;
-  reference_duration_ms: number | null;
-  reference_transcript: string | null;
-  style_prompt: string | null;
-  language: string;
-  is_default: boolean;
-  created_at: string;
-}
-
-export interface VoiceInput {
-  name: string;
-  engine: EngineId;
-  cloned: boolean;
-  reference_transcript: string | null;
-  style_prompt: string | null;
-  language: string;
+/** 试听的结果：一段可以直接放的声音，和后端在响应头里说的几件事 */
+export interface PreviewResult {
+  blob: Blob;
+  duration_ms: number | null;
+  engine: string | null;
+  /** fake 是测试音，worker 是真模型 */
+  backend: string | null;
+  from_cache: boolean;
 }
 
 // ───────── 面试配置 ─────────

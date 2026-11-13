@@ -176,6 +176,105 @@ let whole = recording.finish().await?;
 
 实测（云端容器，ffmpeg 6.1.1）：常驻的 ffmpeg 在收到一块分片后 10 到 50 毫秒内吐出对应的音频，WebM（VP8 加 Opus）和分片 MP4（AAC）都一样。Opus 32 kbps 压缩过的声音和原始录音相比，X-ASR 认出来的字基本没有差别（`sherpa_live` 里有一条测试比这个）。
 
+## 实时对话：一轮回答和打断
+
+实时对话里浏览器把麦克风的声音按 20 到 100 毫秒一帧发上来（16 kHz 单声道 PCM16，见 `docs/architecture/api.md` 的实时通道）。服务端要回答三个问题：候选人说到哪了、什么时候算答完、是不是在打断面试官。
+
+### 一轮回答：`TurnListener`
+
+```rust
+use interview_stt::{TranscribeOptions, TurnConfig, TurnEvent, TurnListener};
+
+let mut turn = TurnListener::start(stt.as_ref(), &TranscribeOptions::default(), TurnConfig::default()).await?;
+
+// 每收到一帧麦克风的音频
+for event in turn.push(&frame).await? {
+    match event {
+        TurnEvent::SpeechStarted { at_ms } => { /* 候选人开口了，或者停顿后接着说了 */ }
+        TurnEvent::Partial { text } => { /* 这一轮到现在的全部文字，发给前端做实时字幕 */ }
+        TurnEvent::Segment(segment) => { /* 一小段定下来了，带逐字时间戳 */ }
+        TurnEvent::SpeechPaused { at_ms } => { /* 话音在 at_ms 落下 */ }
+        TurnEvent::JudgeWanted { revision, text } => {
+            // 让大模型判断 text 是不是一句说完整的回答，不要在这里等它：
+            // 另起一个任务去问，问到了调 turn.verdict(revision, complete)
+        }
+        TurnEvent::Ended { reason, at_ms, transcript } => { /* 这一轮结束，transcript 是全部文字 */ }
+    }
+}
+
+// 候选人点了「我说完了」：不等了
+let transcript = turn.finish().await?;
+```
+
+事件按发生的先后给出，一轮的事件大致是：`SpeechStarted`，一串 `Partial`，`Segment`，`SpeechPaused`，`JudgeWanted`，（接着说的话再来一遍），最后 `Ended`。
+
+什么时候算答完，由 `TurnConfig` 决定：
+
+| 字段 | 默认 | 含义 |
+| --- | ---: | --- |
+| `end_silence_ms` | 3000 | 说完以后安静这么久就结束，不管话有没有说完整 |
+| `confirmed_end_silence_ms` | 800 | 调用方判断「说完整了」以后，安静这么久就结束。`None` 表示不用这一档 |
+| `judge_after_ms` | 500 | 停下来这么久就发 `JudgeWanted` |
+| `no_speech_ms` | 10000 | 一直没人说话，这么久以后按没有回答结束 |
+| `max_ms` | 180000 | 一轮最长这么久 |
+| `min_silence_ms` | 不填（600） | 停顿多久算一小段话说完。调小了发现停顿更早，但换气也会把一句话切开 |
+
+为什么分两档：只看安静了多久的话，等得短会在候选人想词的时候抢话，等得长每一轮都要干等。所以候选人一停下来就请大模型判断这句话说完整没有。说完整了，安静 0.8 秒就结束；没说完整或者判断没回来，一直等到 3 秒。判断回来之前候选人又接着说了，这次判断作废，下次停顿重新问。不想用大模型判断时用 `TurnConfig::silence_only(毫秒)`。
+
+`Ended` 的 `reason`：`Silence`（安静够久）、`Complete`（说完整了提前结束）、`Timeout`（到了最长时间）、`NoSpeech`（没人说话，或者只有咳嗽之类认不出字的声音）。`reason.as_str()` 给出写进 `interview_turns.end_reason` 的值，前两种都是 `silence`。
+
+要点：
+
+- **时间以喂进来的音频为准**，不看墙上的钟。候选人不说话的时候浏览器也要照常发静音帧，不然时间不走，这一轮不会结束。事件里的时间是相对这个会话第一帧音频开头的毫秒数。
+- **`Partial` 的文字后面还会变**，只用来显示。要存的文字以 `Segment` 和 `Ended` 里的为准。
+- **不在 `push` 里等大模型**。`JudgeWanted` 只是提出请求，调用方另起任务去问，期间照常喂音频。
+- 一帧可以比 100 毫秒长，里面会自己切开看，事件不会漏。
+
+### 打断：`BargeInDetector`
+
+面试官说话的时候麦克风也开着。候选人真的开口说话了要马上停掉面试官的声音，但「嗯」「好的」这种附和不算，扬声器漏进麦克风的面试官自己的声音也不算。
+
+```rust
+use interview_stt::{BargeInConfig, BargeInDetector, BargeInEvent, TurnConfig};
+
+// 面试官开始说一句话时
+let mut detector = BargeInDetector::start(stt.as_ref(), &TranscribeOptions::default(), BargeInConfig::default()).await?;
+detector.interviewer_says("请你介绍一下最近做的项目里最有挑战的一个。");
+
+// 面试官说话期间，每收到一帧麦克风的音频
+for event in detector.push(&frame).await? {
+    match event {
+        BargeInEvent::Detected { at_ms, text } => { /* 停掉面试官的声音 */ }
+        BargeInEvent::Ignored { reason, text } => { /* 附和或回声，不用管 */ }
+    }
+}
+
+// 发现打断以后接着听这一轮：打断时已经说的字不会丢
+let mut turn = detector.into_turn(TurnConfig::default());
+```
+
+判断的办法：候选人开口后至少说了 0.4 秒、认出至少两个字，而且这些字不全是附和的词（`BargeInConfig::backchannels`，可以改）、也不是面试官正在说的那句话里的字，才算打断。附和和回声要等这句话说完才下结论，因为后面可能跟着真正要说的话。
+
+这是为了快才用的简单办法（发现打断要在几百毫秒内，等不了大模型）。它认不出来的情况，比如候选人说了一句和问题无关的话，由面试 AI 引擎在停掉声音以后用大模型决定是接着说还是听候选人说。
+
+### 实测
+
+云端容器（4 核，X-ASR 用 2 个线程），真模型，20 毫秒一帧地喂，`sherpa_live` 里有对应的测试：
+
+| 项目 | 数值 |
+| --- | --- |
+| 话音落下到发出 `JudgeWanted` | 约 0.7 秒（`min_silence_ms` 默认 600）；调到 300 时约 0.4 秒 |
+| 候选人开口到发现打断 | 约 0.3 秒 |
+| 实时字幕多久更新一次 | 0.6 秒起，话越长间隔越长（一段话长度的八分之一） |
+| 处理 25 秒的音频（含实时字幕） | 2.3 秒，不到实时的十分之一；最慢的一帧 0.19 秒 |
+| 实时字幕和定稿的差别 | 最后一版字幕和定下来的文字基本一样；最终结果和整段转写一字不差 |
+
+实时字幕是把还没说完的那一段从头再识别一遍得到的（X-ASR 不是流式模型），所以话越长每次越慢。VAD 最长 15 秒切一段，一段内重新识别的总量有上限。
+
+加上大模型和语音合成以后整条链路要多久，见 [realtime.md](realtime.md)。
+
+`TurnListener` 开的会话会出实时字幕；`Transcriber::start_session` 开的不出，CPU 用得少，录像现场转写用的是后者。要自己开带实时字幕的会话用 `Transcriber::start_streaming_session`，没说完的那一段从 `TranscribeSession::partial()` 取。
+
 ## 重现选型测试
 
 脚本在 `crates/interview-stt/bench/`，用的是 sherpa-onnx 的 Python 包，和 Rust 后端是同一套推理代码。

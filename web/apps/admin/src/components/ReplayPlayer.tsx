@@ -23,6 +23,7 @@ import {
   fileSize,
   foldEvents,
   speakerLabel,
+  turnNote,
 } from "../lib/format";
 
 const rates = [0.75, 1, 1.25, 1.5, 2];
@@ -360,25 +361,28 @@ export function ReplayPlayer({
             <p className="oil-muted">还没有逐字稿。</p>
           ) : (
             <div className="adm-turns" ref={listRef}>
-              {turns.map((t, index) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  data-turn={index}
-                  className={`adm-turn adm-turn--${t.speaker}`}
-                  aria-current={index === active ? "true" : undefined}
-                  onClick={() => seek(t.start_ms)}
-                >
-                  <span className="adm-turn__time">{clock(t.start_ms)}</span>
-                  <span>
-                    <span className="adm-turn__who">
-                      {who(t.speaker)}
-                      {t.transcript_source === "live" && " · 实时转写，还没校对"}
+              {turns.map((t, index) => {
+                const note = turnNote(t);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    data-turn={index}
+                    className={`adm-turn adm-turn--${t.speaker}`}
+                    aria-current={index === active ? "true" : undefined}
+                    onClick={() => seek(t.start_ms)}
+                  >
+                    <span className="adm-turn__time">{clock(t.start_ms)}</span>
+                    <span>
+                      <span className="adm-turn__who">
+                        {who(t.speaker)}
+                        {note && ` · ${note}`}
+                      </span>
+                      {t.text.trim() !== "" && <p className="adm-turn__text">{t.text}</p>}
                     </span>
-                    <p className="adm-turn__text">{t.text}</p>
-                  </span>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           )}
         </CardBody>

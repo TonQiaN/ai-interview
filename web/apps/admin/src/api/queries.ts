@@ -1,48 +1,41 @@
 /** 数据请求：每个接口一个 hook。页面只用这里导出的东西，不直接碰 http。 */
+
+import type { paths } from "@ai-interview/api-client";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, http, type Query } from "./http";
+import { ApiError, api, errorMessage, unwrap, unwrapBlob } from "./http";
 import type {
-  AdminUser,
-  CandidateDetail,
   CandidateInput,
   CandidateListItem,
-  ConfigDefaults,
-  CreatedInvite,
+  CreateVoice,
   Decision,
-  ImportedCandidate,
-  Interview,
   InterviewEvent,
   InterviewInput,
   InterviewPatch,
   InterviewPlan,
-  InterviewSummary,
-  InterviewTemplate,
-  Invite,
   LoginInput,
-  Page,
-  Position,
-  PositionDraft,
   PositionInput,
-  RaasCandidate,
-  RaasCandidateImportItem,
-  RaasPosition,
-  RaasPositionImportItem,
-  RaasStatus,
-  Recording,
-  ReportBrief,
-  ReportEnvelope,
-  Resume,
-  ResumeDetail,
-  SpeechEngine,
-  SystemStatus,
+  PreviewRequest,
+  PreviewResult,
   TemplateInput,
-  Turn,
-  Utterance,
+  UpdateVoice,
   Voice,
-  VoiceInput,
 } from "./types";
 
-type List<T> = { items: T[] };
+/** 某个列表接口能带的查询参数 */
+type QueryOf<P extends keyof paths> = paths[P] extends {
+  get: { parameters: { query?: infer Q } };
+}
+  ? NonNullable<Q>
+  : never;
+
+export type PositionQuery = QueryOf<"/api/v1/positions">;
+export type CandidateQuery = QueryOf<"/api/v1/candidates">;
+export type InterviewQuery = QueryOf<"/api/v1/interviews">;
+export type RaasPositionQuery = QueryOf<"/api/v1/raas/positions">;
+export type RaasCandidateQuery = QueryOf<"/api/v1/raas/candidates">;
+
+/** 路径里只有一个 id 的接口 */
+const at = (id: string | undefined) => ({ params: { path: { id: id ?? "" } } });
 
 // ───────── 登录 ─────────
 
@@ -51,7 +44,7 @@ export function useMe() {
     queryKey: ["me"],
     queryFn: async () => {
       try {
-        return await http.get<AdminUser>("/auth/me");
+        return await unwrap(api.GET("/api/v1/auth/me"));
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) return null;
         throw e;
@@ -65,7 +58,7 @@ export function useMe() {
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: LoginInput) => http.post<AdminUser>("/auth/login", input),
+    mutationFn: (input: LoginInput) => unwrap(api.POST("/api/v1/auth/login", { body: input })),
     onSuccess: (user) => {
       qc.clear();
       qc.setQueryData(["me"], user);
@@ -76,7 +69,7 @@ export function useLogin() {
 export function useLogout() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => http.post<null>("/auth/logout"),
+    mutationFn: () => unwrap(api.POST("/api/v1/auth/logout")),
     onSuccess: () => {
       qc.clear();
       qc.setQueryData(["me"], null);
@@ -87,17 +80,17 @@ export function useLogout() {
 export function useSystemStatus() {
   return useQuery({
     queryKey: ["system-status"],
-    queryFn: () => http.get<SystemStatus>("/system/status"),
+    queryFn: () => unwrap(api.GET("/api/v1/system/status")),
     staleTime: 30_000,
   });
 }
 
 // ───────── 岗位 ─────────
 
-export function usePositions(query: Query = {}) {
+export function usePositions(query: PositionQuery = {}) {
   return useQuery({
     queryKey: ["positions", query],
-    queryFn: () => http.get<Page<Position>>("/positions", query),
+    queryFn: () => unwrap(api.GET("/api/v1/positions", { params: { query } })),
     placeholderData: keepPreviousData,
   });
 }
@@ -105,7 +98,7 @@ export function usePositions(query: Query = {}) {
 export function usePosition(id: string | undefined) {
   return useQuery({
     queryKey: ["position", id],
-    queryFn: () => http.get<Position>(`/positions/${id}`),
+    queryFn: () => unwrap(api.GET("/api/v1/positions/{id}", at(id))),
     enabled: Boolean(id),
   });
 }
@@ -113,10 +106,10 @@ export function usePosition(id: string | undefined) {
 export function useSavePosition(id?: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: Partial<PositionInput>) =>
+    mutationFn: (input: PositionInput) =>
       id
-        ? http.patch<Position>(`/positions/${id}`, input)
-        : http.post<Position>("/positions", input),
+        ? unwrap(api.PATCH("/api/v1/positions/{id}", { ...at(id), body: input }))
+        : unwrap(api.POST("/api/v1/positions", { body: input })),
     onSuccess: (p) => {
       qc.invalidateQueries({ queryKey: ["positions"] });
       qc.setQueryData(["position", p.id], p);
@@ -127,14 +120,14 @@ export function useSavePosition(id?: string) {
 /** 把粘贴的岗位描述整理成表单能用的草稿，不保存 */
 export function useDraftPosition() {
   return useMutation({
-    mutationFn: (text: string) => http.post<PositionDraft>("/positions/draft", { text }),
+    mutationFn: (text: string) => unwrap(api.POST("/api/v1/positions/draft", { body: { text } })),
   });
 }
 
 export function useDeletePosition() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => http.delete(`/positions/${id}`),
+    mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/positions/{id}", at(id))),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["positions"] }),
   });
 }
@@ -142,15 +135,15 @@ export function useDeletePosition() {
 export function useRaasStatus() {
   return useQuery({
     queryKey: ["raas-status"],
-    queryFn: () => http.get<RaasStatus>("/raas/status"),
+    queryFn: () => unwrap(api.GET("/api/v1/raas/status")),
     staleTime: 60_000,
   });
 }
 
-export function useRaasPositions(query: Query, enabled: boolean) {
+export function useRaasPositions(query: RaasPositionQuery, enabled: boolean) {
   return useQuery({
     queryKey: ["raas-positions", query],
-    queryFn: () => http.get<Page<RaasPosition>>("/raas/positions", query),
+    queryFn: () => unwrap(api.GET("/api/v1/raas/positions", { params: { query } })),
     enabled,
     placeholderData: keepPreviousData,
   });
@@ -160,10 +153,7 @@ export function useImportRaasPositions() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (refs: string[]) =>
-      http.post<{ items: RaasPositionImportItem[] }>("/raas/positions/import", {
-        refs,
-        refresh: false,
-      }),
+      unwrap(api.POST("/api/v1/raas/positions/import", { body: { refs, refresh: false } })),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["positions"] });
       qc.invalidateQueries({ queryKey: ["raas-positions"] });
@@ -191,10 +181,10 @@ export function profilePending(c: CandidateListItem, now = Date.now()): boolean 
 export const candidateBusy = (c: CandidateListItem) =>
   busy(c.primary_resume?.parse_status) || profilePending(c);
 
-export function useCandidates(query: Query = {}) {
+export function useCandidates(query: CandidateQuery = {}) {
   return useQuery({
     queryKey: ["candidates", query],
-    queryFn: () => http.get<Page<CandidateListItem>>("/candidates", query),
+    queryFn: () => unwrap(api.GET("/api/v1/candidates", { params: { query } })),
     placeholderData: keepPreviousData,
     // 有简历在解析就接着刷新，解析完自动停
     refetchInterval: (q) => (q.state.data?.items.some(candidateBusy) ? 2000 : false),
@@ -204,7 +194,7 @@ export function useCandidates(query: Query = {}) {
 export function useCandidate(id: string | undefined) {
   return useQuery({
     queryKey: ["candidate", id],
-    queryFn: () => http.get<CandidateDetail>(`/candidates/${id}`),
+    queryFn: () => unwrap(api.GET("/api/v1/candidates/{id}", at(id))),
     enabled: Boolean(id),
     refetchInterval: (q) => (q.state.data && candidateBusy(q.state.data) ? 2000 : false),
   });
@@ -215,8 +205,8 @@ export function useSaveCandidate(id?: string) {
   return useMutation({
     mutationFn: (input: CandidateInput) =>
       id
-        ? http.patch<CandidateDetail>(`/candidates/${id}`, input)
-        : http.post<CandidateDetail>("/candidates", input),
+        ? unwrap(api.PATCH("/api/v1/candidates/{id}", { ...at(id), body: input }))
+        : unwrap(api.POST("/api/v1/candidates", { body: input })),
     onSuccess: (c) => {
       qc.invalidateQueries({ queryKey: ["candidates"] });
       qc.setQueryData(["candidate", c.id], c);
@@ -227,22 +217,29 @@ export function useSaveCandidate(id?: string) {
 export function useDeleteCandidate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => http.delete(`/candidates/${id}`),
+    mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/candidates/{id}", at(id))),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["candidates"] }),
   });
 }
 
-function fileForm(file: File): FormData {
-  const form = new FormData();
-  form.set("file", file);
-  return form;
+/** 上传简历是表单（multipart），文件放在 `file` 字段里 */
+function fileForm(file: File) {
+  return {
+    // 生成的类型把二进制字段写成 string，实际发的是文件
+    body: { file: file as unknown as string },
+    bodySerializer: () => {
+      const form = new FormData();
+      form.set("file", file);
+      return form;
+    },
+  };
 }
 
 /** 直接传一份简历，自动建候选人 */
 export function useImportResume() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (file: File) => http.post<ImportedCandidate>("/candidates/import", fileForm(file)),
+    mutationFn: (file: File) => unwrap(api.POST("/api/v1/candidates/import", fileForm(file))),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["candidates"] }),
   });
 }
@@ -250,7 +247,12 @@ export function useImportResume() {
 export function useResumes(candidateId: string | undefined) {
   return useQuery({
     queryKey: ["resumes", candidateId],
-    queryFn: () => http.get<Page<Resume>>(`/candidates/${candidateId}/resumes`, { page_size: 50 }),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/v1/candidates/{id}/resumes", {
+          params: { path: { id: candidateId ?? "" }, query: { page_size: 50 } },
+        }),
+      ),
     enabled: Boolean(candidateId),
     refetchInterval: (q) => (q.state.data?.items.some((r) => busy(r.parse_status)) ? 2000 : false),
   });
@@ -260,7 +262,7 @@ export function useResumes(candidateId: string | undefined) {
 export function useResume(id: string | null | undefined) {
   return useQuery({
     queryKey: ["resume", id],
-    queryFn: () => http.get<ResumeDetail>(`/resumes/${id}`),
+    queryFn: () => unwrap(api.GET("/api/v1/resumes/{id}", at(id ?? undefined))),
     enabled: Boolean(id),
   });
 }
@@ -279,7 +281,9 @@ export function useUploadResume(candidateId: string) {
   const changed = useResumeChanged(candidateId);
   return useMutation({
     mutationFn: (file: File) =>
-      http.post<Resume>(`/candidates/${candidateId}/resumes`, fileForm(file)),
+      unwrap(
+        api.POST("/api/v1/candidates/{id}/resumes", { ...at(candidateId), ...fileForm(file) }),
+      ),
     onSuccess: changed,
   });
 }
@@ -288,7 +292,7 @@ export function useUploadResume(candidateId: string) {
 export function useReparseResume(candidateId: string) {
   const changed = useResumeChanged(candidateId);
   return useMutation({
-    mutationFn: (resumeId: string) => http.post<Resume>(`/resumes/${resumeId}/parse`),
+    mutationFn: (resumeId: string) => unwrap(api.POST("/api/v1/resumes/{id}/parse", at(resumeId))),
     onSuccess: changed,
   });
 }
@@ -296,7 +300,7 @@ export function useReparseResume(candidateId: string) {
 export function useDeleteResume(candidateId: string) {
   const changed = useResumeChanged(candidateId);
   return useMutation({
-    mutationFn: (resumeId: string) => http.delete(`/resumes/${resumeId}`),
+    mutationFn: (resumeId: string) => unwrap(api.DELETE("/api/v1/resumes/{id}", at(resumeId))),
     onSuccess: changed,
   });
 }
@@ -305,7 +309,8 @@ export function useDeleteResume(candidateId: string) {
 export function useRegenerateProfile(candidateId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => http.post<CandidateDetail>(`/candidates/${candidateId}/profile/regenerate`),
+    mutationFn: () =>
+      unwrap(api.POST("/api/v1/candidates/{id}/profile/regenerate", at(candidateId))),
     onSuccess: (c) => {
       qc.setQueryData(["candidate", candidateId], c);
       qc.invalidateQueries({ queryKey: ["candidates"] });
@@ -313,10 +318,10 @@ export function useRegenerateProfile(candidateId: string) {
   });
 }
 
-export function useRaasCandidates(query: Query, enabled: boolean) {
+export function useRaasCandidates(query: RaasCandidateQuery, enabled: boolean) {
   return useQuery({
     queryKey: ["raas-candidates", query],
-    queryFn: () => http.get<Page<RaasCandidate>>("/raas/candidates", query),
+    queryFn: () => unwrap(api.GET("/api/v1/raas/candidates", { params: { query } })),
     enabled,
     placeholderData: keepPreviousData,
   });
@@ -326,10 +331,7 @@ export function useImportRaasCandidates() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (refs: string[]) =>
-      http.post<{ items: RaasCandidateImportItem[] }>("/raas/candidates/import", {
-        refs,
-        refresh: false,
-      }),
+      unwrap(api.POST("/api/v1/raas/candidates/import", { body: { refs, refresh: false } })),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["candidates"] });
       qc.invalidateQueries({ queryKey: ["raas-candidates"] });
@@ -342,36 +344,76 @@ export function useImportRaasCandidates() {
 export function useEngines() {
   return useQuery({
     queryKey: ["engines"],
-    queryFn: () => http.get<List<SpeechEngine>>("/speech/engines"),
+    queryFn: () => unwrap(api.GET("/api/v1/speech/engines")),
     staleTime: 60_000,
   });
 }
 
-export function useVoices() {
-  return useQuery({ queryKey: ["voices"], queryFn: () => http.get<List<Voice>>("/speech/voices") });
+export function useVoices(q = "") {
+  return useQuery({
+    queryKey: ["voices", q],
+    queryFn: () =>
+      unwrap(api.GET("/api/v1/speech/voices", { params: { query: { q, page_size: 100 } } })),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** 后端收的是文件本身，不是表单 */
+function uploadReference(id: string, file: File) {
+  return unwrap(
+    api.PUT("/api/v1/speech/voices/{id}/reference", {
+      ...at(id),
+      // 生成的类型把二进制请求体写成 number[]，实际发的是文件
+      body: file as unknown as number[],
+      bodySerializer: () => file,
+      headers: { "Content-Type": "application/octet-stream" },
+    }),
+  );
+}
+
+/**
+ * 新建音色。克隆音色分两步：先建，再上传参考录音。
+ * 第二步失败时音色已经建好了（只是还不能用），错误里带上它，页面可以让人重新传。
+ */
+export class ReferenceUploadError extends Error {
+  constructor(
+    readonly voice: Voice,
+    readonly cause: unknown,
+  ) {
+    super(errorMessage(cause));
+    this.name = "ReferenceUploadError";
+  }
 }
 
 export function useCreateVoice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ input, reference }: { input: VoiceInput; reference: File | null }) => {
-      const voice = await http.post<Voice>("/speech/voices", input);
-      return reference ? http.put<Voice>(`/speech/voices/${voice.id}/reference`, reference) : voice;
+    mutationFn: async ({ input, reference }: { input: CreateVoice; reference: File | null }) => {
+      const voice = await unwrap(api.POST("/api/v1/speech/voices", { body: input }));
+      if (!reference) return voice;
+      try {
+        return await uploadReference(voice.id, reference);
+      } catch (e) {
+        throw new ReferenceUploadError(voice, e);
+      }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["voices"] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["voices"] }),
   });
 }
 
 export function useUpdateVoice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      id,
-      patch,
-    }: {
-      id: string;
-      patch: Partial<VoiceInput> & { is_default?: boolean };
-    }) => http.patch<Voice>(`/speech/voices/${id}`, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateVoice }) =>
+      unwrap(api.PATCH("/api/v1/speech/voices/{id}", { ...at(id), body: patch })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["voices"] }),
+  });
+}
+
+export function useUploadReference() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) => uploadReference(id, file),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["voices"] }),
   });
 }
@@ -379,20 +421,34 @@ export function useUpdateVoice() {
 export function useDeleteVoice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => http.delete(`/speech/voices/${id}`),
+    mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/speech/voices/{id}", at(id))),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["voices"] }),
   });
 }
 
+/** 存下来的参考录音，取回来听 */
+export function fetchReference(id: string): Promise<Blob> {
+  return unwrapBlob(
+    api.GET("/api/v1/speech/voices/{id}/reference", { ...at(id), parseAs: "blob" }),
+  ).then((r) => r.blob);
+}
+
+/** 试听。真模型合成一句话要几秒到十几秒 */
 export function usePreviewSpeech() {
   return useMutation({
-    mutationFn: (input: {
-      text: string;
-      engine: string;
-      voice_id: string | null;
-      style: string;
-      speed: number;
-    }) => http.post<{ audio_url: string }>("/speech/preview", input),
+    mutationFn: async (input: PreviewRequest): Promise<PreviewResult> => {
+      const { blob, headers } = await unwrapBlob(
+        api.POST("/api/v1/speech/preview", { body: input, parseAs: "blob" }),
+      );
+      const ms = Number(headers.get("x-audio-duration-ms"));
+      return {
+        blob,
+        duration_ms: Number.isFinite(ms) && ms > 0 ? ms : null,
+        engine: headers.get("x-tts-engine"),
+        backend: headers.get("x-tts-backend"),
+        from_cache: headers.get("x-tts-from-cache") === "true",
+      };
+    },
   });
 }
 
@@ -401,7 +457,7 @@ export function usePreviewSpeech() {
 export function useConfigDefaults() {
   return useQuery({
     queryKey: ["config-defaults"],
-    queryFn: () => http.get<ConfigDefaults>("/interview-config/defaults"),
+    queryFn: () => unwrap(api.GET("/api/v1/interview-config/defaults")),
     staleTime: 5 * 60_000,
   });
 }
@@ -410,14 +466,15 @@ export function useConfigDefaults() {
 export function useTemplates() {
   return useQuery({
     queryKey: ["templates"],
-    queryFn: () => http.get<Page<InterviewTemplate>>("/interview-templates", { page_size: 100 }),
+    queryFn: () =>
+      unwrap(api.GET("/api/v1/interview-templates", { params: { query: { page_size: 100 } } })),
   });
 }
 
 export function useTemplate(id: string | undefined) {
   return useQuery({
     queryKey: ["template", id],
-    queryFn: () => http.get<InterviewTemplate>(`/interview-templates/${id}`),
+    queryFn: () => unwrap(api.GET("/api/v1/interview-templates/{id}", at(id))),
     enabled: Boolean(id),
   });
 }
@@ -427,8 +484,8 @@ export function useSaveTemplate(id?: string) {
   return useMutation({
     mutationFn: (input: TemplateInput) =>
       id
-        ? http.patch<InterviewTemplate>(`/interview-templates/${id}`, input)
-        : http.post<InterviewTemplate>("/interview-templates", input),
+        ? unwrap(api.PATCH("/api/v1/interview-templates/{id}", { ...at(id), body: input }))
+        : unwrap(api.POST("/api/v1/interview-templates", { body: input })),
     onSuccess: (t) => {
       qc.invalidateQueries({ queryKey: ["templates"] });
       qc.setQueryData(["template", t.id], t);
@@ -439,7 +496,7 @@ export function useSaveTemplate(id?: string) {
 export function useDeleteTemplate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => http.delete(`/interview-templates/${id}`),
+    mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/interview-templates/{id}", at(id))),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["templates"] }),
   });
 }
@@ -449,10 +506,10 @@ export function useDeleteTemplate() {
 const reportBusy = (status: string | null | undefined) =>
   status === "running" || status === "pending";
 
-export function useInterviews(query: Query = {}, enabled = true) {
+export function useInterviews(query: InterviewQuery = {}, enabled = true) {
   return useQuery({
     queryKey: ["interviews", query],
-    queryFn: () => http.get<Page<InterviewSummary>>("/interviews", query),
+    queryFn: () => unwrap(api.GET("/api/v1/interviews", { params: { query } })),
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: (q) =>
@@ -465,7 +522,7 @@ export function useInterviews(query: Query = {}, enabled = true) {
 export function useInterview(id: string | undefined) {
   return useQuery({
     queryKey: ["interview", id],
-    queryFn: () => http.get<Interview>(`/interviews/${id}`),
+    queryFn: () => unwrap(api.GET("/api/v1/interviews/{id}", at(id))),
     enabled: Boolean(id),
     refetchInterval: (q) => {
       const i = q.state.data;
@@ -482,8 +539,10 @@ export function useCreateInterview() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ input, prepare }: { input: InterviewInput; prepare: boolean }) => {
-      const created = await http.post<Interview>("/interviews", input);
-      return prepare ? http.post<Interview>(`/interviews/${created.id}/prepare`, {}) : created;
+      const created = await unwrap(api.POST("/api/v1/interviews", { body: input }));
+      return prepare
+        ? unwrap(api.POST("/api/v1/interviews/{id}/prepare", { ...at(created.id), body: {} }))
+        : created;
     },
     onSuccess: (i) => {
       qc.invalidateQueries({ queryKey: ["interviews"] });
@@ -513,28 +572,34 @@ function useInterviewAction<TInput, TOutput>(
 export const useUpdateInterview = (id: string) =>
   useInterviewAction(
     id,
-    (patch: InterviewPatch) => http.patch<Interview>(`/interviews/${id}`, patch),
+    (patch: InterviewPatch) =>
+      unwrap(api.PATCH("/api/v1/interviews/{id}", { ...at(id), body: patch })),
     ["plan", "utterances"],
   );
 export const usePrepareInterview = (id: string) =>
   useInterviewAction(
     id,
     (regeneratePlan: boolean) =>
-      http.post<Interview>(`/interviews/${id}/prepare`, { regenerate_plan: regeneratePlan }),
+      unwrap(
+        api.POST("/api/v1/interviews/{id}/prepare", {
+          ...at(id),
+          body: { regenerate_plan: regeneratePlan },
+        }),
+      ),
     ["plan", "utterances"],
   );
 export const useCancelInterview = (id: string) =>
-  useInterviewAction<void, Interview>(id, () => http.post<Interview>(`/interviews/${id}/cancel`), [
+  useInterviewAction(id, () => unwrap(api.POST("/api/v1/interviews/{id}/cancel", at(id))), [
     "invites",
   ]);
 export const useDecide = (id: string) =>
   useInterviewAction(id, (input: { decision: Decision; note: string | null }) =>
-    http.put<Interview>(`/interviews/${id}/decision`, input),
+    unwrap(api.PUT("/api/v1/interviews/{id}/decision", { ...at(id), body: input })),
   );
 export const useRegenerateReport = (id: string) =>
-  useInterviewAction<void, Interview>(
+  useInterviewAction(
     id,
-    () => http.post<Interview>(`/interviews/${id}/report/regenerate`),
+    () => unwrap(api.POST("/api/v1/interviews/{id}/report/regenerate", at(id))),
     ["report", "reports"],
   );
 /** 生成面试链接。完整的链接只在这一次返回，之后查不到 */
@@ -542,27 +607,38 @@ export const useCreateInvite = (id: string) =>
   useInterviewAction(
     id,
     (expiresInHours: number) =>
-      http.post<CreatedInvite>(`/interviews/${id}/invites`, { expires_in_hours: expiresInHours }),
+      unwrap(
+        api.POST("/api/v1/interviews/{id}/invites", {
+          ...at(id),
+          body: { expires_in_hours: expiresInHours },
+        }),
+      ),
     ["invites"],
   );
 export const useRevokeInvite = (id: string) =>
   useInterviewAction(
     id,
-    (inviteId: string) => http.delete(`/interviews/${id}/invites/${inviteId}`),
+    (inviteId: string) =>
+      unwrap(
+        api.DELETE("/api/v1/interviews/{id}/invites/{invite_id}", {
+          params: { path: { id, invite_id: inviteId } },
+        }),
+      ),
     ["invites"],
   );
 /** 保存改过的题目。要把整份计划交回去，改过的句子会重新合成语音 */
 export const useSavePlan = (id: string) =>
   useInterviewAction(
     id,
-    (plan: InterviewPlan) => http.put<InterviewPlan>(`/interviews/${id}/plan`, plan),
+    (plan: InterviewPlan) =>
+      unwrap(api.PUT("/api/v1/interviews/{id}/plan", { ...at(id), body: plan })),
     ["plan", "utterances"],
   );
 
 export function useDeleteInterview() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => http.delete(`/interviews/${id}`),
+    mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/interviews/{id}", at(id))),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["interviews"] }),
   });
 }
@@ -573,7 +649,7 @@ export function usePlan(id: string, enabled = true) {
     queryKey: ["plan", id],
     queryFn: async () => {
       try {
-        return await http.get<InterviewPlan>(`/interviews/${id}/plan`);
+        return await unwrap(api.GET("/api/v1/interviews/{id}/plan", at(id)));
       } catch (e) {
         if (e instanceof ApiError && e.status === 404) return null;
         throw e;
@@ -587,7 +663,7 @@ export function usePlan(id: string, enabled = true) {
 export function useUtterances(id: string, enabled = true, polling = false) {
   return useQuery({
     queryKey: ["utterances", id],
-    queryFn: () => http.get<Utterance[]>(`/interviews/${id}/utterances`),
+    queryFn: () => unwrap(api.GET("/api/v1/interviews/{id}/utterances", at(id))),
     enabled,
     refetchInterval: polling ? 1000 : false,
   });
@@ -596,7 +672,7 @@ export function useUtterances(id: string, enabled = true, polling = false) {
 export function useInvites(id: string, enabled = true) {
   return useQuery({
     queryKey: ["invites", id],
-    queryFn: () => http.get<List<Invite>>(`/interviews/${id}/invites`),
+    queryFn: () => unwrap(api.GET("/api/v1/interviews/{id}/invites", at(id))),
     enabled,
   });
 }
@@ -604,7 +680,7 @@ export function useInvites(id: string, enabled = true) {
 export function useTranscript(id: string, enabled = true) {
   return useQuery({
     queryKey: ["transcript", id],
-    queryFn: () => http.get<List<Turn>>(`/interviews/${id}/transcript`),
+    queryFn: () => unwrap(api.GET("/api/v1/interviews/{id}/transcript", at(id))),
     enabled,
   });
 }
@@ -612,7 +688,7 @@ export function useTranscript(id: string, enabled = true) {
 export function useRecordings(id: string, enabled = true) {
   return useQuery({
     queryKey: ["recordings", id],
-    queryFn: () => http.get<List<Recording>>(`/interviews/${id}/recordings`),
+    queryFn: () => unwrap(api.GET("/api/v1/interviews/{id}/recordings", at(id))),
     enabled,
   });
 }
@@ -624,10 +700,11 @@ export function useEvents(id: string, enabled = true) {
     queryFn: async () => {
       const items: InterviewEvent[] = [];
       for (let page = 1; page <= 20; page += 1) {
-        const got = await http.get<Page<InterviewEvent>>(`/interviews/${id}/events`, {
-          page,
-          page_size: 100,
-        });
+        const got = await unwrap(
+          api.GET("/api/v1/interviews/{id}/events", {
+            params: { path: { id }, query: { page, page_size: 100 } },
+          }),
+        );
         items.push(...got.items);
         if (items.length >= got.total || got.items.length === 0) break;
       }
@@ -642,7 +719,7 @@ export function useEvents(id: string, enabled = true) {
 export function useReportVersions(id: string, enabled = true) {
   return useQuery({
     queryKey: ["reports", id],
-    queryFn: () => http.get<List<ReportBrief>>(`/interviews/${id}/reports`),
+    queryFn: () => unwrap(api.GET("/api/v1/interviews/{id}/reports", at(id))),
     enabled,
   });
 }
@@ -656,7 +733,11 @@ export function useReport(id: string, ready: boolean, version?: number) {
     queryKey: ["report", id, version ?? "latest"],
     queryFn: async () => {
       try {
-        return await http.get<ReportEnvelope>(`/interviews/${id}/report`, { version });
+        return await unwrap(
+          api.GET("/api/v1/interviews/{id}/report", {
+            params: { path: { id }, query: { version } },
+          }),
+        );
       } catch (e) {
         if (e instanceof ApiError && e.status === 404) return null;
         throw e;

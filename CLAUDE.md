@@ -21,7 +21,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                 # 全部测试
 cargo test -p interview-tts            # 只测一个 crate
 cargo test -p interview-tts <测试名>   # 只跑一个测试
-cargo test -p interview-server --test e2e   # 端到端：整个应用装起来，从 HR 登录走到出报告（外部依赖是假的；要 ffmpeg，没装就不测录像那一段）
+cargo test -p interview-server --test e2e   # 端到端：整个应用装起来，从 HR 登录走到出报告，逐题和实时对话各一场（外部依赖是假的；要 ffmpeg，没装就不测录像那一段和实时对话）
 cargo run -p interview-cli -- tts engines
 cargo run -p interview-server -- openapi   # 打印 OpenAPI 文档，不用数据库
 scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息不进 Git
@@ -39,17 +39,18 @@ pnpm -C web format                     # 用 Biome 格式化并整理 import
 
 真模型测试读 `DEEPSEEK_API_KEY`，会产生少量费用，云端容器里可以直接跑：`cargo test -p interview-llm --test live -- --ignored --nocapture`。
 
-面试引擎用真模型出题和模拟面试（同样读 `DEEPSEEK_API_KEY`，出一份题约 0.1 元，模拟一场不到 0.05 元）：
+面试引擎用真模型出题和模拟面试（同样读 `DEEPSEEK_API_KEY`，出一份题约 0.1 元，模拟一场不到 0.05 元，最后一个测停顿和打断的约 0.03 元）：
 
 ```bash
 cargo run -p interview-engine --example plan -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
 cargo run -p interview-engine --example simulate -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
 cargo run -p interview-engine --example converse -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
+cargo run -p interview-engine --example turn_taking -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
 ```
 
 改了出题、判断回答或实时对话的提示词，要用这几个命令实际跑一遍看结果，单元测试用的是假模型，测不出提示词的好坏。
 
-语音合成的真模型只能在 Mac 上跑，由 `tts/worker/worker.py` 提供（协议见 `tts/worker/README.md`）。后端通过 `AI_INTERVIEW_TTS_BACKEND=worker` 和 `AI_INTERVIEW_TTS_WORKER_URLS` 连它，默认是输出测试音的假后端。不用 Mac 也能测协议：`python3 tts/worker/worker.py --engines index2,index25,breeze2 --fake --port 7800` 起一个不加载模型的 worker，`cargo test -p interview-tts --test worker_backend` 会自己起一个（需要 python3）。改了协议，`worker.py`、`crates/interview-tts/src/worker.rs` 和 `tts/worker/README.md` 要一起改。
+语音合成的真模型只能在 Mac 上跑，由 `tts/worker/worker.py` 提供（协议见 `tts/worker/README.md`）。后端通过 `AI_INTERVIEW_TTS_BACKEND=worker` 和 `AI_INTERVIEW_TTS_WORKER_URLS` 连它，默认是输出测试音的假后端。不用 Mac 也能测协议：`python3 tts/worker/worker.py --engines index2,index25,breeze2 --fake --port 7800` 起一个不加载模型的 worker，`cargo test -p interview-tts --test worker_backend` 会自己起一个（需要 python3）。改了协议，`worker.py`、`crates/interview-tts/src/worker.rs` 和 `tts/worker/README.md` 要一起改。在 Mac 上起了真 worker 以后，`cargo test -p interview-tts --test worker_live -- --ignored --nocapture` 用后端把三个真引擎走一遍（要的环境变量见 `tts/worker/README.md` 的「用后端连真引擎走一遍」）。
 
 语音识别的真模型（X-ASR，约 170 MB，CPU 就能跑，不花钱）默认不编进来，要用时加 `--features sherpa`：
 
@@ -71,7 +72,9 @@ export DATABASE_URL=$(scripts/dev-db.sh url)
 cargo test -p interview-server --features sherpa --test live -- --ignored --nocapture
 ```
 
-它会打印题目、每一步等了多久、转写出来的回答、报告结论和大模型的花费。在 Mac 上再设 `AI_INTERVIEW_TTS_BACKEND=worker`，就连真的语音合成一起跑。
+它会打印题目、每一步等了多久、转写出来的回答、报告结论和大模型的花费。示例录音的内容和题目无关，模型听到三题答非所问就会提前结束面试，这是正常的。在 Mac 上再设 `AI_INTERVIEW_TTS_BACKEND=worker`，就连真的语音合成一起跑。
+
+这个测试还认几个变量：`AI_INTERVIEW_LIVE_MODE=conversational` 跑实时对话；`AI_INTERVIEW_LIVE_VOICE_WAV` 指一段参考录音，面试官就用克隆的声音（引擎读 `AI_INTERVIEW_TTS_ENGINE`，BreezeTTS2 还要用 `AI_INTERVIEW_LIVE_VOICE_TEXT_FILE` 给逐字稿），不设是兜底的设计音色；`AI_INTERVIEW_LIVE_QUESTIONS` 改题目数。
 
 改了模块之间的约定（任务名和内容、面试状态怎么流转、别的模块要读的表），跑一遍端到端测试 `crates/interview-server/tests/e2e.rs`，流程变了就一起改它。两个测试共用的部分在 `crates/interview-server/tests/common/`。
 
