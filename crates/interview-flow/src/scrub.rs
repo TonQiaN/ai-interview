@@ -1,12 +1,12 @@
 //! 把简历正文发给大模型之前，去掉出题用不上的联系方式。
 //!
 //! 这一步不能交给大模型做（要去掉的正是不想发给它的东西），所以是确定性的字符扫描。
-//! 只管邮箱和手机号这两样格式固定的；姓名由 `interview-engine` 用占位符处理。
+//! 只管邮箱和电话号码这两样格式固定的；姓名由 `interview-engine` 用占位符处理。
 
 const EMAIL_MARK: &str = "[邮箱]";
 const PHONE_MARK: &str = "[电话]";
 
-/// 去掉文本里的邮箱和手机号，换成占位的标记。
+/// 去掉文本里的邮箱和电话号码，换成占位的标记。
 pub fn scrub_contacts(text: &str) -> String {
     scrub_phones(&scrub_emails(text))
 }
@@ -59,7 +59,8 @@ fn digit(c: char) -> Option<char> {
 }
 
 fn is_separator(c: char) -> bool {
-    matches!(c, ' ' | '-' | '\u{a0}' | '–' | '—')
+    // 右括号：区号写在括号里的固定电话，`(010)60001234`
+    matches!(c, ' ' | '-' | '\u{a0}' | '–' | '—' | ')' | '）')
 }
 
 /// 电话号码最多由几段数字组成（`+86 138 0000 1234` 是四段，留一点余量）。
@@ -70,6 +71,7 @@ const MAX_GROUPS: usize = 5;
 /// - 连续 11 位以上的数字（手机号，身份证号也顺带去掉）；
 /// - 用空格、短横线分段的 11 位手机号，分法不限（`138 0000 1234`、`1380-000-1234`）；
 /// - 前面带国家码的（`+86`、`86`、`0086`，和号码之间有没有分隔都算）；
+/// - 带区号的固定电话（`010-6000-1234`、`0755 60001234`）；
 /// - `+` 开头、一共 10 到 15 位的国际号码。
 ///
 /// 年份区间（`2019-2023`）、金额这类不会被当成电话。宁可多去掉一点，不漏掉。
@@ -130,7 +132,14 @@ fn looks_like_phone(digits: &str, plus: bool) -> bool {
         .or_else(|| digits.strip_prefix("86"))
         .filter(|rest| is_mobile(rest))
         .unwrap_or(digits);
-    is_mobile(national) || (plus && (10..=15).contains(&digits.len()))
+    is_mobile(national) || is_landline(digits) || (plus && (10..=15).contains(&digits.len()))
+}
+
+/// 带区号的大陆固定电话：0 开头的区号（三到四位）加七到八位号码，一共 10 到 12 位。
+/// `00` 开头的是国际冠码，不算。
+fn is_landline(digits: &str) -> bool {
+    let bytes = digits.as_bytes();
+    (10..=12).contains(&bytes.len()) && bytes[0] == b'0' && bytes[1] != b'0'
 }
 
 /// 大陆手机号：11 位，1 开头，第二位是 3 到 9。
@@ -194,6 +203,18 @@ mod tests {
         assert_eq!(scrub_contacts("+1 415 555 0100"), "[电话]");
         // 身份证号这类长串数字也去掉
         assert_eq!(scrub_contacts("证件 110101199001010014"), "证件 [电话]");
+    }
+
+    #[test]
+    fn removes_landline_numbers() {
+        assert_eq!(scrub_contacts("电话：010-0000-1234"), "电话：[电话]");
+        assert_eq!(scrub_contacts("座机 0755-00001234。"), "座机 [电话]。");
+        assert_eq!(scrub_contacts("021 0000 1234"), "[电话]");
+        assert_eq!(scrub_contacts("(010)00001234"), "([电话]");
+        assert_eq!(scrub_contacts("０１０-００００-１２３４"), "[电话]");
+        // 零开头但不是区号加号码的，留着
+        let text = "工号 007-12，版本 0.9-2021，2005-06 到 2009-07";
+        assert_eq!(scrub_contacts(text), text);
     }
 
     #[test]
