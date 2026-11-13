@@ -17,8 +17,8 @@ pub use config::{
 };
 pub use error::EngineError;
 pub use live::{
-    CandidateTurn, LIVE_SCHEMA_VERSION, Line, LiveAction, LiveEvent, LiveOutcome, LiveState,
-    LiveTiming, Speaker,
+    CandidateTurn, Interruption, LIVE_SCHEMA_VERSION, Line, LiveAction, LiveEvent, LiveOutcome,
+    LiveState, LiveTiming, Speaker, TurnContext,
 };
 pub use plan::{
     FollowUp, GenerationInfo, InterviewBrief, InterviewPlan, PLAN_SCHEMA_VERSION, Phrases,

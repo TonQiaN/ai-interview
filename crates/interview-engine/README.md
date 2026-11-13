@@ -96,9 +96,11 @@ let (state, first) = live::open(&plan, &config)?;
 let outcome = live::respond(&model, &plan, &config, &state, &turn, &mut sink).await?;
 ```
 
-每轮调一次模型，流式输出，第一行就是决定（追问、回应、下一题、结束）。`sink` 陆续收到 `LiveEvent`：`Speak` 是现场生成的一句话，拿到就送去合成；`Play` 是播一句提前合成好的。已经问完的题在上下文里只留一行概括，所以每轮发给模型的内容大小不随面试变长。追问次数、时间够不够、换题、提前结束都由代码决定，规则和逐题模式相同。
+每轮调一次模型，流式输出，第一行就是决定（追问、回应、下一题、结束、重念题目、接着听）。`sink` 陆续收到 `LiveEvent`：`Speak` 是现场生成的一句话，拿到就送去合成；`Play` 是播一句提前合成好的。已经问完的题在上下文里只留一行概括，所以每轮发给模型的内容大小不随面试变长。追问次数、时间够不够、换题、提前结束都由代码决定，规则和逐题模式相同。
 
-实测模型大约 1 秒做出决定，一场面试的模型费用两三分钱。做法、实测数字、整条链路的延迟预算和还没解决的问题见 [docs/realtime.md](docs/realtime.md)。
+候选人只是停了一下时也可以来问，用 `live::respond_with` 多传一个 `TurnContext`：`paused` 表示只是停了一下，模型觉得话没说完就回答「接着听」，说完了就照常给出怎么接，不用另外调一次模型判断；`interrupted` 表示候选人打断了面试官、断在哪里，引擎算出候选人实际听到了哪一部分，没听全题目就重念。
+
+实测模型大约 1 秒做出决定，一场面试的模型费用两三分钱；停顿和打断的 29 个例子各跑 3 遍，87 次里判对 86 到 87 次。做法、实测数字、整条链路的延迟预算和还没解决的问题见 [docs/realtime.md](docs/realtime.md)。
 
 ## 用真模型试
 
@@ -106,9 +108,10 @@ let outcome = live::respond(&model, &plan, &config, &state, &turn, &mut sink).aw
 cargo run -p interview-engine --example plan -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
 cargo run -p interview-engine --example simulate -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json lost
 cargo run -p interview-engine --example converse -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
+cargo run -p interview-engine --example turn_taking -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
 ```
 
-`simulate` 让模型扮演候选人，人设有 `strong`（经验扎实）、`vague`（说话空泛）、`faker`（简历注水）、`lost`（大多答不上来）、`quitter`（中途不想面了）。`converse` 是实时对话模式的同一件事，多一个人设 `curious`（爱反问、最后会提问），最后一个参数可以写 `off`、`low`、`high`、`max` 指定思考强度。`fixtures/` 里的岗位和简历都是编的。
+`simulate` 让模型扮演候选人，人设有 `strong`（经验扎实）、`vague`（说话空泛）、`faker`（简历注水）、`lost`（大多答不上来）、`quitter`（中途不想面了）。`converse` 是实时对话模式的同一件事，多一个人设 `curious`（爱反问、最后会提问），最后一个参数可以写 `off`、`low`、`high`、`max` 指定思考强度。`turn_taking` 测实时对话里候选人停顿时「说完了没有」和被打断以后怎么接，一组有标准答案的例子，打印判对了多少、用了多久。`fixtures/` 里的岗位和简历都是编的。
 
 2026-11-13 用 deepseek-flash 实测：
 

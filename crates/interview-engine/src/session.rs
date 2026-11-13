@@ -21,7 +21,7 @@ pub const SESSION_SCHEMA_VERSION: u32 = 1;
 /// 连续几道题完全没有回答就提前结束。
 const NO_RESPONSE_LIMIT: u32 = 2;
 /// 同一句话最多应候选人要求重复几次。
-const MAX_REPEATS: u32 = 1;
+pub(crate) const MAX_REPEATS: u32 = 1;
 /// 超过预期时长这个比例之后，不再问可以跳过的题，也不再追问。
 const SOFT_OVERRUN_PERCENT: u64 = 110;
 /// 超过预期时长这个比例之后，直接收尾。
