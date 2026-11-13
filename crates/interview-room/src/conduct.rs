@@ -424,6 +424,8 @@ async fn start_interview(
         };
     }
     let mut resumed_at = None;
+    // 刚开始的实时对话：用什么语言。提交之后拿它去把常说的接话提前合成好
+    let mut warm_up = None;
     let step = match (row.status, stored_state(interview_id, &row)?) {
         (InterviewStatus::InProgress, Some(state)) => {
             resumed_at = Some(row.elapsed_ms(Utc::now()));
@@ -435,6 +437,7 @@ async fn start_interview(
             let opened = if realtime::enabled(&deps, &config).await {
                 let state = realtime::open(&deps, &plan, &config)?;
                 realtime::save(&mut tx, interview_id, &state).await?;
+                warm_up = Some(config.language);
                 Opened::Realtime(Box::new(state))
             } else {
                 let (state, step) = room::open(&plan, &config).map_err(engine_error)?;
@@ -472,6 +475,9 @@ async fn start_interview(
         }
     };
     tx.commit().await?;
+    if let Some(language) = warm_up {
+        realtime::warm_up(&deps, interview_id, language);
+    }
     let step = match step {
         Opened::Scripted(step) => decorate(&deps, interview_id, &step).await?,
         Opened::Realtime(state) => realtime::current_step(&deps, interview_id, &state).await?,

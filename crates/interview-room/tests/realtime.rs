@@ -152,6 +152,14 @@ impl ChatModel for SlowWriter {
     }
 }
 
+/// 不提前合成常说的接话：别的测试要数现场合成了哪几句，不想把这两句算进去。
+fn no_warm_up() -> RoomConfig {
+    RoomConfig {
+        realtime_warm_up: false,
+        ..RoomConfig::default()
+    }
+}
+
 struct Setup {
     app: TestApp,
     model: Arc<ScriptedModel>,
@@ -166,7 +174,7 @@ async fn setup_with(
 ) -> Setup {
     let model = Arc::new(model);
     let voice = Arc::new(voice);
-    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+    let deps = Deps::new(testing::test_context(pool), no_warm_up())
         .with_llm(Some(model.clone()))
         .with_transcriber(transcriber)
         .with_voice(voice.clone());
@@ -544,7 +552,7 @@ async fn the_next_question_does_not_wait_for_the_model_to_finish_writing(pool: P
         ("next adequate\n", "负责库存服务。"),
         ("next adequate\n", "二"),
     ]));
-    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+    let deps = Deps::new(testing::test_context(pool), no_warm_up())
         .with_llm(Some(model.clone()))
         .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
         .with_voice(Arc::new(FakeVoice::default()));
@@ -1251,7 +1259,7 @@ async fn cutting_in_on_a_sentence_released_early_waits_for_the_rest_of_the_turn(
         ("next adequate\n", "负责库存服务。"),
         ("repeat", ""),
     ]));
-    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+    let deps = Deps::new(testing::test_context(pool), no_warm_up())
         .with_llm(Some(model.clone()))
         .with_transcriber(FakeTranscriber::says("等一下，我还没说完。"))
         .with_voice(Arc::new(FakeVoice::default()));
@@ -1308,4 +1316,63 @@ async fn the_closing_cannot_be_cut_in_on_and_scripted_interviews_never_offer_it(
     let (_, token) = prepared(&app, json!({})).await;
     let first = start(&app, &token).await;
     assert!(first.get("barge_in").is_none(), "逐题模式没有插话：{first}");
+}
+
+/// 等到假声音念过的话和 `expected` 一样，最多等两秒。
+async fn wait_spoken(voice: &FakeVoice, expected: &[&str]) -> Vec<String> {
+    for _ in 0..100 {
+        let spoken = voice.spoken.lock().unwrap().clone();
+        if spoken == expected {
+            return spoken;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    voice.spoken.lock().unwrap().clone()
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_usual_openers_are_voiced_as_soon_as_a_conversation_starts(pool: PgPool) {
+    let voice = Arc::new(FakeVoice::default());
+    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+        .with_llm(Some(Arc::new(ScriptedModel::new())))
+        .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
+        .with_voice(voice.clone());
+    let app = common::app_from(deps).await;
+
+    // 实时对话一开始，就把面试官现场最常说的头一句念一遍：真引擎念这样一句也要两秒，
+    // 念过的有缓存，候选人答完马上能听到
+    let (_, token) = prepared(&app, conversational()).await;
+    let opening = start(&app, &token).await;
+    assert_eq!(key(&opening), "opening");
+    assert_eq!(
+        wait_spoken(&voice, &["明白。", "好的。"]).await,
+        ["明白。", "好的。"]
+    );
+
+    // 断线重连不是重新开始，不再念一遍
+    start(&app, &token).await;
+    // 逐题模式没有现场说的话，不用备
+    let (_, token) = prepared(&app, json!({})).await;
+    start(&app, &token).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(*voice.spoken.lock().unwrap(), ["明白。", "好的。"]);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_voice_that_cannot_speak_does_not_get_in_the_way_of_starting(pool: PgPool) {
+    let voice = Arc::new(FakeVoice {
+        broken: true,
+        ..FakeVoice::default()
+    });
+    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+        .with_llm(Some(Arc::new(ScriptedModel::new())))
+        .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
+        .with_voice(voice.clone());
+    let app = common::app_from(deps).await;
+
+    let (_, token) = prepared(&app, conversational()).await;
+    let opening = start(&app, &token).await;
+    assert_eq!(key(&opening), "opening");
+    let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
+    assert_eq!(key(&q1), "q1");
 }
