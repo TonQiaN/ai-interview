@@ -25,6 +25,7 @@ import {
 import type { Candidate, InterviewConfig, Position } from "../api/types";
 import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import { QueryView, SearchInput } from "../components/common";
+import { VoicePicker } from "../components/VoicePicker";
 
 function PickCandidate({
   selected,
@@ -153,6 +154,7 @@ export function InterviewNewPage() {
   const [position, setPosition] = useState<Position | null>(null);
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [config, setConfig] = useState<InterviewConfig | null>(null);
+  const [voiceId, setVoiceId] = useState<string | null>(null);
 
   // 从候选人页或岗位页点过来时，先替他选好
   const candidateParam = params.get("candidate");
@@ -186,6 +188,7 @@ export function InterviewNewPage() {
           candidate_id: candidate.id,
           position_id: position.id,
           template_id: templateId,
+          voice_id: voiceId,
           config: cleanConfig(config),
         },
         prepare,
@@ -236,7 +239,7 @@ export function InterviewNewPage() {
               : "这位候选人还没有解析好的简历，面试官只能按岗位要求出题。"}
           </Banner>
           <Card>
-            <CardBody>
+            <CardBody className="adm-form-grid">
               <Field label="从哪份设置开始" hint="选一个模板，下面的内容可以再改，只对这一场生效。">
                 {({ id, describedBy }) => (
                   <Select
@@ -254,6 +257,12 @@ export function InterviewNewPage() {
                   </Select>
                 )}
               </Field>
+              <VoicePicker
+                value={voiceId}
+                onChange={setVoiceId}
+                disabled={create.isPending}
+                error={fieldErrors(create.error).voice_id}
+              />
             </CardBody>
           </Card>
           {config && (

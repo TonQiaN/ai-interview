@@ -1122,4 +1122,51 @@
   .adm-voice__consent {
     margin: var(--oil-space-2) 0 0;
   }
+  .adm-voice__list {
+    margin-top: var(--oil-space-4);
+  }
+  .adm-voice {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .adm-voice .adm-item__main {
+    flex-basis: 16rem;
+  }
+  .adm-voice__actions {
+    justify-content: flex-end;
+  }
+  .adm-voice__player {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--oil-space-3);
+    margin-top: var(--oil-space-3);
+  }
+  .adm-voice__player audio,
+  .adm-voice__audio {
+    height: 2.5rem;
+    max-width: 100%;
+  }
+  .adm-voice__audio {
+    display: block;
+    margin-top: var(--oil-space-3);
+  }
+  .adm-voice__reference,
+  .adm-voice__try {
+    padding: var(--oil-space-4);
+    border: 1px solid var(--oil-line);
+    border-radius: var(--oil-radius-md);
+  }
+  .adm-voice__reference-title {
+    flex: 1 1 12rem;
+    min-width: 0;
+  }
+  .adm-voice__more > summary {
+    cursor: pointer;
+    color: var(--oil-ink-2);
+    font-size: var(--oil-text-sm);
+  }
+  .adm-voice__more[open] > summary {
+    margin-bottom: var(--oil-space-3);
+  }
 }
