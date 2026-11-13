@@ -27,6 +27,15 @@ scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息
 
 真模型测试读 `DEEPSEEK_API_KEY`，会产生少量费用，云端容器里可以直接跑：`cargo test -p interview-llm --test live -- --ignored --nocapture`。
 
+面试引擎用真模型出题和模拟面试（同样读 `DEEPSEEK_API_KEY`，出一份题约 0.1 元，模拟一场不到 0.02 元）：
+
+```bash
+cargo run -p interview-engine --example plan -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
+cargo run -p interview-engine --example simulate -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
+```
+
+改了出题或判断回答的提示词，要用这两个命令实际跑一遍看结果，单元测试用的是假模型，测不出提示词的好坏。
+
 ## 目录
 
 完整的归属表在 `docs/architecture/README.md`，这里是速查：

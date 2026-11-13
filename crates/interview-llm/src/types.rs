@@ -3,9 +3,10 @@
 use std::ops::{Add, AddAssign};
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// 思考强度。DeepSeek 只有这三档。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Effort {
     /// 简单任务，最快。
@@ -31,7 +32,7 @@ impl Effort {
 /// 思考模式：一个开关加一个强度。
 ///
 /// 关着的时候强度不起作用，但会保留，这样界面上关了再开不会丢掉原来选的档位。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 pub struct Thinking {
     /// 是否开启思考。
     pub enabled: bool,
@@ -256,6 +257,15 @@ pub struct ChatRequest {
 }
 
 impl ChatRequest {
+    /// 所有消息的文字按顺序拼在一起。测试里用来检查到底给模型发了什么。
+    pub fn text(&self) -> String {
+        self.messages
+            .iter()
+            .map(|message| message.content.as_text())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     pub fn new(messages: Vec<Message>) -> Self {
         Self {
             messages,
@@ -317,7 +327,7 @@ pub enum FinishReason {
 }
 
 /// token 用量。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
 pub struct Usage {
     /// 输入 token，等于缓存命中加未命中。
     pub prompt_tokens: u64,

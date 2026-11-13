@@ -12,6 +12,7 @@ publish = false
 [workspace.dependencies]
 # 内部 crate
 interview-audio = { path = "crates/interview-audio" }
+interview-engine = { path = "crates/interview-engine" }
 interview-llm = { path = "crates/interview-llm" }
 interview-raas = { path = "crates/interview-raas" }
 interview-report = { path = "crates/interview-report" }
