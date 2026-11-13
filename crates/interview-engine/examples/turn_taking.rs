@@ -318,7 +318,12 @@ async fn main() -> Result<()> {
             "这块主要是我们组长在弄，我就是配合一下，具体的不太了解。".into(),
             SPOKE,
         ),
-        ("收尾的话".into(), "嗯，大概就是这样。".into(), SPOKE),
+        // 前面没有别的回答，光这一句等于没答：模型有时当成追问，有时当成把候选人带回题目的回应
+        (
+            "收尾的话".into(),
+            "嗯，大概就是这样。".into(),
+            &[LiveAction::Probe, LiveAction::Next, LiveAction::Reply],
+        ),
         // 回答一句再把问题带回来，模型有时记成回应、有时记成追问，说出来的话是一样的
         (
             "反问".into(),
@@ -346,6 +351,38 @@ async fn main() -> Result<()> {
             expected,
         });
     }
+
+    // 候选人说的话和题目无关（像是收到了别的声音）：先带回一次，还是无关就往下走，不能当成候选人要求结束
+    let off_topic =
+        "现在完成时表示过去发生的动作对现在造成的影响，一般过去时只是说过去发生过这件事。";
+    cases.push(Case {
+        group: "说完了",
+        label: "答非所问，第一次".into(),
+        state: at_second.clone(),
+        turn: said(off_topic, 100_000),
+        context: PAUSED,
+        expected: &[LiveAction::Reply],
+    });
+    let brought_back = advance(
+        &plan,
+        config,
+        &at_second,
+        "reply no_answer\n不好意思，我们回到刚才这道题，你方便说一下吗？",
+        off_topic,
+        100_000,
+    )
+    .await?;
+    cases.push(Case {
+        group: "说完了",
+        label: "答非所问，带回过一次还是无关".into(),
+        state: brought_back,
+        turn: said(
+            "西红柿炒鸡蛋要先把鸡蛋炒到七成熟盛出来，再下西红柿炒出汁。",
+            130_000,
+        ),
+        context: PAUSED,
+        expected: &[LiveAction::Next],
+    });
 
     cases.push(Case {
         group: "说完了",
