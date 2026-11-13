@@ -116,21 +116,32 @@ async fn parse(deps: &Deps, task: &Task, payload: &ParsePayload, last_attempt: b
         }
     };
 
-    // 第二步：主简历的内容用来补全候选人的基本信息和生成画像
-    if !resume.is_primary {
-        return Ok(Some(json!({ "parsed": true, "profile": false })));
+    // 第二步：主简历的内容用来补全候选人的基本信息和生成画像。
+    // 是不是主简历不能看开头读到的那一眼：读简历和写画像各要十几秒，这期间可能有更新的简历
+    // 传上来顶替了它。所以每次往候选人身上写的时候再确认，不是主简历了就不写
+    let still_primary = candidates::fill_from_resume(
+        db,
+        resume.candidate_id,
+        resume.id,
+        &parsed,
+        payload.adopt_name,
+    )
+    .await?;
+    if !still_primary {
+        return finish(deps, resume.id, false).await;
     }
-    candidates::fill_from_resume(db, resume.candidate_id, &parsed, payload.adopt_name).await?;
     let Some(llm) = deps.llm.clone() else {
-        return Ok(Some(json!({ "parsed": true, "profile": false })));
+        return finish(deps, resume.id, false).await;
     };
     let notes = candidates::get(db, resume.candidate_id)
         .await?
         .and_then(|candidate| candidate.notes);
     match build_profile(deps, llm, &parsed, notes.as_deref(), Some(task.id)).await {
         Ok(profile) => {
-            candidates::set_profile(db, resume.candidate_id, &profile).await?;
-            Ok(Some(json!({ "parsed": true, "profile": true })))
+            let saved =
+                candidates::set_profile_from_resume(db, resume.candidate_id, resume.id, &profile)
+                    .await?;
+            finish(deps, resume.id, saved).await
         }
         Err(TalentError::Llm(error)) if error.is_retryable() && !last_attempt => {
             Err(TaskError::retry(error))
@@ -138,9 +149,23 @@ async fn parse(deps: &Deps, task: &Task, payload: &ParsePayload, last_attempt: b
         // 画像生成不出来不算简历解析失败：简历已经能用了，画像可以之后手动重新生成
         Err(error) => {
             tracing::warn!(candidate_id = %resume.candidate_id, %error, "简历解析好了，但画像没有生成出来");
-            Ok(Some(json!({ "parsed": true, "profile": false })))
+            finish(deps, resume.id, false).await
         }
     }
+}
+
+/// 任务收尾。
+///
+/// 任务跑的过程中如果有人点了「重新解析」，上次的结果已经被清掉，而那次请求排的任务
+/// 因为和我们是同一份简历，被并到了我们这一个上。这时不能当作做完了，要再跑一遍，
+/// 不然简历会一直停在「排队中」没人管。
+async fn finish(deps: &Deps, resume_id: Uuid, profile: bool) -> TaskResult {
+    if resumes::is_pending(&deps.ctx.db, resume_id).await? {
+        return Err(TaskError::retry(anyhow::anyhow!(
+            "解析过程中又被要求重新解析，再跑一遍"
+        )));
+    }
+    Ok(Some(json!({ "parsed": true, "profile": profile })))
 }
 
 /// 读简历出错了：是文件的问题就直接标失败，是大模型一时的问题就重试。
