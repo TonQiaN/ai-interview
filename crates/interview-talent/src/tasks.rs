@@ -58,6 +58,14 @@ const LLM_DOWN: &str = "大模型暂时不可用，简历没有解析成。请�
 const FILE_MISSING: &str = "简历原件找不到了，请重新上传";
 const UNFINISHED: &str = "解析中途出错，没有完成。请点「重新解析」";
 
+/// 给 HR 看的提示：文件太长，只读了前面一部分。
+fn too_many_pages(read: usize) -> String {
+    format!(
+        "这份文件页数太多，只读了前 {read} 页，后面的内容没有读到。\
+         后面如果还有工作经历或项目，请把简历精简到 {read} 页以内再上传"
+    )
+}
+
 async fn run_parse(deps: &Deps, task: &Task) -> TaskResult {
     let payload: ParsePayload = task.payload_as()?;
     let last_attempt = task.attempts >= task.max_attempts;
@@ -108,7 +116,15 @@ async fn parse(deps: &Deps, task: &Task, payload: &ParsePayload, last_attempt: b
                 .await;
             match reading {
                 Ok(reading) => {
-                    resumes::mark_done(db, resume.id, &reading.text, &reading.parsed).await?;
+                    let warning = reading.pages_read_of_longer_file.map(too_many_pages);
+                    resumes::mark_done(
+                        db,
+                        resume.id,
+                        &reading.text,
+                        &reading.parsed,
+                        warning.as_deref(),
+                    )
+                    .await?;
                     reading.parsed
                 }
                 Err(error) => return give_up_or_retry(deps, resume.id, error, last_attempt).await,
