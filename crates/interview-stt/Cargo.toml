@@ -22,12 +22,18 @@ tokio = { workspace = true, features = ["rt", "sync", "time"] }
 
 [dev-dependencies]
 anyhow.workspace = true
+futures-util.workspace = true
+interview-llm.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [[example]]
 name = "transcribe"
+required-features = ["sherpa"]
+
+[[example]]
+name = "realtime_latency"
 required-features = ["sherpa"]
 
 [[test]]
