@@ -100,7 +100,7 @@ let outcome = live::respond(&model, &plan, &config, &state, &turn, &mut sink).aw
 
 候选人只是停了一下时也可以来问，用 `live::respond_with` 多传一个 `TurnContext`：`paused` 表示只是停了一下，模型觉得话没说完就回答「接着听」，说完了就照常给出怎么接，不用另外调一次模型判断；`interrupted` 表示候选人打断了面试官、断在哪里，引擎算出候选人实际听到了哪一部分，没听全题目就重念。
 
-实测模型大约 1 秒做出决定，一场面试的模型费用两三分钱；停顿和打断的 31 个例子各跑 3 遍，最近两遍 186 次全对。做法、实测数字、整条链路的延迟预算和还没解决的问题见 [docs/realtime.md](docs/realtime.md)。
+实测模型大约 1 秒做出决定，一场面试的模型费用两三分钱；停顿和打断的 31 个例子各跑 3 遍，最近两遍 186 次里对了 184 次。做法、实测数字、整条链路的延迟预算和还没解决的问题见 [docs/realtime.md](docs/realtime.md)。
 
 ## 用真模型试
 
