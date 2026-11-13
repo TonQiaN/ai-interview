@@ -1522,10 +1522,12 @@ name = "interview-room"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "chrono",
  "interview-core",
  "interview-engine",
+ "interview-llm",
  "interview-platform",
  "serde",
  "serde_json",
