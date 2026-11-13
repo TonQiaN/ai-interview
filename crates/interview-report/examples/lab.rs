@@ -316,22 +316,32 @@ async fn main() -> Result<()> {
     }
 }
 
-/// 包在模型外面：输出没有正常结束时把结束原因打印出来。
+/// 包在模型外面：输出没有正常结束，或者要的是 JSON 却解析不了时，把当时的情况打印出来。
 ///
-/// 模型偶尔会在 JSON 写到一半时停下，分析那边只看得到「JSON 的结构不对」（issue #114），
-/// 这里把当时的结束原因留下来，方便判断是服务端的问题还是别的。
+/// 模型偶尔会交出一份不完整的 JSON，分析那边只看得到「JSON 的结构不对」（issue #114）。
+/// 这里把结束原因和正文的最后一段留下来，方便判断是输出被打断了还是模型自己少写了括号。
+/// 样例都是合成数据，打印正文不涉及个人信息。
 struct ReportUnfinished<M>(M);
 
 #[async_trait]
 impl<M: ChatModel> ChatModel for ReportUnfinished<M> {
     async fn chat_stream(&self, request: ChatRequest) -> Result<ChatStream, LlmError> {
+        let wants_json = request.json_output;
         let events = self.0.chat_stream(request).await?;
-        Ok(Box::pin(events.inspect(|event| match event {
-            Ok(StreamEvent::Done(response)) if response.finish_reason != FinishReason::Stop => {
+        Ok(Box::pin(events.inspect(move |event| match event {
+            Ok(StreamEvent::Done(response)) => {
+                let broken = wants_json
+                    && !response.content.trim().is_empty()
+                    && serde_json::from_str::<serde_json::Value>(&response.content).is_err();
+                if response.finish_reason == FinishReason::Stop && !broken {
+                    return;
+                }
+                let chars: Vec<char> = response.content.chars().collect();
+                let tail: String = chars[chars.len().saturating_sub(160)..].iter().collect();
                 eprintln!(
-                    "模型的输出没有正常结束：结束原因 {:?}，正文 {} 个字符，输出 {} token（其中思考 {}）",
+                    "模型的输出有问题：结束原因 {:?}，正文 {} 个字符，输出 {} token（其中思考 {}），正文结尾：{tail:?}",
                     response.finish_reason,
-                    response.content.chars().count(),
+                    chars.len(),
                     response.usage.completion_tokens,
                     response.usage.reasoning_tokens
                 );
