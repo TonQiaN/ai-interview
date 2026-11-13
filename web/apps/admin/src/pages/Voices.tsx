@@ -17,7 +17,7 @@ import {
 } from "@ai-interview/ui";
 import { AudioLines, Mic, Plus, Star, Trash2, Wand2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { errorMessage } from "../api/http";
+import { errorMessage, isMock } from "../api/http";
 import {
   useCreateVoice,
   useDeleteVoice,
@@ -342,7 +342,20 @@ function VoiceRow({
 }
 
 /** 面试官的声音：三个语音合成引擎的状态，和可以选的音色。 */
+/** 管理引擎和音色的接口后端还没做，真后端下先说明情况，不去请求 */
 export function VoicesPage() {
+  if (isMock) return <VoicesDemo />;
+  return (
+    <>
+      <PageHeader title="声音" description="面试官用哪个引擎、哪个音色说话。" />
+      <Banner tone="info" title="声音管理还在接入">
+        管理引擎和音色的接口还在开发。现在每场面试都用系统默认的引擎和音色，三个引擎之间的切换由部署时的设置决定。
+      </Banner>
+    </>
+  );
+}
+
+function VoicesDemo() {
   const engines = useEngines();
   const voices = useVoices();
   const remove = useDeleteVoice();
@@ -354,7 +367,7 @@ export function VoicesPage() {
     <>
       <PageHeader
         title="声音"
-        description="面试官用哪个引擎、哪个音色说话。三个引擎可以随时切换，每场面试也可以单独选。"
+        description="面试官用哪个引擎、哪个音色说话。三个引擎可以随时切换。"
         actions={
           <Button
             icon={<Plus aria-hidden="true" />}

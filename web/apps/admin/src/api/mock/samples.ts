@@ -22,8 +22,12 @@ import pmReport from "../../../../../../crates/interview-report/samples/reports/
 import salesReport from "../../../../../../crates/interview-report/samples/reports/sales-early-exit.json";
 import salesRecord from "../../../../../../crates/interview-report/samples/sales-early-exit.json";
 import type {
+  InterviewConfig,
   InterviewEvent,
+  InterviewPlan,
   InterviewReport,
+  PlannedQuestion,
+  QuestionCategory,
   Recording,
   Speaker,
   Turn,
@@ -85,60 +89,157 @@ export type SampleName = keyof typeof samples;
 const OPENING =
   "你好，我是这一轮的 AI 面试官。接下来我会逐题提问，你正常回答就行，答完可以说「我说完了」。准备好我们就开始。";
 const CLOSING = "今天的问题就到这里。后续结果会由招聘团队统一通知你，感谢你的时间。";
+const CLOSING_EARLY = "好的，那今天就先到这里。后续安排会由招聘团队和你联系，感谢你的时间。";
+const NUDGE = "你还在吗？如果需要再想一想，可以告诉我。";
+const REPEAT = "没关系，我再说一遍。";
+const ACKS = ["好的，谢谢。", "明白了，我们看下一题。"];
+const CANDIDATE_QUESTIONS = "我的问题问完了。你有什么想了解的吗？我会记下来转给招聘团队。";
 
-/** 题目按问的顺序排：每道题后面跟着它的追问 */
-function ordered(questions: SampleQuestion[]): SampleQuestion[] {
-  const top = questions.filter((q) => !q.parent_id);
-  return top.flatMap((q) => [q, ...questions.filter((f) => f.parent_id === q.id)]);
+/** 按题目的问法猜一个分类，只用来让演示数据看起来像样 */
+function categoryOf(q: SampleQuestion, index: number): QuestionCategory {
+  if (/假设|如果/.test(q.text)) return "situational";
+  if (/为什么.*(离开|选择|想)|期望|打算/.test(q.text)) return "motivation";
+  if (/推理|估算|多少/.test(q.text)) return "logic";
+  if (index === 0 || /简历|项目|经历/.test(q.text)) return "resume_verification";
+  return "professional";
 }
 
-/** 面试官要说的话。plannedOnly 为真时只要提前准备好的（不带现场追问） */
-export function sampleUtterances(name: SampleName, plannedOnly: boolean): Utterance[] {
+const COMPETENCY: Record<QuestionCategory, string> = {
+  warmup: "热身",
+  resume_verification: "经历真实性",
+  professional: "专业能力",
+  behavioral: "行为表现",
+  situational: "分析和应对",
+  logic: "逻辑推理",
+  motivation: "求职动机",
+  screening: "基本条件",
+  other: "其他",
+};
+
+/** 样例里的评分标准是一句话，用分号隔开「好的表现」和「差的表现」 */
+function scoring(guide: string): PlannedQuestion["scoring"] {
+  const [strong = guide, ...weak] = guide.split("；");
+  return { strong_signals: [strong], weak_signals: weak, red_flags: [] };
+}
+
+/** 一份样例对应的题目计划，结构和 AI 引擎出的一样 */
+export function samplePlan(name: SampleName, config: InterviewConfig): InterviewPlan {
   const { record } = samples[name];
-  const speak = (text: string) => text.length * 260;
-  const line = (
-    key: string,
-    kind: Utterance["kind"],
-    text: string,
-    intent: string | null,
-    sec: number | null,
-    live = false,
-  ): Utterance => ({
-    key,
-    kind,
-    text,
-    intent,
-    suggested_answer_sec: sec,
-    source: live ? "live" : "planned",
-    synth_status: "done",
-    audio_duration_ms: speak(text),
+  const top = record.questions.filter((q) => !q.parent_id);
+  const focus = new Set(record.config.focus_points);
+  const questions = top.map((q, index): PlannedQuestion => {
+    const category = categoryOf(q, index);
+    return {
+      key: q.id,
+      text: q.text,
+      intent: q.intent,
+      category,
+      competency: COMPETENCY[category],
+      expected_answer_sec: category === "resume_verification" ? 150 : 100,
+      origin: focus.size > 0 && index === 2 ? "focus" : "generated",
+      required: index < top.length - 1,
+      reserve: false,
+      follow_ups: config.follow_ups.enabled
+        ? record.questions
+            .filter((f) => f.parent_id === q.id)
+            .slice(0, config.follow_ups.max_per_question)
+            .map((f) => ({
+              key: f.id,
+              text: f.text,
+              ask_when: "回答比较笼统、没有讲到自己具体怎么做的时候",
+            }))
+        : [],
+      scoring: scoring(q.scoring_guide),
+    };
   });
-  const questions = ordered(record.questions)
-    .filter((q) => !plannedOnly || !q.parent_id)
-    .map((q) =>
-      line(
-        q.id,
-        q.parent_id ? "follow_up" : "question",
-        q.text,
-        q.intent,
-        q.parent_id ? 60 : 120,
-        Boolean(q.parent_id),
-      ),
-    );
-  return [
-    line("opening", "opening", OPENING, null, null),
-    ...questions,
-    line("closing", "closing", CLOSING, null, null),
-  ];
+  const names = [...new Set(questions.map((q) => q.competency))];
+  return {
+    schema_version: 1,
+    expected_duration_sec: config.target_duration_minutes * 60,
+    brief: {
+      role_summary: record.job.description.split("要求：")[0] ?? record.job.description,
+      candidate_summary: "简历和岗位方向对得上，几段经历里自己负责的部分需要在面试里核实。",
+      competencies: names.map((n) => ({ name: n, description: "", weight: 3 })),
+      must_haves: record.job.must_have,
+      nice_to_haves: record.job.nice_to_have,
+      matches: record.job.must_have.slice(0, 2),
+      gaps: record.job.nice_to_have.slice(0, 1).map((item) => `简历里没有提到：${item}`),
+      verify_points: record.config.focus_points,
+    },
+    phrases: {
+      opening: OPENING,
+      closing: CLOSING,
+      closing_early: CLOSING_EARLY,
+      nudge: NUDGE,
+      repeat: REPEAT,
+      acks: ACKS,
+      candidate_questions: config.candidate_questions === "collect" ? CANDIDATE_QUESTIONS : null,
+    },
+    questions,
+    generation: {
+      model: "deepseek-flash",
+      llm_calls: 3,
+      review_notes: [],
+      system_fingerprint: null,
+      usage: {
+        prompt_tokens: 5200,
+        completion_tokens: 2100,
+        reasoning_tokens: 1800,
+        cache_hit_tokens: 0,
+        cache_miss_tokens: 5200,
+      },
+    },
+  };
+}
+
+/** 一份计划里面试官要说的每一句话，顺序和键跟后端一致 */
+export function planUtterances(plan: InterviewPlan, synthesized: boolean): Utterance[] {
+  const list: Utterance[] = [];
+  const push = (key: string, kind: Utterance["kind"], text: string) => {
+    list.push({
+      key,
+      kind,
+      seq: list.length + 1,
+      source: "planned",
+      text,
+      synth_status: synthesized ? "done" : "pending",
+      synth_error: null,
+      has_audio: synthesized,
+      audio_duration_ms: synthesized ? text.length * 260 : null,
+      tts_engine: synthesized ? "index2" : null,
+    });
+  };
+  push("opening", "opening", plan.phrases.opening);
+  for (const q of plan.questions) {
+    push(q.key, "question", q.text);
+    for (const f of q.follow_ups ?? []) push(f.key, "follow_up", f.text);
+  }
+  plan.phrases.acks.forEach((ack, index) => {
+    push(`ack.${index + 1}`, "transition", ack);
+  });
+  push("nudge", "other", plan.phrases.nudge);
+  push("repeat", "other", plan.phrases.repeat);
+  if (plan.phrases.candidate_questions) {
+    push("candidate_questions", "question", plan.phrases.candidate_questions);
+  }
+  push("closing", "closing", plan.phrases.closing);
+  push("closing_early", "closing", plan.phrases.closing_early);
+  return list;
 }
 
 export interface SampleInterview {
   durationMs: number;
-  utterances: Utterance[];
   turns: Turn[];
   events: InterviewEvent[];
   recordings: Recording[];
 }
+
+/** 成对的事件：离开的那条在前，回来的那条带离开了多久 */
+const RETURN_KIND: Record<string, string> = {
+  visibility_hidden: "visibility_visible",
+  window_blur: "window_focus",
+  network_offline: "network_online",
+};
 
 /** 把一份样例记录变成回看页要的几样东西。startedAt 是面试开始的时刻（毫秒时间戳） */
 export function sampleInterview(
@@ -162,57 +263,80 @@ export function sampleInterview(
       text: s.text,
       start_ms: s.start_ms,
       end_ms: s.end_ms,
+      words: [],
+      confidence: s.speaker === "candidate" ? 0.93 : null,
       transcript_source: "final",
+      end_reason: s.speaker === "candidate" ? "silence" : null,
     };
   });
   const at = (ms: number) => new Date(startedAt + ms).toISOString();
+  const event = (
+    id: string,
+    kind: string,
+    atMs: number | null,
+    occurredAt: string,
+    payload: Record<string, unknown> = {},
+    source = "client",
+  ): InterviewEvent => ({ id, kind, at_ms: atMs, occurred_at: occurredAt, source, payload });
   const events: InterviewEvent[] = [
-    {
-      id: "e0",
-      kind: "device_check",
-      at_ms: null,
-      occurred_at: at(-90_000),
-      duration_ms: null,
-      detail: "摄像头、麦克风、网络正常",
-    },
-    ...record.events.map(
-      (e): InterviewEvent => ({
-        id: e.id,
-        kind: e.kind,
-        at_ms: e.at_ms,
-        occurred_at: at(e.at_ms),
-        duration_ms: e.duration_ms ?? null,
-        detail: e.detail ?? null,
-      }),
-    ),
+    event("e0a", "page_opened", null, at(-150_000), {
+      signals: ["visibility", "fullscreen", "device_change", "network", "clipboard"],
+      in_app_browser: null,
+    }),
+    event("e0b", "device_check", null, at(-90_000), { result: "passed" }),
+    event("e0c", "interview_started", 0, at(0), {}, "server"),
   ];
-  const recordings: Recording[] = [
-    {
-      id: makeId(),
-      track: "camera",
-      mime_type: "video/webm",
-      start_ms: 0,
-      duration_ms: record.duration_ms,
-      size_bytes: Math.round(record.duration_ms * 95),
-      media_url: null,
-    },
-    {
-      id: makeId(),
-      track: "microphone",
-      mime_type: "audio/webm",
-      start_ms: 0,
-      duration_ms: record.duration_ms,
-      size_bytes: Math.round(record.duration_ms * 6),
-      media_url: null,
-    },
-  ];
-  return {
-    durationMs: record.duration_ms,
-    utterances: sampleUtterances(name, false),
-    turns,
-    events,
-    recordings,
-  };
+  for (const e of record.events) {
+    const back = RETURN_KIND[e.kind];
+    if (back) {
+      // 报告里的出处指的是离开的那一条，id 保持不变
+      events.push(event(e.id, e.kind, e.at_ms, at(e.at_ms)));
+      const gone = e.duration_ms ?? 0;
+      events.push(
+        event(`${e.id}b`, back, e.at_ms + gone, at(e.at_ms + gone), { duration_ms: gone }),
+      );
+    } else if (e.kind === "paste" || e.kind === "copy") {
+      events.push(event(e.id, e.kind, e.at_ms, at(e.at_ms), { chars: 180 }));
+    } else if (e.kind === "face_count_changed") {
+      const payload = { count: Number(e.detail ?? 1) };
+      events.push(event(e.id, e.kind, e.at_ms, at(e.at_ms), payload, "analysis"));
+    } else {
+      events.push(event(e.id, e.kind, e.at_ms, at(e.at_ms), e.detail ? { detail: e.detail } : {}));
+    }
+  }
+  events.push(
+    event("e9", "interview_finished", record.duration_ms, at(record.duration_ms), {}, "server"),
+  );
+  events.sort((a, b) => a.occurred_at.localeCompare(b.occurred_at));
+
+  // 断过网的那一场录像分成两段，回看时要接起来放
+  const cut = record.events.find((e) => e.kind === "network_offline");
+  const spans = cut
+    ? [
+        { start: 0, end: cut.at_ms },
+        { start: cut.at_ms + (cut.duration_ms ?? 0), end: record.duration_ms },
+      ]
+    : [{ start: 0, end: record.duration_ms }];
+  const recordings = (["camera", "microphone"] as const).flatMap((track) =>
+    spans.map((span, segment): Recording => {
+      const duration = span.end - span.start;
+      return {
+        id: makeId(),
+        track,
+        segment,
+        content_type: track === "camera" ? "video/webm" : "audio/webm",
+        status: "ready",
+        size_bytes: Math.round(duration * (track === "camera" ? 95 : 6)),
+        start_ms: span.start,
+        duration_ms: duration,
+        error: null,
+        // 演示数据里没有真的录像文件
+        media_url: null,
+        created_at: at(span.start),
+      };
+    }),
+  );
+  return { durationMs: record.duration_ms, turns, events, recordings };
 }
 
 /** 这场面试的报告：换上真正的面试 ID 和生成时间 */

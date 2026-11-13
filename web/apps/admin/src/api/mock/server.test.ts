@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   Candidate,
   CandidateDetail,
+  CreatedInvite,
   ImportedCandidate,
   Interview,
-  InterviewReport,
+  InterviewPlan,
+  InterviewSummary,
   Invite,
   Page,
   Position,
@@ -12,8 +14,11 @@ import type {
   RaasCandidateImportItem,
   RaasPosition,
   RaasPositionImportItem,
+  ReportBrief,
+  ReportEnvelope,
   Resume,
   ResumeDetail,
+  Turn,
   Utterance,
 } from "../types";
 import { createMockServer } from "./server";
@@ -74,18 +79,16 @@ describe("假后端", () => {
 
   it("面试列表能按状态筛选，并分页", async () => {
     await login(server);
-    const all = await call<Page<Interview>>(server, "GET", "/interviews?page_size=100");
+    const all = await call<Page<InterviewSummary>>(server, "GET", "/interviews?page_size=100");
     expect(all.data.total).toBe(all.data.items.length);
-    const done = await call<Page<Interview>>(
+    const done = await call<Page<InterviewSummary>>(
       server,
       "GET",
-      "/interviews?status=completed,abandoned&page_size=100",
+      "/interviews?status=completed&page_size=100",
     );
     expect(done.data.items.length).toBeGreaterThan(0);
-    expect(done.data.items.every((i) => i.status === "completed" || i.status === "abandoned")).toBe(
-      true,
-    );
-    const firstPage = await call<Page<Interview>>(server, "GET", "/interviews?page_size=3");
+    expect(done.data.items.every((i) => i.status === "completed")).toBe(true);
+    const firstPage = await call<Page<InterviewSummary>>(server, "GET", "/interviews?page_size=3");
     expect(firstPage.data.items).toHaveLength(3);
     expect(firstPage.data.total).toBe(all.data.total);
   });
@@ -100,56 +103,111 @@ describe("假后端", () => {
     const created = await call<Interview>(server, "POST", "/interviews", {
       candidate_id: candidate.id,
       position_id: position.id,
-      config: template.config,
+      template_id: template.id,
     });
     expect(created.data.status).toBe("draft");
+    // 没有传设置时用模板的
+    expect(created.data.config).toEqual(template.config);
+    expect(created.data.has_plan).toBe(false);
     const id = created.data.id;
 
-    // 草稿还不能发链接
+    // 草稿还没有题目，也不能发链接
+    expect((await call(server, "GET", `/interviews/${id}/plan`)).status).toBe(404);
     expect(
-      (await call(server, "POST", `/interviews/${id}/invites`, { expires_in_days: 7 })).status,
+      (await call(server, "POST", `/interviews/${id}/invites`, { expires_in_hours: 72 })).status,
     ).toBe(409);
 
     expect((await call<Interview>(server, "POST", `/interviews/${id}/prepare`)).data.status).toBe(
       "preparing",
     );
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(20_000);
     const ready = await call<Interview>(server, "GET", `/interviews/${id}`);
     expect(ready.data.status).toBe("ready");
-    const utterances = await call<{ items: Utterance[] }>(
-      server,
-      "GET",
-      `/interviews/${id}/utterances`,
-    );
-    expect(utterances.data.items.every((u) => u.synth_status === "done")).toBe(true);
-    expect(utterances.data.items.some((u) => u.kind === "follow_up")).toBe(false);
+    expect(ready.data.has_plan).toBe(true);
+    const utterances = await call<Utterance[]>(server, "GET", `/interviews/${id}/utterances`);
+    expect(utterances.data.length).toBe(ready.data.synth.total);
+    expect(utterances.data.every((u) => u.synth_status === "done")).toBe(true);
 
-    const invite = await call<Invite>(server, "POST", `/interviews/${id}/invites`, {
-      expires_in_days: 7,
+    // 改一句题目：整份计划交回去，只有改过的那句重新合成
+    const plan = await call<InterviewPlan>(server, "GET", `/interviews/${id}/plan`);
+    const first = plan.data.questions[0];
+    if (!first) throw new Error("计划里应该有题目");
+    const edited = {
+      ...plan.data,
+      questions: plan.data.questions.map((q, i) => (i === 0 ? { ...q, text: "换一个问法" } : q)),
+    };
+    expect((await call(server, "PUT", `/interviews/${id}/plan`, edited)).status).toBe(200);
+    await vi.advanceTimersByTimeAsync(20_000);
+    const after = await call<Utterance[]>(server, "GET", `/interviews/${id}/utterances`);
+    expect(after.data.find((u) => u.key === first.key)?.text).toBe("换一个问法");
+    expect((await call<Interview>(server, "GET", `/interviews/${id}`)).data.status).toBe("ready");
+
+    const invite = await call<CreatedInvite>(server, "POST", `/interviews/${id}/invites`, {
+      expires_in_hours: 72,
     });
     expect(invite.data.url).toMatch(/\/i\/#\w+/);
+    expect(invite.data.invite.status).toBe("active");
     expect((await call<Interview>(server, "GET", `/interviews/${id}`)).data.status).toBe("invited");
+    // 之后再查，拿不到完整的链接
     const listed = await call<{ items: Invite[] }>(server, "GET", `/interviews/${id}/invites`);
-    expect(listed.data.items.map((x) => x.url)).toEqual([null]);
+    expect(listed.data.items).toHaveLength(1);
+    expect(JSON.stringify(listed.data)).not.toContain(invite.data.url);
 
-    // 已经发出链接就不能再改题
-    expect((await call(server, "PUT", `/interviews/${id}/plan`, { items: [] })).status).toBe(409);
+    // 再生成一个，旧的就作废了
+    await call<CreatedInvite>(server, "POST", `/interviews/${id}/invites`, {});
+    const both = await call<{ items: Invite[] }>(server, "GET", `/interviews/${id}/invites`);
+    expect(both.data.items.map((x) => x.status).sort()).toEqual(["active", "revoked"]);
+
+    // 已经发出链接就不能再改设置和题目
+    expect((await call(server, "PUT", `/interviews/${id}/plan`, edited)).status).toBe(409);
+    const patched = await call<{ error: { code: string } }>(server, "PATCH", `/interviews/${id}`, {
+      config: template.config,
+    });
+    expect(patched.status).toBe(409);
+    expect(patched.data.error.code).toBe("interview_not_editable");
   });
 
-  it("报告没生成出来时接口是 404，重新生成后拿得到", async () => {
+  it("设置不合规时返回 422，按字段说明原因", async () => {
     await login(server);
-    const failed = server.db.interviews.find((i) => i.report_status === "failed");
+    const candidate = server.db.candidates[0];
+    const position = server.db.positions[0];
+    const template = server.db.templates[0];
+    if (!candidate || !position || !template) throw new Error("演示数据不完整");
+    const bad = await call<{ error: { code: string; details: Record<string, string> } }>(
+      server,
+      "POST",
+      "/interviews",
+      {
+        candidate_id: candidate.id,
+        position_id: position.id,
+        config: { ...template.config, target_duration_minutes: 500 },
+      },
+    );
+    expect(bad.status).toBe(422);
+    expect(bad.data.error.code).toBe("validation_failed");
+    expect(bad.data.error.details.target_duration_minutes).toBeTruthy();
+  });
+
+  it("报告没生成出来时接口是 404，重新生成后是新的一版", async () => {
+    await login(server);
+    const failed = server.db.interviews.find((i) => i.report?.status === "failed");
     if (!failed) throw new Error("演示数据里应该有一场报告失败的面试");
-    expect(failed.report_error).toBeTruthy();
-    expect((await call(server, "GET", `/interviews/${failed.id}/report`)).status).toBe(404);
+    expect(failed.report?.error).toBeTruthy();
+    const missing = await call<{ error: { code: string } }>(
+      server,
+      "GET",
+      `/interviews/${failed.id}/report`,
+    );
+    expect(missing.status).toBe(404);
+    expect(missing.data.error.code).toBe("report_not_ready");
 
     const started = await call<Interview>(
       server,
       "POST",
       `/interviews/${failed.id}/report/regenerate`,
     );
-    expect(started.data.report_status).toBe("running");
-    expect(started.data.report_error).toBeNull();
+    expect(started.data.report?.status).toBe("running");
+    expect(started.data.report?.version).toBe(2);
     // 生成中不能再点一次
     expect((await call(server, "POST", `/interviews/${failed.id}/report/regenerate`)).status).toBe(
       409,
@@ -157,40 +215,75 @@ describe("假后端", () => {
 
     await vi.advanceTimersByTimeAsync(200);
     const done = await call<Interview>(server, "GET", `/interviews/${failed.id}`);
-    expect(done.data.report_status).toBe("done");
-    const report = await call<InterviewReport>(server, "GET", `/interviews/${failed.id}/report`);
+    expect(done.data.report?.status).toBe("done");
+    const report = await call<ReportEnvelope>(server, "GET", `/interviews/${failed.id}/report`);
     expect(report.status).toBe(200);
-    expect(report.data.interview_id).toBe(failed.id);
-    expect(done.data.recommendation).toBe(report.data.recommendation.decision);
-    expect(done.data.overall_score).toBe(report.data.overall_score);
+    expect(report.data.version).toBe(2);
+    expect(report.data.content.interview_id).toBe(failed.id);
+    const versions = await call<{ items: ReportBrief[] }>(
+      server,
+      "GET",
+      `/interviews/${failed.id}/reports`,
+    );
+    expect(versions.data.items.map((v) => [v.version, v.status])).toEqual([
+      [2, "done"],
+      [1, "failed"],
+    ]);
   });
 
   it("没面完的面试不能生成报告", async () => {
     await login(server);
     const draft = server.db.interviews.find((i) => i.status === "draft");
     if (!draft) throw new Error("演示数据里应该有一场草稿");
-    expect((await call(server, "POST", `/interviews/${draft.id}/report/regenerate`)).status).toBe(
-      409,
+    const refused = await call<{ error: { code: string } }>(
+      server,
+      "POST",
+      `/interviews/${draft.id}/report/regenerate`,
     );
+    expect(refused.status).toBe(409);
+    expect(refused.data.error.code).toBe("interview_not_finished");
   });
 
-  it("面完的面试都有回看的内容，列表上的建议和报告一致", async () => {
+  it("面完的面试都有回看的内容和报告", async () => {
     await login(server);
-    for (const interview of server.db.interviews.filter((i) => i.report_status === "done")) {
-      const transcript = await call<{ turns: unknown[]; duration_ms: number }>(
+    const finished = server.db.interviews.filter((i) => i.report?.status === "done");
+    expect(finished.length).toBeGreaterThan(0);
+    for (const interview of finished) {
+      const transcript = await call<{ items: Turn[] }>(
         server,
         "GET",
         `/interviews/${interview.id}/transcript`,
       );
-      expect(transcript.data.turns.length).toBeGreaterThan(0);
-      expect(transcript.data.duration_ms).toBe(interview.duration_ms);
-      const report = await call<InterviewReport>(
+      expect(transcript.data.items.length).toBeGreaterThan(0);
+      const recordings = await call<{ items: unknown[] }>(
+        server,
+        "GET",
+        `/interviews/${interview.id}/recordings`,
+      );
+      expect(recordings.data.items.length).toBeGreaterThan(0);
+      const report = await call<ReportEnvelope>(
         server,
         "GET",
         `/interviews/${interview.id}/report`,
       );
-      expect(report.data.recommendation.decision).toBe(interview.recommendation);
+      expect(report.data.content.interview_id).toBe(interview.id);
     }
+  });
+
+  it("记下录用决定，列表上跟着变", async () => {
+    await login(server);
+    const interview = server.db.interviews.find(
+      (i) => i.status === "completed" && i.decision === "pending",
+    );
+    if (!interview) throw new Error("演示数据里应该有一场还没做决定的面试");
+    const decided = await call<Interview>(server, "PUT", `/interviews/${interview.id}/decision`, {
+      decision: "hold",
+      note: "等二面排期",
+    });
+    expect(decided.data.decision).toBe("hold");
+    expect(decided.data.decision_note).toBe("等二面排期");
+    const list = await call<Page<InterviewSummary>>(server, "GET", "/interviews?page_size=100");
+    expect(list.data.items.find((i) => i.id === interview.id)?.decision).toBe("hold");
   });
 
   it("从 RAAS 导入岗位后，这个岗位标成已导入；再导一次不会重复建", async () => {

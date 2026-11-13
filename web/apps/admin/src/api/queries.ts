@@ -7,13 +7,14 @@ import type {
   CandidateInput,
   CandidateListItem,
   ConfigDefaults,
+  CreatedInvite,
   Decision,
   ImportedCandidate,
   Interview,
-  InterviewConfig,
   InterviewEvent,
   InterviewInput,
-  InterviewReport,
+  InterviewPatch,
+  InterviewPlan,
   InterviewSummary,
   InterviewTemplate,
   Invite,
@@ -28,11 +29,14 @@ import type {
   RaasPositionImportItem,
   RaasStatus,
   Recording,
+  ReportBrief,
+  ReportEnvelope,
   Resume,
   ResumeDetail,
   SpeechEngine,
   SystemStatus,
-  Transcript,
+  TemplateInput,
+  Turn,
   Utterance,
   Voice,
   VoiceInput,
@@ -402,10 +406,11 @@ export function useConfigDefaults() {
   });
 }
 
+/** 模板不会很多，一次取完 */
 export function useTemplates() {
   return useQuery({
     queryKey: ["templates"],
-    queryFn: () => http.get<List<InterviewTemplate>>("/interview-templates"),
+    queryFn: () => http.get<Page<InterviewTemplate>>("/interview-templates", { page_size: 100 }),
   });
 }
 
@@ -417,17 +422,10 @@ export function useTemplate(id: string | undefined) {
   });
 }
 
-export interface TemplateInput {
-  name: string;
-  description: string | null;
-  config: InterviewConfig;
-  is_default?: boolean;
-}
-
 export function useSaveTemplate(id?: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: Partial<TemplateInput>) =>
+    mutationFn: (input: TemplateInput) =>
       id
         ? http.patch<InterviewTemplate>(`/interview-templates/${id}`, input)
         : http.post<InterviewTemplate>("/interview-templates", input),
@@ -448,6 +446,9 @@ export function useDeleteTemplate() {
 
 // ───────── 面试 ─────────
 
+const reportBusy = (status: string | null | undefined) =>
+  status === "running" || status === "pending";
+
 export function useInterviews(query: Query = {}, enabled = true) {
   return useQuery({
     queryKey: ["interviews", query],
@@ -455,7 +456,7 @@ export function useInterviews(query: Query = {}, enabled = true) {
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: (q) =>
-      q.state.data?.items.some((i) => i.status === "preparing" || i.report_status === "running")
+      q.state.data?.items.some((i) => i.status === "preparing" || reportBusy(i.report_status))
         ? 2000
         : 30_000,
   });
@@ -470,7 +471,7 @@ export function useInterview(id: string | undefined) {
       const i = q.state.data;
       if (!i) return false;
       if (i.status === "preparing") return 800;
-      if (i.report_status === "running" || i.report_status === "pending") return 2000;
+      if (reportBusy(i.report?.status)) return 2000;
       if (i.status === "invited" || i.status === "in_progress") return 10_000;
       return false;
     },
@@ -482,7 +483,7 @@ export function useCreateInterview() {
   return useMutation({
     mutationFn: async ({ input, prepare }: { input: InterviewInput; prepare: boolean }) => {
       const created = await http.post<Interview>("/interviews", input);
-      return prepare ? http.post<Interview>(`/interviews/${created.id}/prepare`) : created;
+      return prepare ? http.post<Interview>(`/interviews/${created.id}/prepare`, {}) : created;
     },
     onSuccess: (i) => {
       qc.invalidateQueries({ queryKey: ["interviews"] });
@@ -508,16 +509,20 @@ function useInterviewAction<TInput, TOutput>(
   });
 }
 
-export const useUpdateInterviewConfig = (id: string) =>
+/** 改设置、换简历会让已经出好的题目作废；只换声音的话题目留着，语音重新合成 */
+export const useUpdateInterview = (id: string) =>
   useInterviewAction(
     id,
-    (config: InterviewConfig) => http.patch<Interview>(`/interviews/${id}`, { config }),
-    ["utterances"],
+    (patch: InterviewPatch) => http.patch<Interview>(`/interviews/${id}`, patch),
+    ["plan", "utterances"],
   );
 export const usePrepareInterview = (id: string) =>
-  useInterviewAction<void, Interview>(id, () => http.post<Interview>(`/interviews/${id}/prepare`), [
-    "utterances",
-  ]);
+  useInterviewAction(
+    id,
+    (regeneratePlan: boolean) =>
+      http.post<Interview>(`/interviews/${id}/prepare`, { regenerate_plan: regeneratePlan }),
+    ["plan", "utterances"],
+  );
 export const useCancelInterview = (id: string) =>
   useInterviewAction<void, Interview>(id, () => http.post<Interview>(`/interviews/${id}/cancel`), [
     "invites",
@@ -530,13 +535,14 @@ export const useRegenerateReport = (id: string) =>
   useInterviewAction<void, Interview>(
     id,
     () => http.post<Interview>(`/interviews/${id}/report/regenerate`),
-    ["report"],
+    ["report", "reports"],
   );
+/** 生成面试链接。完整的链接只在这一次返回，之后查不到 */
 export const useCreateInvite = (id: string) =>
   useInterviewAction(
     id,
-    (expiresInDays: number) =>
-      http.post<Invite>(`/interviews/${id}/invites`, { expires_in_days: expiresInDays }),
+    (expiresInHours: number) =>
+      http.post<CreatedInvite>(`/interviews/${id}/invites`, { expires_in_hours: expiresInHours }),
     ["invites"],
   );
 export const useRevokeInvite = (id: string) =>
@@ -545,12 +551,12 @@ export const useRevokeInvite = (id: string) =>
     (inviteId: string) => http.delete(`/interviews/${id}/invites/${inviteId}`),
     ["invites"],
   );
-export const useEditPlan = (id: string) =>
+/** 保存改过的题目。要把整份计划交回去，改过的句子会重新合成语音 */
+export const useSavePlan = (id: string) =>
   useInterviewAction(
     id,
-    (items: { key: string; text: string }[]) =>
-      http.put<List<Utterance>>(`/interviews/${id}/plan`, { items }),
-    ["utterances"],
+    (plan: InterviewPlan) => http.put<InterviewPlan>(`/interviews/${id}/plan`, plan),
+    ["plan", "utterances"],
   );
 
 export function useDeleteInterview() {
@@ -561,16 +567,29 @@ export function useDeleteInterview() {
   });
 }
 
+/** 题目计划。还没出题时是 null */
+export function usePlan(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["plan", id],
+    queryFn: async () => {
+      try {
+        return await http.get<InterviewPlan>(`/interviews/${id}/plan`);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+    enabled,
+  });
+}
+
+/** 面试官要说的每一句话和它的语音合成进度。polling 为真时一秒刷一次 */
 export function useUtterances(id: string, enabled = true, polling = false) {
   return useQuery({
     queryKey: ["utterances", id],
-    queryFn: () => http.get<List<Utterance>>(`/interviews/${id}/utterances`),
+    queryFn: () => http.get<Utterance[]>(`/interviews/${id}/utterances`),
     enabled,
-    refetchInterval: (q) =>
-      polling ||
-      q.state.data?.items.some((u) => u.synth_status === "running" || u.synth_status === "pending")
-        ? 1000
-        : false,
+    refetchInterval: polling ? 1000 : false,
   });
 }
 
@@ -585,7 +604,7 @@ export function useInvites(id: string, enabled = true) {
 export function useTranscript(id: string, enabled = true) {
   return useQuery({
     queryKey: ["transcript", id],
-    queryFn: () => http.get<Transcript>(`/interviews/${id}/transcript`),
+    queryFn: () => http.get<List<Turn>>(`/interviews/${id}/transcript`),
     enabled,
   });
 }
@@ -598,24 +617,46 @@ export function useRecordings(id: string, enabled = true) {
   });
 }
 
+/** 一场面试的全部过程事件，按发生的先后排。接口是分页的，这里翻到底 */
 export function useEvents(id: string, enabled = true) {
   return useQuery({
     queryKey: ["events", id],
-    queryFn: () => http.get<List<InterviewEvent>>(`/interviews/${id}/events`),
+    queryFn: async () => {
+      const items: InterviewEvent[] = [];
+      for (let page = 1; page <= 20; page += 1) {
+        const got = await http.get<Page<InterviewEvent>>(`/interviews/${id}/events`, {
+          page,
+          page_size: 100,
+        });
+        items.push(...got.items);
+        if (items.length >= got.total || got.items.length === 0) break;
+      }
+      items.sort((a, b) => a.occurred_at.localeCompare(b.occurred_at));
+      return { items };
+    },
+    enabled,
+  });
+}
+
+/** 这场面试生成过的报告版本，新的在前 */
+export function useReportVersions(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["reports", id],
+    queryFn: () => http.get<List<ReportBrief>>(`/interviews/${id}/reports`),
     enabled,
   });
 }
 
 /**
- * 分析报告。只有 report_status 是 done 时才有；生成中、失败看面试详情里的 report_status 和 report_error。
- * ready 传 false 时不请求。
+ * 分析报告。不给 version 就是最新生成好的那一版；还没有生成好的版本时是 null。
+ * 生成中、失败看面试详情里的 `report`。ready 传 false 时不请求。
  */
-export function useReport(id: string, ready: boolean) {
+export function useReport(id: string, ready: boolean, version?: number) {
   return useQuery({
-    queryKey: ["report", id],
+    queryKey: ["report", id, version ?? "latest"],
     queryFn: async () => {
       try {
-        return await http.get<InterviewReport>(`/interviews/${id}/report`);
+        return await http.get<ReportEnvelope>(`/interviews/${id}/report`, { version });
       } catch (e) {
         if (e instanceof ApiError && e.status === 404) return null;
         throw e;

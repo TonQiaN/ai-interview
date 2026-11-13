@@ -39,7 +39,7 @@ export function SettingsPage() {
           />
           <CardBody>
             <QueryView query={defaults}>
-              {({ config, limits, models }) => (
+              {({ config, limits }) => (
                 <>
                   <p className="adm-report-intro">
                     没有选模板时，新安排的面试用这一套：{configSummary(config)}。
@@ -48,7 +48,7 @@ export function SettingsPage() {
                     items={[
                       [
                         "预期时长",
-                        `${limits.expected_duration_min.min} 到 ${limits.expected_duration_min.max} 分钟`,
+                        `${limits.target_duration_minutes.min} 到 ${limits.target_duration_minutes.max} 分钟`,
                       ],
                       [
                         "题目数",
@@ -56,14 +56,11 @@ export function SettingsPage() {
                       ],
                       [
                         "停顿多久算答完",
-                        `${limits.silence_sec.presets.join("、")} 秒，也可以在 ${limits.silence_sec.min} 到 ${limits.silence_sec.max} 秒之间自己定`,
+                        `${limits.silence_sec.suggested.join("、")} 秒，也可以在 ${limits.silence_sec.min} 到 ${limits.silence_sec.max} 秒之间自己定`,
                       ],
-                      [
-                        "一题最多答多久",
-                        `${limits.max_answer_sec.min} 到 ${limits.max_answer_sec.max} 秒`,
-                      ],
-                      ["语速", `${limits.speed.min} 到 ${limits.speed.max} 倍`],
-                      ["大模型", models.map((m) => m.name).join("、")],
+                      ["一题最多答多久", `${limits.max_sec.min} 到 ${limits.max_sec.max} 秒`],
+                      ["每题最多追问", `${limits.follow_ups_per_question.max} 次`],
+                      ["大模型", "DeepSeek Flash，思考可以开关，强度分三档"],
                     ]}
                   />
                 </>

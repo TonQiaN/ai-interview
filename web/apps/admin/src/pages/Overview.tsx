@@ -3,7 +3,7 @@ import { ArrowRight, Plus } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { useInterviews, useMe, useSystemStatus } from "../api/queries";
 import type { InterviewSummary } from "../api/types";
-import { Empty, Person, QueryView, RecommendationBadge, StatusBadge } from "../components/common";
+import { DecisionBadge, Empty, Person, QueryView, StatusBadge } from "../components/common";
 import { SystemStatusList } from "../components/SystemStatusList";
 import { relativeTime } from "../lib/format";
 
@@ -12,9 +12,9 @@ function todoOf(i: InterviewSummary): string | null {
   if (i.status === "prepare_failed") return "题目没准备好，去重试";
   if (i.status === "draft") return "还没生成题目";
   if (i.status === "ready") return "可以发链接了";
-  if (i.status === "completed" && i.report_status === "failed") return "报告生成失败，去重新生成";
-  if (i.status === "completed" && i.report_status === "done" && i.decision === "undecided")
-    return "报告好了，等你决定";
+  const ended = i.status === "completed" || i.status === "abandoned";
+  if (ended && i.report_status === "failed") return "报告生成失败，去重新生成";
+  if (ended && i.report_status === "done" && i.decision === "pending") return "报告好了，等你决定";
   return null;
 }
 
@@ -57,10 +57,7 @@ export function OverviewPage() {
           const live = items.filter((i) => i.status === "in_progress").length;
           const waiting = items.filter((i) => i.status === "invited").length;
           const done = items.filter((i) => i.status === "completed");
-          const scored = done.filter((i) => i.overall_score !== null);
-          const average = scored.length
-            ? Math.round(scored.reduce((sum, i) => sum + (i.overall_score ?? 0), 0) / scored.length)
-            : null;
+          const advanced = items.filter((i) => i.decision === "advance").length;
           return (
             <>
               <div className="adm-stats adm-section">
@@ -68,11 +65,7 @@ export function OverviewPage() {
                 <Stat label="正在面试" value={live} unit="场" />
                 <Stat label="已发链接，等候选人" value={waiting} unit="场" />
                 <Stat label="已完成" value={done.length} unit="场" />
-                <Stat
-                  label="平均得分"
-                  value={average ?? "—"}
-                  unit={average === null ? undefined : "分"}
-                />
+                <Stat label="决定进入下一轮" value={advanced} unit="人" />
               </div>
 
               <div className="adm-split adm-section">
@@ -89,8 +82,8 @@ export function OverviewPage() {
                           <li key={i.id} className="adm-item">
                             <div className="adm-item__main">
                               <Person
-                                name={i.candidate.name}
-                                sub={i.position.title}
+                                name={i.candidate_name}
+                                sub={i.position_title}
                                 to={`/interviews/${i.id}`}
                               />
                             </div>
@@ -99,7 +92,7 @@ export function OverviewPage() {
                               size="sm"
                               variant="ghost"
                               iconOnly
-                              aria-label={`打开 ${i.candidate.name} 的面试`}
+                              aria-label={`打开 ${i.candidate_name} 的面试`}
                               onClick={() => navigate(`/interviews/${i.id}`)}
                             >
                               <ArrowRight aria-hidden="true" />
@@ -150,15 +143,12 @@ export function OverviewPage() {
                           <li key={i.id} className="adm-item">
                             <div className="adm-item__main">
                               <Person
-                                name={i.candidate.name}
-                                sub={`${i.position.title} · ${relativeTime(i.updated_at)}`}
+                                name={i.candidate_name}
+                                sub={`${i.position_title} · ${relativeTime(i.updated_at)}`}
                                 to={`/interviews/${i.id}`}
                               />
                             </div>
-                            {i.overall_score !== null && (
-                              <strong className="oil-num">{i.overall_score} 分</strong>
-                            )}
-                            <RecommendationBadge value={i.recommendation} />
+                            <DecisionBadge value={i.decision} />
                             <StatusBadge status={i.status} />
                           </li>
                         ))}
