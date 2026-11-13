@@ -10,12 +10,21 @@ function bytes(text: string): ArrayBuffer {
 }
 
 function segment(sessionKey: string, segmentId: string, startMs: number): SegmentMeta {
-  return { sessionKey, track: "camera", segmentId, mimeType: "video/webm", startMs, totalChunks: null };
+  return {
+    sessionKey,
+    track: "camera",
+    segmentId,
+    mimeType: "video/webm",
+    startMs,
+    totalChunks: null,
+  };
 }
 
 describe("sha256Hex", () => {
   it("和标准测试向量一致", async () => {
-    expect(await sha256Hex(bytes("abc"))).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    expect(await sha256Hex(bytes("abc"))).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
   });
 });
 
@@ -32,7 +41,10 @@ describe.each(implementations)("%s", (_name, create) => {
     await store.putSegment(segment("a", "early", 1000));
     await store.putSegment(segment("b", "other", 2000));
 
-    expect((await store.listSegments("a")).map((item) => item.segmentId)).toEqual(["early", "late"]);
+    expect((await store.listSegments("a")).map((item) => item.segmentId)).toEqual([
+      "early",
+      "late",
+    ]);
     expect((await store.listSegments("b")).map((item) => item.segmentId)).toEqual(["other"]);
     expect(await store.listSegments("none")).toEqual([]);
   });
@@ -41,15 +53,29 @@ describe.each(implementations)("%s", (_name, create) => {
     const store = await create();
     await store.putSegment(segment("a", "s1", 1000));
     await store.putSegment({ ...segment("a", "s1", 1000), totalChunks: 7 });
-    expect(await store.listSegments("a")).toEqual([{ ...segment("a", "s1", 1000), totalChunks: 7 }]);
+    expect(await store.listSegments("a")).toEqual([
+      { ...segment("a", "s1", 1000), totalChunks: 7 },
+    ]);
   });
 
   it("分片按序号排序，清单只带序号和大小", async () => {
     const store = await create();
     for (const seq of [2, 0, 10, 1]) {
-      await store.putChunk({ sessionKey: "a", segmentId: "s1", seq, bytes: bytes("x".repeat(seq + 1)), sha256: "h" });
+      await store.putChunk({
+        sessionKey: "a",
+        segmentId: "s1",
+        seq,
+        bytes: bytes("x".repeat(seq + 1)),
+        sha256: "h",
+      });
     }
-    await store.putChunk({ sessionKey: "a", segmentId: "s2", seq: 0, bytes: bytes("other"), sha256: "h" });
+    await store.putChunk({
+      sessionKey: "a",
+      segmentId: "s2",
+      seq: 0,
+      bytes: bytes("other"),
+      sha256: "h",
+    });
 
     expect(await store.listChunks("a", "s1")).toEqual([
       { seq: 0, size: 1 },
@@ -62,7 +88,13 @@ describe.each(implementations)("%s", (_name, create) => {
   it("读回的内容和写入的一致", async () => {
     const store = await create();
     const content = bytes("第一片录制内容");
-    await store.putChunk({ sessionKey: "a", segmentId: "s1", seq: 0, bytes: content, sha256: "abc" });
+    await store.putChunk({
+      sessionKey: "a",
+      segmentId: "s1",
+      seq: 0,
+      bytes: content,
+      sha256: "abc",
+    });
 
     const chunk = await store.getChunk({ sessionKey: "a", segmentId: "s1", seq: 0 });
     expect(chunk?.sha256).toBe("abc");
@@ -73,8 +105,20 @@ describe.each(implementations)("%s", (_name, create) => {
   it("删除分片和段", async () => {
     const store = await create();
     await store.putSegment(segment("a", "s1", 1000));
-    await store.putChunk({ sessionKey: "a", segmentId: "s1", seq: 0, bytes: bytes("x"), sha256: "h" });
-    await store.putChunk({ sessionKey: "a", segmentId: "s1", seq: 1, bytes: bytes("y"), sha256: "h" });
+    await store.putChunk({
+      sessionKey: "a",
+      segmentId: "s1",
+      seq: 0,
+      bytes: bytes("x"),
+      sha256: "h",
+    });
+    await store.putChunk({
+      sessionKey: "a",
+      segmentId: "s1",
+      seq: 1,
+      bytes: bytes("y"),
+      sha256: "h",
+    });
 
     await store.deleteChunk({ sessionKey: "a", segmentId: "s1", seq: 0 });
     expect(await store.listChunks("a", "s1")).toEqual([{ seq: 1, size: 1 }]);
@@ -93,7 +137,13 @@ describe("IndexedDbChunkStore", () => {
     const factory = new IDBFactory();
     const first = await IndexedDbChunkStore.open(factory);
     await first.putSegment(segment("a", "s1", 1000));
-    await first.putChunk({ sessionKey: "a", segmentId: "s1", seq: 0, bytes: bytes("还在"), sha256: "h" });
+    await first.putChunk({
+      sessionKey: "a",
+      segmentId: "s1",
+      seq: 0,
+      bytes: bytes("还在"),
+      sha256: "h",
+    });
     first.close();
 
     const second = await IndexedDbChunkStore.open(factory);

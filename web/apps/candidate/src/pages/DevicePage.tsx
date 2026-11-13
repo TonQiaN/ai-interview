@@ -1,4 +1,11 @@
-import { Banner, Button, DeviceCheckCard, type DeviceCheckState, Stage, Steps } from "@ai-interview/ui";
+import {
+  Banner,
+  Button,
+  DeviceCheckCard,
+  type DeviceCheckState,
+  Stage,
+  Steps,
+} from "@ai-interview/ui";
 import { Camera, Mic, Volume2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CameraPreview } from "../components/CameraPreview";
@@ -23,7 +30,16 @@ export interface DevicePageProps {
 const MIC_HELP_AFTER_MS = 15_000;
 
 export function DevicePage(props: DevicePageProps) {
-  const { room, device, cameraStream, subscribeLevel, onRequest, onPlayTestSound, onConfirmSpeaker, onNext } = props;
+  const {
+    room,
+    device,
+    cameraStream,
+    subscribeLevel,
+    onRequest,
+    onPlayTestSound,
+    onConfirmSpeaker,
+    onNext,
+  } = props;
   const granted = device.permission === "granted";
 
   // 麦克风迟迟没反应时，给出提示，也不把候选人卡死在这一步
@@ -42,7 +58,12 @@ export function DevicePage(props: DevicePageProps) {
   const allPassed = granted && device.micHeard && speakerDone;
   const canContinue = allPassed || (granted && speakerDone && micSlow);
 
-  const pending: DeviceCheckState = device.permission === "requesting" ? "checking" : device.permission === "failed" ? "failed" : "idle";
+  const pending: DeviceCheckState =
+    device.permission === "requesting"
+      ? "checking"
+      : device.permission === "failed"
+        ? "failed"
+        : "idle";
   const error = device.error ? MEDIA_ERROR_TEXT[device.error] : null;
 
   return (
@@ -54,7 +75,13 @@ export function DevicePage(props: DevicePageProps) {
             {allPassed || !canContinue ? "下一步" : "麦克风没反应，仍然继续"}
           </Button>
         ) : (
-          <Button size="lg" block variant="accent" loading={device.permission === "requesting"} onClick={onRequest}>
+          <Button
+            size="lg"
+            block
+            variant="accent"
+            loading={device.permission === "requesting"}
+            onClick={onRequest}
+          >
             {device.permission === "failed" ? "重新检测" : "允许使用摄像头和麦克风"}
           </Button>
         )
@@ -117,7 +144,15 @@ export function DevicePage(props: DevicePageProps) {
       </DeviceCheckCard>
 
       <DeviceCheckCard
-        state={granted ? (speakerDone ? "passed" : device.speaker === "playing" ? "checking" : "idle") : "idle"}
+        state={
+          granted
+            ? speakerDone
+              ? "passed"
+              : device.speaker === "playing"
+                ? "checking"
+                : "idle"
+            : "idle"
+        }
         icon={<Volume2 />}
         title="扬声器或耳机"
         description={

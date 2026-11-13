@@ -89,7 +89,10 @@ export class EnergyVad {
     this.updateFloor(level, frameMs);
 
     const enterDb = Math.max(this.floorDb + config.enterMarginDb, config.minEnterDb);
-    const exitDb = Math.max(this.floorDb + config.exitMarginDb, config.minEnterDb - (config.enterMarginDb - config.exitMarginDb));
+    const exitDb = Math.max(
+      this.floorDb + config.exitMarginDb,
+      config.minEnterDb - (config.enterMarginDb - config.exitMarginDb),
+    );
 
     if (!this.speaking) {
       if (level >= enterDb) {

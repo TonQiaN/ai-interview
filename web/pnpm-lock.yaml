@@ -66,6 +66,9 @@ importers:
 
   apps/candidate:
     dependencies:
+      '@ai-interview/api-client':
+        specifier: workspace:*
+        version: link:../../packages/api-client
       '@ai-interview/ui':
         specifier: workspace:*
         version: link:../../packages/ui

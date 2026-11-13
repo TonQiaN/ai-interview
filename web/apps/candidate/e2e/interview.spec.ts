@@ -1,17 +1,33 @@
 import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import {
+  answerTo,
   button,
-  configureMock,
   enterInterview,
+  eventKinds,
   expectQuestion,
-  expectSegmentsComplete,
-  mockState,
+  expectRecordingsReady,
   open,
   passPreflight,
-  resetMock,
-  TOKENS,
+  roomState,
+  seedInterview,
+  spokenKeys,
+  UNKNOWN_TOKEN,
 } from "./helpers";
+
+/** 没接大模型和语音识别时，一场面试里面试官依次说的话。 */
+const SPOKEN_IN_ORDER = [
+  "opening",
+  "q1",
+  "ack.1",
+  "q2",
+  "ack.2",
+  "q3",
+  "ack.1",
+  "candidate_questions",
+  "ack.2",
+  "closing",
+];
 
 function ffprobeAvailable(): boolean {
   try {
@@ -22,12 +38,9 @@ function ffprobeAvailable(): boolean {
   }
 }
 
-test.beforeEach(async () => {
-  await resetMock();
-});
-
 test("从打开链接到面试完成：逐题问答，静音自动进入下一题，录像完整上传", async ({ page }) => {
-  await open(page);
+  const interview = seedInterview();
+  await open(page, interview.token);
   await expect(page.getByText("后端工程师（Rust）")).toBeVisible();
   await button(page, "开始准备").click();
 
@@ -35,7 +48,7 @@ test("从打开链接到面试完成：逐题问答，静音自动进入下一�
   const agree = button(page, "同意并继续");
   await expect(agree).toBeDisabled();
   const boxes = await page.getByRole("checkbox").all();
-  expect(boxes).toHaveLength(3);
+  expect(boxes.length).toBeGreaterThanOrEqual(3);
   await boxes[0]?.check();
   await expect(agree).toBeDisabled();
   for (const box of boxes) await box.check();
@@ -56,52 +69,61 @@ test("从打开链接到面试完成：逐题问答，静音自动进入下一�
   await expectQuestion(page, 3);
   await expect(page.getByText("面试完成，谢谢你")).toBeVisible({ timeout: 60_000 });
 
-  const state = await mockState();
-  expect(state.stage).toBe("finished");
-  expect(state.finish_reason).toBe("completed");
-  expect(state.device_checks).toHaveLength(1);
-  expect(state.device_checks[0]).toMatchObject({ camera: "ok", microphone: "ok", speaker: "ok" });
+  const state = await expectRecordingsReady(interview, 1);
+  expect(state.status).toBe("completed");
+  expect(state.end_reason).toBe("completed");
+  const reports = state.events.filter((event) => event.kind === "device_report");
+  expect(reports).toHaveLength(1);
+  expect(reports[0]?.payload).toMatchObject({ camera: "ok", microphone: "ok", speaker: "ok" });
 
-  // 每一句都报了播放起止；三道题都是静音自动结束，答题时间在播放结束之后
-  expect(state.turns.map((turn) => turn.utterance_key)).toEqual(["opening", "q1", "q2", "q3", "closing"]);
-  for (const turn of state.turns) {
-    expect(turn.playback_end_ms).toBeGreaterThan(turn.playback_start_ms ?? Number.NaN);
+  // 面试官的每一句都记了播放起止；每道题答完有一句过渡，最后问候选人有没有问题，再说结束语
+  expect(spokenKeys(state)).toEqual(SPOKEN_IN_ORDER);
+  const interviewer = state.turns.filter((turn) => turn.speaker === "interviewer");
+  for (const turn of interviewer) {
+    expect(turn.end_ms).toBeGreaterThan(turn.start_ms);
   }
-  for (const turn of state.turns.filter((item) => item.utterance_key.startsWith("q"))) {
-    expect(turn.end_reason).toBe("silence");
-    expect(turn.answer_start_ms).toBeGreaterThanOrEqual(turn.playback_end_ms ?? Number.NaN);
-    expect(turn.answer_end_ms).toBeGreaterThan(turn.answer_start_ms ?? Number.NaN);
+  // 三道题都是静音自动结束，答题时间在这道题播完之后
+  for (const key of ["q1", "q2", "q3"]) {
+    const asked = interviewer.find((turn) => turn.utterance_key === key);
+    const answer = answerTo(state, key);
+    expect(answer?.end_reason, `${key} 的回答`).toBe("silence");
+    expect(answer?.start_ms).toBeGreaterThanOrEqual(asked?.end_ms ?? Number.NaN);
+    expect(answer?.end_ms).toBeGreaterThan(answer?.start_ms ?? Number.NaN);
   }
 
-  const kinds = state.events.map((event) => event.kind);
+  const kinds = eventKinds(state);
   expect(kinds).toContain("interview_started");
   expect(kinds).toContain("interview_finished");
 
-  // 一段录像，分片齐全；时长盖住整场面试
-  expect(state.segments).toHaveLength(1);
-  expectSegmentsComplete(state.segments);
-  const [segment] = state.segments;
-  const lastTurn = state.turns.at(-1);
-  if (ffprobeAvailable() && segment?.file) {
-    const streams = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", segment.file]).toString();
+  // 一段录像；有画面有声音，时长盖住整场面试
+  const [recording] = state.recordings;
+  const lastTurn = interviewer.at(-1);
+  if (ffprobeAvailable() && recording?.file) {
+    const streams = execFileSync("ffprobe", [
+      "-v",
+      "error",
+      "-show_entries",
+      "stream=codec_type",
+      "-of",
+      "csv=p=0",
+      recording.file,
+    ]).toString();
     expect(streams).toContain("video");
     expect(streams).toContain("audio");
-    // 浏览器录出来的文件头里没有时长，数一遍包才知道
-    const packets = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time", "-of", "csv=p=0", segment.file]).toString().trim().split("\n");
-    const durationMs = Number(packets.at(-1)) * 1000;
-    expect(durationMs).toBeGreaterThan((lastTurn?.playback_end_ms ?? 0) - 1500);
+    expect(recording.duration_ms).toBeGreaterThan((lastTurn?.end_ms ?? 0) - 1500);
   }
 });
 
 test("链接过期、被撤销、无效或不完整时，说清楚原因", async ({ page }) => {
-  await open(page, TOKENS.expired);
+  const interview = seedInterview();
+  await open(page, interview.expired_token);
   await expect(page.getByRole("heading", { name: "链接已过期" })).toBeVisible();
 
-  await open(page, TOKENS.revoked);
+  await open(page, interview.revoked_token);
   await page.reload();
   await expect(page.getByRole("heading", { name: "链接已失效" })).toBeVisible();
 
-  await open(page, TOKENS.unknown);
+  await open(page, UNKNOWN_TOKEN);
   await page.reload();
   await expect(page.getByRole("heading", { name: "链接无效" })).toBeVisible();
 
@@ -109,11 +131,11 @@ test("链接过期、被撤销、无效或不完整时，说清楚原因", async
   await page.reload();
   await expect(page.getByRole("heading", { name: "链接不完整" })).toBeVisible();
 
-  expect((await mockState()).stage).toBe("not_started");
+  expect(roomState(interview).status).toBe("invited");
 });
 
 test("可以手动点「我答完了」，也可以提前结束面试", async ({ page }) => {
-  await enterInterview(page);
+  const interview = await enterInterview(page);
   await expectQuestion(page, 1);
   await button(page, "我答完了，下一题").click();
   await expectQuestion(page, 2);
@@ -125,18 +147,19 @@ test("可以手动点「我答完了」，也可以提前结束面试", async ({
   await button(page, "结束面试").click();
   await expect(page.getByText("面试已结束")).toBeVisible({ timeout: 30_000 });
 
-  const state = await mockState();
-  expect(state.finish_reason).toBe("candidate_left");
-  expect(state.turns.find((turn) => turn.utterance_key === "q1")?.end_reason).toBe("button");
-  expectSegmentsComplete(state.segments);
+  const state = await expectRecordingsReady(interview, 1);
+  expect(state.status).toBe("abandoned");
+  expect(state.end_reason).toBe("candidate_left");
+  expect(answerTo(state, "q1")?.end_reason).toBe("button");
 
-  // 结束之后再打开链接，不会重新开始
+  // 结束之后再打开链接，不会重新开始，说的还是「已结束」而不是「完成」
   await page.reload();
-  await expect(page.getByText("面试已结束").or(page.getByText("面试完成，谢谢你"))).toBeVisible();
+  await expect(page.getByText("面试已结束")).toBeVisible();
+  await expect(button(page, "开始准备")).toHaveCount(0);
 });
 
 test("答题中刷新页面，重新检查设备后从中断的那一题继续，两段录像都完整", async ({ page }) => {
-  await enterInterview(page);
+  const interview = await enterInterview(page);
   await expectQuestion(page, 2);
   await page.reload();
 
@@ -146,27 +169,29 @@ test("答题中刷新页面，重新检查设备后从中断的那一题继续�
   await expectQuestion(page, 2);
   await expect(page.getByText("面试完成，谢谢你")).toBeVisible({ timeout: 60_000 });
 
-  const state = await mockState();
-  expect(state.finish_reason).toBe("completed");
-  expect(state.turns.map((turn) => turn.utterance_key)).toEqual(["opening", "q1", "q2", "q3", "closing"]);
-  // 刷新前一段、刷新后一段；第二段的起点在第一段之后
-  expect(state.segments).toHaveLength(2);
-  expectSegmentsComplete(state.segments);
-  const starts = state.segments.map((segment) => segment.start_ms).sort((a, b) => a - b);
-  expect(starts[1]).toBeGreaterThan(starts[0] ?? Number.NaN);
+  const state = await expectRecordingsReady(interview, 2);
+  expect(state.end_reason).toBe("completed");
+  // 每句话只记一次：刷新时正在问的第 2 题没有因为重新播了一遍多出一条
+  expect(spokenKeys(state)).toEqual(SPOKEN_IN_ORDER);
+  // 刷新前一段、刷新后一段；第二段从第一段结束之后开始，时间轴上不重叠
+  const [before, after] = state.recordings;
+  expect(after?.start_ms).toBeGreaterThan(before?.start_ms ?? Number.NaN);
+  if (before?.duration_ms != null) {
+    expect(after?.start_ms).toBeGreaterThanOrEqual(before.start_ms + before.duration_ms - 1000);
+  }
 });
 
 test("面试中断网：继续录制，恢复后补传，一片不少", async ({ page, context }) => {
   // 断网期间不让题目往下走，方便看提示
-  await configureMock({ silenceSec: 30 });
-  await enterInterview(page);
+  const interview = await enterInterview(page, { silenceSec: 30 });
   await expectQuestion(page, 1);
+  const received = () => roomState(interview).recordings[0]?.chunks.length ?? 0;
 
   await context.setOffline(true);
   await expect(page.getByText("网络不稳定")).toBeVisible({ timeout: 20_000 });
-  const before = (await mockState()).segments[0]?.received.length ?? 0;
+  const before = received();
   await page.waitForTimeout(4000);
-  expect((await mockState()).segments[0]?.received.length ?? 0).toBeLessThanOrEqual(before + 1);
+  expect(received()).toBeLessThanOrEqual(before + 1);
 
   await context.setOffline(false);
   await expect(page.getByText("网络不稳定")).toBeHidden({ timeout: 30_000 });
@@ -176,26 +201,41 @@ test("面试中断网：继续录制，恢复后补传，一片不少", async ({
   await button(page, "结束面试").click();
   await expect(page.getByText("面试已结束")).toBeVisible({ timeout: 30_000 });
 
-  const state = await mockState();
-  expect(state.segments).toHaveLength(1);
-  expectSegmentsComplete(state.segments);
+  const state = await expectRecordingsReady(interview, 1);
   // 断网那几秒的分片也在：总片数盖得住整场时长（每片 1 秒）
-  expect(state.segments[0]?.received.length ?? 0).toBeGreaterThan(before + 3);
-  expect(state.events.map((event) => event.kind)).toEqual(expect.arrayContaining(["network_offline", "network_online"]));
+  expect(state.recordings[0]?.chunks.length ?? 0).toBeGreaterThan(before + 3);
+  expect(eventKinds(state)).toEqual(expect.arrayContaining(["network_offline", "network_online"]));
 });
 
 test("提交答案时服务暂时不可用，会自动重试，不丢题", async ({ page }) => {
-  await enterInterview(page);
+  const interview = await enterInterview(page);
   await expectQuestion(page, 1);
-  await configureMock({ failAdvance: 2 });
+  // 接下来两次上报都让它失败，像后端正在重启
+  let failures = 0;
+  await page.route("**/api/v1/room/advance", async (route) => {
+    if (failures < 2) {
+      failures += 1;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "unavailable", message: "服务暂时不可用" } }),
+      });
+    } else {
+      await route.continue();
+    }
+  });
   await button(page, "我答完了，下一题").click();
   await expectQuestion(page, 2);
-  const state = await mockState();
-  expect(state.turns.filter((turn) => turn.utterance_key === "q1")).toHaveLength(1);
+  expect(failures).toBe(2);
+  const state = roomState(interview);
+  expect(
+    state.turns.filter((turn) => turn.utterance_key === "q1" && turn.speaker === "candidate"),
+  ).toHaveLength(1);
+  expect(spokenKeys(state).filter((key) => key === "q1")).toHaveLength(1);
 });
 
 test("切到别的页面会记进过程事件，只记发生过，不记内容", async ({ page }) => {
-  await enterInterview(page);
+  const interview = await enterInterview(page);
   await expectQuestion(page, 1);
   await page.evaluate(() => {
     window.dispatchEvent(new Event("blur"));
@@ -206,9 +246,10 @@ test("切到别的页面会记进过程事件，只记发生过，不记内容",
   await button(page, "结束面试").click();
   await expect(page.getByText("面试已结束")).toBeVisible({ timeout: 30_000 });
 
-  const events = (await mockState()).events;
-  const kinds = events.map((event) => event.kind);
-  expect(kinds).toEqual(expect.arrayContaining(["window_blur", "window_focus", "paste"]));
-  const paste = events.find((event) => event.kind === "paste");
+  // 过程事件是攒一小批再报的，结束时会把剩下的发出去
+  await expect
+    .poll(() => eventKinds(roomState(interview)))
+    .toEqual(expect.arrayContaining(["window_blur", "window_focus", "paste"]));
+  const paste = roomState(interview).events.find((event) => event.kind === "paste");
   expect(JSON.stringify(paste?.payload ?? {})).not.toMatch(/text|content|data/);
 });

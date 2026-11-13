@@ -98,7 +98,7 @@ pub struct ClientEvent {
     pub occurred_at: DateTime<Utc>,
     /// 事件的补充信息，一个 JSON 对象
     #[serde(default)]
-    #[schema(value_type = Object)]
+    #[schema(value_type = std::collections::HashMap<String, Value>)]
     pub payload: Value,
 }
 
@@ -215,7 +215,7 @@ pub struct InterviewEvent {
     /// `client`（候选人的页面）或 `server`
     pub source: String,
     pub kind: String,
-    #[schema(value_type = Object)]
+    #[schema(value_type = std::collections::HashMap<String, Value>)]
     pub payload: Value,
 }
 

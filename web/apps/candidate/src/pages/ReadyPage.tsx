@@ -38,9 +38,7 @@ export function ReadyPage({ room, busy, error, onBegin }: ReadyPageProps) {
       </div>
       <ol className="app-rules">
         <li>面试官会一题一题地问。听完题目后直接开口回答，不用点任何按钮。</li>
-        <li>
-          答完后停顿 {silence} 秒，会自动进入下一题。想快一点，可以点「我答完了」。
-        </li>
+        <li>答完后停顿 {silence} 秒，会自动进入下一题。想快一点，可以点「我答完了」。</li>
         <li>中间想一想再说没关系，只要还在说话就不会被打断。</li>
         <li>请保持正对镜头，不要切到别的应用或页面。</li>
         <li>如果页面意外关闭或刷新，重新打开链接可以从中断的地方继续。</li>
