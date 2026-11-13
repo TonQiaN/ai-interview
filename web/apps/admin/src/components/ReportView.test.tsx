@@ -94,4 +94,31 @@ describe("分析报告", () => {
     expect(names).not.toContain("主要理由");
     expect(names).toContain("理由和顾虑");
   });
+
+  it("综合分旁边写出重新生成时的浮动范围，旧报告没有范围也能显示", () => {
+    const report = sampleReport("backend-strong", "i-1", Date.now());
+    report.overall_score = 82;
+    report.score_range = { low: 79, high: 85 };
+    const { container, rerender } = render(<ReportView report={report} onSeek={() => {}} />);
+    expect(container.textContent).toContain("82 / 100");
+    expect(container.textContent).toContain("79 到 85");
+    rerender(<ReportView report={{ ...report, score_range: undefined }} onSeek={() => {}} />);
+    expect(container.textContent).toContain("82 / 100");
+    expect(container.textContent).not.toContain("79 到 85");
+  });
+
+  it("几次评分不一样的题，说明回答介于两档之间", () => {
+    const report = sampleReport("backend-strong", "i-1", Date.now());
+    const judged = report.questions.filter((q) => q.judgement?.answered);
+    const [split, same] = judged;
+    if (!split?.judgement || !same?.judgement) throw new Error("样例里应该有两道点评过的题");
+    split.judgement.rating = 3.5;
+    split.judgement.ratings = [3, 3.5, 4];
+    same.judgement.ratings = [4, 4, 4];
+    for (const q of judged.slice(2)) if (q.judgement) q.judgement.ratings = [];
+    const { container } = render(<ReportView report={report} onSeek={() => {}} />);
+    expect(screen.getAllByText("3.5 分").length).toBeGreaterThan(0);
+    expect(screen.getByText(/分别是 3、3.5、4 分/)).toBeTruthy();
+    expect(container.textContent?.match(/回答介于两档之间/g)?.length).toBe(1);
+  });
 });

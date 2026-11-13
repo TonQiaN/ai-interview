@@ -630,9 +630,24 @@ export function fileSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** 1 到 5 分 → 「4 分」；没考察到写「没考察到」 */
+/** 1 到 5 分，可以带半分 → 「4 分」「3.5 分」；没考察到写「没考察到」 */
 export function rating(value: number | null): string {
   return value === null ? "没考察到" : `${value} 分`;
+}
+
+/** 总分重新生成时大概落在哪个范围：「79 到 85」。旧报告没有范围，范围只有一个数时也不写 */
+export function scoreRangeText(
+  range: { low: number; high: number } | null | undefined,
+): string | null {
+  if (!range || range.low === range.high) return null;
+  return `${range.low} 到 ${range.high}`;
+}
+
+/** 一道题评了几次、分数不一样时，说出每次的分数；只评一次或几次都一样就不说 */
+export function ratingSpread(ratings: number[] | null | undefined): string | null {
+  if (!ratings || ratings.length < 2) return null;
+  if (ratings.every((r) => r === ratings[0])) return null;
+  return `评了 ${ratings.length} 次，分别是 ${ratings.join("、")} 分，回答介于两档之间`;
 }
 
 /** 分数用什么颜色：80 以上绿，60 以上金，再低红 */
