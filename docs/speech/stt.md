@@ -103,7 +103,7 @@ cargo build --release -p <用到它的二进制> --features sherpa
 | `AI_INTERVIEW_STT_MODEL_DIR` | 模型目录，`sherpa` 后端必填 |
 | `AI_INTERVIEW_STT_THREADS` | 识别一段话用几个线程，默认 2 |
 
-在云端开发容器里编译：出网要过代理，sherpa-onnx 的构建脚本不认代理签发的证书，会下载失败。先跑一次 `eval "$(crates/interview-stt/scripts/fetch-sherpa-lib.sh)"`，它用 curl 把预编译库下到本地并设好 `SHERPA_ONNX_ARCHIVE_DIR`，之后正常编译。Mac 和 GitHub Actions 不需要这一步。
+在云端开发容器里编译：出网要过代理，sherpa-onnx 的构建脚本不认代理签发的证书，会下载失败。先跑一次 `eval "$(crates/interview-stt/scripts/fetch-sherpa-lib.sh)"`，它用 curl 把预编译库下到本地并设好 `SHERPA_ONNX_ARCHIVE_DIR`，之后正常编译。Mac 不需要这一步。GitHub Actions 里用的是 `fetch-sherpa-lib.sh --extract`：把库解到 `target/` 外面并设 `SHERPA_ONNX_LIB_DIR`，免得 `target/` 的缓存恢复后库文件不全、链接时报找不到 `sherpa-onnx-c-api`。
 
 ### 试一下
 
