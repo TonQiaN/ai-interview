@@ -6,10 +6,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use common::{TestApp, app, app_with_model, multipart_file, run_tasks};
+use common::{TestApp, app, app_with_model, multipart_file, run_tasks, run_tasks_with};
 use interview_llm::testing::ScriptedModel;
 use interview_llm::{ChatModel, ChatRequest, ChatStream, LlmError};
 use interview_platform::testing::TestRequest;
+use interview_talent::{Deps, PdfRenderer};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
@@ -428,8 +429,64 @@ async fn reads_a_pdf_resume_page_by_page(pool: PgPool) {
     let parsed = resume(&app, uploaded["id"].as_str().expect("有 id")).await;
     assert_eq!(parsed["parse_status"], "done", "{parsed}");
     assert_eq!(parsed["text_content"], "# 林知夏\n\n高级后端工程师");
+    // 页数没超，没有什么要提醒的
+    assert_eq!(parsed["parse_warning"], Value::Null);
     // 转写、整理、画像各一次
     assert_eq!(model.requests().len(), 3);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_pdf_with_too_many_pages_says_what_was_left_out(pool: PgPool) {
+    if std::process::Command::new("pdftoppm")
+        .arg("-v")
+        .output()
+        .is_err()
+    {
+        eprintln!("没装 poppler-utils，跳过");
+        return;
+    }
+    let model = Arc::new(
+        ScriptedModel::new()
+            .reply(RESUME_TEXT)
+            .reply(EXTRACTION)
+            .reply(PROFILE)
+            .reply(RESUME_TEXT)
+            .reply(EXTRACTION)
+            .reply(PROFILE),
+    );
+    let app = app_with_model(pool, model.clone()).await;
+    let candidate_id = new_candidate(&app).await;
+    let pdf = include_bytes!("fixtures/three-pages.pdf");
+    let (status, uploaded) = upload(&app, &candidate_id, "long.pdf", pdf).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{uploaded}");
+    let id = uploaded["id"].as_str().expect("有 id");
+
+    // 三页的文件，最多只读两页
+    let deps = Deps {
+        renderer: PdfRenderer {
+            max_pages: 2,
+            ..PdfRenderer::default()
+        },
+        ..Deps::new(app.ctx.clone(), Some(model.clone()))
+    };
+    run_tasks_with(deps).await;
+    let parsed = resume(&app, id).await;
+    // 读到的部分照常能用，但要告诉 HR 后面还有没读的
+    assert_eq!(parsed["parse_status"], "done", "{parsed}");
+    assert_eq!(parsed["parse_error"], Value::Null);
+    let warning = parsed["parse_warning"].as_str().expect("有提示");
+    assert!(warning.contains("前 2 页"), "{warning}");
+
+    // 重新解析：上次的提示先清掉；这次页数够，读完也没有提示
+    let response = TestRequest::post(format!("/api/v1/resumes/{id}/parse"))
+        .send(&app.router)
+        .await;
+    assert_eq!(response.status, StatusCode::ACCEPTED, "{}", response.text());
+    assert_eq!(resume(&app, id).await["parse_warning"], Value::Null);
+    run_tasks(&app.ctx, Some(model.clone())).await;
+    let parsed = resume(&app, id).await;
+    assert_eq!(parsed["parse_status"], "done", "{parsed}");
+    assert_eq!(parsed["parse_warning"], Value::Null);
 }
 
 /// 在第 `at` 次调用大模型之前先做一件事的假模型。用来模拟「大模型还在算的时候，别处发生了变化」。

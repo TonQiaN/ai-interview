@@ -28,6 +28,9 @@ pub struct ResumeReading {
     pub parsed: ParsedResume,
     /// 两步加起来的大模型用量。
     pub usage: Usage,
+    /// 文件的页数超过了上限时，这里是实际读了的页数：只读了前这么多页，后面的没有读。
+    /// 全部读完了是 `None`。
+    pub pages_read_of_longer_file: Option<usize>,
 }
 
 impl std::fmt::Debug for ResumeReading {
@@ -37,6 +40,7 @@ impl std::fmt::Debug for ResumeReading {
             .field("text_chars", &self.text.chars().count())
             .field("work_experience", &self.parsed.work_experience.len())
             .field("usage", &self.usage)
+            .field("pages_read_of_longer_file", &self.pages_read_of_longer_file)
             .finish()
     }
 }
@@ -55,13 +59,19 @@ pub async fn read_resume(
     settings: &TalentAiSettings,
 ) -> Result<ResumeReading, TalentError> {
     let mut usage = Usage::default();
+    let mut pages_read_of_longer_file = None;
     let text = match content {
         ResumeContent::Text(text) => text.trim().to_owned(),
         ResumeContent::Pages {
-            pages, text_layer, ..
+            pages,
+            text_layer,
+            truncated,
         } => {
             if pages.is_empty() {
                 return Err(TalentError::Unreadable);
+            }
+            if *truncated {
+                pages_read_of_longer_file = Some(pages.len());
             }
             let (text, transcribe_usage) =
                 transcribe(model, pages, text_layer.as_deref(), settings).await?;
@@ -80,6 +90,7 @@ pub async fn read_resume(
         text,
         parsed,
         usage,
+        pages_read_of_longer_file,
     })
 }
 
@@ -438,6 +449,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn says_how_many_pages_were_read_when_the_file_was_longer() {
+        let settings = TalentAiSettings::default();
+        let model = ScriptedModel::new()
+            .reply("# 林知夏")
+            .reply(EXTRACTION)
+            .reply("# 林知夏")
+            .reply(EXTRACTION);
+
+        let whole = read_resume(&model, &pages(2), &settings)
+            .await
+            .expect("读得出来");
+        assert_eq!(whole.pages_read_of_longer_file, None);
+
+        let ResumeContent::Pages {
+            pages, text_layer, ..
+        } = pages(2)
+        else {
+            unreachable!("pages() 给的就是页面");
+        };
+        let cut = ResumeContent::Pages {
+            pages,
+            text_layer,
+            truncated: true,
+        };
+        let partial = read_resume(&model, &cut, &settings)
+            .await
+            .expect("读得出来");
+        assert_eq!(partial.pages_read_of_longer_file, Some(2));
+    }
+
+    #[tokio::test]
     async fn truncated_transcription_is_an_error() {
         let model = ScriptedModel::new().reply_with(|response| {
             response.content = "# 林知夏".to_owned();
@@ -510,6 +552,7 @@ mod tests {
                 ..ParsedResume::default()
             },
             usage: Usage::default(),
+            pages_read_of_longer_file: None,
         };
         let debug = format!("{reading:?}");
         assert!(!debug.contains("林知夏"), "{debug}");
