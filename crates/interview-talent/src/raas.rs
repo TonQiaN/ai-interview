@@ -157,6 +157,9 @@ impl std::fmt::Debug for ImportedCandidate {
     }
 }
 
+/// RAAS 里没填姓名的候选人，先用这个名字建档，等简历解析出姓名再换掉。
+pub(crate) const UNNAMED_CANDIDATE: &str = "未填写姓名";
+
 /// 把 RAAS 的候选人详情换成我们建档要的基本信息。
 pub fn candidate_from_raas(detail: &CandidateDetail) -> ImportedCandidate {
     ImportedCandidate {
@@ -164,7 +167,7 @@ pub fn candidate_from_raas(detail: &CandidateDetail) -> ImportedCandidate {
         name: detail
             .name
             .clone()
-            .unwrap_or_else(|| "未填写姓名".to_owned()),
+            .unwrap_or_else(|| UNNAMED_CANDIDATE.to_owned()),
         email: detail.email.as_ref().map(|email| email.to_lowercase()),
         phone: detail.mobile.as_deref().and_then(normalize_phone),
         current_title: detail.current_title.clone(),

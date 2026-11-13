@@ -15,6 +15,7 @@ use uuid::Uuid;
 use super::talent_error;
 use crate::deps::Deps;
 use crate::document::DocumentKind;
+use crate::store::candidates::{Candidate, CandidateSource};
 use crate::store::resumes::{self, NewResume, Resume};
 use crate::tasks::parse_task;
 
@@ -215,6 +216,18 @@ pub(crate) fn placeholder_name(file_name: Option<&str>) -> String {
     match stem {
         Some(stem) => stem.chars().take(50).collect(),
         None => "未命名候选人".to_owned(),
+    }
+}
+
+/// 候选人现在的名字是不是我们自动起的占位名（还没被简历里的姓名或 HR 手填的名字换掉）。
+pub(crate) fn is_placeholder_name(candidate: &Candidate, resume_file_name: Option<&str>) -> bool {
+    match candidate.source {
+        // 上传简历建的：名字是文件名
+        CandidateSource::Upload => candidate.name == placeholder_name(resume_file_name),
+        // 从 RAAS 导入、RAAS 里没填姓名的
+        CandidateSource::Raas => candidate.name == crate::raas::UNNAMED_CANDIDATE,
+        // 手工建的：名字是 HR 填的
+        CandidateSource::Manual => false,
     }
 }
 

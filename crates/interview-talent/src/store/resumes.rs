@@ -238,6 +238,16 @@ pub async fn fail_if_unfinished(db: &PgPool, id: Uuid, reason: &str) -> sqlx::Re
     Ok(())
 }
 
+/// 这份简历是不是在等着解析。
+pub async fn is_pending(db: &PgPool, id: Uuid) -> sqlx::Result<bool> {
+    let pending: Option<bool> =
+        sqlx::query_scalar("SELECT parse_status = 'pending' FROM resumes WHERE id = $1")
+            .bind(id)
+            .fetch_optional(db)
+            .await?;
+    Ok(pending.unwrap_or(false))
+}
+
 /// 准备重新解析：状态回到排队中，丢掉上次的结果。返回 `false` 表示简历不存在。
 pub async fn reset_for_parse(conn: &mut PgConnection, id: Uuid) -> sqlx::Result<bool> {
     let done = sqlx::query(
