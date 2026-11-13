@@ -101,6 +101,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: stt-sherpa
+      - name: sherpa-onnx 预编译库
+        # 放在 target/ 外面，原因见脚本开头的说明
+        run: |
+          line="$(crates/interview-stt/scripts/fetch-sherpa-lib.sh --extract)"
+          echo "${line#export }" >> "$GITHUB_ENV"
       - name: clippy
         run: cargo clippy -p interview-stt --all-targets --features sherpa -- -D warnings
       - name: 模型缓存
@@ -110,6 +115,9 @@ jobs:
           key: stt-models-${{ hashFiles('crates/interview-stt/scripts/download-models.sh') }}
       - name: 下载模型
         run: crates/interview-stt/scripts/download-models.sh
+      - name: 系统依赖
+        # ffmpeg：现场转写的测试要把录像分片解成音频
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: test
         # 模型在 CPU 上跑，不花钱，所以这里连标了 #[ignore] 的真模型测试一起跑
         run: cargo test -p interview-stt --features sherpa -- --include-ignored

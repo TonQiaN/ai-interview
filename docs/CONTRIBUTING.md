@@ -45,6 +45,8 @@ docs: 补充首包延迟的测法
 
 新加 job 时要把它加进 `all-checks-passed` 的 `needs`。
 
+测试要用到两个系统程序，CI 里装好了，本机也要装：poppler（`pdftoppm`，解析 PDF 简历）和 ffmpeg（从录像里取声音、合并录像）。Debian/Ubuntu：`sudo apt-get install poppler-utils ffmpeg`；macOS：`brew install poppler ffmpeg`。本机没装 ffmpeg 时相关的测试会跳过并打印一行说明，CI 里没装则直接失败。
+
 CI 跑在 Linux 上，没有 TTS 模型。需要真模型或真 TTS 的测试标 `#[ignore]`，在 Mac 上用 `cargo test -- --ignored` 手动跑，并在 PR 的「怎么验证」里写明跑没跑、结果如何。
 
 Dependabot 每周给 Rust 依赖和 Actions 各开一个升级 PR。

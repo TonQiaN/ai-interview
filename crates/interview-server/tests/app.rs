@@ -70,7 +70,7 @@ async fn health_docs_and_default_deny(pool: PgPool) {
     assert_eq!(response.status, StatusCode::NOT_FOUND);
     assert_eq!(response.json()["error"]["code"], "not_found");
 
-    // 系统状态里有数据库和大模型
+    // 系统状态里有数据库、大模型、语音合成和 ffmpeg
     let response = TestRequest::get("/api/v1/system/status")
         .send(&authed)
         .await;
@@ -86,9 +86,17 @@ async fn health_docs_and_default_deny(pool: PgPool) {
             )
         })
         .collect();
+    // ffmpeg 装没装看机器，其余的在测试里是固定的
+    let (ffmpeg, others): (Vec<String>, Vec<String>) = names
+        .into_iter()
+        .partition(|name| name.starts_with("ffmpeg="));
     assert_eq!(
-        names,
+        others,
         ["database=ok", "llm=not_configured", "tts=not_configured"]
+    );
+    assert!(
+        ffmpeg == ["ffmpeg=ok"] || ffmpeg == ["ffmpeg=down"],
+        "{ffmpeg:?}"
     );
 
     // 首页跳到 HR 后台

@@ -30,7 +30,7 @@ AI 面试：开源的 AI 面试系统。主体语言是 Rust；面试官的语�
 
 ## 开始
 
-需要 Rust 1.90 以上（`rust-toolchain.toml` 会让 rustup 自动装 stable）和 PostgreSQL 16（只要装了就行，不用自己建库；macOS 上 `brew install postgresql@16`）。解析 PDF 简历要用 poppler 的 `pdftoppm`：Debian/Ubuntu 装 `poppler-utils`，macOS 用 `brew install poppler`。
+需要 Rust 1.90 以上（`rust-toolchain.toml` 会让 rustup 自动装 stable）和 PostgreSQL 16（只要装了就行，不用自己建库；macOS 上 `brew install postgresql@16`）。解析 PDF 简历要用 poppler 的 `pdftoppm`：Debian/Ubuntu 装 `poppler-utils`，macOS 用 `brew install poppler`。面试中听候选人的回答、给录像补时长要用 ffmpeg：Debian/Ubuntu 装 `ffmpeg`，macOS 用 `brew install ffmpeg`；不在 PATH 里时用 `AI_INTERVIEW_FFMPEG` 指到它。
 
 ```bash
 scripts/dev.sh        # 一键启动：起开发数据库、跑迁移、启动后端

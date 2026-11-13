@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use interview_audio::Ffmpeg;
 use interview_llm::{ChatModel, DeepSeekClient};
 use interview_platform::AppContext;
 use interview_platform::status::{ComponentStatus, DatabaseProbe, StatusProbe, StatusRegistry};
@@ -111,6 +112,7 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
     // ── ③ AI 引擎：interview-engine 是纯库，由 interview-flow 调用，这里不用接 ──
 
     // ── ④ 语音：interview-tts（音色管理、合成）、interview-stt ──
+    probes.register(FfmpegProbe(Ffmpeg::from_env()));
 
     // ── ⑤ 候选人面试间：interview-room ──
     let room = interview_room::Deps::new(ctx.clone(), interview_room::RoomConfig::from_env())
@@ -194,5 +196,28 @@ impl StatusProbe for TtsProbe {
             ComponentStatus::down(self.name(), format!("三个引擎都用不了：{reason}"))
         };
         status.with_details(serde_json::json!({ "backend": backend, "engines": engines }))
+    }
+}
+
+/// ffmpeg 装了没有。录像补时长、从录像里取出声音做转写都靠它。
+struct FfmpegProbe(Ffmpeg);
+
+#[async_trait]
+impl StatusProbe for FfmpegProbe {
+    fn name(&self) -> &'static str {
+        "ffmpeg"
+    }
+
+    async fn check(&self) -> ComponentStatus {
+        match self.0.version().await {
+            Ok(version) => ComponentStatus::ok(self.name()).with_details(serde_json::json!({
+                "program": self.0.program(),
+                "version": version,
+            })),
+            Err(error) => ComponentStatus::down(
+                self.name(),
+                format!("{error}。没有它，面试中听不到候选人的回答，录像也拖不了进度条"),
+            ),
+        }
     }
 }

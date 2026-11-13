@@ -1375,7 +1375,9 @@ name = "interview-audio"
 version = "0.1.0"
 dependencies = [
  "hound",
+ "tempfile",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1549,6 +1551,7 @@ dependencies = [
  "async-trait",
  "axum",
  "clap",
+ "interview-audio",
  "interview-flow",
  "interview-llm",
  "interview-platform",
@@ -1580,6 +1583,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sherpa-onnx",
+ "tempfile",
  "thiserror",
  "tokio",
 ]
