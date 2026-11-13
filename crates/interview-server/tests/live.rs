@@ -28,6 +28,13 @@
 //! `AI_INTERVIEW_LIVE_MODE=conversational` 跑实时对话：面试官现场接话，「等下一步」的时间里
 //! 包含现场转写、模型想好怎么接、合成第一句。
 //!
+//! `AI_INTERVIEW_LIVE_KEEP_AUDIO_DIR` 指一个目录，测试结束前把面试官说的每一句的语音（预合成的和现场合成的）
+//! 拷过去，可以拿来听。不设的话这些文件跟着临时目录一起删掉。克隆音色合成出来的也是那个人的声音，
+//! 留在本机，不要提交、不要外传。
+//!
+//! 设了 `AI_INTERVIEW_LOG`（写法见 `interview_platform::telemetry`，比如 `info`）就把后端日志也打出来，
+//! 不设就只有测试自己打印的内容。
+//!
 //! 岗位和简历是合成的。
 
 use std::path::{Path, PathBuf};
@@ -53,6 +60,8 @@ const QUESTIONS_ENV_VAR: &str = "AI_INTERVIEW_LIVE_QUESTIONS";
 const VOICE_WAV_ENV_VAR: &str = "AI_INTERVIEW_LIVE_VOICE_WAV";
 const VOICE_TEXT_FILE_ENV_VAR: &str = "AI_INTERVIEW_LIVE_VOICE_TEXT_FILE";
 const MODE_ENV_VAR: &str = "AI_INTERVIEW_LIVE_MODE";
+const KEEP_AUDIO_DIR_ENV_VAR: &str = "AI_INTERVIEW_LIVE_KEEP_AUDIO_DIR";
+const LOG_ENV_VAR: &str = "AI_INTERVIEW_LOG";
 
 const POSITION: &str = "负责订单和支付系统的后端开发：设计接口和数据模型，保证高峰期的稳定性，\
                         排查线上问题，和产品、前端、测试一起把需求做完。";
@@ -437,6 +446,10 @@ fn similarity(a: &str, b: &str) -> f64 {
 #[sqlx::test(migrator = "MIGRATOR")]
 #[ignore = "需要真模型、真语音识别和 ffmpeg，会产生少量费用"]
 async fn a_whole_interview_with_the_real_model_and_real_speech_recognition(pool: PgPool) {
+    if std::env::var_os(LOG_ENV_VAR).is_some() {
+        interview_platform::telemetry::init();
+    }
+
     // ── 装配：和服务进程一样读环境变量 ──
     let shared = Shared::from_env().await;
     assert!(shared.llm.is_some(), "要先设 DEEPSEEK_API_KEY");
@@ -564,13 +577,16 @@ async fn a_whole_interview_with_the_real_model_and_real_speech_recognition(pool:
         "\n== 面试方式：{} ==",
         session["mode"].as_str().unwrap_or("?")
     );
+
+    // 候选人这一路的录像：每一步的回答时间里是一段示例录音。
+    // 要在开始面试之前生成好：ffmpeg 是同步跑的，测试的运行时只有一个线程，
+    // 放在开始之后会把面试间派出去的后台任务（比如提前合成接话）卡住好几秒
+    let slots = schedule(&clips);
+    let webm = camera_recording(&ffmpeg, &timeline(&clips, &slots));
+
     let response = w.room(&token, "start", json!({})).await;
     assert_eq!(response.status, StatusCode::OK, "{}", response.text());
     let mut step = response.json();
-
-    // 候选人这一路的录像：每一步的回答时间里是一段示例录音
-    let slots = schedule(&clips);
-    let webm = camera_recording(&ffmpeg, &timeline(&clips, &slots));
     let mut upload = Upload::open(&w, &token, webm).await;
 
     // ── 候选人：照着服务端给的每一步走完 ──
@@ -780,6 +796,40 @@ async fn a_whole_interview_with_the_real_model_and_real_speech_recognition(pool:
         stt_status.backend,
         stt_status.detail.as_deref().unwrap_or("?")
     );
+    keep_audio(&w);
+}
+
+/// 设了 `AI_INTERVIEW_LIVE_KEEP_AUDIO_DIR` 就把面试官的语音拷过去：只拷 `utterances` 目录下的 WAV，
+/// 候选人的录像、参考录音都不拷。
+fn keep_audio(w: &World) {
+    let Some(target) = std::env::var_os(KEEP_AUDIO_DIR_ENV_VAR) else {
+        return;
+    };
+    let target = PathBuf::from(target);
+    std::fs::create_dir_all(&target)
+        .unwrap_or_else(|error| panic!("建不了 {KEEP_AUDIO_DIR_ENV_VAR} 指的目录：{error}"));
+    let mut kept = 0;
+    let interviews = w.files_dir().join("interviews");
+    for interview in std::fs::read_dir(&interviews)
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let utterances = interview.path().join("utterances");
+        for file in std::fs::read_dir(&utterances)
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let path = file.path();
+            if path.extension().is_some_and(|ext| ext == "wav") {
+                std::fs::copy(&path, target.join(file.file_name()))
+                    .unwrap_or_else(|error| panic!("面试官的语音没拷过去：{error}"));
+                kept += 1;
+            }
+        }
+    }
+    println!("\n== 面试官的语音留了 {kept} 个文件，在 {KEEP_AUDIO_DIR_ENV_VAR} 指的目录里 ==");
 }
 
 #[test]
