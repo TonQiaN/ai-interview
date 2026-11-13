@@ -15,6 +15,7 @@ interview-audio = { path = "crates/interview-audio" }
 interview-llm = { path = "crates/interview-llm" }
 interview-raas = { path = "crates/interview-raas" }
 interview-report = { path = "crates/interview-report" }
+interview-stt = { path = "crates/interview-stt" }
 interview-talent = { path = "crates/interview-talent" }
 interview-tts = { path = "crates/interview-tts" }
 
