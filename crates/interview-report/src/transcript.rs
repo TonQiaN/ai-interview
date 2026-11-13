@@ -276,7 +276,12 @@ pub(crate) fn render_context(
         );
     }
 
-    out.push_str("\n# 过程事件\n由候选人的面试网页采集。每行的格式：[事件 id | 发生时间 | 种类 | 持续时间] 说明\n");
+    out.push_str(
+        "\n# 过程事件\n由候选人的面试网页采集。每行的格式：[事件 id | 开始时间 | 种类 | 持续时间] 说明\n\
+         开始时间写「开始前」的，是面试开始之前的事件。page_opened 是打开面试页，说明里的 signals \
+         是这个浏览器能采集哪几类信号，in_app_browser 是所在的内置浏览器（微信这一类，里面窗口失焦可能采不到）。\
+         某类信号采集不到时，没有记录不等于没有发生。\n",
+    );
     if record.events.is_empty() {
         out.push_str("（面试网页全程在采集，没有记录到切出页面、粘贴、退出全屏这类事件。）\n");
     }
@@ -285,7 +290,7 @@ pub(crate) fn render_context(
             out,
             "[{} | {} | {} | {}] {}",
             event.id,
-            clock(event.at_ms),
+            event.at_ms.map_or_else(|| "开始前".to_owned(), clock),
             event.kind,
             event.duration_ms.map_or_else(|| "-".to_owned(), seconds),
             event.detail.as_deref().unwrap_or("")

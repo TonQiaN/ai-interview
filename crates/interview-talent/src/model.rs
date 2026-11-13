@@ -71,6 +71,142 @@ pub struct ParsedResume {
     pub self_evaluation: Option<String>,
 }
 
+impl ParsedResume {
+    /// 给面试出题和写报告用的简历文字（Markdown）。
+    ///
+    /// 只带和岗位能力有关的内容：经历、项目、教育、技能。姓名、手机、邮箱、现居地、期望薪资
+    /// 都不带，这些出题用不上，不该发给大模型。存在 `resumes.interview_text`。
+    pub fn to_interview_text(&self) -> String {
+        let mut out = String::new();
+        let overview: Vec<String> = [
+            self.current_title.clone(),
+            self.current_company.clone(),
+            self.years_of_experience
+                .map(|years| format!("{years} 年工作经验")),
+            self.highest_degree.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if !overview.is_empty() {
+            push_section(&mut out, "概况", &overview.join("，"));
+        }
+        if let Some(summary) = &self.summary {
+            push_section(&mut out, "个人简介", summary);
+        }
+
+        let work: Vec<String> = self
+            .work_experience
+            .iter()
+            .map(|job| {
+                entry(
+                    &[job.company.as_deref(), job.title.as_deref()],
+                    period(job.start.as_deref(), job.end.as_deref(), job.is_current),
+                    job.description.as_deref(),
+                    &job.technologies,
+                )
+            })
+            .collect();
+        push_entries(&mut out, "工作经历", &work);
+
+        let projects: Vec<String> = self
+            .projects
+            .iter()
+            .map(|project| {
+                entry(
+                    &[project.name.as_deref(), project.role.as_deref()],
+                    period(project.start.as_deref(), project.end.as_deref(), false),
+                    project.description.as_deref(),
+                    &project.technologies,
+                )
+            })
+            .collect();
+        push_entries(&mut out, "项目经历", &projects);
+
+        let education: Vec<String> = self
+            .education
+            .iter()
+            .map(|school| {
+                entry(
+                    &[
+                        school.school.as_deref(),
+                        school.degree.as_deref(),
+                        school.major.as_deref(),
+                    ],
+                    period(school.start.as_deref(), school.end.as_deref(), false),
+                    school.description.as_deref(),
+                    &[],
+                )
+            })
+            .collect();
+        push_entries(&mut out, "教育经历", &education);
+
+        for (title, items) in [
+            ("技能", &self.skills),
+            ("语言", &self.languages),
+            ("证书", &self.certifications),
+            ("获奖", &self.awards),
+        ] {
+            if !items.is_empty() {
+                push_section(&mut out, title, &items.join("、"));
+            }
+        }
+        if !self.job_intention.positions.is_empty() {
+            push_section(
+                &mut out,
+                "想做的职位",
+                &self.job_intention.positions.join("、"),
+            );
+        }
+        if let Some(evaluation) = &self.self_evaluation {
+            push_section(&mut out, "自我评价", evaluation);
+        }
+        out.trim_end().to_owned()
+    }
+}
+
+fn push_section(out: &mut String, title: &str, body: &str) {
+    out.push_str(&format!("## {title}\n\n{}\n\n", body.trim()));
+}
+
+fn push_entries(out: &mut String, title: &str, entries: &[String]) {
+    if !entries.is_empty() {
+        push_section(out, title, &entries.join("\n\n"));
+    }
+}
+
+/// 一段经历：标题行（几个部分用 `·` 连起来，后面跟时间），下面是内容和用到的技术。
+fn entry(
+    heading: &[Option<&str>],
+    period: Option<String>,
+    description: Option<&str>,
+    technologies: &[String],
+) -> String {
+    let heading: Vec<&str> = heading.iter().flatten().copied().collect();
+    let mut text = format!("### {}", heading.join(" · "));
+    if let Some(period) = period {
+        text.push_str(&format!("（{period}）"));
+    }
+    if let Some(description) = description {
+        text.push_str(&format!("\n\n{}", description.trim()));
+    }
+    if !technologies.is_empty() {
+        text.push_str(&format!("\n\n用到的技术：{}", technologies.join("、")));
+    }
+    text
+}
+
+fn period(start: Option<&str>, end: Option<&str>, is_current: bool) -> Option<String> {
+    let end = if is_current { Some("至今") } else { end };
+    match (start, end) {
+        (Some(start), Some("至今")) => Some(format!("{start} 至今")),
+        (Some(start), Some(end)) => Some(format!("{start} 到 {end}")),
+        (Some(start), None) => Some(format!("{start} 起")),
+        (None, Some(end)) => Some(format!("到 {end}")),
+        (None, None) => None,
+    }
+}
+
 /// 求职意向。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(default)]
@@ -320,6 +456,56 @@ mod tests {
         assert_eq!(resume, ParsedResume::default());
         let extra: PositionExtra = serde_json::from_str("{}").expect("能解析");
         assert_eq!(extra, PositionExtra::default());
+    }
+
+    #[test]
+    fn interview_text_keeps_experience_and_drops_contact_details() {
+        let resume = ParsedResume {
+            name: Some("林知夏".to_owned()),
+            phone: Some("13800001234".to_owned()),
+            email: Some("linzhixia@example.com".to_owned()),
+            location: Some("杭州市西湖区".to_owned()),
+            current_title: Some("高级后端工程师".to_owned()),
+            years_of_experience: Some(8.5),
+            highest_degree: Some("本科".to_owned()),
+            job_intention: JobIntention {
+                positions: vec!["后端负责人".to_owned()],
+                salary: Some("50k".to_owned()),
+                ..JobIntention::default()
+            },
+            work_experience: vec![WorkExperience {
+                company: Some("杭州示例云科技有限公司".to_owned()),
+                title: Some("高级后端工程师".to_owned()),
+                start: Some("2021-07".to_owned()),
+                is_current: true,
+                description: Some("用 Rust 重写结算链路。".to_owned()),
+                technologies: vec!["Rust".to_owned(), "PostgreSQL".to_owned()],
+                ..WorkExperience::default()
+            }],
+            education: vec![Education {
+                school: Some("示例大学".to_owned()),
+                degree: Some("本科".to_owned()),
+                major: Some("计算机".to_owned()),
+                end: Some("2018".to_owned()),
+                ..Education::default()
+            }],
+            skills: vec!["Rust".to_owned(), "Go".to_owned()],
+            ..ParsedResume::default()
+        };
+        let text = resume.to_interview_text();
+        assert_eq!(
+            text,
+            "## 概况\n\n高级后端工程师，8.5 年工作经验，本科\n\n\
+             ## 工作经历\n\n### 杭州示例云科技有限公司 · 高级后端工程师（2021-07 至今）\n\n\
+             用 Rust 重写结算链路。\n\n用到的技术：Rust、PostgreSQL\n\n\
+             ## 教育经历\n\n### 示例大学 · 本科 · 计算机（到 2018）\n\n\
+             ## 技能\n\nRust、Go\n\n\
+             ## 想做的职位\n\n后端负责人"
+        );
+        for secret in ["林知夏", "13800001234", "example.com", "西湖区", "50k"] {
+            assert!(!text.contains(secret), "不该带 {secret}");
+        }
+        assert_eq!(ParsedResume::default().to_interview_text(), "");
     }
 
     #[test]

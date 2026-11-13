@@ -138,17 +138,235 @@ pub struct Word {
 }
 
 /// 候选人网页采集到的一个过程事件。
+///
+/// 从面试间上报的原始事件组装时用 [`ProctorEvent::from_raw`]，它会把「离开」和「回来」合成一条。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct ProctorEvent {
     pub id: String,
-    pub at_ms: u64,
-    /// 事件种类，例如 `visibility_hidden`、`window_blur`、`paste`、`fullscreen_exit`、`face_count_changed`，
+    /// 事件开始的时间。面试开始之前的事件（打开页面、设备检测）没有时间，留空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_ms: Option<u64>,
+    /// 事件种类，例如 `visibility_hidden`、`window_blur`、`paste`、`recording_gap`、`page_opened`，
     /// 清单见 `docs/architecture/api.md`。这里不限定取值，新的种类直接加，含义由模型理解。
     pub kind: String,
-    /// 持续了多久，瞬时事件留空。
+    /// 从 `at_ms` 起持续了多久，瞬时事件留空。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     /// 补充说明。事件带的数据（payload）转成文字放在这里。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+}
+
+/// 面试间上报的一条原始事件，对应 `POST /api/v1/room/events` 存下来的一行。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct RawEvent {
+    pub id: String,
+    pub kind: String,
+    /// 面试时间轴上的毫秒。面试开始之前的事件是空。
+    #[serde(default)]
+    pub at_ms: Option<u64>,
+    /// 事件带的数据，原样传进来。
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub payload: serde_json::Value,
+}
+
+/// 成对上报的事件：`(回来, 离开)`。面试间在「回来」那一条上带 `duration_ms`。
+const PAIRED_KINDS: [(&str, &str); 4] = [
+    ("visibility_visible", "visibility_hidden"),
+    ("window_focus", "window_blur"),
+    ("network_online", "network_offline"),
+    ("device_recovered", "recording_gap"),
+];
+
+impl ProctorEvent {
+    /// 把面试间上报的原始事件整理成分析用的事件，`raw` 按发生的先后排好。
+    ///
+    /// 面试间把「离开」和「回来」分两条报，离开了多久写在「回来」那一条上。这里把两条合成一条：
+    /// 保留「离开」，补上持续时间，这样一条事件就说清了从什么时候起离开了多久，证据也能对到
+    /// 录像上的那一段。只有「回来」没有「离开」时，按持续时间往回推出一条「离开」。
+    /// 其余事件原样保留，带的数据转成一行文字放进 `detail`。
+    #[must_use]
+    pub fn from_raw(raw: Vec<RawEvent>) -> Vec<Self> {
+        let mut events: Vec<Self> = Vec::with_capacity(raw.len());
+        for item in raw {
+            let mut payload = item.payload;
+            let duration_ms = payload
+                .as_object_mut()
+                .and_then(|map| map.remove("duration_ms"))
+                .and_then(|value| value.as_u64());
+            let detail = detail_text(&payload);
+            let opening = PAIRED_KINDS
+                .iter()
+                .find(|(closing, _)| *closing == item.kind)
+                .map(|(_, opening)| *opening);
+            let Some(opening) = opening else {
+                events.push(Self {
+                    id: item.id,
+                    at_ms: item.at_ms,
+                    kind: item.kind,
+                    duration_ms,
+                    detail,
+                });
+                continue;
+            };
+            let open = events
+                .iter_mut()
+                .rev()
+                .find(|event| event.kind == opening)
+                .filter(|event| event.duration_ms.is_none());
+            match (open, duration_ms) {
+                (Some(open), _) => {
+                    open.duration_ms = duration_ms.or_else(|| {
+                        let (start, end) = (open.at_ms?, item.at_ms?);
+                        end.checked_sub(start)
+                    });
+                }
+                (None, Some(duration)) => events.push(Self {
+                    id: item.id,
+                    at_ms: item.at_ms.map(|at| at.saturating_sub(duration)),
+                    kind: opening.to_owned(),
+                    duration_ms: Some(duration),
+                    detail,
+                }),
+                (None, None) => events.push(Self {
+                    id: item.id,
+                    at_ms: item.at_ms,
+                    kind: item.kind,
+                    duration_ms: None,
+                    detail,
+                }),
+            }
+        }
+        events
+    }
+}
+
+/// 事件带的数据转成一行文字。空对象和空值不算。
+fn detail_text(payload: &serde_json::Value) -> Option<String> {
+    match payload {
+        serde_json::Value::Null => None,
+        serde_json::Value::Object(map) if map.is_empty() => None,
+        serde_json::Value::String(text) if text.trim().is_empty() => None,
+        serde_json::Value::String(text) => Some(text.clone()),
+        other => Some(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn raw(id: &str, kind: &str, at_ms: Option<u64>, payload: serde_json::Value) -> RawEvent {
+        RawEvent {
+            id: id.to_owned(),
+            kind: kind.to_owned(),
+            at_ms,
+            payload,
+        }
+    }
+
+    #[test]
+    fn leave_and_return_become_one_event() {
+        let events = ProctorEvent::from_raw(vec![
+            raw("e1", "visibility_hidden", Some(60_000), json!({})),
+            raw(
+                "e2",
+                "visibility_visible",
+                Some(78_000),
+                json!({"duration_ms": 18_000}),
+            ),
+            raw("e3", "paste", Some(80_000), json!({"chars": 412})),
+        ]);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].id, "e1");
+        assert_eq!(events[0].kind, "visibility_hidden");
+        assert_eq!(events[0].at_ms, Some(60_000));
+        assert_eq!(events[0].duration_ms, Some(18_000));
+        assert_eq!(events[0].detail, None);
+        assert_eq!(events[1].kind, "paste");
+        assert_eq!(events[1].detail.as_deref(), Some(r#"{"chars":412}"#));
+    }
+
+    #[test]
+    fn return_without_duration_uses_the_time_between() {
+        let events = ProctorEvent::from_raw(vec![
+            raw("e1", "network_offline", Some(10_000), json!({})),
+            raw("e2", "network_online", Some(14_500), json!({})),
+        ]);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "network_offline");
+        assert_eq!(events[0].duration_ms, Some(4_500));
+    }
+
+    #[test]
+    fn return_without_leave_is_pushed_back_by_its_duration() {
+        let events = ProctorEvent::from_raw(vec![raw(
+            "e1",
+            "window_focus",
+            Some(30_000),
+            json!({"duration_ms": 12_000}),
+        )]);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "window_blur");
+        assert_eq!(events[0].at_ms, Some(18_000));
+        assert_eq!(events[0].duration_ms, Some(12_000));
+    }
+
+    #[test]
+    fn return_with_nothing_to_pair_is_kept_as_is() {
+        let events = ProctorEvent::from_raw(vec![raw("e1", "window_focus", Some(500), json!({}))]);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "window_focus");
+        assert_eq!(events[0].duration_ms, None);
+    }
+
+    #[test]
+    fn second_leave_pairs_with_its_own_return() {
+        let events = ProctorEvent::from_raw(vec![
+            raw("e1", "window_blur", Some(1_000), json!({})),
+            raw(
+                "e2",
+                "window_focus",
+                Some(3_000),
+                json!({"duration_ms": 2_000}),
+            ),
+            raw("e3", "window_blur", Some(9_000), json!({})),
+            raw(
+                "e4",
+                "window_focus",
+                Some(20_000),
+                json!({"duration_ms": 11_000}),
+            ),
+        ]);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].duration_ms, Some(2_000));
+        assert_eq!(events[1].at_ms, Some(9_000));
+        assert_eq!(events[1].duration_ms, Some(11_000));
+    }
+
+    #[test]
+    fn events_before_the_interview_keep_their_data() {
+        let events = ProctorEvent::from_raw(vec![raw(
+            "e1",
+            "page_opened",
+            None,
+            json!({"signals": {"clipboard": false}, "in_app_browser": "wechat"}),
+        )]);
+        assert_eq!(events[0].at_ms, None);
+        let detail = events[0].detail.as_deref().unwrap_or_default();
+        assert!(detail.contains("wechat"));
+        assert!(detail.contains("clipboard"));
+    }
+
+    #[test]
+    fn raw_event_reads_null_time_and_missing_payload() {
+        let event: RawEvent =
+            serde_json::from_str(r#"{"id":"e1","kind":"device_check","at_ms":null}"#)
+                .expect("能读");
+        assert_eq!(event.at_ms, None);
+        assert!(event.payload.is_null());
+    }
 }
