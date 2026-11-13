@@ -203,6 +203,8 @@ interview.finalize（interview-flow）
   → 入队 report.generate
 report.generate（interview-flow）
   → 组装面试记录（岗位、简历、配置、plan、turns、events）
+  → 从摄像头录像里抽帧，让大模型看画面里的人数和有没有手机（interview-report 的 frames），
+    看到的情况作为过程事件加进记录。结果存下来，重新生成报告时不再看。检查不成不影响出报告
   → 调 interview-report 生成报告，存 interview_reports（每次生成一个新版本）
 HR 在后台看录像、文字记录、报告，写结论（interviews.decision）
 ```
