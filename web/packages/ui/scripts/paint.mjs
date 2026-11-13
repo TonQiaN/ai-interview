@@ -32,20 +32,100 @@ function loadPlaywright() {
 /** @type {Array<{name:string, file:string, kind:string, args:Record<string, unknown>, quality?:number}>} */
 const JOBS = [
   // 插画
-  { name: "dusk", file: "paintings/dusk.webp", kind: "paint", args: { scene: "dusk", width: 1800, height: 720, seed: 11, swirl: 0.5 }, quality: 0.8 },
-  { name: "sitter", file: "paintings/sitter.webp", kind: "paint", args: { scene: "sitter", width: 900, height: 1080, seed: 23, swirl: 0.9, baseAngle: 0.9 }, quality: 0.82 },
-  { name: "bouquet", file: "paintings/bouquet.webp", kind: "paint", args: { scene: "bouquet", width: 900, height: 900, seed: 5, swirl: 1.4 }, quality: 0.8 },
-  { name: "nocturne", file: "paintings/nocturne.webp", kind: "paint", args: { scene: "nocturne", width: 1200, height: 900, seed: 31, swirl: 0.4 }, quality: 0.8 },
-  { name: "meadow", file: "paintings/meadow.webp", kind: "paint", args: { scene: "meadow", width: 1200, height: 900, seed: 47, swirl: 0.6 }, quality: 0.8 },
-  { name: "palette", file: "paintings/palette.webp", kind: "paint", args: { scene: "palette", width: 720, height: 1440, seed: 3, swirl: 2.2, flowScale: 0.5, brushes: [0.07, 0.035, 0.018] }, quality: 0.72 },
+  {
+    name: "dusk",
+    file: "paintings/dusk.webp",
+    kind: "paint",
+    args: { scene: "dusk", width: 1800, height: 720, seed: 11, swirl: 0.5 },
+    quality: 0.8,
+  },
+  {
+    name: "sitter",
+    file: "paintings/sitter.webp",
+    kind: "paint",
+    args: { scene: "sitter", width: 900, height: 1080, seed: 23, swirl: 0.9, baseAngle: 0.9 },
+    quality: 0.82,
+  },
+  {
+    name: "bouquet",
+    file: "paintings/bouquet.webp",
+    kind: "paint",
+    args: { scene: "bouquet", width: 900, height: 900, seed: 5, swirl: 1.4 },
+    quality: 0.8,
+  },
+  {
+    name: "nocturne",
+    file: "paintings/nocturne.webp",
+    kind: "paint",
+    args: { scene: "nocturne", width: 1200, height: 900, seed: 31, swirl: 0.4 },
+    quality: 0.8,
+  },
+  {
+    name: "meadow",
+    file: "paintings/meadow.webp",
+    kind: "paint",
+    args: { scene: "meadow", width: 1200, height: 900, seed: 47, swirl: 0.6 },
+    quality: 0.8,
+  },
+  {
+    name: "palette",
+    file: "paintings/palette.webp",
+    kind: "paint",
+    args: {
+      scene: "palette",
+      width: 720,
+      height: 1440,
+      seed: 3,
+      swirl: 2.2,
+      flowScale: 0.5,
+      brushes: [0.07, 0.035, 0.018],
+    },
+    quality: 0.72,
+  },
   // 笔触蒙版（白色带透明度）
-  { name: "stroke", file: "brush/stroke.webp", kind: "mask", args: { kind: "stroke", width: 640, height: 120, seed: 9 }, quality: 0.9 },
-  { name: "stroke-b", file: "brush/stroke-b.webp", kind: "mask", args: { kind: "stroke", width: 640, height: 120, seed: 21 }, quality: 0.9 },
-  { name: "underline", file: "brush/underline.webp", kind: "mask", args: { kind: "underline", width: 640, height: 48, seed: 14 }, quality: 0.9 },
-  { name: "dab", file: "brush/dab.webp", kind: "mask", args: { kind: "dab", width: 240, height: 240, seed: 17 }, quality: 0.9 },
+  {
+    name: "stroke",
+    file: "brush/stroke.webp",
+    kind: "mask",
+    args: { kind: "stroke", width: 640, height: 120, seed: 9 },
+    quality: 0.9,
+  },
+  {
+    name: "stroke-b",
+    file: "brush/stroke-b.webp",
+    kind: "mask",
+    args: { kind: "stroke", width: 640, height: 120, seed: 21 },
+    quality: 0.9,
+  },
+  {
+    name: "underline",
+    file: "brush/underline.webp",
+    kind: "mask",
+    args: { kind: "underline", width: 640, height: 48, seed: 14 },
+    quality: 0.9,
+  },
+  {
+    name: "dab",
+    file: "brush/dab.webp",
+    kind: "mask",
+    args: { kind: "dab", width: 240, height: 240, seed: 17 },
+    quality: 0.9,
+  },
   // 平铺质感
-  { name: "weave", file: "texture/weave.webp", kind: "tile", args: { kind: "weave", size: 128, seed: 2 }, quality: 0.8 },
-  { name: "impasto", file: "texture/impasto.webp", kind: "tile", args: { kind: "impasto", size: 256, seed: 6 }, quality: 0.8 },
+  {
+    name: "weave",
+    file: "texture/weave.webp",
+    kind: "tile",
+    args: { kind: "weave", size: 128, seed: 2 },
+    quality: 0.8,
+  },
+  {
+    name: "impasto",
+    file: "texture/impasto.webp",
+    kind: "tile",
+    args: { kind: "impasto", size: 256, seed: 6 },
+    quality: 0.8,
+  },
 ];
 
 const only = process.argv.slice(2);
@@ -79,16 +159,17 @@ window.__run = (kind, args, quality) => {
 
 for (const job of jobs) {
   const started = Date.now();
-  const dataUrl = await page.evaluate(([kind, args, quality]) => window.__run(kind, args, quality), [
-    job.kind,
-    job.args,
-    job.quality ?? 0.8,
-  ]);
+  const dataUrl = await page.evaluate(
+    ([kind, args, quality]) => window.__run(kind, args, quality),
+    [job.kind, job.args, job.quality ?? 0.8],
+  );
   const bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64");
   const target = join(outDir, job.file);
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, bytes);
-  console.log(`${job.file}  ${(bytes.length / 1024).toFixed(0)} KB  ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  console.log(
+    `${job.file}  ${(bytes.length / 1024).toFixed(0)} KB  ${((Date.now() - started) / 1000).toFixed(1)}s`,
+  );
 }
 
 await browser.close();

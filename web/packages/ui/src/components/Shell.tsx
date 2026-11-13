@@ -17,10 +17,20 @@ export function AppShell({ sidebar, topbar, children }: AppShellProps) {
   return (
     <div className="oil-shell" data-nav-open={open || undefined}>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: 点侧栏里的链接后收起抽屉，键盘用户走链接本身 */}
-      <aside className="oil-sidebar" onClick={(e) => (e.target as HTMLElement).closest("a") && setOpen(false)}>
+      <aside
+        className="oil-sidebar"
+        onClick={(e) => (e.target as HTMLElement).closest("a") && setOpen(false)}
+      >
         {sidebar}
       </aside>
-      {open && <button type="button" className="oil-shell__scrim" aria-label="收起导航" onClick={() => setOpen(false)} />}
+      {open && (
+        <button
+          type="button"
+          className="oil-shell__scrim"
+          aria-label="收起导航"
+          onClick={() => setOpen(false)}
+        />
+      )}
       <div className="oil-main">
         <header className="oil-topbar">
           <button
@@ -94,7 +104,10 @@ export function PageHeader({ title, description, crumbs, actions, brush }: PageH
       <div className="oil-page-head__text">
         {crumbs && <div className="oil-crumbs">{crumbs}</div>}
         <h1 className="oil-page-head__title">
-          <span className="oil-brushed" style={brush ? ({ "--oil-brush-color": brush } as React.CSSProperties) : undefined}>
+          <span
+            className="oil-brushed"
+            style={brush ? ({ "--oil-brush-color": brush } as React.CSSProperties) : undefined}
+          >
             {title}
           </span>
         </h1>

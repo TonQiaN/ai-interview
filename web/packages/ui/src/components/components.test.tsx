@@ -74,7 +74,16 @@ describe("Segmented", () => {
 describe("Slider", () => {
   it("回调拿到的是数字", () => {
     const onChange = vi.fn();
-    render(<Slider aria-label="静音判定" value={5} min={2} max={15} onChange={onChange} format={(v) => `${v} 秒`} />);
+    render(
+      <Slider
+        aria-label="静音判定"
+        value={5}
+        min={2}
+        max={15}
+        onChange={onChange}
+        format={(v) => `${v} 秒`}
+      />,
+    );
     fireEvent.change(screen.getByRole("slider"), { target: { value: "10" } });
     expect(onChange).toHaveBeenCalledWith(10);
     expect(screen.getByText("5 秒")).toBeTruthy();
