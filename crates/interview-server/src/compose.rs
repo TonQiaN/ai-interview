@@ -76,6 +76,9 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
     // ── ④ 语音：interview-tts（音色管理、合成）、interview-stt ──
 
     // ── ⑤ 候选人面试间：interview-room ──
+    let room = interview_room::Deps::new(ctx.clone(), interview_room::RoomConfig::from_env());
+    api = api.merge(interview_room::router(room.clone()));
+    interview_room::register_tasks(&mut tasks, room);
 
     // ── ① 面试场次：interview-flow ──
 

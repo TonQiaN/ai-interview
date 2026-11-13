@@ -18,6 +18,7 @@ interview-llm = { path = "crates/interview-llm" }
 interview-platform = { path = "crates/interview-platform" }
 interview-raas = { path = "crates/interview-raas" }
 interview-report = { path = "crates/interview-report" }
+interview-room = { path = "crates/interview-room" }
 interview-stt = { path = "crates/interview-stt" }
 interview-talent = { path = "crates/interview-talent" }
 interview-tts = { path = "crates/interview-tts" }
