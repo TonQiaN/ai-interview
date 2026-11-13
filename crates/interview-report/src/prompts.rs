@@ -7,7 +7,7 @@ use crate::record::Segment;
 use crate::transcript::{QuestionGroup, segment_alias};
 
 /// 提示词版本。
-pub const PROMPT_VERSION: u32 = 3;
+pub const PROMPT_VERSION: u32 = 4;
 
 /// 所有步骤共用的系统提示。
 pub(crate) const SYSTEM: &str = r#"你是一位资深的招聘评估专家，正在帮企业的 HR 分析一场 AI 面试的记录。

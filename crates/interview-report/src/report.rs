@@ -23,7 +23,8 @@ pub struct InterviewReport {
     /// 综合得分，0 到 100，由各题评分按权重算出（每题 1 到 5 分，乘以 20）。没有任何一题被评分时为空。
     pub overall_score: Option<u8>,
     /// 综合得分大概的浮动范围。同一场面试重新分析一遍，分数会有几分的出入，
-    /// 页面上建议把总分和这个范围一起显示。没有总分时为空。
+    /// 实测重新分析的结果 95% 以上落在这个范围里，页面上建议把它和总分一起显示。
+    /// 它只说明模型打分的出入有多大，不说明分数本身准不准。没有总分时为空。
     #[serde(default)]
     pub score_range: Option<ScoreRange>,
     /// 各项能力的评价。
@@ -240,6 +241,18 @@ pub struct QuestionJudgement {
     /// 下一轮值得追问的问题。
     #[serde(default)]
     pub follow_up: Option<String>,
+}
+
+impl QuestionJudgement {
+    /// 这道题的分数：评了不止一次时是几次的平均（不取整），只评一次时就是 `rating`。算总分用这个。
+    #[must_use]
+    pub fn mean_rating(&self) -> f32 {
+        if self.ratings.is_empty() {
+            return self.rating;
+        }
+        let count = f32::from(u16::try_from(self.ratings.len()).unwrap_or(u16::MAX));
+        self.ratings.iter().sum::<f32>() / count
+    }
 }
 
 /// 一道题的计时数据，由程序从时间戳算出。
