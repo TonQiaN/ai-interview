@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { defineConfig } from "@playwright/test";
-import { writeFakeMic } from "./e2e/fake-mic";
+import { writeFakeMic, writeSpeechMic } from "./e2e/fake-mic";
 
 /**
  * 浏览器端到端测试：真的 Chromium，假的摄像头和麦克风，真的后端。
@@ -17,7 +17,16 @@ import { writeFakeMic } from "./e2e/fake-mic";
  * 后端由 e2e/backend.sh 起：用开发数据库实例（scripts/dev-db.sh）上单独的一个库，每次清空重建。
  * 每个测试自己造一场面试（crates/interview-room/examples/demo.rs），互不影响。
  * 需要本机有 Rust 工具链和 PostgreSQL；第一次跑要先编译后端，会慢一些。
+ *
+ * 平时语音识别和大模型都是假的。想用真的走一遍（会花一点 DeepSeek 的钱，CI 不跑）：
+ *
+ *   E2E_REAL=1 E2E_SPEECH_WAV=<一段有人说话的 WAV> pnpm e2e
+ *
+ * 这时只跑 e2e/real.spec.ts，假麦克风放的是那段 WAV。还要有 DEEPSEEK_API_KEY 和
+ * AI_INTERVIEW_STT_MODEL_DIR（见 crates/interview-stt/README.md），后端会带着 sherpa 特性编译。
+ * 识别模型的包里带了几段示例录音（test_wavs/），可以直接拿来用。
  */
+const REAL = process.env.E2E_REAL === "1";
 const API_PORT = Number(process.env.E2E_API_PORT ?? 18080);
 const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 15174);
 const repoRoot = resolve(import.meta.dirname, "../../..");
@@ -25,7 +34,13 @@ const repoRoot = resolve(import.meta.dirname, "../../..");
 // 配置文件会被主进程和每个 worker 各加载一次，临时目录只建一次，靠环境变量传下去
 process.env.E2E_TMP_DIR ??= mkdtempSync(join(tmpdir(), "ai-interview-e2e-"));
 const tmp = process.env.E2E_TMP_DIR;
-const micFile = writeFakeMic(join(tmp, "mic.wav"));
+const micFile = REAL ? speechMic(join(tmp, "mic.wav")) : writeFakeMic(join(tmp, "mic.wav"));
+
+function speechMic(path: string): string {
+  const speech = process.env.E2E_SPEECH_WAV;
+  if (!speech) throw new Error("E2E_REAL=1 时要用 E2E_SPEECH_WAV 指一段有人说话的 WAV");
+  return writeSpeechMic(path, speech);
+}
 
 process.env.E2E_DATABASE_URL ??= execFileSync(join(repoRoot, "scripts/dev-db.sh"), ["url"], {
   encoding: "utf8",
@@ -63,20 +78,29 @@ export default defineConfig({
     screenshot: "only-on-failure",
     trace: "off",
   },
-  projects: [
-    {
-      name: "允许权限",
-      testIgnore: /denied\.spec\.ts/,
-      use: { launchOptions: { args: ["--use-fake-ui-for-media-stream", ...media] } },
-    },
-    {
-      name: "拒绝权限",
-      testMatch: /denied\.spec\.ts/,
-      // 精简版的无头浏览器（headless shell）没有权限弹窗，getUserMedia 会直接报「不支持」。
-      // 完整的 Chromium 在没人点「允许」时报的是 NotAllowedError，和候选人点了「拒绝」一样。
-      use: { channel: "chromium", launchOptions: { args: media } },
-    },
-  ],
+  projects: REAL
+    ? [
+        {
+          name: "真模型",
+          testMatch: /real\.spec\.ts/,
+          timeout: 10 * 60_000,
+          use: { launchOptions: { args: ["--use-fake-ui-for-media-stream", ...media] } },
+        },
+      ]
+    : [
+        {
+          name: "允许权限",
+          testIgnore: [/denied\.spec\.ts/, /real\.spec\.ts/],
+          use: { launchOptions: { args: ["--use-fake-ui-for-media-stream", ...media] } },
+        },
+        {
+          name: "拒绝权限",
+          testMatch: /denied\.spec\.ts/,
+          // 精简版的无头浏览器（headless shell）没有权限弹窗，getUserMedia 会直接报「不支持」。
+          // 完整的 Chromium 在没人点「允许」时报的是 NotAllowedError，和候选人点了「拒绝」一样。
+          use: { channel: "chromium", launchOptions: { args: media } },
+        },
+      ],
   webServer: [
     {
       command: "e2e/backend.sh",

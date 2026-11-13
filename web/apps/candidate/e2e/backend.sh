@@ -12,16 +12,24 @@ scripts/dev-db.sh psql -q \
   -c "DROP DATABASE IF EXISTS $db_name WITH (FORCE)" \
   -c "CREATE DATABASE $db_name"
 
-cargo build -p interview-server
 cargo build -p interview-room --example demo
 
-# 不调大模型：面试间没接语音识别时本来就不判断回答，这里把密钥清掉，面试后的分析也不会花钱
-export DEEPSEEK_API_KEY=""
-# 录像一秒切一片，断网补传这类情况几秒钟就能测出来
-export AI_INTERVIEW_ROOM_RECORDING_TIMESLICE_MS=1000
-# 语音识别是假后端（听到声音就给一句固定的话）。让它也做现场转写，
-# 这样能看到浏览器录出来的分片确实解得出声音、文字确实记进了对话
-export AI_INTERVIEW_STT_BACKEND=fake
-export AI_INTERVIEW_ROOM_FAKE_TRANSCRIPT=true
+if [ "${E2E_REAL:-}" = "1" ]; then
+  # 真的语音识别模型和真的大模型（会花一点钱，只在手动验证时用）
+  : "${DEEPSEEK_API_KEY:?E2E_REAL=1 时要有 DEEPSEEK_API_KEY}"
+  : "${AI_INTERVIEW_STT_MODEL_DIR:?E2E_REAL=1 时要有 AI_INTERVIEW_STT_MODEL_DIR，模型用 crates/interview-stt/scripts/download-models.sh 下载}"
+  cargo build -p interview-server --features sherpa
+  export AI_INTERVIEW_STT_BACKEND=sherpa
+else
+  cargo build -p interview-server
+  # 不调大模型：把密钥清掉，面试中不判断回答，面试后的分析也不会花钱
+  export DEEPSEEK_API_KEY=""
+  # 录像一秒切一片，断网补传这类情况几秒钟就能测出来
+  export AI_INTERVIEW_ROOM_RECORDING_TIMESLICE_MS=1000
+  # 语音识别是假后端（听到声音就给一句固定的话）。让它也做现场转写，
+  # 这样能看到浏览器录出来的分片确实解得出声音、文字确实记进了对话
+  export AI_INTERVIEW_STT_BACKEND=fake
+  export AI_INTERVIEW_ROOM_FAKE_TRANSCRIPT=true
+fi
 export AI_INTERVIEW_LOG="${AI_INTERVIEW_LOG:-warn}"
 exec target/debug/interview-server serve
