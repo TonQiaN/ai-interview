@@ -81,7 +81,7 @@ fn report_config(config: &InterviewConfig) -> record::InterviewConfig {
     }
 }
 
-/// 面试中现场生成的话（实时模式的追问等）：key、类型、文字。
+/// 面试中现场生成的话（实时对话里的追问、对候选人的回应）：key、类型、文字。
 async fn spoken_utterances(
     db: &PgPool,
     interview_id: Uuid,
@@ -147,7 +147,8 @@ fn questions(
         {
             continue;
         }
-        // 追问的 key 是「题目 key.f序号」，前半截就是它追的那道题
+        // 追问的 key 是「题目 key.后缀」（计划里的是 `.f序号`，现场追问是 `.p序号`），
+        // 前半截就是它追的那道题
         let parent_id = key
             .split_once('.')
             .map(|(parent, _)| parent.to_owned())
