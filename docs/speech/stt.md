@@ -195,8 +195,10 @@ for event in turn.push(&frame).await? {
         TurnEvent::Segment(segment) => { /* 一小段定下来了，带逐字时间戳 */ }
         TurnEvent::SpeechPaused { at_ms } => { /* 话音在 at_ms 落下 */ }
         TurnEvent::JudgeWanted { revision, text } => {
-            // 让大模型判断 text 是不是一句说完整的回答，不要在这里等它：
-            // 另起一个任务去问，问到了调 turn.verdict(revision, complete)
+            // 候选人说完了没有，问面试引擎，不要在这里等它：另起一个任务，
+            // 带着 TurnContext { paused: true, .. } 调 live::respond_with。
+            // 引擎的决定是 Wait（接着听）就调 turn.verdict(revision, false)，
+            // 别的决定调 turn.verdict(revision, true)，要说的话等 Ended 以后再用
         }
         TurnEvent::Ended { reason, at_ms, transcript } => { /* 这一轮结束，transcript 是全部文字 */ }
     }
@@ -220,6 +222,8 @@ let transcript = turn.finish().await?;
 | `min_silence_ms` | 不填（600） | 停顿多久算一小段话说完。调小了发现停顿更早，但换气也会把一句话切开 |
 
 为什么分两档：只看安静了多久的话，等得短会在候选人想词的时候抢话，等得长每一轮都要干等。所以候选人一停下来就请大模型判断这句话说完整没有。说完整了，安静 0.8 秒就结束；没说完整或者判断没回来，一直等到 3 秒。判断回来之前候选人又接着说了，这次判断作废，下次停顿重新问。不想用大模型判断时用 `TurnConfig::silence_only(毫秒)`。
+
+这个判断由面试引擎来做：`live::respond_with` 在候选人停顿时（`paused: true`）多一种决定「接着听」，一次调用同时回答「说完没有」和「怎么接」，引擎那边的用法见 `crates/interview-engine/docs/realtime.md` 的「候选人停了一下：说完了没有」。两边接起来的完整例子是 `crates/interview-stt/examples/realtime_latency.rs`。
 
 `Ended` 的 `reason`：`Silence`（安静够久）、`Complete`（说完整了提前结束）、`Timeout`（到了最长时间）、`NoSpeech`（没人说话，或者只有咳嗽之类认不出字的声音）。`reason.as_str()` 给出写进 `interview_turns.end_reason` 的值，前两种都是 `silence`。
 
