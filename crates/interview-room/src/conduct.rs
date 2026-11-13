@@ -424,7 +424,7 @@ async fn start_interview(
         };
     }
     let mut resumed_at = None;
-    // 刚开始的实时对话：用什么语言。提交之后拿它去把常说的接话提前合成好
+    // 刚开始的实时对话：用什么语言。提交之后拿它去把接话提前合成好
     let mut warm_up = None;
     let step = match (row.status, stored_state(interview_id, &row)?) {
         (InterviewStatus::InProgress, Some(state)) => {
