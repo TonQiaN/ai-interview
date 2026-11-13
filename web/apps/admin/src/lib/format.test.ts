@@ -6,6 +6,7 @@ import {
   eventSeverity,
   eventText,
   fileSize,
+  foldEvents,
   rating,
   relativeTime,
   stageName,
@@ -65,16 +66,41 @@ describe("报告和过程事件", () => {
     expect(eventSeverity("device_check")).toBe("info");
   });
 
-  it("事件的说明带上持续时间和补充", () => {
-    expect(eventText({ kind: "visibility_hidden", duration_ms: 9000, detail: null })).toBe(
-      "切出页面（持续 9 秒）",
+  it("事件的说明带上离开了多久和补充", () => {
+    expect(eventText({ kind: "visibility_hidden", payload: { duration_ms: 9000 } })).toBe(
+      "切出页面（离开了 9 秒）",
     );
-    expect(eventText({ kind: "paste", duration_ms: null, detail: null })).toBe("粘贴");
-    expect(eventNote({ kind: "face_count_changed", duration_ms: null, detail: "2" })).toBe(
-      "变成 2 个人",
-    );
-    expect(eventText({ kind: "unknown_kind", duration_ms: null, detail: null })).toBe(
-      "unknown_kind",
-    );
+    expect(eventText({ kind: "paste", payload: { chars: 180 } })).toBe("粘贴（180 个字）");
+    expect(eventNote({ kind: "face_count_changed", payload: { count: 2 } })).toBe("变成 2 个人");
+    expect(eventNote({ kind: "device_check", payload: { result: "passed" } })).toBe("通过");
+    expect(
+      eventNote({
+        kind: "device_check",
+        payload: { result: "failed", error: "permission_denied" },
+      }),
+    ).toBe("没通过：没有给权限");
+    expect(
+      eventNote({ kind: "device_changed", payload: { kinds: ["camera"], before: {}, after: {} } }),
+    ).toBe("摄像头");
+    expect(eventText({ kind: "unknown_kind", payload: {} })).toBe("unknown_kind");
+  });
+
+  it("回到页面那条并到切出页面那条上", () => {
+    const folded = foldEvents([
+      { kind: "page_opened", payload: {} },
+      { kind: "visibility_hidden", payload: {} },
+      { kind: "paste", payload: { chars: 20 } },
+      { kind: "visibility_visible", payload: { duration_ms: 8000 } },
+      { kind: "window_blur", payload: {} },
+    ]);
+    expect(folded.map((e) => e.kind)).toEqual([
+      "page_opened",
+      "visibility_hidden",
+      "paste",
+      "window_blur",
+    ]);
+    expect(folded[1]?.payload).toEqual({ duration_ms: 8000 });
+    // 还没回来的那次离开没有时长
+    expect(eventNote(folded[3] ?? { kind: "", payload: {} })).toBeNull();
   });
 });

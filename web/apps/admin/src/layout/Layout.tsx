@@ -76,7 +76,7 @@ export function Layout() {
   const logout = useLogout();
   // 侧栏上的数字：面试结束了但还没做决定的
   const waiting = useInterviews({ status: "completed", page_size: 100 }, Boolean(me.data));
-  const undecided = waiting.data?.items.filter((i) => i.decision === "undecided").length ?? 0;
+  const undecided = waiting.data?.items.filter((i) => i.decision === "pending").length ?? 0;
 
   if (me.isPending) {
     return (

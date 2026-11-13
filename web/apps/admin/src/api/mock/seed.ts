@@ -1,6 +1,7 @@
 /**
  * 演示数据。全部是编的：人名、公司、手机号（1380000xxxx）、邮箱（@example.com）都不对应真人。
  */
+import { estimateBudget } from "../../lib/budget";
 import type {
   Candidate,
   CandidateProfile,
@@ -8,6 +9,7 @@ import type {
   Interview,
   InterviewConfig,
   InterviewEvent,
+  InterviewPlan,
   InterviewReport,
   InterviewStatus,
   InterviewTemplate,
@@ -18,6 +20,7 @@ import type {
   RaasCandidate,
   RaasPosition,
   Recording,
+  ReportBrief,
   Resume,
   SpeechEngine,
   Turn,
@@ -25,11 +28,12 @@ import type {
   Voice,
 } from "../types";
 import {
+  planUtterances,
   type SampleName,
   sampleInterview,
+  samplePlan,
   sampleReport,
   samples,
-  sampleUtterances,
 } from "./samples";
 
 const MIN = 60_000;
@@ -48,31 +52,51 @@ export function newId(): string {
   return `0193a000-0000-7000-8000-${tail}`;
 }
 
+/** 和后端的默认面试设置一致（crates/interview-engine/src/config.rs） */
 export const defaultConfig: InterviewConfig = {
   mode: "scripted",
   language: "zh",
-  expected_duration_min: 30,
+  stage: "screening",
+  seniority: "auto",
+  target_duration_minutes: 20,
   question_count: null,
-  allow_early_finish: true,
-  silence_sec: 5,
-  max_answer_sec: 180,
-  llm: { model: "deepseek-flash", thinking: { enabled: true, effort: "high" } },
-  tts: { engine: "index2", voice_id: null, style: "沉稳、亲切，语速适中", speed: 1 },
-  focus_prompts: [],
-  extra_context: "",
-  record_video: true,
+  answer: { silence_sec: 5, min_sec: 3, max_sec: 180 },
+  follow_ups: { enabled: true, max_per_question: 1 },
+  early_stop: { enabled: true, min_questions: 3, poor_streak: 3 },
+  candidate_questions: "collect",
+  focus_instructions: [],
+  must_ask_questions: [],
+  screening_checks: [],
+  avoid_topics: [],
+  competencies: [],
+  verify_resume: true,
+  company_intro: "",
+  process_note: "这是第一轮初筛面试，通过之后还有一到两轮人工面试。",
+  prior_notes: "",
+  interviewer: { name: "", style: "professional" },
+  planning_thinking: { enabled: true, effort: "high" },
+  live_thinking: { enabled: false, effort: "high" },
 };
+
+const range = (min: number, max: number, suggested: number[]) => ({ min, max, suggested });
 
 export const configDefaults: ConfigDefaults = {
   config: defaultConfig,
   limits: {
-    expected_duration_min: { min: 10, max: 60, step: 5 },
-    question_count: { min: 3, max: 20 },
-    silence_sec: { min: 2, max: 15, presets: [3, 5, 10] },
-    max_answer_sec: { min: 30, max: 300, step: 30 },
-    speed: { min: 0.8, max: 1.2, step: 0.05 },
+    target_duration_minutes: range(5, 90, [15, 20, 30, 40]),
+    question_count: range(1, 30, [6, 8, 10, 12]),
+    silence_sec: range(2, 30, [3, 5, 8, 10]),
+    max_sec: range(30, 600, [120, 180, 240, 300]),
+    min_sec: range(0, 30, [0, 3, 5]),
+    follow_ups_per_question: range(0, 3, [0, 1, 2]),
+    early_stop_min_questions: range(1, 10, [2, 3, 4]),
+    early_stop_poor_streak: range(2, 6, [2, 3, 4]),
+    competency_weight: range(1, 5, [1, 2, 3, 4, 5]),
+    max_list_items: 20,
+    max_item_chars: 500,
+    max_text_chars: 5000,
   },
-  models: [{ id: "deepseek-flash", name: "DeepSeek Flash" }],
+  time_budget: estimateBudget(defaultConfig),
 };
 
 export const engines: SpeechEngine[] = [
@@ -943,6 +967,8 @@ export function seedResumes(candidates: Candidate[]): {
       is_primary: true,
       parse_status: seed ? "done" : "running",
       parse_error: null,
+      // 演示数据里留一份页数超了的，能看到提醒长什么样
+      parse_warning: seed && index === 3 ? "PDF 超过 8 页，只读了前 8 页" : null,
       parsed_at: seed ? iso(Date.parse(c.created_at) - Date.now() + MIN) : null,
       created_at: c.created_at,
       updated_at: c.created_at,
@@ -951,14 +977,13 @@ export function seedResumes(candidates: Candidate[]): {
   return { resumes, parsed };
 }
 
-export function seedTemplates(voiceId: string): InterviewTemplate[] {
+export function seedTemplates(): InterviewTemplate[] {
   return [
     {
       id: newId(),
-      name: "通用初筛（30 分钟）",
-      description: "第一轮面试的默认设置：10 道题左右，逐题问答。",
-      config: { ...defaultConfig, tts: { ...defaultConfig.tts, voice_id: voiceId } },
-      is_default: true,
+      name: "通用初筛（20 分钟）",
+      description: "第一轮面试的常用设置：逐题问答，每题最多追问一次。",
+      config: defaultConfig,
       created_at: iso(-20 * DAY),
       updated_at: iso(-4 * DAY),
     },
@@ -968,36 +993,48 @@ export function seedTemplates(voiceId: string): InterviewTemplate[] {
       description: "技术岗位用。一定会出一道逻辑推理题，并追问项目细节。",
       config: {
         ...defaultConfig,
-        expected_duration_min: 40,
-        llm: { model: "deepseek-flash", thinking: { enabled: true, effort: "max" } },
-        tts: { ...defaultConfig.tts, voice_id: voiceId },
-        focus_prompts: [
+        target_duration_minutes: 30,
+        follow_ups: { enabled: true, max_per_question: 2 },
+        planning_thinking: { enabled: true, effort: "max" },
+        focus_instructions: [
           "一定要出一道逻辑推理题，看思考过程而不是答案。",
           "对简历里最近一个项目追问到实现细节，判断是不是亲手做的。",
         ],
+        screening_checks: ["最快到岗时间", "期望薪资"],
+        competencies: [
+          { name: "排查问题的思路", description: "有没有先后顺序，能不能说出具体手段", weight: 5 },
+          { name: "技术判断", description: "做决定时有没有比较过别的方案", weight: 4 },
+          { name: "沟通表达", description: "能不能把复杂的事讲清楚", weight: 3 },
+        ],
       },
-      is_default: false,
       created_at: iso(-10 * DAY),
       updated_at: iso(-10 * DAY),
     },
     {
       id: newId(),
-      name: "快速摸底（20 分钟）",
-      description: "候选人多的时候用，题目少，静音判定短。",
+      name: "快速摸底（15 分钟）",
+      description: "候选人多的时候用：题目少，不追问，静音 3 秒就算答完。",
       config: {
         ...defaultConfig,
-        expected_duration_min: 20,
+        target_duration_minutes: 15,
         question_count: 6,
-        silence_sec: 3,
-        llm: { model: "deepseek-flash", thinking: { enabled: false, effort: "high" } },
-        tts: { ...defaultConfig.tts, voice_id: voiceId },
+        answer: { silence_sec: 3, min_sec: 3, max_sec: 120 },
+        follow_ups: { enabled: false, max_per_question: 1 },
+        candidate_questions: "skip",
+        planning_thinking: { enabled: false, effort: "high" },
       },
-      is_default: false,
       created_at: iso(-7 * DAY),
       updated_at: iso(-7 * DAY),
     },
   ];
 }
+
+/** 一份报告版本：列表里的简要信息，加上生成好的内容 */
+export interface ReportVersion {
+  brief: ReportBrief;
+  content: InterviewReport | null;
+}
+
 export interface Seed {
   positions: Position[];
   candidates: Candidate[];
@@ -1007,13 +1044,14 @@ export interface Seed {
   voices: Voice[];
   templates: InterviewTemplate[];
   interviews: Interview[];
+  plans: Map<string, InterviewPlan>;
   utterances: Map<string, Utterance[]>;
   turns: Map<string, Turn[]>;
   events: Map<string, InterviewEvent[]>;
   recordings: Map<string, Recording[]>;
-  /** 已经生成好的报告 */
-  reports: Map<string, InterviewReport>;
-  /** 这场面试的内容来自哪份样例；生成报告时按它取 */
+  /** 每场面试的报告版本，新的在前 */
+  reports: Map<string, ReportVersion[]>;
+  /** 这场面试的内容来自哪份样例；出题和生成报告时按它取 */
   sampleOf: Map<string, SampleName>;
   invites: Map<string, Invite[]>;
 }
@@ -1027,16 +1065,17 @@ export function sampleForPosition(title: string): SampleName {
 export function buildSeed(): Seed {
   const positions = seedPositions();
   const candidates = seedCandidates();
+  const { resumes, parsed } = seedResumes(candidates);
   const voices = seedVoices();
-  const voiceId = voices[0]?.id ?? "";
-  const templates = seedTemplates(voiceId);
+  const templates = seedTemplates();
   const base = templates[0]?.config ?? defaultConfig;
 
+  const plans = new Map<string, InterviewPlan>();
   const utterances = new Map<string, Utterance[]>();
   const turns = new Map<string, Turn[]>();
   const events = new Map<string, InterviewEvent[]>();
   const recordings = new Map<string, Recording[]>();
-  const reports = new Map<string, InterviewReport>();
+  const reports = new Map<string, ReportVersion[]>();
   const sampleOf = new Map<string, SampleName>();
   const invites = new Map<string, Invite[]>();
   const interviews: Interview[] = [];
@@ -1050,9 +1089,9 @@ export function buildSeed(): Seed {
     const { config } = samples[name].record;
     return {
       ...base,
-      expected_duration_min: config.expected_minutes,
-      focus_prompts: config.focus_points,
-      extra_context: config.round,
+      target_duration_minutes: config.expected_minutes,
+      focus_instructions: config.focus_points,
+      follow_ups: { enabled: true, max_per_question: 2 },
     };
   }
 
@@ -1069,26 +1108,30 @@ export function buildSeed(): Seed {
     const interview: Interview = {
       id: newId(),
       status,
-      candidate: { id: c.id, name: c.name, current_title: c.current_title ?? null },
+      candidate: {
+        id: c.id,
+        name: c.name,
+        current_title: c.current_title ?? null,
+        current_company: c.current_company ?? null,
+      },
       position: { id: p.id, title: p.title, department: p.department ?? null },
-      mode: cfg.mode,
-      expected_duration_min: cfg.expected_duration_min,
-      started_at: null,
-      ended_at: null,
-      duration_ms: null,
-      end_reason: null,
-      report_status: null,
-      overall_score: null,
-      recommendation: null,
-      decision: "undecided",
-      created_at: iso(createdAt),
-      updated_at: iso(createdAt),
       config: cfg,
+      time_budget: estimateBudget(cfg),
+      has_plan: false,
+      synth: { done: 0, failed: 0, total: 0 },
       prepare_error: null,
-      prepare_progress: null,
-      report_error: null,
+      report: null,
+      resume_id: resumes.find((r) => r.candidate_id === c.id && r.is_primary)?.id ?? null,
+      template_id: templates[0]?.id ?? null,
+      voice_id: null,
+      decision: "pending",
       decision_note: null,
       decided_at: null,
+      started_at: null,
+      ended_at: null,
+      end_reason: null,
+      created_at: iso(createdAt),
+      updated_at: iso(createdAt),
       ...patch,
     };
     interviews.push(interview);
@@ -1104,16 +1147,28 @@ export function buildSeed(): Seed {
     opened: number | null = null,
   ) {
     const list = invites.get(id) ?? [];
-    list.push({
+    list.unshift({
       id: newId(),
+      interview_id: id,
       status,
-      url: null,
-      token_hint: `…${(list.length + 7).toString(36)}K${id.slice(-3)}`,
       expires_at: iso(expiresAt),
+      revoked_at: null,
       first_opened_at: opened === null ? null : iso(opened),
+      last_opened_at: opened === null ? null : iso(opened + MIN),
+      open_count: opened === null ? 0 : 2,
       created_at: iso(createdAt),
     });
     invites.set(id, list);
+  }
+
+  /** 题目和语音都准备好了 */
+  function planned(it: Interview, name: SampleName) {
+    const plan = samplePlan(name, it.config);
+    const lines = planUtterances(plan, true);
+    plans.set(it.id, plan);
+    utterances.set(it.id, lines);
+    it.has_plan = true;
+    it.synth = { done: lines.length, failed: 0, total: lines.length };
   }
 
   /** 面完的面试：回看的内容来自样例，报告按 report 参数决定有没有 */
@@ -1126,40 +1181,48 @@ export function buildSeed(): Seed {
   ): Interview {
     const left = name === "sales-early-exit";
     const it = add(candidate, name, left ? "abandoned" : "completed", startedAt - DAY);
+    planned(it, name);
     const started = Date.now() + startedAt;
     const data = sampleInterview(name, started, newId);
     const generatedAt = started + data.durationMs + 4 * MIN;
+    const brief: ReportBrief = {
+      id: newId(),
+      version: 1,
+      status: report,
+      error:
+        report === "failed"
+          ? "模型服务超时，已经重试 2 次。面试记录是完整的，可以重新生成。"
+          : null,
+      generated_at: report === "done" ? new Date(generatedAt).toISOString() : null,
+    };
     Object.assign(it, {
       started_at: iso(startedAt),
       ended_at: iso(startedAt + data.durationMs),
-      duration_ms: data.durationMs,
-      end_reason: left ? "left" : "finished",
-      report_status: report,
+      end_reason: left ? "candidate_left" : "completed",
+      report: brief,
       updated_at: iso(startedAt + data.durationMs + 4 * MIN),
     } satisfies Partial<Interview>);
-    if (report === "done") {
-      const content = sampleReport(name, it.id, generatedAt);
-      reports.set(it.id, content);
-      it.overall_score = content.overall_score;
-      it.recommendation = content.recommendation.decision;
-    }
+    reports.set(it.id, [
+      { brief, content: report === "done" ? sampleReport(name, it.id, generatedAt) : null },
+    ]);
     Object.assign(it, patch);
-    utterances.set(it.id, data.utterances);
     turns.set(it.id, data.turns);
     events.set(it.id, data.events);
     recordings.set(it.id, data.recordings);
-    invite(it.id, "used", startedAt - DAY + HOUR, startedAt + 6 * DAY, startedAt - 4 * MIN);
+    // 面完之后链接就不能再用了
+    invite(it.id, "expired", startedAt - DAY + HOUR, startedAt + 6 * DAY, startedAt - 4 * MIN);
     return it;
-  }
-
-  function planned(id: string, name: SampleName) {
-    utterances.set(id, sampleUtterances(name, true));
   }
 
   // 面完、报告已出、等 HR 下结论
   finished("林知远", "backend-strong", -2 * DAY, "done");
   finished("顾清和", "backend-fabricated", -26 * HOUR, "done");
-  finished("苏晚晴", "pm-mediocre", -3 * DAY, "done");
+  finished("苏晚晴", "pm-mediocre", -3 * DAY, "done", {
+    decision: "hold",
+    decision_note: "表现中等，等这批候选人都面完再比较。",
+    decided_at: iso(-2 * DAY),
+    updated_at: iso(-2 * DAY),
+  });
   // 刚面完，报告还在生成
   finished("陆明哲", "backend-third-party", -40 * MIN, "running");
   // 已经有结论的
@@ -1176,9 +1239,7 @@ export function buildSeed(): Seed {
     updated_at: iso(-4 * DAY),
   });
   // 报告生成失败，可以重新生成
-  finished("周予安", "frontend-injection", -30 * HOUR, "failed", {
-    report_error: "模型服务超时，已经重试 2 次。面试记录是完整的，可以重新生成。",
-  });
+  finished("周予安", "frontend-injection", -30 * HOUR, "failed");
   // 候选人中途离开
   finished("方砚秋", "sales-early-exit", -6 * DAY, "done");
 
@@ -1188,33 +1249,53 @@ export function buildSeed(): Seed {
       started_at: iso(-11 * MIN),
       updated_at: iso(-11 * MIN),
     });
-    planned(it.id, "backend-strong");
-    invite(it.id, "used", -1 * DAY, 6 * DAY, -14 * MIN);
+    planned(it, "backend-strong");
+    invite(it.id, "active", -1 * DAY, 6 * DAY, -14 * MIN);
   }
   // 已发链接，等候选人
   {
     const it = add("温以宁", "pm-mediocre", "invited", -1 * DAY, { updated_at: iso(-20 * HOUR) });
-    planned(it.id, "pm-mediocre");
+    planned(it, "pm-mediocre");
     invite(it.id, "active", -20 * HOUR, 3 * DAY, -2 * HOUR);
   }
   // 题目准备好了，还没发链接
   {
     const it = add("叶南乔", "analyst-nervous", "ready", -3 * HOUR, { updated_at: iso(-2 * HOUR) });
-    planned(it.id, "analyst-nervous");
+    planned(it, "analyst-nervous");
   }
   // 链接过期，后来重新安排时准备失败
   {
     const it = add("程一鸣", "frontend-injection", "expired", -12 * DAY, {
       updated_at: iso(-5 * DAY),
     });
-    planned(it.id, "frontend-injection");
+    planned(it, "frontend-injection");
     invite(it.id, "expired", -12 * DAY, -5 * DAY);
   }
-  add("程一鸣", "frontend-injection", "prepare_failed", -5 * HOUR, {
-    prepare_error:
-      "语音合成失败：TTS worker 没有响应（第 4 句）。题目已经生成，重试时只会重新合成语音。",
-    updated_at: iso(-5 * HOUR + 3 * MIN),
-  });
+  {
+    // 题目出好了，语音合成到一半失败
+    const it = add("程一鸣", "frontend-injection", "prepare_failed", -5 * HOUR, {
+      prepare_error: "语音合成失败：TTS worker 没有响应。题目已经生成，重试时只会重新合成语音。",
+      updated_at: iso(-5 * HOUR + 3 * MIN),
+    });
+    const plan = samplePlan("frontend-injection", it.config);
+    const lines = planUtterances(plan, true).map(
+      (line, index): Utterance =>
+        index < 3
+          ? line
+          : {
+              ...line,
+              synth_status: index === 3 ? "failed" : "pending",
+              synth_error: index === 3 ? "TTS worker 没有响应" : null,
+              has_audio: false,
+              audio_duration_ms: null,
+              tts_engine: null,
+            },
+    );
+    plans.set(it.id, plan);
+    utterances.set(it.id, lines);
+    it.has_plan = true;
+    it.synth = { done: 3, failed: 1, total: lines.length };
+  }
   // 草稿
   add("沈星河", "sales-early-exit", "draft", -30 * MIN);
 
@@ -1223,10 +1304,12 @@ export function buildSeed(): Seed {
   return {
     positions,
     candidates,
-    ...seedResumes(candidates),
+    resumes,
+    parsed,
     voices,
     templates,
     interviews,
+    plans,
     utterances,
     turns,
     events,

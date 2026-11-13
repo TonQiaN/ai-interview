@@ -17,32 +17,41 @@ import {
   Textarea,
   useToast,
 } from "@ai-interview/ui";
-import { Ban, Link2, Pencil, Send, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Ban, Link2, Pencil, RefreshCw, Send, Trash2 } from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { errorMessage } from "../api/http";
+import { errorMessage, fieldErrors } from "../api/http";
 import {
   useCancelInterview,
   useCreateInvite,
   useDecide,
   useDeleteInterview,
-  useEditPlan,
-  useEngines,
   useEvents,
   useInterview,
   useInvites,
+  usePlan,
   usePrepareInterview,
   useRecordings,
   useRegenerateReport,
   useReport,
+  useReportVersions,
   useRevokeInvite,
+  useSavePlan,
   useTranscript,
-  useUpdateInterviewConfig,
+  useUpdateInterview,
   useUtterances,
-  useVoices,
 } from "../api/queries";
-import type { Decision, Interview, InterviewConfig, Invite, Utterance } from "../api/types";
-import { ConfigForm } from "../components/ConfigForm";
+import type {
+  CreatedInvite,
+  Decision,
+  Interview,
+  InterviewConfig,
+  InterviewPlan,
+  Invite,
+  PlannedQuestion,
+  Utterance,
+} from "../api/types";
+import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import {
   Confirm,
   DecisionBadge,
@@ -55,15 +64,23 @@ import {
 import { ReplayPlayer } from "../components/ReplayPlayer";
 import { ReportView } from "../components/ReportView";
 import {
+  categoryLabel,
+  decisionLabel,
   duration,
+  elapsedMs,
   endReasonLabel,
   fullTime,
   inviteStatusLabel,
   inviteStatusTone,
+  modeLabel,
+  originLabel,
   relativeTime,
+  stageLabelOf,
   statusHint,
+  styleLabel,
   synthStatusLabel,
   synthStatusTone,
+  thinkingLabel,
 } from "../lib/format";
 
 type Tab = "overview" | "questions" | "invites" | "replay" | "report";
@@ -73,30 +90,30 @@ const editable = (i: Interview) =>
 const cancellable = (i: Interview) =>
   !["completed", "abandoned", "expired", "cancelled"].includes(i.status);
 const ended = (i: Interview) => i.status === "completed" || i.status === "abandoned";
+const reportBusy = (i: Interview) =>
+  i.report?.status === "running" || i.report?.status === "pending";
+const gap = (size: number) => ({ "--oil-gap": `var(--oil-space-${size})` }) as React.CSSProperties;
 
 // ───────── 概览 ─────────
 
 function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) => void }) {
   const prepare = usePrepareInterview(interview.id);
   const toast = useToast();
-  const run = () => prepare.mutate(undefined, { onError: (e) => toast(errorMessage(e)) });
-  const { status } = interview;
+  const run = () => prepare.mutate(false, { onError: (e) => toast(errorMessage(e)) });
+  const { status, synth } = interview;
 
   if (status === "preparing") {
-    const p = interview.prepare_progress;
+    const synthesizing = interview.has_plan && synth.total > 0;
     return (
       <Banner tone="info" title="正在准备题目和语音">
-        <div
-          className="oil-stack"
-          style={{ "--oil-gap": "var(--oil-space-2)" } as React.CSSProperties}
-        >
+        <div className="oil-stack" style={gap(2)}>
           <span>
-            {p && p.total > 0
-              ? `已合成 ${p.done} / ${p.total} 段语音。`
+            {synthesizing
+              ? `题目出好了，已合成 ${synth.done} / ${synth.total} 句语音。`
               : "正在按简历和岗位要求出题。"}
             可以先去做别的，好了会停在「待发送」。
           </span>
-          <Progress value={p && p.total > 0 ? p.done / p.total : 0.05} label="准备进度" />
+          <Progress value={synthesizing ? synth.done / synth.total : 0.05} label="准备进度" />
         </div>
       </Banner>
     );
@@ -105,7 +122,7 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
     return (
       <Banner
         tone="danger"
-        title="题目没有准备好"
+        title={interview.has_plan ? "语音没有全部合成出来" : "题目没有准备好"}
         actions={
           <Button size="sm" loading={prepare.isPending} onClick={run}>
             重试
@@ -113,6 +130,9 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
         }
       >
         {interview.prepare_error ?? "准备过程出错了。"}
+        {interview.has_plan &&
+          synth.failed > 0 &&
+          ` 有 ${synth.failed} 句没合成成功，重试只补这几句。`}
       </Banner>
     );
   }
@@ -120,14 +140,14 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
     return (
       <Banner
         tone="info"
-        title="还没生成题目"
+        title={interview.has_plan ? "语音需要重新合成" : "还没生成题目"}
         actions={
           <Button size="sm" loading={prepare.isPending} onClick={run}>
-            生成题目和语音
+            {interview.has_plan ? "合成语音" : "生成题目和语音"}
           </Button>
         }
       >
-        {statusHint.draft}
+        {interview.has_plan ? "题目还在，合成好语音就可以发给候选人。" : statusHint.draft}
       </Banner>
     );
   }
@@ -146,11 +166,7 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
       </Banner>
     );
   }
-  if (
-    status === "completed" &&
-    interview.report_status === "done" &&
-    interview.decision === "undecided"
-  ) {
+  if (ended(interview) && interview.report?.status === "done" && interview.decision === "pending") {
     return (
       <Banner
         tone="success"
@@ -165,13 +181,25 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
       </Banner>
     );
   }
-  if (
-    ended(interview) &&
-    (interview.report_status === "running" || interview.report_status === "pending")
-  ) {
+  if (ended(interview) && reportBusy(interview)) {
     return (
       <Banner tone="info" title="正在生成分析报告">
         一般一两分钟。回看现在就可以看。
+      </Banner>
+    );
+  }
+  if (ended(interview) && interview.report?.status === "failed") {
+    return (
+      <Banner
+        tone="danger"
+        title="报告没有生成出来"
+        actions={
+          <Button size="sm" onClick={() => goTo("report")}>
+            去看看
+          </Button>
+        }
+      >
+        回看不受影响。可以在「报告」里重新生成。
       </Banner>
     );
   }
@@ -182,55 +210,90 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
   );
 }
 
-function ConfigSummary({ config }: { config: InterviewConfig }) {
-  const engines = useEngines();
-  const voices = useVoices();
-  const engine = engines.data?.items.find((e) => e.id === config.tts.engine);
-  const voice = voices.data?.items.find((v) => v.id === config.tts.voice_id);
-  const effort = { low: "快", high: "深入", max: "最深入" }[config.llm.thinking.effort];
+function bullets(key: string, items: string[]): ReactNode {
+  return (
+    <ul key={key} className="adm-bullets">
+      {items.map((item) => (
+        <li key={item}>{item}</li>
+      ))}
+    </ul>
+  );
+}
+
+function ConfigSummary({ interview }: { interview: Interview }) {
+  const { config, time_budget: budget } = interview;
+  const lists: Array<[string, string[]]> = [
+    ["重点考察", config.focus_instructions],
+    ["必须问的题", config.must_ask_questions],
+    ["要确认的条件", config.screening_checks],
+    ["不要问的话题", config.avoid_topics],
+    [
+      "考察维度",
+      config.competencies.map((c) => (c.description ? `${c.name}：${c.description}` : c.name)),
+    ],
+  ];
+  const notes: Array<[string, string]> = [
+    ["公司和团队", config.company_intro],
+    ["流程说明", config.process_note],
+    ["已经了解到的", config.prior_notes],
+  ];
   return (
     <KeyValue
       items={[
-        ["预期时长", `${config.expected_duration_min} 分钟`],
+        ["面试方式", `${modeLabel[config.mode]}，${stageLabelOf[config.stage]}`],
         [
-          "题目数量",
-          config.question_count === null ? "按时长自动安排" : `${config.question_count} 道`,
+          "时长和题量",
+          `预期 ${config.target_duration_minutes} 分钟，${
+            config.question_count === null
+              ? `自动安排约 ${budget.question_count} 道主问题`
+              : `${config.question_count} 道主问题`
+          }`,
         ],
-        ["停顿多久算答完", `${config.silence_sec} 秒`],
-        ["一道题最多答", duration(config.max_answer_sec * 1000)],
-        ["提前结束", config.allow_early_finish ? "候选人明显不合适时可以" : "不提前结束"],
+        [
+          "答题",
+          `停顿 ${config.answer.silence_sec} 秒算答完，一道题最多答 ${duration(config.answer.max_sec * 1000)}`,
+        ],
+        [
+          "追问",
+          config.follow_ups.enabled
+            ? `回答不够具体时追问，每题最多 ${config.follow_ups.max_per_question} 次`
+            : "不追问",
+        ],
+        [
+          "提前结束",
+          config.early_stop.enabled
+            ? `问完 ${config.early_stop.min_questions} 道题之后，连续 ${config.early_stop.poor_streak} 道答得很差就结束`
+            : "不提前结束",
+        ],
+        [
+          "候选人提问",
+          config.candidate_questions === "collect"
+            ? "最后请候选人提问，记下来转给你"
+            : "不留提问环节",
+        ],
+        ["核实简历", config.verify_resume ? "针对简历里的经历提问" : "不专门核实"],
+        [
+          "面试官",
+          `自称「${config.interviewer.name || "AI 面试官"}」，${styleLabel[config.interviewer.style]}的口吻`,
+        ],
         [
           "模型",
-          `${config.llm.model}，${config.llm.thinking.enabled ? `思考模式（${effort}）` : "不开思考"}`,
+          `DeepSeek Flash。出题时思考${thinkingLabel(config.planning_thinking)}；面试中思考${thinkingLabel(config.live_thinking)}`,
         ],
-        [
-          "声音",
-          `${engine?.name ?? config.tts.engine}，${voice?.name ?? "默认音色"}，${config.tts.speed.toFixed(2)} 倍速`,
-        ],
-        ["说话风格", config.tts.style || "—"],
-        [
-          "考察重点",
-          config.focus_prompts.length === 0 ? (
-            "没有额外要求"
-          ) : (
-            <ul key="focus" className="adm-bullets">
-              {config.focus_prompts.map((p) => (
-                <li key={p}>{p}</li>
-              ))}
-            </ul>
+        ...lists
+          .filter(([, items]) => items.length > 0)
+          .map(([label, items]) => [label, bullets(label, items)] as [string, ReactNode]),
+        ...notes
+          .filter(([, text]) => text)
+          .map(
+            ([label, text]) =>
+              [
+                label,
+                <span key={label} className="adm-prewrap">
+                  {text}
+                </span>,
+              ] as [string, ReactNode],
           ),
-        ],
-        [
-          "其他背景",
-          config.extra_context ? (
-            <span key="context" className="adm-prewrap">
-              {config.extra_context}
-            </span>
-          ) : (
-            "—"
-          ),
-        ],
-        ["录制", config.record_video ? "录视频和声音" : "只录声音"],
       ]}
     />
   );
@@ -255,11 +318,10 @@ function DecisionCard({ interview }: { interview: Interview }) {
           <Segmented
             aria-label="你的决定"
             value={decision}
-            options={[
-              { value: "advance", label: "进入下一轮" },
-              { value: "undecided", label: "还没定" },
-              { value: "reject", label: "不推进" },
-            ]}
+            options={(["advance", "hold", "reject", "pending"] as const).map((value) => ({
+              value,
+              label: decisionLabel[value],
+            }))}
             onChange={setDecision}
           />
           <Field label="备注">
@@ -306,12 +368,15 @@ function EditConfigDialog({
   open: boolean;
   onClose: () => void;
 }) {
-  const save = useUpdateInterviewConfig(interview.id);
+  const save = useUpdateInterview(interview.id);
   const toast = useToast();
-  const [config, setConfig] = useState(interview.config);
+  const [config, setConfig] = useState<InterviewConfig>(interview.config);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在打开的那一刻取一次，免得后台刷新把正在改的内容冲掉
   useEffect(() => {
-    if (open) setConfig(structuredClone(interview.config));
-  }, [open, interview.config]);
+    if (!open) return;
+    setConfig(structuredClone(interview.config));
+    save.reset();
+  }, [open]);
   return (
     <Dialog
       open={open}
@@ -327,15 +392,10 @@ function EditConfigDialog({
             loading={save.isPending}
             onClick={() =>
               save.mutate(
-                {
-                  ...config,
-                  focus_prompts: config.focus_prompts.map((p) => p.trim()).filter(Boolean),
-                },
+                { config: cleanConfig(config) },
                 {
                   onSuccess: () => {
-                    toast(
-                      interview.status === "ready" ? "设置改了，题目需要重新生成" : "设置已保存",
-                    );
+                    toast(interview.has_plan ? "设置改了，题目需要重新生成" : "设置已保存");
                     onClose();
                   },
                 },
@@ -348,13 +408,18 @@ function EditConfigDialog({
       }
     >
       <div className="oil-stack">
-        {interview.status === "ready" && (
+        {interview.has_plan && (
           <Banner tone="warning">
-            题目已经按原来的设置准备好了。改了设置之后，题目和语音要重新生成。
+            题目已经按原来的设置出好了。改了设置之后，题目和语音要重新生成。
           </Banner>
         )}
         {save.error && <Banner tone="danger">{errorMessage(save.error)}</Banner>}
-        <ConfigForm value={config} onChange={setConfig} disabled={save.isPending} />
+        <ConfigForm
+          value={config}
+          onChange={setConfig}
+          disabled={save.isPending}
+          errors={fieldErrors(save.error)}
+        />
       </div>
     </Dialog>
   );
@@ -369,7 +434,7 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
   const [confirming, setConfirming] = useState<"cancel" | "delete" | null>(null);
 
   return (
-    <div className="oil-stack" style={{ "--oil-gap": "var(--oil-space-5)" } as React.CSSProperties}>
+    <div className="oil-stack" style={gap(5)}>
       <NextStep interview={interview} goTo={goTo} />
       <div className="adm-split">
         <Card>
@@ -389,14 +454,11 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
             }
           />
           <CardBody>
-            <ConfigSummary config={interview.config} />
+            <ConfigSummary interview={interview} />
           </CardBody>
         </Card>
 
-        <div
-          className="oil-stack"
-          style={{ "--oil-gap": "var(--oil-space-5)" } as React.CSSProperties}
-        >
+        <div className="oil-stack" style={gap(5)}>
           {ended(interview) && <DecisionCard interview={interview} />}
           <Card>
             <CardHeader title="这场面试" />
@@ -419,7 +481,7 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
                   ...(interview.started_at
                     ? ([
                         ["开始", fullTime(interview.started_at)],
-                        ["用时", duration(interview.duration_ms)],
+                        ["用时", duration(elapsedMs(interview))],
                         [
                           "怎么结束的",
                           interview.end_reason
@@ -443,7 +505,7 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
                 取消这场面试
               </Button>
             )}
-            {interview.status !== "in_progress" && (
+            {interview.status !== "in_progress" && interview.status !== "preparing" && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -502,142 +564,443 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
 
 // ───────── 题目 ─────────
 
-const kindLabel: Record<Utterance["kind"], string> = {
-  opening: "开场",
-  question: "问题",
-  follow_up: "追问",
-  transition: "过渡",
-  closing: "结束",
-};
+/** 正在改的一句话：改完怎么放回计划里 */
+interface Editing {
+  label: string;
+  text: string;
+  hint?: string;
+  apply: (plan: InterviewPlan, text: string) => InterviewPlan;
+}
 
-function keyLabel(u: Utterance): string {
-  if (u.kind === "question") return u.key.replace(/^q/, "Q");
-  return kindLabel[u.kind];
+function SynthBadge({ utterance }: { utterance: Utterance | undefined }) {
+  if (!utterance) return null;
+  return (
+    <Badge tone={synthStatusTone[utterance.synth_status]} plain>
+      {utterance.synth_status === "done" && utterance.audio_duration_ms
+        ? `语音 ${Math.round(utterance.audio_duration_ms / 1000)} 秒`
+        : synthStatusLabel[utterance.synth_status]}
+    </Badge>
+  );
+}
+
+/** 题目清单里的一行：面试官要说的一句话 */
+function Line({
+  label,
+  text,
+  follow,
+  utterance,
+  onEdit,
+  children,
+}: {
+  label: string;
+  text: string;
+  follow?: boolean;
+  utterance: Utterance | undefined;
+  onEdit?: () => void;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={`adm-utter${follow ? " adm-utter--follow" : ""}`}>
+      <div className="adm-utter__key">{label}</div>
+      <div>
+        <p className="adm-utter__text">{text}</p>
+        {children}
+        {utterance?.synth_status === "failed" && utterance.synth_error && (
+          <div className="adm-utter__intent">语音没合成出来：{utterance.synth_error}</div>
+        )}
+      </div>
+      <div className="adm-utter__side">
+        <SynthBadge utterance={utterance} />
+        {onEdit && (
+          <Button size="sm" variant="ghost" icon={<Pencil aria-hidden="true" />} onClick={onEdit}>
+            改
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Signals({ question }: { question: PlannedQuestion }) {
+  const groups: Array<[string, string[]]> = [
+    ["答得好会提到", question.scoring?.strong_signals ?? []],
+    ["答得弱的表现", question.scoring?.weak_signals ?? []],
+    ["要警惕", question.scoring?.red_flags ?? []],
+  ];
+  const shown = groups.filter(([, items]) => items.length > 0);
+  if (shown.length === 0) return null;
+  return (
+    <details className="adm-utter__more">
+      <summary>怎么判断答得好不好</summary>
+      {shown.map(([label, items]) => (
+        <div key={label}>
+          <strong>{label}</strong>
+          <ul className="adm-bullets adm-bullets--muted">
+            {items.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </details>
+  );
+}
+
+function BriefCard({ plan }: { plan: InterviewPlan }) {
+  const { brief } = plan;
+  const lists: Array<[string, string[] | undefined]> = [
+    ["和岗位对得上的", brief.matches],
+    ["有差距或没提到的", brief.gaps],
+    ["要当面核实的", brief.verify_points],
+  ];
+  const shown = lists.filter(([, items]) => items && items.length > 0);
+  if (!brief.role_summary && !brief.candidate_summary && shown.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader title="面试官是怎么理解这场面试的" />
+      <CardBody>
+        <KeyValue
+          items={[
+            ...(brief.role_summary ? [["岗位", brief.role_summary] as [string, ReactNode]] : []),
+            ...(brief.candidate_summary
+              ? [["候选人", brief.candidate_summary] as [string, ReactNode]]
+              : []),
+            ...shown.map(
+              ([label, items]) => [label, bullets(label, items ?? [])] as [string, ReactNode],
+            ),
+          ]}
+        />
+      </CardBody>
+    </Card>
+  );
 }
 
 function QuestionsTab({ interview }: { interview: Interview }) {
-  const utterances = useUtterances(interview.id, true, interview.status === "preparing");
-  const edit = useEditPlan(interview.id);
+  const preparing = interview.status === "preparing";
+  const plan = usePlan(interview.id);
+  const utterances = useUtterances(interview.id, true, preparing);
+  const save = useSavePlan(interview.id);
+  const prepare = usePrepareInterview(interview.id);
   const toast = useToast();
-  const [editing, setEditing] = useState<Utterance | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
   const [text, setText] = useState("");
-  const canEdit = interview.status === "ready";
+  const [regenerating, setRegenerating] = useState(false);
+  const canEdit = editable(interview);
 
-  if (interview.status === "draft")
-    return <Banner tone="info">还没生成题目。回到「概览」点「生成题目和语音」。</Banner>;
+  // 出题的那一步结束后，把题目取回来
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在这两个值变的时候重新取
+  useEffect(() => {
+    void plan.refetch();
+  }, [interview.has_plan, interview.status]);
+
+  if (plan.error) return <LoadError error={plan.error} onRetry={() => plan.refetch()} />;
+  if (plan.isPending) return <Loading />;
+  const data = plan.data;
+  if (!data) {
+    return (
+      <Banner tone="info">
+        {preparing
+          ? "面试官正在出题，稍等一下。"
+          : interview.status === "prepare_failed"
+            ? "题目没有出成功。回到「概览」点「重试」。"
+            : "还没生成题目。回到「概览」点「生成题目和语音」。"}
+      </Banner>
+    );
+  }
+
+  const byKey = new Map((utterances.data ?? []).map((u) => [u.key, u]));
+  const live = (utterances.data ?? []).filter((u) => u.source === "live");
+  const main = data.questions.filter((q) => !q.reserve);
+  const reserve = data.questions.length - main.length;
+  const followUps = data.questions.reduce((sum, q) => sum + (q.follow_ups?.length ?? 0), 0);
+  const speech = (utterances.data ?? []).reduce((sum, u) => sum + (u.audio_duration_ms ?? 0), 0);
+  const edit = (target: Editing) => {
+    if (!canEdit) return undefined;
+    return () => {
+      save.reset();
+      setEditing(target);
+      setText(target.text);
+    };
+  };
+  const setQuestion = (index: number, patch: (q: PlannedQuestion) => PlannedQuestion) => {
+    return (current: InterviewPlan): InterviewPlan => ({
+      ...current,
+      questions: current.questions.map((q, i) => (i === index ? patch(q) : q)),
+    });
+  };
+  const setPhrase = (key: "opening" | "closing" | "closing_early" | "nudge" | "repeat") => {
+    return (current: InterviewPlan, next: string): InterviewPlan => ({
+      ...current,
+      phrases: { ...current.phrases, [key]: next },
+    });
+  };
+  let mainNo = 0;
 
   return (
-    <QueryView query={utterances}>
-      {({ items }) => {
-        const questions = items.filter((u) => u.kind === "question").length;
-        const speech = items.reduce((sum, u) => sum + (u.audio_duration_ms ?? 0), 0);
-        return (
-          <div className="oil-stack">
-            {items.length === 0 ? (
-              <Banner tone="info">
-                {interview.status === "preparing"
-                  ? "面试官正在出题，稍等一下。"
-                  : "这场面试没有题目。"}
-              </Banner>
-            ) : (
-              <>
-                <p className="oil-muted" style={{ margin: 0 }}>
-                  共 {questions} 道题，面试官说话约 {duration(speech)}。
-                  {canEdit
-                    ? "可以改措辞，改完那一句会重新合成语音。"
-                    : interview.status === "preparing"
-                      ? ""
-                      : "链接已经发出，题目不能再改。"}
-                  「想考察什么」只有你看得到。
-                </p>
-                <Card>
-                  <CardBody>
-                    {items.map((u) => (
-                      <div
-                        key={u.key}
-                        className={`adm-utter${u.kind === "follow_up" ? " adm-utter--follow" : ""}`}
-                      >
-                        <div className="adm-utter__key">{keyLabel(u)}</div>
-                        <div>
-                          <p className="adm-utter__text">{u.text}</p>
-                          {u.intent && <div className="adm-utter__intent">想考察：{u.intent}</div>}
-                          {u.source === "live" && (
-                            <div className="adm-utter__intent">面试中临场追问的</div>
-                          )}
-                        </div>
-                        <div className="adm-utter__side">
-                          <Badge tone={synthStatusTone[u.synth_status]} plain>
-                            {u.synth_status === "done" && u.audio_duration_ms
-                              ? `语音 ${Math.round(u.audio_duration_ms / 1000)} 秒`
-                              : synthStatusLabel[u.synth_status]}
-                          </Badge>
-                          {canEdit && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              icon={<Pencil aria-hidden="true" />}
-                              onClick={() => {
-                                setEditing(u);
-                                setText(u.text);
-                              }}
-                            >
-                              改
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </CardBody>
-                </Card>
-              </>
-            )}
-            <Dialog
-              open={editing !== null}
-              onClose={() => setEditing(null)}
-              title={editing ? `改${keyLabel(editing)}的措辞` : ""}
-              footer={
-                <>
-                  <Button variant="secondary" onClick={() => setEditing(null)}>
-                    取消
-                  </Button>
-                  <Button
-                    disabled={!text.trim() || text.trim() === editing?.text}
-                    loading={edit.isPending}
-                    onClick={() =>
-                      editing &&
-                      edit.mutate([{ key: editing.key, text: text.trim() }], {
-                        onSuccess: () => {
-                          toast("改好了，正在重新合成这一句");
-                          setEditing(null);
-                        },
-                        onError: (e) => toast(errorMessage(e)),
-                      })
-                    }
+    <div className="oil-stack" style={gap(5)}>
+      <div className="oil-row oil-row--between oil-row--wrap">
+        <p className="oil-muted" style={{ margin: 0 }}>
+          共 {main.length} 道主问题
+          {reserve > 0 && `，另备 ${reserve} 道（时间有富余才问）`}
+          {followUps > 0 && `，${followUps} 句追问`}
+          {speech > 0 && `；面试官说话约 ${duration(speech)}`}。
+          {canEdit
+            ? "可以改措辞，改完那一句会重新合成语音。"
+            : preparing
+              ? ""
+              : "链接发出之后题目不能再改。"}
+          「想考察什么」只有你看得到。
+        </p>
+        {canEdit && (
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<RefreshCw aria-hidden="true" />}
+            onClick={() => setRegenerating(true)}
+          >
+            重新出题
+          </Button>
+        )}
+      </div>
+
+      <BriefCard plan={data} />
+
+      <Card>
+        <CardHeader title="面试时依次要说的" />
+        <CardBody>
+          <Line
+            label="开场"
+            text={data.phrases.opening}
+            utterance={byKey.get("opening")}
+            onEdit={edit({
+              label: "开场白",
+              text: data.phrases.opening,
+              apply: setPhrase("opening"),
+            })}
+          />
+          {data.questions.map((q, index) => {
+            if (!q.reserve) mainNo += 1;
+            const label = q.reserve ? "备用" : `Q${mainNo}`;
+            return (
+              <div key={q.key}>
+                <Line
+                  label={label}
+                  text={q.text}
+                  utterance={byKey.get(q.key)}
+                  onEdit={edit({
+                    label: q.reserve ? "这道备用题" : `第 ${mainNo} 题`,
+                    text: q.text,
+                    hint: q.intent ? `想考察：${q.intent}` : undefined,
+                    apply: (current, next) =>
+                      setQuestion(index, (old) => ({ ...old, text: next }))(current),
+                  })}
+                >
+                  <div className="adm-utter__tags">
+                    <Badge plain>{categoryLabel[q.category]}</Badge>
+                    {q.origin !== "generated" && <Badge plain>{originLabel[q.origin]}</Badge>}
+                    {q.competency && <span className="adm-item__sub">{q.competency}</span>}
+                    <span className="adm-item__sub">
+                      预计答 {duration(q.expected_answer_sec * 1000)}
+                    </span>
+                  </div>
+                  {q.intent && <div className="adm-utter__intent">想考察：{q.intent}</div>}
+                  <Signals question={q} />
+                </Line>
+                {(q.follow_ups ?? []).map((f, fIndex) => (
+                  <Line
+                    key={f.key}
+                    follow
+                    label="追问"
+                    text={f.text}
+                    utterance={byKey.get(f.key)}
+                    onEdit={edit({
+                      label: `${label} 的追问`,
+                      text: f.text,
+                      hint: `什么时候问：${f.ask_when}`,
+                      apply: (current, next) =>
+                        setQuestion(index, (old) => ({
+                          ...old,
+                          follow_ups: (old.follow_ups ?? []).map((x, i) =>
+                            i === fIndex ? { ...x, text: next } : x,
+                          ),
+                        }))(current),
+                    })}
                   >
-                    保存并重新合成
-                  </Button>
-                </>
+                    <div className="adm-utter__intent">什么时候问：{f.ask_when}</div>
+                  </Line>
+                ))}
+              </div>
+            );
+          })}
+          {data.phrases.candidate_questions && (
+            <Line
+              label="提问"
+              text={data.phrases.candidate_questions}
+              utterance={byKey.get("candidate_questions")}
+              onEdit={edit({
+                label: "请候选人提问的那句话",
+                text: data.phrases.candidate_questions,
+                apply: (current, next) => ({
+                  ...current,
+                  phrases: { ...current.phrases, candidate_questions: next },
+                }),
+              })}
+            />
+          )}
+          <Line
+            label="结束"
+            text={data.phrases.closing}
+            utterance={byKey.get("closing")}
+            onEdit={edit({
+              label: "结束语",
+              text: data.phrases.closing,
+              apply: setPhrase("closing"),
+            })}
+          />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="随时可能用到的话" />
+        <CardBody>
+          {data.phrases.acks.map((ack, index) => (
+            <Line
+              // biome-ignore lint/suspicious/noArrayIndexKey: 过渡语没有自己的标识，顺序就是身份
+              key={index}
+              label="过渡"
+              text={ack}
+              utterance={byKey.get(`ack.${index + 1}`)}
+              onEdit={edit({
+                label: "这句过渡语",
+                text: ack,
+                apply: (current, next) => ({
+                  ...current,
+                  phrases: {
+                    ...current.phrases,
+                    acks: current.phrases.acks.map((x, i) => (i === index ? next : x)),
+                  },
+                }),
+              })}
+            />
+          ))}
+          <Line
+            label="提醒"
+            text={data.phrases.nudge}
+            utterance={byKey.get("nudge")}
+            onEdit={edit({
+              label: "提醒的话",
+              text: data.phrases.nudge,
+              apply: setPhrase("nudge"),
+            })}
+          >
+            <div className="adm-utter__intent">候选人很久不说话时用</div>
+          </Line>
+          <Line
+            label="重复"
+            text={data.phrases.repeat}
+            utterance={byKey.get("repeat")}
+            onEdit={edit({
+              label: "重复题目前的话",
+              text: data.phrases.repeat,
+              apply: setPhrase("repeat"),
+            })}
+          >
+            <div className="adm-utter__intent">候选人要求再说一遍时用</div>
+          </Line>
+          <Line
+            label="提前结束"
+            text={data.phrases.closing_early}
+            utterance={byKey.get("closing_early")}
+            onEdit={edit({
+              label: "提前结束时的话",
+              text: data.phrases.closing_early,
+              apply: setPhrase("closing_early"),
+            })}
+          >
+            <div className="adm-utter__intent">面试提前结束时代替结束语</div>
+          </Line>
+        </CardBody>
+      </Card>
+
+      {live.length > 0 && (
+        <Card>
+          <CardHeader title="面试中临场说的" />
+          <CardBody>
+            {live.map((u) => (
+              <Line key={u.key} label="临场" text={u.text} utterance={u} />
+            ))}
+          </CardBody>
+        </Card>
+      )}
+
+      {data.generation?.review_notes && data.generation.review_notes.length > 0 && (
+        <Card flat>
+          <CardHeader title="出题时模型自己检查出来的问题" />
+          <CardBody>{bullets("review", data.generation.review_notes)}</CardBody>
+        </Card>
+      )}
+
+      <Dialog
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        title={editing ? `改${editing.label}` : ""}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEditing(null)}>
+              取消
+            </Button>
+            <Button
+              disabled={!text.trim() || text.trim() === editing?.text}
+              loading={save.isPending}
+              onClick={() =>
+                editing &&
+                save.mutate(editing.apply(data, text.trim()), {
+                  onSuccess: () => {
+                    toast("改好了，正在重新合成这一句");
+                    setEditing(null);
+                  },
+                })
               }
             >
-              <Field
-                label="面试官会这样说"
-                hint={editing?.intent ? `想考察：${editing.intent}` : undefined}
-              >
-                {({ id, describedBy }) => (
-                  <Textarea
-                    id={id}
-                    aria-describedby={describedBy}
-                    rows={5}
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                  />
-                )}
-              </Field>
-            </Dialog>
-          </div>
-        );
-      }}
-    </QueryView>
+              保存并重新合成
+            </Button>
+          </>
+        }
+      >
+        <div className="oil-stack">
+          {save.error && <Banner tone="danger">{errorMessage(save.error)}</Banner>}
+          <Field label="面试官会这样说" hint={editing?.hint}>
+            {({ id, describedBy }) => (
+              <Textarea
+                id={id}
+                aria-describedby={describedBy}
+                rows={5}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+              />
+            )}
+          </Field>
+        </div>
+      </Dialog>
+      <Confirm
+        open={regenerating}
+        title="重新出题？"
+        confirmLabel="重新出题"
+        loading={prepare.isPending}
+        onClose={() => setRegenerating(false)}
+        onConfirm={() =>
+          prepare.mutate(true, {
+            onSuccess: () => {
+              toast("开始重新出题");
+              setRegenerating(false);
+            },
+            onError: (e) => toast(errorMessage(e)),
+          })
+        }
+      >
+        现在的题目和你改过的措辞会被新的替换，语音也要重新合成，一般一两分钟。
+      </Confirm>
+    </div>
   );
 }
 
@@ -646,7 +1009,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
 function inviteMessage(interview: Interview, url: string, expiresAt: string): string {
   return `${interview.candidate.name}你好：
 
-感谢你应聘「${interview.position.title}」。第一轮是线上的 AI 面试，大约 ${interview.config.expected_duration_min} 分钟，不用下载软件，也不用登录。
+感谢你应聘「${interview.position.title}」。第一轮是线上的 AI 面试，大约 ${interview.config.target_duration_minutes} 分钟，不用下载软件，也不用登录。
 
 面试链接：${url}
 
@@ -665,17 +1028,15 @@ function InvitesTab({ interview }: { interview: Interview }) {
   const toast = useToast();
   const [days, setDays] = useState("7");
   // 完整链接只在生成时返回一次，离开这一页就看不到了
-  const [fresh, setFresh] = useState<Invite | null>(null);
+  const [fresh, setFresh] = useState<CreatedInvite | null>(null);
   const [revoking, setRevoking] = useState<Invite | null>(null);
   const canCreate = interview.status === "ready" || interview.status === "invited";
+  const hasActive = invites.data?.items.some((invite) => invite.status === "active") ?? false;
 
   return (
     <div className="adm-split adm-split--wide-side">
-      <div
-        className="oil-stack"
-        style={{ "--oil-gap": "var(--oil-space-5)" } as React.CSSProperties}
-      >
-        {fresh?.url && (
+      <div className="oil-stack" style={gap(5)}>
+        {fresh && (
           <Card>
             <CardHeader title="链接生成好了" />
             <CardBody>
@@ -690,7 +1051,7 @@ function InvitesTab({ interview }: { interview: Interview }) {
                 />
                 <Field label="可以直接发给候选人的话">
                   <pre className="adm-message">
-                    {inviteMessage(interview, fresh.url, fresh.expires_at)}
+                    {inviteMessage(interview, fresh.url, fresh.invite.expires_at)}
                   </pre>
                 </Field>
                 <div>
@@ -698,7 +1059,7 @@ function InvitesTab({ interview }: { interview: Interview }) {
                     variant="secondary"
                     onClick={() => {
                       void navigator.clipboard
-                        ?.writeText(inviteMessage(interview, fresh.url ?? "", fresh.expires_at))
+                        ?.writeText(inviteMessage(interview, fresh.url, fresh.invite.expires_at))
                         .then(() => toast("整段话已复制"));
                     }}
                   >
@@ -725,17 +1086,18 @@ function InvitesTab({ interview }: { interview: Interview }) {
                       <li key={invite.id} className="adm-item">
                         <Link2 aria-hidden="true" size={18} />
                         <div className="adm-item__main">
-                          <div className="oil-mono">{invite.token_hint}</div>
+                          <div>{fullTime(invite.created_at)} 生成</div>
                           <div className="adm-item__sub">
-                            {relativeTime(invite.created_at)}生成，
                             {invite.status === "active"
                               ? `${relativeTime(invite.expires_at)}过期`
-                              : `有效期到 ${fullTime(invite.expires_at)}`}
-                            {invite.first_opened_at
-                              ? `，候选人${relativeTime(invite.first_opened_at)}打开过`
+                              : invite.revoked_at
+                                ? `${relativeTime(invite.revoked_at)}作废`
+                                : `有效期到 ${fullTime(invite.expires_at)}`}
+                            {invite.open_count > 0
+                              ? `，候选人打开过 ${invite.open_count} 次，最近一次是${relativeTime(invite.last_opened_at ?? invite.first_opened_at)}`
                               : invite.status === "active"
                                 ? "，候选人还没打开"
-                                : ""}
+                                : "，候选人没有打开过"}
                           </div>
                         </div>
                         <Badge tone={inviteStatusTone[invite.status]} plain>
@@ -772,10 +1134,14 @@ function InvitesTab({ interview }: { interview: Interview }) {
                   : "这场面试已经开始或结束，不能再生成链接。"}
               </Banner>
             )}
-            <Field label="有效期">
-              {({ id }) => (
+            <Field
+              label="有效期"
+              hint={hasActive ? "生成新链接之后，之前的链接会马上失效。" : undefined}
+            >
+              {({ id, describedBy }) => (
                 <Select
                   id={id}
+                  aria-describedby={describedBy}
                   value={days}
                   disabled={!canCreate}
                   onChange={(e) => setDays(e.target.value)}
@@ -793,10 +1159,10 @@ function InvitesTab({ interview }: { interview: Interview }) {
               disabled={!canCreate}
               loading={create.isPending}
               onClick={() =>
-                create.mutate(Number(days), { onSuccess: (invite) => setFresh(invite) })
+                create.mutate(Number(days) * 24, { onSuccess: (created) => setFresh(created) })
               }
             >
-              {interview.status === "invited" ? "再生成一个链接" : "生成链接"}
+              {hasActive ? "换一个新链接" : "生成链接"}
             </Button>
           </div>
         </CardBody>
@@ -814,7 +1180,7 @@ function InvitesTab({ interview }: { interview: Interview }) {
           revoke.mutate(revoking.id, {
             onSuccess: () => {
               toast("链接已作废");
-              if (fresh?.id === revoking.id) setFresh(null);
+              if (fresh?.invite.id === revoking.id) setFresh(null);
               setRevoking(null);
             },
             onError: (e) => toast(errorMessage(e)),
@@ -836,10 +1202,11 @@ function ReplayTab({
   interview: Interview;
   seekTo: { ms: number; nonce: number } | null;
 }) {
-  const transcript = useTranscript(interview.id);
-  const recordings = useRecordings(interview.id);
-  const events = useEvents(interview.id);
-  if (!interview.started_at)
+  const started = Boolean(interview.started_at);
+  const transcript = useTranscript(interview.id, started);
+  const recordings = useRecordings(interview.id, started);
+  const events = useEvents(interview.id, started);
+  if (!started)
     return <Banner tone="info">面试还没开始，结束后这里可以看录像、听录音、读逐字稿。</Banner>;
   if (transcript.data && recordings.data && events.data) {
     return (
@@ -848,10 +1215,11 @@ function ReplayTab({
           <Banner tone="info">面试还在进行，这里是到目前为止的内容。</Banner>
         )}
         <ReplayPlayer
-          transcript={transcript.data}
+          turns={transcript.data.items}
           recordings={recordings.data.items}
           events={events.data.items}
           candidateName={interview.candidate.name}
+          elapsedMs={elapsedMs(interview)}
           seekTo={seekTo}
         />
       </div>
@@ -864,96 +1232,120 @@ function ReplayTab({
 // ───────── 报告 ─────────
 
 function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: number) => void }) {
-  const status = interview.report_status;
-  const report = useReport(interview.id, status === "done");
+  const latest = interview.report ?? null;
+  const versions = useReportVersions(interview.id, ended(interview));
+  const done = (versions.data?.items ?? []).filter((v) => v.status === "done");
+  const [picked, setPicked] = useState<number | undefined>(undefined);
+  const hasDone = latest?.status === "done" || done.length > 0;
+  const report = useReport(interview.id, hasDone, picked);
   const regenerate = useRegenerateReport(interview.id);
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
+  const busy = reportBusy(interview);
   const run = () =>
     regenerate.mutate(undefined, {
       onSuccess: () => {
         toast("开始生成报告");
+        setPicked(undefined);
         setConfirming(false);
       },
       onError: (e) => toast(errorMessage(e)),
     });
 
+  // 新的一版生成好之后，把它取回来
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在最新一版的状态变的时候重新取
+  useEffect(() => {
+    void versions.refetch();
+    if (hasDone) void report.refetch();
+  }, [latest?.id, latest?.status]);
+
   if (!ended(interview)) return <Banner tone="info">面试结束后会自动生成分析报告。</Banner>;
 
-  if (status === "running" || status === "pending") {
-    return (
-      <Banner tone="info" title="正在生成报告">
-        正在读逐字稿和过程记录，逐题点评、对照岗位要求、核实简历，一般一两分钟。可以先去看回看。
-      </Banner>
-    );
-  }
-  if (status === "failed") {
-    return (
-      <Banner
-        tone="danger"
-        title="报告没有生成出来"
-        actions={
-          <Button size="sm" loading={regenerate.isPending} onClick={run}>
-            重新生成
-          </Button>
-        }
-      >
-        {interview.report_error ?? "生成过程出错了。"}
-      </Banner>
-    );
-  }
-  if (status === null) {
-    return (
-      <Banner
-        tone="info"
-        title="还没有报告"
-        actions={
-          <Button size="sm" loading={regenerate.isPending} onClick={run}>
-            生成报告
-          </Button>
-        }
-      >
-        这场面试还没有生成过分析报告。
-      </Banner>
-    );
-  }
+  const generate = (
+    <Button size="sm" loading={regenerate.isPending} onClick={run}>
+      {latest ? "重新生成" : "生成报告"}
+    </Button>
+  );
 
   return (
-    <QueryView query={report}>
-      {(data) =>
-        data ? (
-          <>
-            <ReportView report={data} onSeek={onSeek} onRegenerate={() => setConfirming(true)} />
-            <Confirm
-              open={confirming}
-              title="重新生成报告？"
-              confirmLabel="重新生成"
-              loading={regenerate.isPending}
-              onClose={() => setConfirming(false)}
-              onConfirm={run}
-            >
-              现在的报告会被新的替换。重新生成要调用十来次大模型，会花一点费用；结论大体一致，分数可能有几分的出入。
-            </Confirm>
-          </>
-        ) : (
-          <Banner
-            tone="info"
-            title="还没有报告"
-            actions={
-              <Button size="sm" loading={regenerate.isPending} onClick={run}>
-                生成报告
-              </Button>
-            }
+    <div className="oil-stack" style={gap(5)}>
+      {busy && (
+        <Banner tone="info" title="正在生成报告">
+          正在读逐字稿和过程记录，逐题点评、对照岗位要求、核实简历，一般一两分钟。可以先去看回看。
+          {hasDone && "下面是上一版。"}
+        </Banner>
+      )}
+      {latest?.status === "failed" && (
+        <Banner tone="danger" title="报告没有生成出来" actions={generate}>
+          {latest.error ?? "生成过程出错了。"}
+          {hasDone && " 下面是之前生成好的那一版。"}
+        </Banner>
+      )}
+      {!latest && (
+        <Banner tone="info" title="还没有报告" actions={generate}>
+          这场面试还没有生成过分析报告。
+        </Banner>
+      )}
+      {done.length > 1 && (
+        <div className="oil-row oil-row--wrap">
+          <span className="oil-muted">这场面试生成过 {done.length} 版报告，现在看的是</span>
+          <Select
+            aria-label="看哪一版报告"
+            style={{ width: "auto" }}
+            value={String(picked ?? report.data?.version ?? done[0]?.version ?? "")}
+            onChange={(e) => setPicked(Number(e.target.value))}
           >
-            这场面试还没有生成过分析报告。
-          </Banner>
-        )
-      }
-    </QueryView>
+            {done.map((v) => (
+              <option key={v.id} value={v.version}>
+                第 {v.version} 版 · {fullTime(v.generated_at)}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+      {hasDone && (
+        <QueryView query={report}>
+          {(data) =>
+            data ? (
+              <ReportView
+                report={data.content}
+                onSeek={onSeek}
+                onRegenerate={busy ? undefined : () => setConfirming(true)}
+              />
+            ) : null
+          }
+        </QueryView>
+      )}
+      <Confirm
+        open={confirming}
+        title="重新生成报告？"
+        confirmLabel="重新生成"
+        loading={regenerate.isPending}
+        onClose={() => setConfirming(false)}
+        onConfirm={run}
+      >
+        会生成新的一版，之前的版本还能看。重新生成要调用十来次大模型，会花一点费用；结论大体一致，分数可能有几分的出入。
+      </Confirm>
+    </div>
   );
 }
 
 // ───────── 页面 ─────────
+
+/** 标题下面的分数和建议，取自最新一版报告 */
+function Verdict({ interview }: { interview: Interview }) {
+  const report = useReport(interview.id, interview.report?.status === "done");
+  const content = report.data?.content;
+  if (!content) return null;
+  return (
+    <>
+      {typeof content.overall_score === "number" && (
+        <strong className="oil-num">{content.overall_score} 分</strong>
+      )}
+      <RecommendationBadge value={content.recommendation.decision} />
+    </>
+  );
+}
 
 export function InterviewDetailPage() {
   const { id = "" } = useParams();
@@ -988,10 +1380,7 @@ export function InterviewDetailPage() {
             description={
               <span className="oil-row oil-row--wrap">
                 <StatusBadge status={i.status} />
-                {i.overall_score !== null && (
-                  <strong className="oil-num">{i.overall_score} 分</strong>
-                )}
-                <RecommendationBadge value={i.recommendation} />
+                <Verdict interview={i} />
                 <DecisionBadge value={i.decision} />
                 <span>{relativeTime(i.updated_at)}更新</span>
               </span>

@@ -6,18 +6,26 @@ import type {
   ComponentState,
   Credibility,
   Decision,
+  Effort,
   FocusVerdict,
+  InterviewerStyle,
+  InterviewMode,
+  InterviewStage,
   InterviewStatus,
   InviteStatus,
   Level,
   ParseStatus,
   PositionStatus,
+  QuestionCategory,
+  QuestionOrigin,
   Recommendation,
   ReportStatus,
   RequirementVerdict,
   ReviewFlagCode,
   RiskLevel,
+  Seniority,
   SynthStatus,
+  Thinking,
 } from "../api/types";
 
 export const statusLabel: Record<InterviewStatus, string> = {
@@ -76,13 +84,15 @@ export const recommendationTone: Record<Recommendation, Tone> = {
 
 export const decisionLabel: Record<Decision, string> = {
   advance: "进入下一轮",
+  hold: "待定",
   reject: "不推进",
-  undecided: "还没定",
+  pending: "还没定",
 };
 export const decisionTone: Record<Decision, Tone> = {
   advance: "success",
+  hold: "warning",
   reject: "danger",
-  undecided: "neutral",
+  pending: "neutral",
 };
 
 export const reportStatusLabel: Record<ReportStatus, string> = {
@@ -108,24 +118,70 @@ export const synthStatusLabel: Record<SynthStatus, string> = {
   running: "合成中",
   done: "已合成",
   failed: "合成失败",
+  skipped: "不用合成",
 };
 export const synthStatusTone: Record<SynthStatus, Tone> = {
   pending: "neutral",
   running: "info",
   done: "success",
   failed: "danger",
+  skipped: "neutral",
 };
 export const inviteStatusLabel: Record<InviteStatus, string> = {
   active: "有效",
-  used: "已使用",
   expired: "已过期",
   revoked: "已作废",
 };
 export const inviteStatusTone: Record<InviteStatus, Tone> = {
   active: "success",
-  used: "info",
   expired: "neutral",
   revoked: "neutral",
+};
+
+// ───────── 面试设置 ─────────
+
+export const modeLabel: Record<InterviewMode, string> = {
+  scripted: "逐题问答",
+  conversational: "实时对话",
+};
+export const stageLabelOf: Record<InterviewStage, string> = {
+  screening: "第一轮初筛",
+  in_depth: "深入面试",
+};
+export const seniorityLabel: Record<Seniority, string> = {
+  auto: "自动判断",
+  entry: "应届或实习",
+  junior: "初级",
+  mid: "中级",
+  senior: "高级",
+  lead: "负责人",
+};
+export const styleLabel: Record<InterviewerStyle, string> = {
+  warm: "亲切",
+  professional: "专业",
+  rigorous: "严谨",
+};
+export const effortLabel: Record<Effort, string> = { low: "快", high: "深入", max: "最深入" };
+export function thinkingLabel(t: Thinking): string {
+  return t.enabled ? `开，${effortLabel[t.effort ?? "high"]}` : "关";
+}
+
+export const categoryLabel: Record<QuestionCategory, string> = {
+  warmup: "热身",
+  resume_verification: "核实经历",
+  professional: "专业",
+  behavioral: "行为",
+  situational: "情景",
+  logic: "逻辑",
+  motivation: "动机",
+  screening: "基本条件",
+  other: "其他",
+};
+export const originLabel: Record<QuestionOrigin, string> = {
+  generated: "模型出的",
+  must_ask: "必问题",
+  focus: "按考察重点出的",
+  screening_check: "基本条件确认",
 };
 
 // ───────── 分析报告 ─────────
@@ -275,18 +331,35 @@ export const speakerLabel: Record<string, string> = {
   other: "其他人",
 };
 
+/** 面试为什么结束。取值见 docs/architecture/api.md 里 finish 的 reason */
 export const endReasonLabel: Record<string, string> = {
-  finished: "正常结束",
-  early_finish: "面试官提前结束",
-  left: "候选人离开",
-  timeout: "超时",
+  completed: "题目问完，正常结束",
+  time_up: "到时间了",
+  poor_answers: "回答持续不理想，面试官提前结束",
+  no_response: "候选人一直没有回答",
+  candidate_request: "候选人要求结束",
+  candidate_left: "候选人中途点了结束",
+  connection_lost: "候选人离开后没有回来",
+};
+
+/** 候选人这一段回答是怎么结束的 */
+export const answerEndLabel: Record<string, string> = {
+  silence: "停顿后自动结束",
+  button: "点了「答完了」",
+  timeout: "到了最长回答时间",
+  no_speech: "没有开口",
 };
 
 // ───────── 过程事件 ─────────
-// 事件种类的清单在 docs/architecture/api.md。
+// 事件种类和各自带的补充信息在 docs/architecture/api.md 的「过程事件」。
 
 export const eventLabel: Record<string, string> = {
+  page_opened: "打开面试页面",
   device_check: "设备检测",
+  device_report: "设备检测结果",
+  interview_started: "面试开始",
+  interview_finished: "面试结束",
+  interview_abandoned: "候选人没有回来，面试结束",
   visibility_hidden: "切出页面",
   visibility_visible: "回到页面",
   window_blur: "窗口失去焦点",
@@ -295,10 +368,15 @@ export const eventLabel: Record<string, string> = {
   paste: "粘贴",
   copy: "复制",
   device_changed: "更换了设备",
+  device_recovered: "设备恢复",
   network_offline: "断网",
   network_online: "网络恢复",
   ws_reconnected: "重新连上",
   recording_gap: "录制中断",
+  recording_error: "录制出错",
+  question_replayed: "重听了题目",
+  answer_continued: "要求继续回答",
+  events_dropped: "有事件没有记下来",
   face_count_changed: "画面里的人数变了",
 };
 
@@ -308,20 +386,104 @@ export type EventSeverity = "info" | "notice" | "warning";
 export function eventSeverity(kind: string): EventSeverity {
   if (["visibility_hidden", "paste", "face_count_changed", "fullscreen_exit"].includes(kind))
     return "warning";
-  if (["window_blur", "copy", "device_changed", "network_offline", "recording_gap"].includes(kind))
+  if (
+    [
+      "window_blur",
+      "copy",
+      "device_changed",
+      "network_offline",
+      "recording_gap",
+      "recording_error",
+      "interview_abandoned",
+    ].includes(kind)
+  )
     return "notice";
   return "info";
 }
 
-type EventLike = { kind: string; duration_ms: number | null; detail: string | null };
+/** 成对事件里「回来」的那一条。时间轴上不单独标，离开了多久记在离开的那条上 */
+export const RETURN_OF: Record<string, string> = {
+  visibility_visible: "visibility_hidden",
+  window_focus: "window_blur",
+  network_online: "network_offline",
+};
+
+type EventLike = { kind: string; payload: Record<string, unknown> };
+
+const num = (value: unknown): number | null => (typeof value === "number" ? value : null);
+const str = (value: unknown): string | null =>
+  typeof value === "string" && value !== "" ? value : null;
+
+const deviceKindLabel: Record<string, string> = {
+  camera: "摄像头",
+  microphone: "麦克风",
+  speaker: "扬声器",
+};
+const deviceErrorLabel: Record<string, string> = {
+  permission_denied: "没有给权限",
+  device_not_found: "没找到设备",
+};
 
 /** 事件除了种类之外的补充：持续了多久、附带的说明。没有就是空 */
 export function eventNote(event: EventLike): string | null {
-  if (event.kind === "face_count_changed" && event.detail) return `变成 ${event.detail} 个人`;
+  const p = event.payload ?? {};
   const parts: string[] = [];
-  if (event.duration_ms) parts.push(`持续 ${duration(event.duration_ms)}`);
-  if (event.detail) parts.push(event.detail);
+  const away = num(p.duration_ms);
+  if (away) parts.push(`离开了 ${duration(away)}`);
+  const chars = num(p.chars);
+  if (chars !== null) parts.push(`${chars} 个字`);
+  const count = num(p.count);
+  if (event.kind === "face_count_changed" && count !== null) parts.push(`变成 ${count} 个人`);
+  if (Array.isArray(p.kinds)) {
+    const names = p.kinds.map((k) => deviceKindLabel[String(k)] ?? String(k));
+    if (names.length > 0) parts.push(names.join("、"));
+  }
+  if (event.kind === "device_check") {
+    if (p.result === "passed") parts.push("通过");
+    if (p.result === "failed") {
+      const error = str(p.error);
+      parts.push(`没通过${error ? `：${deviceErrorLabel[error] ?? error}` : ""}`);
+    }
+  }
+  if (event.kind === "device_report") {
+    for (const key of ["camera", "microphone", "speaker"]) {
+      if (p[key] === "failed") parts.push(`${deviceKindLabel[key]}不能用`);
+      if (p[key] === "skipped") parts.push(`${deviceKindLabel[key]}跳过了`);
+    }
+    const kbps = num(p.uplink_kbps);
+    if (kbps !== null) parts.push(`上行 ${Math.round(kbps)} kbps`);
+  }
+  const browser = str(p.in_app_browser);
+  if (browser) parts.push(`在${browser}内置浏览器里打开`);
+  const detail = str(p.detail);
+  if (detail) parts.push(detail);
   return parts.length > 0 ? parts.join("，") : null;
+}
+
+/**
+ * 把成对的事件合起来：「回到页面」那条带着离开了多久，把它记到前面「切出页面」那条上，
+ * 「回到页面」本身不再单独列出来。这样时间轴上一次离开只有一个点。
+ */
+export function foldEvents<T extends EventLike>(events: T[]): T[] {
+  const out: T[] = [];
+  for (const event of events) {
+    const leaveKind = RETURN_OF[event.kind];
+    if (!leaveKind) {
+      out.push(event);
+      continue;
+    }
+    for (let i = out.length - 1; i >= 0; i -= 1) {
+      const leave = out[i];
+      if (leave?.kind !== leaveKind) continue;
+      if (leave.payload?.duration_ms === undefined && event.payload?.duration_ms !== undefined)
+        out[i] = {
+          ...leave,
+          payload: { ...leave.payload, duration_ms: event.payload.duration_ms },
+        };
+      break;
+    }
+  }
+  return out;
 }
 
 /** 事件的一句话说明：种类加补充 */
@@ -464,3 +626,13 @@ export const positionStatusTone: Record<PositionStatus, Tone> = {
   paused: "warning",
   closed: "neutral",
 };
+
+/** 一场面试从开始到结束用了多久；还没结束是 null */
+export function elapsedMs(i: {
+  started_at?: string | null;
+  ended_at?: string | null;
+}): number | null {
+  if (!i.started_at || !i.ended_at) return null;
+  const ms = Date.parse(i.ended_at) - Date.parse(i.started_at);
+  return Number.isFinite(ms) && ms >= 0 ? ms : null;
+}

@@ -14,7 +14,7 @@ import {
 import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { errorMessage } from "../api/http";
+import { errorMessage, fieldErrors } from "../api/http";
 import {
   useCandidates,
   useConfigDefaults,
@@ -23,7 +23,7 @@ import {
   useTemplates,
 } from "../api/queries";
 import type { Candidate, InterviewConfig, Position } from "../api/types";
-import { ConfigForm } from "../components/ConfigForm";
+import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import { QueryView, SearchInput } from "../components/common";
 
 function PickCandidate({
@@ -166,13 +166,10 @@ export function InterviewNewPage() {
       setPosition(presetPositions.data?.items.find((p) => p.id === positionParam) ?? null);
   }, [positionParam, position, presetPositions.data]);
 
-  // 设置的初始值：默认模板，没有模板就用系统默认
+  // 设置的初始值是系统默认，选了模板再换成模板的
   useEffect(() => {
-    if (config || !defaults.data || !templates.data) return;
-    const preferred = templates.data.items.find((t) => t.is_default);
-    setTemplateId(preferred?.id ?? null);
-    setConfig(structuredClone(preferred?.config ?? defaults.data.config));
-  }, [config, defaults.data, templates.data]);
+    if (!config && defaults.data) setConfig(structuredClone(defaults.data.config));
+  }, [config, defaults.data]);
 
   function applyTemplate(id: string) {
     const template = templates.data?.items.find((t) => t.id === id);
@@ -183,12 +180,16 @@ export function InterviewNewPage() {
 
   function submit(prepare: boolean) {
     if (!candidate || !position || !config) return;
-    const cleaned = {
-      ...config,
-      focus_prompts: config.focus_prompts.map((p) => p.trim()).filter(Boolean),
-    };
     create.mutate(
-      { input: { candidate_id: candidate.id, position_id: position.id, config: cleaned }, prepare },
+      {
+        input: {
+          candidate_id: candidate.id,
+          position_id: position.id,
+          template_id: templateId,
+          config: cleanConfig(config),
+        },
+        prepare,
+      },
       {
         onSuccess: (interview) => {
           toast(prepare ? "开始准备题目和语音" : "已存为草稿");
@@ -231,7 +232,7 @@ export function InterviewNewPage() {
         >
           <Banner tone="info" title={`${candidate.name} 面试 ${position.title}`}>
             {candidate.profile
-              ? "面试官会结合他的简历和岗位要求出题。"
+              ? "面试官会结合这份简历和岗位要求出题。"
               : "这位候选人还没有解析好的简历，面试官只能按岗位要求出题。"}
           </Banner>
           <Card>
@@ -255,7 +256,14 @@ export function InterviewNewPage() {
               </Field>
             </CardBody>
           </Card>
-          {config && <ConfigForm value={config} onChange={setConfig} disabled={create.isPending} />}
+          {config && (
+            <ConfigForm
+              value={config}
+              onChange={setConfig}
+              disabled={create.isPending}
+              errors={fieldErrors(create.error)}
+            />
+          )}
           {create.error && <Banner tone="danger">{errorMessage(create.error)}</Banner>}
           <div className="oil-row oil-row--wrap" style={{ justifyContent: "flex-end" }}>
             <Button variant="ghost" onClick={() => setStep(0)} disabled={create.isPending}>

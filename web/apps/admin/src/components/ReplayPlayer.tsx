@@ -11,7 +11,7 @@ import {
 } from "@ai-interview/ui";
 import { Download, Pause, Play, RotateCcw, RotateCw } from "lucide-react";
 import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef } from "react";
-import type { InterviewEvent, Recording, Transcript } from "../api/types";
+import type { InterviewEvent, Recording, Turn } from "../api/types";
 import { activeTurnIndex, useClock } from "../lib/clock";
 import {
   clock,
@@ -21,6 +21,7 @@ import {
   eventSeverity,
   eventText,
   fileSize,
+  foldEvents,
   speakerLabel,
 } from "../lib/format";
 
@@ -32,42 +33,69 @@ const trackLabel: Record<Recording["track"], string> = {
 };
 
 export interface ReplayPlayerProps {
-  transcript: Transcript;
+  turns: Turn[];
   recordings: Recording[];
   events: InterviewEvent[];
   candidateName: string;
+  /** 面试从开始到结束的时长；还在进行时不传 */
+  elapsedMs?: number | null;
   /** 要跳到的时间点。nonce 变了就跳，这样重复点同一处也有效 */
   seekTo?: { ms: number; nonce: number } | null;
 }
 
+/** 一句话说到什么时候。还没说完的那句只知道开头 */
+const endOf = (t: Turn) => t.end_ms ?? t.start_ms;
+
+/** 某一路录制里能播放的各段，按时间排好 */
+function playable(recordings: Recording[], track: Recording["track"]): Recording[] {
+  return recordings
+    .filter((r) => r.track === track && r.status === "ready" && r.media_url)
+    .sort((a, b) => a.start_ms - b.start_ms);
+}
+
 export function ReplayPlayer({
-  transcript,
+  turns,
   recordings,
-  events,
+  events: rawEvents,
   candidateName,
+  elapsedMs,
   seekTo,
 }: ReplayPlayerProps) {
-  const { turns } = transcript;
-  const total = Math.max(transcript.duration_ms, turns.at(-1)?.end_ms ?? 0, 1);
-  const video = recordings.find((r) => r.track === "camera" && r.media_url);
-  const audio = video ? undefined : recordings.find((r) => r.track === "microphone" && r.media_url);
-  const source = video ?? audio;
-  const mediaRef = useRef<HTMLMediaElement | null>(null);
-  const { ms, playing, rate, toggle, seek, setRate } = useClock(
-    total,
-    mediaRef,
-    source?.start_ms ?? 0,
+  const events = useMemo(() => foldEvents(rawEvents), [rawEvents]);
+  const total = Math.max(
+    elapsedMs ?? 0,
+    ...turns.map(endOf),
+    ...recordings.map((r) => r.start_ms + (r.duration_ms ?? 0)),
+    1,
   );
+  // 有录像放录像，没有就放录音；断线重连过的会有好几段
+  const videos = useMemo(() => playable(recordings, "camera"), [recordings]);
+  const audios = useMemo(
+    () => (videos.length > 0 ? [] : playable(recordings, "microphone")),
+    [recordings, videos],
+  );
+  const segments = videos.length > 0 ? videos : audios;
+  const mediaRef = useRef<HTMLMediaElement | null>(null);
+  const { ms, playing, rate, toggle, seek, setRate, segment } = useClock(total, mediaRef, segments);
+  const video = videos[segment];
+  const audio = audios[segment];
+  const source = video ?? audio;
 
   const active = activeTurnIndex(turns, ms);
   const current = turns[active];
-  const speaking = current && ms <= current.end_ms ? current : undefined;
+  const speaking = current && ms <= endOf(current) ? current : undefined;
   const who = (speaker: string) =>
     speaker === "candidate" ? candidateName : (speakerLabel[speaker] ?? speaker);
   const marks = useMemo(
-    () => events.filter((e) => e.at_ms !== null && eventSeverity(e.kind) !== "info"),
+    () =>
+      events.filter(
+        (e) => e.at_ms !== null && e.at_ms !== undefined && eventSeverity(e.kind) !== "info",
+      ),
     [events],
   );
+  const pieces = recordings
+    .filter((r) => r.status === "ready")
+    .sort((a, b) => a.start_ms - b.start_ms);
 
   useEffect(() => {
     if (seekTo) seek(seekTo.ms);
@@ -114,6 +142,11 @@ export function ReplayPlayer({
             >
               <Avatar name={candidateName} size="xl" />
               <div>{audio ? "这场面试只录了声音" : "这场面试没有可播放的录像"}</div>
+              {recordings.some((r) => r.status === "uploading" || r.status === "assembling") && (
+                <div style={{ opacity: 0.75, fontSize: "var(--oil-text-sm)" }}>
+                  录像还在上传和整理，过一会儿再来看
+                </div>
+              )}
               {!source && (
                 <div style={{ opacity: 0.75, fontSize: "var(--oil-text-sm)" }}>
                   可以按时间轴回放逐字稿
@@ -214,7 +247,7 @@ export function ReplayPlayer({
                 className={`adm-track__seg${t.speaker === "interviewer" ? " adm-track__seg--interviewer" : ""}`}
                 style={{
                   left: pct(t.start_ms),
-                  width: `calc(${pct(t.end_ms)} - ${pct(t.start_ms)})`,
+                  width: `calc(${pct(endOf(t))} - ${pct(t.start_ms)})`,
                 }}
               />
             ))}
@@ -258,10 +291,10 @@ export function ReplayPlayer({
                 {events.map((e) => (
                   <li key={e.id}>
                     <span className="adm-turn__time">
-                      {e.at_ms === null ? "开始前" : clock(e.at_ms)}
+                      {typeof e.at_ms === "number" ? clock(e.at_ms) : "开始前"}
                     </span>
                     <span>
-                      {e.at_ms === null ? (
+                      {typeof e.at_ms !== "number" ? (
                         (eventLabel[e.kind] ?? e.kind)
                       ) : (
                         <button
@@ -282,25 +315,35 @@ export function ReplayPlayer({
                   </li>
                 ))}
               </ul>
-              {recordings.length > 0 && (
+              {pieces.length > 0 && (
                 <div className="oil-row oil-row--wrap" style={{ marginTop: "var(--oil-space-3)" }}>
-                  {recordings.map((r) =>
-                    r.media_url ? (
+                  {pieces.map((r) => {
+                    const same = pieces.filter((p) => p.track === r.track);
+                    const nth = same.length > 1 ? `第 ${same.indexOf(r) + 1} 段` : "";
+                    const label = `${trackLabel[r.track]}${nth} ${duration(r.duration_ms)}${
+                      typeof r.size_bytes === "number" ? ` · ${fileSize(r.size_bytes)}` : ""
+                    }`;
+                    return r.media_url ? (
                       <a key={r.id} className="adm-chip-btn" href={r.media_url} download>
                         <Download
                           aria-hidden="true"
                           size={13}
                           style={{ verticalAlign: -2, marginRight: 4 }}
                         />
-                        {trackLabel[r.track]} {duration(r.duration_ms)} · {fileSize(r.size_bytes)}
+                        {label}
                       </a>
                     ) : (
                       <span key={r.id} className="adm-item__sub">
-                        {trackLabel[r.track]} {duration(r.duration_ms)} · {fileSize(r.size_bytes)}
+                        {label}
                       </span>
-                    ),
-                  )}
+                    );
+                  })}
                 </div>
+              )}
+              {recordings.some((r) => r.status === "failed") && (
+                <p className="adm-item__sub" style={{ margin: "var(--oil-space-3) 0 0" }}>
+                  有一段录制没有保存下来，那一段只能看逐字稿。
+                </p>
               )}
             </CardBody>
           </Card>
