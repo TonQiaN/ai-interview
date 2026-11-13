@@ -14,6 +14,7 @@ publish = false
 interview-audio = { path = "crates/interview-audio" }
 interview-core = { path = "crates/interview-core" }
 interview-engine = { path = "crates/interview-engine" }
+interview-flow = { path = "crates/interview-flow" }
 interview-llm = { path = "crates/interview-llm" }
 interview-platform = { path = "crates/interview-platform" }
 interview-raas = { path = "crates/interview-raas" }
