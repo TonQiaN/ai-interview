@@ -189,15 +189,15 @@ HR 侧：
 | `GET /api/v1/room/session` | 会话信息：状态、岗位和公司的展示名、预期时长、模式、同意事项、静音秒数、断点位置 |
 | `POST /api/v1/room/consent` | 记录同意：`{ "consent_version", "agreed_keys" }`。必须同意的少勾了返回 422；版本和服务端当前的不一样返回 409（`consent_outdated`） |
 | `POST /api/v1/room/device-check` | 上报设备检测结果，记成一条 `device_report` 事件 |
-| `POST /api/v1/room/start` | 开始面试，返回第一句话。已经开始的面试再调一次，返回当前该播的那一句（刷新后续面用） |
-| `POST /api/v1/room/advance` | 逐题模式：上报刚答完的这一段（起止毫秒、结束原因），返回下一步 |
-| `GET /api/v1/room/utterances/{key}/audio` | 面试官语音 |
+| `POST /api/v1/room/start` | 开始面试，返回第一句话。已经开始的面试再调一次，返回当前该播的那一句（刷新后续面用）；已经结束的返回 `finish`。还没同意返回 409（`consent_required`） |
+| `POST /api/v1/room/advance` | 逐题模式：每播完一句调一次，要听回答的那一句等候选人答完再调（带起止毫秒、结束原因），返回下一步 |
+| `GET /api/v1/room/utterances/{key}/audio` | 面试官语音，支持 Range。只能取当前这一句、`preload_audio_urls` 里的和已经播过的，别的返回 404 |
 | `POST /api/v1/room/events` | 批量上报过程事件 |
 | `PUT /api/v1/room/recordings/{track}/{segment}` | 登记一段录制（幂等）。`{segment}` 是浏览器生成的 UUID，请求体是 `{ "content_type", "start_ms" }` |
 | `PUT /api/v1/room/recordings/{track}/{segment}/chunks/{seq}` | 上传一个录制分片（幂等），`X-Chunk-Sha256` 带内容的校验和 |
 | `GET /api/v1/room/recordings/{track}/{segment}/chunks` | 已收到的分片序号：`{ "received": [0, 1, 2] }` |
 | `POST /api/v1/room/recordings/{track}/{segment}/complete` | 这一段传完了：`{ "total_chunks": 38 }`，缺片时返回 409 |
-| `POST /api/v1/room/finish` | 结束面试 |
+| `POST /api/v1/room/finish` | 候选人中途结束面试：`{ "reason": "candidate_left" }`。面试正常问完时服务端自己结束，页面不用调 |
 | `POST /api/v1/room/ws-ticket`、`GET /api/v1/room/ws?ticket=` | 实时模式的 WebSocket |
 
 ### ⑦ 分析报告
@@ -230,7 +230,7 @@ HR 侧：
 }
 ```
 
-- `action`：`say`（播放这句话；`expects_answer` 为真时播完开始听候选人回答）或 `finish`（面试结束，带结束语的话先 `say` 再 `finish`）。`finish` 带 `reason`：`completed`、`time_up`、`poor_answers`、`no_response`、`candidate_request`、`candidate_left` 之一。
+- `action`：`say`（播放这句话；`expects_answer` 为真时播完开始听候选人回答）或 `finish`（面试结束，带结束语的话先 `say` 再 `finish`）。`finish` 带 `reason`：`completed`、`time_up`、`poor_answers`、`no_response`、`candidate_request`（这五个是面试官结束的，面试状态 `completed`），`candidate_left`（候选人中途点了结束）、`connection_lost`（候选人离开后一直没回来）之一（这两个的面试状态是 `abandoned`）。`reason` 同时记在 `interviews.end_reason` 里。
 - `seq`：这一句在本场面试里的序号，服务端每发一句加一。同一句话可能说两次（没听到回答时再问一遍、候选人要求重复、过渡语复用），所以不能拿 `utterance.key` 区分。
 - 一次只发一句。引擎的一步里有几句话时（比如开场白接第一题），服务端一句一句发，前面的 `expects_answer` 为假，最后一句为真。候选人答完后可以先发一句过渡语（`ack.N`），同时在后台转写和决定下一步。
 - `preload_audio_urls`（可选）：接下来多半会用到的语音，页面提前取好，减少句与句之间的等待。
@@ -252,10 +252,16 @@ HR 侧：
 
 - `end_reason`：`silence`（静音够久）、`button`（点了「答完了」）、`timeout`（到了最长作答时间）、`no_speech`（一直没开口，这时 `answer_start_ms` 和 `answer_end_ms` 是 null）。不需要回答的话，这三个字段都是 null。
 - `replays`：候选人重听了几次题目。
+- 每一句都要上报，不只是要回答的那一句：不需要回答的话（开场白、过渡语、结束语）播完就调，`answer_*` 和 `end_reason` 留空。`utterance_key` 和服务端发出的那一句对不上返回 409（`seq_conflict`）；要听回答的那一句没带 `end_reason` 返回 422。
+- 时刻都是面试时间轴上的毫秒数。比服务端的时钟快 5 秒以上的，按服务端的算。
 
-- 服务端把面试官的话和候选人的回答各记一行 `interview_turns`，调 `interview-engine` 的状态机决定下一步。逐题模式下候选人的文字在面试后由整段转写补上；如果配置允许逐题追问，服务端会先转写这一段再决定。
-- `advance` 是幂等的：同一个 `seq` 重复提交返回同样的下一步（断网重试用）；`seq` 不是当前这一句也不是上一句时返回 409。
+- 服务端把面试官的话和候选人的回答各记一行 `interview_turns`（没开口的回答不记），调 `interview-engine` 的状态机决定下一步。逐题模式下候选人的文字在面试后由整段转写补上；如果配置允许逐题追问，服务端会先转写这一段再决定。
+- 候选人答完之后，`advance` 马上返回一句过渡语，回答放到后台判断。页面报告过渡语播完时判断还没好，这次请求会等到判断完再返回；判断最多等 20 秒，等不到就按顺序问下一题。极少数情况下返回 503（`answer_pending`），页面过一会儿原样重试。
+- `advance` 是幂等的：同一个 `seq` 重复提交返回同样的下一步（断网重试用）；`seq` 不是当前这一句也不是上一句时返回 409（`seq_conflict`）。面试已经结束时返回 `finish`。
 - 断点续面：`GET /room/session` 的 `resume` 是当前该播的那一句；页面重新检查设备后调 `start`，从这一句继续。录像从新的一段开始录。
+- 面试结束（不管哪种原因）时，服务端在同一个事务里排一个 `interview.finalize` 任务，转写和出报告从那里开始。
+- 页面超过 15 分钟（`AI_INTERVIEW_ROOM_ABANDON_MINUTES`）没有任何动静（不上报、不传录像），后台任务 `room.watchdog` 把面试按 `connection_lost` 结束，并记一条服务端事件 `interview_abandoned`。结束语已经发给页面的不算中途离开，记成正常结束。
+- 配置成实时对话（`conversational`）的面试，在实时通道接上之前按逐题进行，`session.mode` 是 `scripted`。
 
 ### 录制上传
 
@@ -324,4 +330,4 @@ HR 侧：
 - `device_report` 是 `POST /room/device-check` 记下的：`camera`、`microphone`、`speaker`（`ok`、`failed`、`skipped`）、`uplink_kbps`、`recording_mime`、`user_agent`。
 - `kind` 只能用小写字母、数字和下划线；`payload` 是一个 JSON 对象，序列化后不超过 4096 字节；一次最多报 200 条。格式不对的单条事件会被丢掉，不影响同一批里的其他事件。
 
-`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`device_check`、`device_report`、`page_opened`、`interview_started`、`interview_finished`、`question_replayed`、`answer_continued`、`events_dropped`、`face_count_changed`（⑦ 面试后从录像抽帧产出，浏览器不报）。
+`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`device_check`、`device_report`、`page_opened`、`interview_started`、`interview_finished`、`question_replayed`、`answer_continued`、`events_dropped`、`interview_abandoned`（服务端记的：候选人离开后一直没回来，面试被结束）、`face_count_changed`（⑦ 面试后从录像抽帧产出，浏览器不报）。

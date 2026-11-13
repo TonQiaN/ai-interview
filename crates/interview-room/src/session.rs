@@ -3,7 +3,7 @@
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use chrono::{DateTime, Utc};
-use interview_engine::config::{InterviewConfig, InterviewMode};
+use interview_engine::config::InterviewConfig;
 use interview_platform::http::{ErrorBody, Json};
 use interview_platform::{ApiError, ApiResult};
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,7 @@ use utoipa_axum::routes;
 
 use crate::Deps;
 use crate::access::{RoomAccess, RoomStage};
+use crate::conduct;
 use crate::config::RecordingSettings;
 use crate::consent::{CONSENT_VERSION, ConsentItem, consent_items};
 use crate::events::{self, NewEvent};
@@ -73,6 +74,14 @@ pub(crate) fn parse_config(interview_id: uuid::Uuid, raw: Value) -> InterviewCon
     })
 }
 
+/// 这场面试用哪种方式进行。
+///
+/// 实时对话的通道还没接上，配置成实时对话的面试先按逐题进行：题目和语音是同一份，
+/// 只是追问用提前写好的，不现场生成。
+pub(crate) fn room_mode(_config: &InterviewConfig) -> RoomMode {
+    RoomMode::Scripted
+}
+
 pub(crate) fn answer_settings(config: &InterviewConfig) -> AnswerSettings {
     AnswerSettings {
         silence_sec: config.answer.silence_sec,
@@ -81,7 +90,7 @@ pub(crate) fn answer_settings(config: &InterviewConfig) -> AnswerSettings {
     }
 }
 
-async fn consent_agreed(deps: &Deps, access: &RoomAccess) -> ApiResult<bool> {
+pub(crate) async fn consent_agreed(deps: &Deps, access: &RoomAccess) -> ApiResult<bool> {
     let (agreed,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM interview_consents
                          WHERE interview_id = $1 AND consent_version = $2)",
@@ -149,10 +158,7 @@ async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<
         position_title,
         company_name,
         candidate_name,
-        mode: match config.mode {
-            InterviewMode::Scripted => RoomMode::Scripted,
-            InterviewMode::Conversational => RoomMode::Realtime,
-        },
+        mode: room_mode(&config),
         expected_duration_sec: config.target_duration_minutes.saturating_mul(60),
         camera_required: deps.config.camera_required,
         consent: ConsentState {
@@ -163,8 +169,7 @@ async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<
         recording: deps.config.recording.clone(),
         answer: answer_settings(&config),
         elapsed_ms: access.elapsed_ms(Utc::now()),
-        // 「开始」和「推进」接上之后，这里给出续面该播的那一句
-        resume: None,
+        resume: conduct::resume_step(&deps, &access).await?,
         expires_at: access.expires_at,
     }))
 }
