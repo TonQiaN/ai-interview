@@ -6,7 +6,8 @@ use async_trait::async_trait;
 use interview_audio::{Audio, REALTIME_SAMPLE_RATE, SilenceConfig, SpeechSegment, detect_speech};
 
 use crate::transcriber::{
-    SessionProgress, SttError, SttStatus, TranscribeOptions, TranscribeSession, Transcriber,
+    SessionProgress, StreamingOptions, SttError, SttStatus, TranscribeOptions, TranscribeSession,
+    Transcriber,
 };
 use crate::transcript::{Segment, Transcript, Word};
 use crate::words::{Token, join_words, plain_tokens, words_from_tokens};
@@ -27,7 +28,8 @@ const IN_SPEECH_SLACK_MS: u64 = 150;
 /// 和真后端的表现一致。云端容器和 CI 用它测面试流程。
 ///
 /// 边录边转时，一段声音要等到后面又出现一段声音才定下来（真后端是停顿半秒多就定下来），
-/// 最后一段在 `finish` 时给出。
+/// 最后一段在 `finish` 时给出。开了中间结果的会话里，还没定下来的那段声音按到现在的时长
+/// 先给出它开头的几个字（[`TranscribeSession::partial`]），声音越长字越多。
 #[derive(Debug, Default)]
 pub struct FakeTranscriber {
     shared: Arc<Shared>,
@@ -104,7 +106,16 @@ impl Transcriber for FakeTranscriber {
 
     async fn start_session(
         &self,
+        options: &TranscribeOptions,
+    ) -> Result<Box<dyn TranscribeSession>, SttError> {
+        self.start_streaming_session(options, &StreamingOptions::default())
+            .await
+    }
+
+    async fn start_streaming_session(
+        &self,
         _options: &TranscribeOptions,
+        streaming: &StreamingOptions,
     ) -> Result<Box<dyn TranscribeSession>, SttError> {
         self.shared.calls.fetch_add(1, Ordering::SeqCst);
         if self.unavailable {
@@ -118,6 +129,8 @@ impl Transcriber for FakeTranscriber {
             last_speech_end_ms: None,
             tokens: None,
             segments: Vec::new(),
+            partials: streaming.partials,
+            partial: None,
         }))
     }
 }
@@ -134,6 +147,10 @@ struct FakeSession {
     /// 这次会话还没用掉的文字；听到第一段声音时才从脚本里取。
     tokens: Option<VecDeque<String>>,
     segments: Vec<Segment>,
+    /// 要不要中间结果。
+    partials: bool,
+    /// 还没定下来的那段声音到现在的中间结果。
+    partial: Option<String>,
 }
 
 impl FakeSession {
@@ -165,10 +182,15 @@ impl FakeSession {
         self.pending_start_ms += drop_samples as u64 * 1_000 / u64::from(REALTIME_SAMPLE_RATE);
     }
 
-    /// 给一段声音分文字，生成一段转写。`take_all` 表示这是最后一段，剩下的字全给它。
-    fn settle(&mut self, span: SpeechSegment, take_all: bool) -> Option<Segment> {
+    /// 这次会话还没用掉的文字。第一次用到时才从脚本里取。
+    fn remaining(&mut self) -> &mut VecDeque<String> {
         let shared = Arc::clone(&self.shared);
-        let remaining = self.tokens.get_or_insert_with(|| shared.next_tokens());
+        self.tokens.get_or_insert_with(|| shared.next_tokens())
+    }
+
+    /// 一段声音分到几个字。`take_all` 表示这是最后一段，剩下的字全给它。
+    fn share(&mut self, span: SpeechSegment, take_all: bool) -> usize {
+        let remaining = self.remaining();
         let mut count = if take_all {
             remaining.len()
         } else {
@@ -185,7 +207,28 @@ impl FakeSession {
         {
             count += 1;
         }
-        let texts: Vec<String> = remaining.drain(..count).collect();
+        count
+    }
+
+    /// 还没定下来的那段声音，到现在听起来是什么：它现在定下来会分到的那几个字。
+    fn peek(&mut self, span: SpeechSegment) -> Option<String> {
+        let count = self.share(span, false);
+        let texts: Vec<String> = self.remaining().iter().take(count).cloned().collect();
+        let tokens: Vec<Token<'_>> = texts
+            .iter()
+            .map(|text| Token {
+                text,
+                start_ms: span.start_ms,
+            })
+            .collect();
+        let text = join_words(&words_from_tokens(&tokens, span.end_ms));
+        (!text.is_empty()).then_some(text)
+    }
+
+    /// 给一段声音分文字，生成一段转写。`take_all` 表示这是最后一段，剩下的字全给它。
+    fn settle(&mut self, span: SpeechSegment, take_all: bool) -> Option<Segment> {
+        let count = self.share(span, take_all);
+        let texts: Vec<String> = self.remaining().drain(..count).collect();
         if texts.is_empty() {
             return None;
         }
@@ -224,6 +267,7 @@ impl TranscribeSession for FakeSession {
         let speech = self.pending_speech()?;
         let Some((last, earlier)) = speech.split_last() else {
             // 一直没声音：只留最后一小截，免得越攒越长
+            self.partial = None;
             self.drop_pending_until(self.audio_ms().saturating_sub(KEEP_QUIET_MS));
             return Ok(Vec::new());
         };
@@ -238,6 +282,9 @@ impl TranscribeSession for FakeSession {
             self.drop_pending_until(span.end_ms);
         }
         self.segments.extend(settled.iter().cloned());
+        if self.partials {
+            self.partial = self.peek(*last);
+        }
         Ok(settled)
     }
 
@@ -271,6 +318,10 @@ impl TranscribeSession for FakeSession {
             segments: self.segments.clone(),
             audio_duration_ms: self.audio_ms(),
         }
+    }
+
+    fn partial(&self) -> Option<String> {
+        self.partial.clone()
     }
 
     async fn finish(mut self: Box<Self>) -> Result<Transcript, SttError> {
