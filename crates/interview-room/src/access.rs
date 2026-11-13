@@ -106,6 +106,16 @@ fn bearer_token(parts: &Parts) -> Option<&str> {
     (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then_some(token)
 }
 
+/// 令牌是 32 字节随机数的 URL 安全 base64，不带填充：正好 43 个字符。
+const TOKEN_LEN: usize = 43;
+
+fn looks_like_token(token: &str) -> bool {
+    token.len() == TOKEN_LEN
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
 /// 校验令牌。`grace` 是面试结束后链接还能用多久（补传录像）。
 pub(crate) async fn verify(
     db: &PgPool,
@@ -113,8 +123,8 @@ pub(crate) async fn verify(
     grace: Duration,
     now: DateTime<Utc>,
 ) -> ApiResult<RoomAccess> {
-    // 正常的令牌是 43 个字符；长得离谱的不用去查库
-    if token.len() > 256 {
+    // 长得不像令牌的不用去查库
+    if !looks_like_token(token) {
         return Err(invalid());
     }
     let row: Option<InviteRow> = sqlx::query_as(
@@ -181,5 +191,27 @@ impl FromRequestParts<Deps> for RoomAccess {
         let token = bearer_token(parts).ok_or_else(invalid)?;
         let grace = Duration::hours(i64::from(deps.config.upload_grace_hours));
         verify(&deps.ctx.db, token, grace, Utc::now()).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use interview_platform::auth::generate_token;
+
+    use super::looks_like_token;
+
+    #[test]
+    fn generated_tokens_pass_and_anything_else_is_turned_away() {
+        for _ in 0..50 {
+            assert!(looks_like_token(&generate_token()));
+        }
+        let token = generate_token();
+        assert!(!looks_like_token(""));
+        assert!(!looks_like_token(&token[1..]));
+        assert!(!looks_like_token(&format!("{token}a")));
+        assert!(!looks_like_token(&format!("{}=", &token[1..])));
+        assert!(!looks_like_token(&format!("{}/", &token[1..])));
+        assert!(!looks_like_token(&format!("{}好", &token[3..])));
+        assert!(!looks_like_token(&"x".repeat(5000)));
     }
 }
