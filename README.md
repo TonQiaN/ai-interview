@@ -4,6 +4,8 @@ AI 面试：开源的 AI 面试系统。主体语言是 Rust；面试官的语�
 
 三个 TTS 是之前研究选出来的，结论和后续接入要用的资料整理在 [tts/README.md](tts/README.md)。
 
+整体怎么搭的、每个目录归谁，见 [docs/architecture/README.md](docs/architecture/README.md)；数据表见 [data-model.md](docs/architecture/data-model.md)，接口见 [api.md](docs/architecture/api.md)。
+
 ## 现在有什么
 
 目前是骨架，还没有面试功能：
@@ -27,8 +29,9 @@ scripts/check.sh                                               # 全量检查，
 
 ```text
 crates/            Rust workspace，一个 crate 一个目录
+migrations/        数据库迁移
 tts/               三个 TTS 引擎的接入资料和版本锁定
-docs/              开发流程等文档
+docs/              架构文档、开发流程
 scripts/           检查脚本
 .github/           CI、Dependabot、issue 和 PR 模板
 CLAUDE.md          给 AI 开发者的约定（AGENTS.md 指向它）
