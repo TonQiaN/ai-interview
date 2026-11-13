@@ -57,6 +57,8 @@ export interface RoomSession {
     agreed: boolean;
   };
   recording: RecordingSettings;
+  /** 默认的作答设置，用来在开始前告诉候选人规则。每道题实际用的以「下一步」里的为准。 */
+  answer: AnswerSettings;
   /** 面试已经进行了多少毫秒；还没开始是 null。 */
   elapsed_ms: number | null;
   /** 续面时接下来该做的一步；还没开始或已结束是 null。 */
@@ -97,6 +99,11 @@ export interface Progress {
 export type NextStep =
   | {
       action: "say";
+      /**
+       * 这一句在本场面试里的序号，每发一句加一。提交时原样带回，服务端按它判断是不是重复提交。
+       * 同一句话（同一个 utterance.key）可能说两次，比如没听到回答时再问一遍，所以不能拿 key 当序号用。
+       */
+      seq: number;
       utterance: Utterance;
       /** 播完之后要不要听候选人回答。 */
       expects_answer: boolean;
@@ -124,6 +131,8 @@ export type AnswerEndReason =
 
 /** 上报刚完成的这一句（以及候选人的回答）。时间都是面试时间轴上的毫秒。 */
 export interface AdvanceRequest {
+  /** 这一句的序号，取自服务端发来的那一步。 */
+  seq: number;
   utterance_key: string;
   playback_start_ms: number;
   playback_end_ms: number;

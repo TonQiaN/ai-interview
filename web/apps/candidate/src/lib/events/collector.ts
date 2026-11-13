@@ -109,17 +109,74 @@ export class EventCollector {
 
 /** bindPageEvents 需要的浏览器对象。测试时可以传假的。 */
 export interface PageTargets {
-  document: Pick<Document, "addEventListener" | "removeEventListener" | "visibilityState" | "fullscreenElement">;
+  document: Pick<Document, "addEventListener" | "removeEventListener" | "visibilityState" | "fullscreenElement"> &
+    Partial<Pick<Document, "getSelection" | "fullscreenEnabled">>;
   window: Pick<Window, "addEventListener" | "removeEventListener">;
-  mediaDevices?: Pick<MediaDevices, "addEventListener" | "removeEventListener"> | undefined;
+  mediaDevices?: (Pick<MediaDevices, "addEventListener" | "removeEventListener"> & Partial<Pick<MediaDevices, "enumerateDevices">>) | undefined;
+  /** 单调时钟（毫秒），用来算「离开了多久」。默认 performance.now。 */
+  now?: () => number;
+}
+
+export interface PageEventBinding {
+  /** 取消所有监听。 */
+  unbind(): void;
+  /**
+   * 重新记一次当前有哪些设备。拿到摄像头和麦克风权限之后要调一次：
+   * 授权前浏览器只肯说「每类有一个」，授权后才给完整的清单，不重记会把这个差别当成换了设备。
+   */
+  rebaselineDevices(): Promise<void>;
+}
+
+/** 每类设备各有几个。只数个数，不带设备名称（名称里可能有人名，比如「某某的 AirPods」）。 */
+export interface DeviceCounts {
+  camera: number;
+  microphone: number;
+  speaker: number;
+}
+
+const DEVICE_KIND: Record<MediaDeviceKind, keyof DeviceCounts> = {
+  videoinput: "camera",
+  audioinput: "microphone",
+  audiooutput: "speaker",
+};
+
+async function countDevices(mediaDevices: PageTargets["mediaDevices"]): Promise<DeviceCounts | null> {
+  if (!mediaDevices?.enumerateDevices) return null;
+  try {
+    const counts: DeviceCounts = { camera: 0, microphone: 0, speaker: 0 };
+    for (const device of await mediaDevices.enumerateDevices()) counts[DEVICE_KIND[device.kind]] += 1;
+    return counts;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 这个浏览器里哪几类过程事件采得到。随 page_opened 一起上报，
+ * 报告据此区分「没发生」和「采不到」。
+ *
+ * 失焦（window_blur）没法事先探测：有些应用内置的浏览器就是不触发，所以这里不列，
+ * 报告要结合 page_opened 里的 in_app_browser 来判断。
+ */
+export function collectableSignals(targets: PageTargets, navigatorLike: { onLine?: boolean } = {}): Record<string, boolean> {
+  return {
+    visibility: typeof targets.document.visibilityState === "string",
+    fullscreen: targets.document.fullscreenEnabled === true,
+    device_change: Boolean(targets.mediaDevices?.enumerateDevices) && "ondevicechange" in (targets.mediaDevices ?? {}),
+    network: typeof navigatorLike.onLine === "boolean",
+    clipboard: true,
+  };
 }
 
 /**
  * 监听页面上和面试诚信、网络状况有关的事件，记到 collector 里。
- * 返回一个函数，调用它取消所有监听。
+ *
+ * 成对的事件（切走和回来、失焦和聚焦、断网和恢复），回来的那一条带 duration_ms，表示离开了多久。
+ * 粘贴和复制只记发生了、有多少个字符，不记内容。
  */
-export function bindPageEvents(collector: EventCollector, targets: PageTargets): () => void {
+export function bindPageEvents(collector: EventCollector, targets: PageTargets): PageEventBinding {
   const { document: doc, window: win, mediaDevices } = targets;
+  const now = targets.now ?? (() => performance.now());
   const unbind: Array<() => void> = [];
   const listen = (
     target: { addEventListener: EventTarget["addEventListener"]; removeEventListener: EventTarget["removeEventListener"] } | undefined,
@@ -131,29 +188,67 @@ export function bindPageEvents(collector: EventCollector, targets: PageTargets):
     unbind.push(() => target.removeEventListener(type, handler));
   };
 
+  /** 每一对事件里「离开」那一头发生的时刻。 */
+  const leftAt = new Map<string, number>();
+  const leave = (pair: string, kind: string) => {
+    leftAt.set(pair, now());
+    collector.record(kind);
+  };
+  const comeBack = (pair: string, kind: string) => {
+    const since = leftAt.get(pair);
+    leftAt.delete(pair);
+    collector.record(kind, since === undefined ? {} : { duration_ms: Math.max(0, Math.round(now() - since)) });
+  };
+
   listen(doc, "visibilitychange", () => {
-    const hidden = doc.visibilityState === "hidden";
-    collector.record(hidden ? "visibility_hidden" : "visibility_visible");
-    // 切走之后页面随时可能被系统回收，趁现在把手里的发出去
-    if (hidden) void collector.flush({ keepalive: true });
+    if (doc.visibilityState === "hidden") {
+      leave("visibility", "visibility_hidden");
+      // 切走之后页面随时可能被系统回收，趁现在把手里的发出去
+      void collector.flush({ keepalive: true });
+    } else {
+      comeBack("visibility", "visibility_visible");
+    }
   });
-  listen(win, "blur", () => collector.record("window_blur"));
-  listen(win, "focus", () => collector.record("window_focus"));
+  listen(win, "blur", () => leave("focus", "window_blur"));
+  listen(win, "focus", () => comeBack("focus", "window_focus"));
   listen(doc, "fullscreenchange", () => {
     if (!doc.fullscreenElement) collector.record("fullscreen_exit");
   });
-  // 只记发生了，不记内容
-  listen(doc, "paste", () => collector.record("paste"));
-  listen(doc, "copy", () => collector.record("copy"));
-  listen(win, "offline", () => collector.record("network_offline"));
+  listen(doc, "paste", (event) => {
+    // 只数字符数，内容不留、不上报
+    const chars = (event as ClipboardEvent).clipboardData?.getData("text").length;
+    collector.record("paste", chars === undefined ? {} : { chars });
+  });
+  listen(doc, "copy", () => {
+    const chars = doc.getSelection?.()?.toString().length;
+    collector.record("copy", chars === undefined ? {} : { chars });
+  });
+  listen(win, "offline", () => leave("network", "network_offline"));
   listen(win, "online", () => {
-    collector.record("network_online");
+    comeBack("network", "network_online");
     void collector.flush();
   });
-  listen(mediaDevices, "devicechange", () => collector.record("device_changed"));
+
+  let devices: DeviceCounts | null = null;
+  const rebaselineDevices = async () => {
+    devices = await countDevices(mediaDevices);
+  };
+  void rebaselineDevices();
+  listen(mediaDevices, "devicechange", () => {
+    const before = devices;
+    void countDevices(mediaDevices).then((after) => {
+      devices = after;
+      if (!before || !after) return collector.record("device_changed");
+      const kinds = (Object.keys(after) as Array<keyof DeviceCounts>).filter((kind) => after[kind] !== before[kind]);
+      collector.record("device_changed", { kinds, before, after });
+    });
+  });
   listen(win, "pagehide", () => void collector.flush({ keepalive: true }));
 
-  return () => {
-    for (const off of unbind) off();
+  return {
+    unbind: () => {
+      for (const off of unbind) off();
+    },
+    rebaselineDevices,
   };
 }
