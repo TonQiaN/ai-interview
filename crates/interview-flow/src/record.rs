@@ -264,6 +264,10 @@ fn end_reason_text(reason: &str) -> String {
         ("no_response", "候选人连续几道题没有开口，面试官提前结束"),
         ("candidate_request", "候选人自己要求结束"),
         ("candidate_left", "候选人中途离开，没有回来"),
+        (
+            "connection_lost",
+            "候选人那边很久没有动静，多半是断线或关了页面，系统结束了面试",
+        ),
     ]);
     known
         .get(reason)

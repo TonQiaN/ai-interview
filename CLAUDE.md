@@ -21,6 +21,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                 # 全部测试
 cargo test -p interview-tts            # 只测一个 crate
 cargo test -p interview-tts <测试名>   # 只跑一个测试
+cargo test -p interview-server --test e2e   # 端到端：整个应用装起来，从 HR 登录走到面试收尾（外部依赖是假的）
 cargo run -p interview-cli -- tts engines
 cargo run -p interview-server -- openapi   # 打印 OpenAPI 文档，不用数据库
 scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息不进 Git
@@ -61,6 +62,8 @@ cargo run --release -p interview-stt --features sherpa --example transcribe -- �
 ```
 
 服务进程要用真的语音识别（面试后重新转写），同样加特性启动：`cargo run -p interview-server --features sherpa`，并设 `AI_INTERVIEW_STT_BACKEND=sherpa`。
+
+改了模块之间的约定（任务名和内容、面试状态怎么流转、别的模块要读的表），跑一遍端到端测试 `crates/interview-server/tests/e2e.rs`，流程变了就一起改它。
 
 改了 `crates/interview-stt/src/sherpa.rs` 要带着 `--features sherpa` 跑 clippy 和上面的测试，`scripts/check.sh` 不开这个特性。CI 里有单独的 `stt-sherpa` 任务跑这些。
 
