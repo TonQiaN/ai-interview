@@ -21,6 +21,7 @@ use tokio::sync::Semaphore;
 
 use crate::evidence::{EvidenceIndex, HasEvidence};
 use crate::prompts::{self, PROMPT_VERSION, SYSTEM};
+use crate::prose;
 use crate::record::InterviewRecord;
 use crate::report::{
     ClaimVerdict, CommunicationAssessment, CompetencyRating, Credibility, Decision, Evidence,
@@ -223,7 +224,7 @@ pub async fn analyze(
     );
     let outcome = runner.finish();
 
-    Ok(InterviewReport {
+    let report = InterviewReport {
         schema_version: SCHEMA_VERSION,
         interview_id: record.interview_id.clone(),
         generated_at_ms: SystemTime::now()
@@ -255,7 +256,8 @@ pub async fn analyze(
             evidence: stats,
             failed_stages,
         },
-    })
+    };
+    Ok(prose::replace_question_ids(report, &groups))
 }
 
 /// 评一道题。评不止一次时分数取平均，评语用分数离平均最近的那一次的。

@@ -553,6 +553,42 @@ async fn repeated_judgements_are_averaged() {
 }
 
 #[tokio::test]
+async fn question_ids_in_prose_become_ordinals() {
+    let integrity = INTEGRITY
+        .replace(
+            "有一次切出页面。",
+            "q2 作答前有一次切出页面，q1.f1 和 q1 没有异常。",
+        )
+        .replace("第二题作答前切出页面 5 秒。", "q2作答前切出页面 5 秒。");
+    let model = RoutedModel::new()
+        .on("question:q1", Q1)
+        .on("question:q2", Q2)
+        .on("requirements", REQUIREMENTS)
+        .on("resume", RESUME)
+        .on("integrity", &integrity)
+        .on("communication", COMMUNICATION)
+        .on("synthesis", SYNTHESIS);
+    let report = analyze(&sample_record(), &model, &once()).await.unwrap();
+
+    let integrity = report.integrity.unwrap();
+    assert_eq!(
+        integrity.summary,
+        "第 2 题作答前有一次切出页面，第 1 题的追问和第 1 题没有异常。"
+    );
+    assert_eq!(
+        integrity.signals[0].description,
+        "第 2 题作答前切出页面 5 秒。"
+    );
+    // id 字段和证据不动
+    assert_eq!(report.questions[1].question_id, "q2");
+    assert_eq!(
+        integrity.signals[0].evidence[0].event_id.as_deref(),
+        Some("e1")
+    );
+    assert_eq!(report.overall_score, Some(67));
+}
+
+#[tokio::test]
 async fn agreeing_judgements_still_get_a_minimum_range() {
     let report = analyze(&sample_record(), &full_model(), &AnalyzeOptions::default())
         .await
