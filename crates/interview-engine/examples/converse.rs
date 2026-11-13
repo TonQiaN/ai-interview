@@ -185,14 +185,19 @@ async fn main() -> Result<()> {
         if let Some(first) = outcome.timing.first_speech_ms {
             match outcome.action {
                 LiveAction::Probe | LiveAction::Reply => first_generated.push(first),
-                LiveAction::Next | LiveAction::End => first_prepared.push(first),
+                LiveAction::Next | LiveAction::End | LiveAction::Repeat => {
+                    first_prepared.push(first)
+                }
+                // 这里每一轮都是说完了才问的，不会出现接着听
+                LiveAction::Wait => {}
             }
         }
         counts[match outcome.action {
             LiveAction::Probe => 0,
             LiveAction::Reply => 1,
-            LiveAction::Next => 2,
+            LiveAction::Next | LiveAction::Repeat => 2,
             LiveAction::End => 3,
+            LiveAction::Wait => continue,
         }] += 1;
         if let Some(note) = &outcome.note {
             println!(
