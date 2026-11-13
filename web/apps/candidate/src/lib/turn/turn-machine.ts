@@ -19,6 +19,8 @@ export interface TurnConfig {
   noSpeechPromptMs: number;
   /** 题目播完后一直没开口，多久直接进入下一题（毫秒）。 */
   noSpeechTimeoutMs: number;
+  /** 开始听作答之后，至少过这么久才允许因为静音结束（毫秒）。防止咳嗽一声就被判成答完。 */
+  minAnswerMs: number;
   /** 一道题最长作答时间（毫秒），从题目播完算起。 */
   maxAnswerMs: number;
   /** 离最长作答时间还剩多久时提醒（毫秒）。 */
@@ -32,6 +34,7 @@ export const DEFAULT_TURN_CONFIG: TurnConfig = {
   countdownMs: 3_000,
   noSpeechPromptMs: 12_000,
   noSpeechTimeoutMs: 30_000,
+  minAnswerMs: 3_000,
   maxAnswerMs: 180_000,
   maxAnswerWarningMs: 15_000,
   maxReplays: 2,
@@ -152,7 +155,11 @@ function checkTimeouts(state: Listening, at: number, config: TurnConfig): TurnSt
     }
     return state;
   }
-  if (state.silenceSince !== null && at - state.silenceSince >= config.silenceMs) {
+  if (
+    state.silenceSince !== null &&
+    at - state.silenceSince >= config.silenceMs &&
+    at - state.listenStartedAt >= config.minAnswerMs
+  ) {
     return end(state, "silence", at);
   }
   return state;
@@ -258,7 +265,9 @@ export function viewTurn(state: TurnState, now: number, config: TurnConfig = DEF
   }
   const at = state.pausedAt ?? now;
   const silenceRemainingMs =
-    state.silenceSince === null ? null : Math.max(0, config.silenceMs - (at - state.silenceSince));
+    state.silenceSince === null
+      ? null
+      : Math.max(0, config.silenceMs - (at - state.silenceSince), config.minAnswerMs - (at - state.listenStartedAt));
   const answerRemainingMs = Math.max(0, config.maxAnswerMs - (at - state.listenStartedAt));
   return {
     countdownVisible: silenceRemainingMs !== null && silenceRemainingMs <= config.countdownMs,
