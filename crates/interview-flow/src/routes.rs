@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::model::{
     ConfigDefaults, CreateInterview, InterviewDetail, InterviewFilter, InterviewSummary,
-    PrepareRequest, UpdateInterview, UtteranceView,
+    PrepareRequest, UpdateInterview, UpdatedInterview, UtteranceView,
 };
 use crate::store::{self, InterviewRow, NewInterview};
 use crate::{Deps, prepare};
@@ -200,7 +200,9 @@ async fn get_interview(
 
 /// 改面试
 ///
-/// 只能在发链接之前改。改了配置或简历，已经出好的题目会作废、面试回到草稿，要重新准备；
+/// 只能在发链接之前改。换了简历，或者改的配置写进了题目里（时长、面试官、考察要求等），
+/// 已经出好的题目会作废、面试回到草稿，要重新准备，`replan_reasons` 里是导致重新出题的字段。
+/// 改的配置不影响题目（早停、思考模式、单题最长时间等）时题目和语音都保留，状态不变。
 /// 只换音色的话题目保留，重新准备时只重新合成语音。
 #[utoipa::path(
     patch,
@@ -209,7 +211,7 @@ async fn get_interview(
     params(("id" = Uuid, Path, description = "面试 ID")),
     request_body = UpdateInterview,
     responses(
-        (status = 200, description = "改好了", body = InterviewDetail),
+        (status = 200, description = "改好了", body = UpdatedInterview),
         (status = 409, description = "现在的状态不能改，code 是 interview_not_editable", body = ErrorBody),
         (status = 422, description = "配置不合要求", body = ErrorBody),
     )
@@ -219,7 +221,7 @@ async fn update_interview(
     _user: AdminUser,
     Path(id): Path<Uuid>,
     Json(request): Json<UpdateInterview>,
-) -> ApiResult<Json<InterviewDetail>> {
+) -> ApiResult<Json<UpdatedInterview>> {
     let row = load(&deps, id).await?;
     ensure_editable(row.status)?;
 
@@ -235,20 +237,46 @@ async fn update_interview(
         check_voice(&deps, voice_id).await?;
     }
 
-    let content_changed = config != old_config || resume_id != row.resume_id;
+    // 哪些改动让出好的题目不能用了：题目是照着简历和这些配置写的
+    let mut replan_reasons: Vec<String> = old_config
+        .replan_reasons(&config)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    if resume_id != row.resume_id {
+        replan_reasons.push("resume_id".to_owned());
+    }
+    let has_plan = row.plan.is_some();
+    let drop_plan = has_plan && !replan_reasons.is_empty();
+    if !has_plan {
+        // 还没出题，谈不上重新出
+        replan_reasons.clear();
+    }
+    // 题目还能用：把计划收拾到符合新配置（只会去掉多出来的追问、压短预期回答时间）
+    let conformed = if has_plan && !drop_plan && config != old_config {
+        let mut plan = load_plan(&row).await?;
+        plan.conform_to(&config).then_some(plan)
+    } else {
+        None
+    };
     let voice_changed = voice_id != row.voice_id;
     // 题目或语音要重做的话，回到草稿，等 HR 再点一次准备
-    let back_to_draft = (content_changed || voice_changed) && row.plan.is_some();
+    let back_to_draft = has_plan && (drop_plan || voice_changed);
     let status = if back_to_draft {
         InterviewStatus::Draft
     } else {
         row.status
     };
+    let conformed_json = conformed
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(ApiError::internal)?;
 
     let mut tx = deps.ctx.db.begin().await?;
     let updated = sqlx::query(
         "UPDATE interviews SET config = $3, resume_id = $4, voice_id = $5, status = $6, \
-             plan = CASE WHEN $7 THEN NULL ELSE plan END, \
+             plan = CASE WHEN $7 THEN NULL ELSE COALESCE($8, plan) END, \
              prepare_error = CASE WHEN $6 = 'draft' THEN NULL ELSE prepare_error END \
          WHERE id = $1 AND status = $2",
     )
@@ -258,30 +286,40 @@ async fn update_interview(
     .bind(resume_id)
     .bind(voice_id)
     .bind(status)
-    .bind(content_changed)
+    .bind(drop_plan)
+    .bind(conformed_json)
     .execute(&mut *tx)
     .await?;
     if updated.rows_affected() == 0 {
         return Err(ApiError::conflict("面试的状态刚刚变了，刷新后再试"));
     }
-    if content_changed {
+    if drop_plan {
         sqlx::query(
             "DELETE FROM interview_utterances WHERE interview_id = $1 AND source = 'planned'",
         )
         .bind(id)
         .execute(&mut *tx)
         .await?;
-    } else if voice_changed {
-        sqlx::query(
-            "UPDATE interview_utterances SET synth_status = 'pending', synth_error = NULL \
-             WHERE interview_id = $1 AND source = 'planned'",
-        )
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+    } else {
+        if let Some(plan) = &conformed {
+            // 面试官的话只会少不会变：去掉不再需要的那几句，其余的语音原样留着
+            store::sync_utterances(&mut tx, id, &plan.utterances(), false).await?;
+        }
+        if voice_changed {
+            sqlx::query(
+                "UPDATE interview_utterances SET synth_status = 'pending', synth_error = NULL \
+                 WHERE interview_id = $1 AND source = 'planned'",
+            )
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        }
     }
     tx.commit().await?;
-    Ok(Json(detail(&deps, id).await?))
+    Ok(Json(UpdatedInterview {
+        interview: detail(&deps, id).await?,
+        replan_reasons,
+    }))
 }
 
 /// 归档面试
