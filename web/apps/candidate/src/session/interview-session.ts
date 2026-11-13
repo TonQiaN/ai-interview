@@ -36,6 +36,7 @@ import {
 } from "../lib/upload/chunk-store";
 import { IndexedDbChunkStore } from "../lib/upload/idb-chunk-store";
 import { closeOrphanSegments } from "../lib/upload/orphans";
+import { UploadEventTracker } from "../lib/upload/upload-events";
 import { retryDelayMs, Uploader, type UploadStatus } from "../lib/upload/uploader";
 import { EnergyVad } from "../lib/vad/energy-vad";
 
@@ -154,6 +155,8 @@ export class InterviewSession {
   private recorder: SegmentRecorder | null = null;
   private runner: InterviewRunner<AudioBuffer> | null = null;
   private wakeLock: ScreenWakeLock | null = null;
+  /** 面试是什么时候结束的（performance.now()）；这次打开页面时面试已经结束是 null。 */
+  private finishedAt: number | null = null;
   private readonly cleanups: Array<() => void> = [];
   private trackCleanups: Array<() => void> = [];
   private disposed = false;
@@ -265,8 +268,15 @@ export class InterviewSession {
       isOnline: () => navigator.onLine,
     });
     this.uploader = uploader;
+    // 录像传不动了、又传动了，各记一条过程事件
+    const uploadEvents = new UploadEventTracker({
+      record: (kind, payload) => collector.record(kind, payload),
+    });
     this.cleanups.push(
-      uploader.subscribe((upload) => this.patch({ upload })),
+      uploader.subscribe((upload) => {
+        uploadEvents.observe(upload);
+        this.patch({ upload });
+      }),
       () => uploader.stop(),
     );
     const onOnline = () => {
@@ -596,6 +606,7 @@ export class InterviewSession {
 
   private async finish(reason: string, notifyServer: boolean): Promise<void> {
     if (this.snapshot.stage === "finishing" || this.snapshot.stage === "done") return;
+    this.finishedAt = performance.now();
     this.patch({ stage: "finishing", finishReason: reason, interrupted: false });
     this.collector?.record("interview_finished", { reason });
 
@@ -633,6 +644,11 @@ export class InterviewSession {
     try {
       await this.closeOrphans();
       await this.uploader?.drain();
+      // 面试结束后候选人等了多久才传完。刷新后回来补传的那一次不知道从哪算起，不带等待时间
+      this.collector?.record("upload_finished", {
+        uploaded_bytes: this.uploader?.getStatus().uploadedBytes ?? 0,
+        wait_ms: this.finishedAt === null ? null : Math.round(performance.now() - this.finishedAt),
+      });
       await this.collector?.flush();
       window.removeEventListener("beforeunload", this.warnBeforeUnload);
       this.patch({ stage: "done", actionError: null });

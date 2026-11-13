@@ -18,11 +18,12 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use futures_util::{StreamExt, stream};
+use futures_util::future::join_all;
 use interview_llm::{ChatModel, ChatRequest, ContentPart, Message, Thinking, chat_json_checked};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 
 use crate::record::{InterviewRecord, ProctorEvent};
 use crate::report::Usage;
@@ -289,13 +290,18 @@ pub async fn observe_frames(
     let mut usage = Usage::default();
     let mut last_error = None;
 
+    // 同时进行的模型调用数用信号量来限。不用「闭包加 buffered 的流」那种写法：
+    // 那样得到的 future 编译器推不出 Send，放不进后台任务。
+    let permits = Semaphore::new(concurrency);
+
     // 第一遍：几张一批地看
     let batches: Vec<&[Frame]> = frames.chunks(options.batch_size.max(1)).collect();
-    let looked: Vec<Result<Looked, String>> = stream::iter(batches.iter().copied())
-        .map(|batch| look(batch, model, options))
-        .buffered(concurrency)
-        .collect()
-        .await;
+    let looked: Vec<Result<Looked, String>> = join_all(
+        batches
+            .iter()
+            .map(|batch| look_limited(&permits, batch, model, options)),
+    )
+    .await;
     let mut seen: Vec<Option<Seen>> = Vec::with_capacity(frames.len());
     for (batch, result) in batches.iter().zip(looked) {
         match result {
@@ -320,29 +326,12 @@ pub async fn observe_frames(
             .filter_map(|(index, seen)| Some((index, seen.clone()?)))
             .filter(|(_, seen)| seen.is_flagged())
             .collect();
-        let frames_ref = &frames;
-        let rechecked: Vec<(usize, Vec<Looked>)> = stream::iter(suspects)
-            .map(|(index, first)| async move {
-                let single = std::slice::from_ref(&frames_ref[index]);
-                let mut looks = Vec::new();
-                for _ in 0..2 {
-                    let Ok(looked) = look(single, model, options).await else {
-                        continue;
-                    };
-                    let agrees = looked
-                        .frames
-                        .first()
-                        .is_some_and(|again| first.agrees(again));
-                    looks.push(looked);
-                    if agrees {
-                        break;
-                    }
-                }
-                (index, looks)
-            })
-            .buffered(concurrency)
-            .collect()
+        let rechecked: Vec<Vec<Looked>> =
+            join_all(suspects.iter().map(|(index, first)| {
+                look_again(&permits, &frames[*index], first, model, options)
+            }))
             .await;
+        let rechecked = suspects.iter().map(|(index, _)| *index).zip(rechecked);
         for (index, looks) in rechecked {
             let mut votes: Vec<Seen> = seen[index].take().into_iter().collect();
             for looked in looks {
@@ -384,6 +373,43 @@ pub async fn observe_frames(
         unreadable,
         usage,
     })
+}
+
+/// 排队等到有名额再看。
+async fn look_limited(
+    permits: &Semaphore,
+    frames: &[Frame],
+    model: &dyn ChatModel,
+    options: &FrameOptions,
+) -> Result<Looked, String> {
+    let _permit = permits.acquire().await.map_err(|e| e.to_string())?;
+    look(frames, model, options).await
+}
+
+/// 把一张不正常的帧单独再看：和第一次的看法一致就停，不一致再看一次。没看成的那次不算。
+async fn look_again(
+    permits: &Semaphore,
+    frame: &Frame,
+    first: &Seen,
+    model: &dyn ChatModel,
+    options: &FrameOptions,
+) -> Vec<Looked> {
+    let single = std::slice::from_ref(frame);
+    let mut looks = Vec::new();
+    for _ in 0..2 {
+        let Ok(looked) = look_limited(permits, single, model, options).await else {
+            continue;
+        };
+        let agrees = looked
+            .frames
+            .first()
+            .is_some_and(|again| first.agrees(again));
+        looks.push(looked);
+        if agrees {
+            break;
+        }
+    }
+    looks
 }
 
 const FRAME_SYSTEM: &str = r#"你在协助检查一场线上视频面试的录像。下面每张图是候选人的摄像头在某个时刻拍到的画面。

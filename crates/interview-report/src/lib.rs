@@ -13,6 +13,7 @@ mod evidence;
 pub mod frames;
 mod pipeline;
 mod prompts;
+mod prose;
 pub mod record;
 pub mod report;
 mod transcript;

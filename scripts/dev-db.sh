@@ -15,6 +15,12 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# macOS 上，没有设语言环境时（LANG 和 LC_ALL 都是空的，比如从桌面应用、launchd 里调用），
+# PostgreSQL 起不来，报 "postmaster became multithreaded during startup"。给一个系统自带的。
+if [ "$(uname -s)" = "Darwin" ] && [ -z "${LC_ALL:-}" ] && [ -z "${LANG:-}" ]; then
+  export LC_ALL=en_US.UTF-8
+fi
+
 PORT="${AI_INTERVIEW_DEV_DB_PORT:-54329}"
 DB_NAME="ai_interview"
 DB_USER="ai_interview"

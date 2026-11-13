@@ -291,14 +291,24 @@ async fn put_chunk(
         .bind(format!("recording-chunk:{}:{seq}", segment.id))
         .execute(&mut *tx)
         .await?;
-    let exists: Option<(i32,)> = sqlx::query_as(
-        "SELECT seq FROM interview_recording_chunks WHERE recording_id = $1 AND seq = $2",
+    let exists: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT sha256 FROM interview_recording_chunks WHERE recording_id = $1 AND seq = $2",
     )
     .bind(segment.id)
     .bind(seq_i32)
     .fetch_optional(&mut *tx)
     .await?;
-    if exists.is_some() {
+    if let Some((stored,)) = exists {
+        // 页面重传的应该是同一份字节。内容不一样说明页面那边出了问题：保留先到的那一份，
+        // 照样告诉页面收到了（它拿到别的回答也没有办法补救），在日志里留一条，方便以后查
+        if stored.is_some_and(|stored| stored != digest) {
+            tracing::warn!(
+                interview_id = %access.interview_id,
+                recording_id = %segment.id,
+                seq,
+                "同一个分片第二次传来的内容和第一次不一样，保留了第一次的"
+            );
+        }
         return Ok(StatusCode::NO_CONTENT);
     }
     if segment.status != RecordingStatus::Uploading {
