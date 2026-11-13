@@ -10,7 +10,12 @@ export interface CardProps extends HTMLAttributes<HTMLDivElement> {
 export function Card({ flat, interactive, className, ...rest }: CardProps) {
   return (
     <div
-      className={clsx("oil-card", flat && "oil-card--flat", interactive && "oil-card--interactive", className)}
+      className={clsx(
+        "oil-card",
+        flat && "oil-card--flat",
+        interactive && "oil-card--interactive",
+        className,
+      )}
       {...rest}
     />
   );
@@ -54,10 +59,22 @@ export interface FrameProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 /** 画框。里面放 img、video 或任何内容。 */
-export function Frame({ weight = "normal", dark, ratio, className, children, ...rest }: FrameProps) {
+export function Frame({
+  weight = "normal",
+  dark,
+  ratio,
+  className,
+  children,
+  ...rest
+}: FrameProps) {
   return (
     <div
-      className={clsx("oil-frame", weight !== "normal" && `oil-frame--${weight}`, dark && "oil-frame--dark", className)}
+      className={clsx(
+        "oil-frame",
+        weight !== "normal" && `oil-frame--${weight}`,
+        dark && "oil-frame--dark",
+        className,
+      )}
       {...rest}
     >
       <div className="oil-frame__inner" style={ratio ? { aspectRatio: ratio } : undefined}>

@@ -46,7 +46,14 @@ const deviceStateLabel: Record<DeviceCheckState, string> = {
   failed: "未通过",
 };
 
-export function DeviceCheckCard({ state, icon, title, description, children, className }: DeviceCheckCardProps) {
+export function DeviceCheckCard({
+  state,
+  icon,
+  title,
+  description,
+  children,
+  className,
+}: DeviceCheckCardProps) {
   return (
     <section className={clsx("oil-device", className)} data-state={state}>
       <span className="oil-device__icon" aria-hidden="true">
@@ -128,7 +135,10 @@ export function ConsentList({ items, checked, onChange, className }: ConsentList
   );
 }
 
-export function allConsented(items: ReadonlyArray<ConsentItem>, checked: ReadonlySet<string>): boolean {
+export function allConsented(
+  items: ReadonlyArray<ConsentItem>,
+  checked: ReadonlySet<string>,
+): boolean {
   return items.every((i) => checked.has(i.id));
 }
 
@@ -195,9 +205,18 @@ export interface InterviewerPresenceProps {
 }
 
 /** 面试官形象：一幅圆形的油画肖像，外圈表达「正在提问 / 正在听 / 思考中」。 */
-export function InterviewerPresence({ state, painting = "sitter", label, size, className }: InterviewerPresenceProps) {
+export function InterviewerPresence({
+  state,
+  painting = "sitter",
+  label,
+  size,
+  className,
+}: InterviewerPresenceProps) {
   const text = label ?? presenceLabel[state];
-  const sized = size == null ? undefined : ({ "--_size": typeof size === "number" ? `${size}px` : size } as CSSProperties);
+  const sized =
+    size == null
+      ? undefined
+      : ({ "--_size": typeof size === "number" ? `${size}px` : size } as CSSProperties);
   return (
     <div className={clsx("oil-presence", className)} data-state={state} style={sized}>
       <span className="oil-presence__halo" />
@@ -276,7 +295,15 @@ export function formatClock(totalSeconds: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s % 60)}` : `${pad(m)}:${pad(s % 60)}`;
 }
 
-export function Timer({ seconds, label = "已用时", className }: { seconds: number; label?: string; className?: string }) {
+export function Timer({
+  seconds,
+  label = "已用时",
+  className,
+}: {
+  seconds: number;
+  label?: string;
+  className?: string;
+}) {
   return (
     <span className={clsx("oil-timer", className)} role="timer" aria-label={label}>
       <Clock aria-hidden="true" />
@@ -285,7 +312,13 @@ export function Timer({ seconds, label = "已用时", className }: { seconds: nu
   );
 }
 
-export function RecordingIndicator({ paper, children = "录制中" }: { paper?: boolean; children?: ReactNode }) {
+export function RecordingIndicator({
+  paper,
+  children = "录制中",
+}: {
+  paper?: boolean;
+  children?: ReactNode;
+}) {
   return <span className={clsx("oil-rec", paper && "oil-rec--paper")}>{children}</span>;
 }
 
@@ -312,7 +345,13 @@ export function SilenceRing({ remaining, total, size = 72, className }: SilenceR
       aria-label={`${Math.ceil(remaining)} 秒后进入下一题`}
     >
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
-        <circle className="oil-silence__track" cx={size / 2} cy={size / 2} r={r} strokeWidth={thickness} />
+        <circle
+          className="oil-silence__track"
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          strokeWidth={thickness}
+        />
         <circle
           className="oil-silence__value"
           cx={size / 2}

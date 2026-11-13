@@ -1,5 +1,13 @@
 import { CheckCircle2 } from "lucide-react";
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 interface ToastItem {
   id: number;
@@ -9,7 +17,13 @@ interface ToastItem {
 const ToastContext = createContext<(text: ReactNode) => void>(() => {});
 
 /** 包在应用最外层。里面任何地方用 useToast() 弹一条几秒后自动消失的提示。 */
-export function ToastProvider({ children, duration = 3200 }: { children: ReactNode; duration?: number }) {
+export function ToastProvider({
+  children,
+  duration = 3200,
+}: {
+  children: ReactNode;
+  duration?: number;
+}) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const next = useRef(1);
   const push = useCallback(

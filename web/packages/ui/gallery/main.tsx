@@ -19,9 +19,9 @@ import {
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  Avatar,
   allConsented,
   applyTheme,
-  Avatar,
   Badge,
   Banner,
   Brand,
@@ -106,20 +106,73 @@ const surfaces = [
 ] as const;
 
 const consentItems = [
-  { id: "record", label: "我同意本次面试全程录音录像", detail: "录像和录音只用于本次招聘的评估，由招聘方保存，到期删除。" },
-  { id: "ai", label: "我知道面试官是 AI，结果由招聘人员复核", detail: "AI 负责提问和整理记录，是否进入下一轮由招聘人员决定。" },
+  {
+    id: "record",
+    label: "我同意本次面试全程录音录像",
+    detail: "录像和录音只用于本次招聘的评估，由招聘方保存，到期删除。",
+  },
+  {
+    id: "ai",
+    label: "我知道面试官是 AI，结果由招聘人员复核",
+    detail: "AI 负责提问和整理记录，是否进入下一轮由招聘人员决定。",
+  },
   { id: "alone", label: "我会独立作答，不使用他人或工具代答" },
 ];
 
 const people = [
-  { name: "林知远", job: "后端工程师（Rust）", state: "已完成", tone: "success", score: 86, when: "今天 10:20" },
-  { name: "苏晚晴", job: "产品经理", state: "进行中", tone: "info", score: null, when: "今天 14:05" },
-  { name: "陈墨", job: "数据分析师", state: "待开始", tone: "neutral", score: null, when: "链接 3 天后过期" },
-  { name: "周予安", job: "前端工程师", state: "已过期", tone: "warning", score: null, when: "昨天" },
-  { name: "顾清和", job: "测试工程师", state: "不推荐", tone: "danger", score: 41, when: "11 月 11 日" },
+  {
+    name: "林知远",
+    job: "后端工程师（Rust）",
+    state: "已完成",
+    tone: "success",
+    score: 86,
+    when: "今天 10:20",
+  },
+  {
+    name: "苏晚晴",
+    job: "产品经理",
+    state: "进行中",
+    tone: "info",
+    score: null,
+    when: "今天 14:05",
+  },
+  {
+    name: "陈墨",
+    job: "数据分析师",
+    state: "待开始",
+    tone: "neutral",
+    score: null,
+    when: "链接 3 天后过期",
+  },
+  {
+    name: "周予安",
+    job: "前端工程师",
+    state: "已过期",
+    tone: "warning",
+    score: null,
+    when: "昨天",
+  },
+  {
+    name: "顾清和",
+    job: "测试工程师",
+    state: "不推荐",
+    tone: "danger",
+    score: 41,
+    when: "11 月 11 日",
+  },
 ] as const;
 
-function Section({ id, title, note, children }: { id: string; title: string; note?: string; children: React.ReactNode }) {
+function Section({
+  id,
+  title,
+  note,
+  children,
+}: {
+  id: string;
+  title: string;
+  note?: string;
+  children: React.ReactNode;
+}) {
   return (
     <section className="g-section" id={id}>
       <div className="g-section__head">
@@ -157,7 +210,9 @@ function Gallery() {
   useEffect(() => applyTheme(theme), [theme]);
   useEffect(() => {
     const t = window.setInterval(() => {
-      setLevels((prev) => prev.map((_, i) => Math.max(0, Math.sin(Date.now() / 300 + i * 0.6) * 0.5 + 0.45)));
+      setLevels((prev) =>
+        prev.map((_, i) => Math.max(0, Math.sin(Date.now() / 300 + i * 0.6) * 0.5 + 0.45)),
+      );
     }, 120);
     return () => window.clearInterval(t);
   }, []);
@@ -173,13 +228,21 @@ function Gallery() {
           亚麻画布做底，生褐做墨，普鲁士蓝是主色，朱红和土黄点睛。HR 后台和候选人面试页共用这一套。
         </p>
         <div className="oil-row" style={{ marginTop: 22 }}>
-          <Button variant="gold" icon={theme === "dark" ? <Sun /> : <Moon />} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+          <Button
+            variant="gold"
+            icon={theme === "dark" ? <Sun /> : <Moon />}
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          >
             {theme === "dark" ? "换到画布（浅色）" : "换到夜画（深色）"}
           </Button>
         </div>
       </Hero>
 
-      <Section id="color" title="颜料" note="装饰直接用颜料色；文字和状态用语义令牌，两套主题里各有取值。">
+      <Section
+        id="color"
+        title="颜料"
+        note="装饰直接用颜料色；文字和状态用语义令牌，两套主题里各有取值。"
+      >
         <div className="g-swatches">
           {pigments.map(([name, v]) => (
             <div className="g-swatch" key={v}>
@@ -199,7 +262,11 @@ function Gallery() {
         </div>
       </Section>
 
-      <Section id="type" title="字体" note="标题用自托管、按字切片的宋体；正文用系统字体，不走外网。">
+      <Section
+        id="type"
+        title="字体"
+        note="标题用自托管、按字切片的宋体；正文用系统字体，不走外网。"
+      >
         <Card>
           <CardBody className="oil-stack">
             <div className="oil-display oil-title-xl">第一场面试，从一幅画开始</div>
@@ -207,7 +274,8 @@ function Gallery() {
             <div className="oil-display oil-title-md">面试设置与考察重点</div>
             <div className="oil-display oil-title-sm">带时间戳的转写记录</div>
             <p style={{ maxWidth: "62ch" }}>
-              正文：这是招聘流程里的第一场面试。AI 面试官按岗位要求和候选人简历准备题目，逐题提问，候选人口头作答，全程录音录像，结束后生成分析报告供招聘人员复核。
+              正文：这是招聘流程里的第一场面试。AI
+              面试官按岗位要求和候选人简历准备题目，逐题提问，候选人口头作答，全程录音录像，结束后生成分析报告供招聘人员复核。
             </p>
             <p className="oil-muted">次要文字：链接 7 天内有效，候选人不需要登录。</p>
             <p className="oil-mono oil-faint">00:12:36 → 00:13:02 · deepseek-flash · effort=high</p>
@@ -263,14 +331,40 @@ function Gallery() {
                   </Select>
                 )}
               </Field>
-              <Field label="预期时长" hint="题目数量和追问深度会按时长安排；答得很差时可以提前结束。">
-                {({ id }) => <Slider id={id} value={minutes} min={10} max={60} step={5} onChange={setMinutes} format={(v) => `${v} 分钟`} />}
+              <Field
+                label="预期时长"
+                hint="题目数量和追问深度会按时长安排；答得很差时可以提前结束。"
+              >
+                {({ id }) => (
+                  <Slider
+                    id={id}
+                    value={minutes}
+                    min={10}
+                    max={60}
+                    step={5}
+                    onChange={setMinutes}
+                    format={(v) => `${v} 分钟`}
+                  />
+                )}
               </Field>
               <Field label="静音判定" hint="候选人停下来这么久，算这一题答完。">
-                {({ id }) => <Slider id={id} value={silence} min={2} max={15} onChange={setSilence} format={(v) => `${v} 秒`} />}
+                {({ id }) => (
+                  <Slider
+                    id={id}
+                    value={silence}
+                    min={2}
+                    max={15}
+                    onChange={setSilence}
+                    format={(v) => `${v} 秒`}
+                  />
+                )}
               </Field>
               <div className="oil-row oil-row--between oil-row--wrap">
-                <Switch label="开启思考模式" checked={thinking} onChange={(e) => setThinking(e.target.checked)} />
+                <Switch
+                  label="开启思考模式"
+                  checked={thinking}
+                  onChange={(e) => setThinking(e.target.checked)}
+                />
                 <Segmented
                   aria-label="思考强度"
                   value={effort}
@@ -283,7 +377,12 @@ function Gallery() {
                 />
               </div>
               <Field label="额外考察重点" hint="会注入给面试官，例如：一定要出一道逻辑推理题。">
-                {({ id }) => <Textarea id={id} defaultValue="重点核实简历里「日均千万级请求」项目的真实参与程度。" />}
+                {({ id }) => (
+                  <Textarea
+                    id={id}
+                    defaultValue="重点核实简历里「日均千万级请求」项目的真实参与程度。"
+                  />
+                )}
               </Field>
             </CardBody>
             <CardFooter>
@@ -303,15 +402,30 @@ function Gallery() {
                   )}
                 </Field>
                 <Field label="手机号" error="手机号格式不对">
-                  {({ id, describedBy }) => <Input id={id} defaultValue="1380000" aria-invalid="true" aria-describedby={describedBy} />}
+                  {({ id, describedBy }) => (
+                    <Input
+                      id={id}
+                      defaultValue="1380000"
+                      aria-invalid="true"
+                      aria-describedby={describedBy}
+                    />
+                  )}
                 </Field>
-                <div className="oil-row oil-row--wrap" style={{ "--oil-gap": "20px" } as React.CSSProperties}>
+                <div
+                  className="oil-row oil-row--wrap"
+                  style={{ "--oil-gap": "20px" } as React.CSSProperties}
+                >
                   <Checkbox label="克隆音色" defaultChecked />
                   <Checkbox label="录制视频" defaultChecked />
                   <Radio label="IndexTTS 2" name="tts" defaultChecked />
                   <Radio label="BreezeTTS2" name="tts" />
                 </div>
-                <Dropzone onFiles={() => {}} accept=".pdf" title="上传简历" hint="PDF，由大模型直接解析成候选人画像" />
+                <Dropzone
+                  onFiles={() => {}}
+                  accept=".pdf"
+                  title="上传简历"
+                  hint="PDF，由大模型直接解析成候选人画像"
+                />
                 <Field label="面试链接">
                   <CopyField value="https://interview.example.com/i/7Qm2xK9vTz4bLp8w" />
                 </Field>
@@ -382,7 +496,14 @@ function Gallery() {
         </Card>
         <div className="g-two" style={{ marginTop: 16 }}>
           <Card>
-            <CardHeader title="各维度评分" actions={<Ring value={0.86} size={56} thickness={6} color="var(--oil-success)">86</Ring>} />
+            <CardHeader
+              title="各维度评分"
+              actions={
+                <Ring value={0.86} size={56} thickness={6} color="var(--oil-success)">
+                  86
+                </Ring>
+              }
+            />
             <CardBody className="oil-stack">
               <ScoreBar label="专业能力" value={88} />
               <ScoreBar label="项目经历真实性" value={74} />
@@ -405,7 +526,19 @@ function Gallery() {
                 items={[
                   ["应聘岗位", "后端工程师（Rust）"],
                   ["联系方式", "13800000001 · lin@example.com"],
-                  ["技能", <span className="oil-row oil-row--wrap" style={{ "--oil-gap": "6px" } as React.CSSProperties} key="s"><Chip>Rust</Chip><Chip>Tokio</Chip><Chip>PostgreSQL</Chip><Chip>分布式</Chip></span>],
+                  [
+                    "技能",
+                    <span
+                      className="oil-row oil-row--wrap"
+                      style={{ "--oil-gap": "6px" } as React.CSSProperties}
+                      key="s"
+                    >
+                      <Chip>Rust</Chip>
+                      <Chip>Tokio</Chip>
+                      <Chip>PostgreSQL</Chip>
+                      <Chip>分布式</Chip>
+                    </span>,
+                  ],
                   ["简历解析", <Progress value={0.7} tone="gold" label="简历解析进度" key="p" />],
                 ]}
               />
@@ -446,18 +579,29 @@ function Gallery() {
         </div>
       </Section>
 
-      <Section id="paintings" title="插画" note="都是程序画出来的：先铺色块，再沿着边缘一笔一笔铺笔触，最后按颜料厚度打侧光。静态图片，页面上不跑滤镜。">
+      <Section
+        id="paintings"
+        title="插画"
+        note="都是程序画出来的：先铺色块，再沿着边缘一笔一笔铺笔触，最后按颜料厚度打侧光。静态图片，页面上不跑滤镜。"
+      >
         <div className="g-paintings">
           {(Object.keys(paintings) as PaintingName[]).map((name) => (
             <figure key={name}>
-              <Painting name={name} ratio={name === "dusk" ? "5 / 2" : name === "palette" ? "1 / 2" : "4 / 3"} />
+              <Painting
+                name={name}
+                ratio={name === "dusk" ? "5 / 2" : name === "palette" ? "1 / 2" : "4 / 3"}
+              />
               <figcaption className="oil-mono oil-faint">{name}</figcaption>
             </figure>
           ))}
         </div>
       </Section>
 
-      <Section id="shell" title="后台骨架" note="侧栏的底是调色盘上搅开的颜料，当前项后面是一笔土黄。">
+      <Section
+        id="shell"
+        title="后台骨架"
+        note="侧栏的底是调色盘上搅开的颜料，当前项后面是一笔土黄。"
+      >
         <div className="g-shell">
           <aside className="oil-sidebar" style={{ position: "relative", height: "auto" }}>
             <Brand mark="面" name="AI 面试" sub="招聘工作台" />
@@ -510,7 +654,11 @@ function Gallery() {
         </div>
       </Section>
 
-      <Section id="interview" title="候选人面试页" note="手机优先。面试进行中是深色舞台，动效只动 transform 和 opacity。">
+      <Section
+        id="interview"
+        title="候选人面试页"
+        note="手机优先。面试进行中是深色舞台，动效只动 transform 和 opacity。"
+      >
         <div className="g-phones">
           <div className="g-phone">
             <Stage
@@ -527,13 +675,33 @@ function Gallery() {
                   面试需要摄像头和麦克风。
                 </p>
               </div>
-              <DeviceCheckCard state="passed" icon={<Camera />} title="摄像头" description="画面正常">
-                <VideoFrame weight="thin" mirror placeholder="这里是你的画面" topLeft={<RecordingIndicator>预览</RecordingIndicator>} />
+              <DeviceCheckCard
+                state="passed"
+                icon={<Camera />}
+                title="摄像头"
+                description="画面正常"
+              >
+                <VideoFrame
+                  weight="thin"
+                  mirror
+                  placeholder="这里是你的画面"
+                  topLeft={<RecordingIndicator>预览</RecordingIndicator>}
+                />
               </DeviceCheckCard>
-              <DeviceCheckCard state="checking" icon={<Mic />} title="麦克风" description="请说一句话试试">
+              <DeviceCheckCard
+                state="checking"
+                icon={<Mic />}
+                title="麦克风"
+                description="请说一句话试试"
+              >
                 <LevelMeter levels={levels} />
               </DeviceCheckCard>
-              <DeviceCheckCard state="failed" icon={<Wifi />} title="网络" description="连接不稳定，换个网络再试">
+              <DeviceCheckCard
+                state="failed"
+                icon={<Wifi />}
+                title="网络"
+                description="连接不稳定，换个网络再试"
+              >
                 <Button variant="secondary" size="sm">
                   重新检测
                 </Button>
@@ -545,7 +713,12 @@ function Gallery() {
             <Stage
               header={<Steps compact steps={["须知", "设备", "同意", "开始"]} current={2} />}
               footer={
-                <Button size="lg" block variant="accent" disabled={!allConsented(consentItems, consent)}>
+                <Button
+                  size="lg"
+                  block
+                  variant="accent"
+                  disabled={!allConsented(consentItems, consent)}
+                >
                   同意并开始面试
                 </Button>
               }
@@ -605,7 +778,11 @@ function Gallery() {
                 painting="meadow"
                 title="面试完成，谢谢你"
                 description="录像已经保存。招聘人员看过之后会联系你，一般在 3 个工作日内。"
-                actions={<Button variant="secondary" size="lg" block>关闭页面</Button>}
+                actions={
+                  <Button variant="secondary" size="lg" block>
+                    关闭页面
+                  </Button>
+                }
               />
             </Stage>
           </div>

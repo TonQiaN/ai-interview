@@ -10,7 +10,9 @@ export function readTheme(): Theme {
   } catch {
     // 隐私模式下读不到存储，按系统设置走
   }
-  return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
 }
 
 /** 把主题写到 <html data-theme>，并记住。 */
