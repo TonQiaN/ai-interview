@@ -1,0 +1,186 @@
+/* 页面底子和排版。所有规则都收在 oil 这一层里，使用方自己的样式不加层就能覆盖它。 */
+
+@layer oil {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    color: var(--oil-ink);
+    background-color: var(--oil-linen);
+    /* 亚麻画布的经纬。静态贴图，不是滤镜，不占 CPU */
+    background-image: url("../assets/texture/weave.webp");
+    background-size: 128px;
+    font-family: var(--oil-font-body);
+    font-size: var(--oil-text-md);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    margin: 0;
+    font-family: var(--oil-font-display);
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+  }
+
+  p {
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  a {
+    color: var(--oil-link);
+    text-underline-offset: 0.2em;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  img,
+  video,
+  svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--oil-focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--oil-gold) 45%, transparent);
+  }
+
+  /* 排版工具类 */
+  .oil-display {
+    font-family: var(--oil-font-display);
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+  .oil-title-xl {
+    font-size: var(--oil-title-xl);
+    line-height: 1.12;
+  }
+  .oil-title-lg {
+    font-size: var(--oil-title-lg);
+    line-height: 1.2;
+  }
+  .oil-title-md {
+    font-size: var(--oil-title-md);
+  }
+  .oil-title-sm {
+    font-size: var(--oil-title-sm);
+  }
+  .oil-eyebrow {
+    font-size: var(--oil-text-xs);
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--oil-ink-3);
+  }
+  .oil-muted {
+    color: var(--oil-ink-2);
+  }
+  .oil-faint {
+    color: var(--oil-ink-3);
+  }
+  .oil-mono {
+    font-family: var(--oil-font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .oil-num {
+    font-variant-numeric: tabular-nums;
+  }
+  .oil-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* 标题下面的一笔 */
+  .oil-brushed {
+    position: relative;
+    display: inline-block;
+    padding-bottom: 0.28em;
+  }
+  .oil-brushed::after {
+    content: "";
+    position: absolute;
+    inset: auto -0.2em 0 -0.3em;
+    height: 0.36em;
+    background: var(--oil-brush-color, var(--oil-accent));
+    -webkit-mask: url("../assets/brush/underline.webp") center / 100% 100% no-repeat;
+    mask: url("../assets/brush/underline.webp") center / 100% 100% no-repeat;
+    opacity: 0.9;
+  }
+
+  /* 布局工具类 */
+  .oil-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--oil-gap, var(--oil-space-4));
+  }
+  .oil-row {
+    display: flex;
+    align-items: center;
+    gap: var(--oil-gap, var(--oil-space-3));
+  }
+  .oil-row--wrap {
+    flex-wrap: wrap;
+  }
+  .oil-row--between {
+    justify-content: space-between;
+  }
+  .oil-grid {
+    display: grid;
+    gap: var(--oil-gap, var(--oil-space-4));
+    grid-template-columns: repeat(auto-fill, minmax(var(--oil-col, 260px), 1fr));
+  }
+  .oil-grow {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .oil-divider {
+    height: 1px;
+    border: 0;
+    margin: 0;
+    background: var(--oil-line);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

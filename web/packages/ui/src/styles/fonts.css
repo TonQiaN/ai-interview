@@ -1,0 +1,8 @@
+/*
+ * 标题字体，自托管，不走外网字体服务。
+ * Noto Serif SC 按 unicode-range 切成约一百片，浏览器只下载页面上真正用到的字所在的那几片。
+ * 只要一个字重（700），正文用系统字体，所以首屏很小。
+ * 两个字体都是 SIL OFL 1.1 许可。
+ */
+@import "@fontsource/playfair-display/latin-700.css";
+@import "@fontsource/noto-serif-sc/700.css";

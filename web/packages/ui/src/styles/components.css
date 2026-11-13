@@ -1,0 +1,1475 @@
+/* 通用组件。类名都以 oil- 开头；不用 React 也可以直接写这些类。 */
+
+@layer oil {
+  /* ───────── 按钮：一块厚涂的颜料 ───────── */
+  .oil-btn {
+    --_bg: var(--oil-primary);
+    --_fg: var(--oil-on-primary);
+    --_edge: color-mix(in srgb, var(--_bg) 72%, #000);
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5em;
+    min-height: 38px;
+    padding: 0 16px;
+    border: 1px solid var(--_edge);
+    border-radius: var(--oil-radius-md);
+    color: var(--_fg);
+    background-color: var(--_bg);
+    background-image:
+      url("../assets/texture/impasto.webp"),
+      linear-gradient(180deg, rgb(255 255 255 / 0.16), rgb(255 255 255 / 0) 46%, rgb(0 0 0 / 0.16));
+    background-size:
+      256px,
+      auto;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.26),
+      inset 0 -2px 0 rgb(0 0 0 / 0.16),
+      var(--oil-shadow-1);
+    font-size: var(--oil-text-md);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      transform var(--oil-fast) var(--oil-ease),
+      box-shadow var(--oil-fast) var(--oil-ease),
+      background-color var(--oil-fast) var(--oil-ease);
+  }
+  .oil-btn:hover {
+    background-color: color-mix(in srgb, var(--_bg) 88%, #fff);
+  }
+  .oil-btn:active {
+    transform: translateY(1px);
+    box-shadow:
+      inset 0 2px 4px rgb(0 0 0 / 0.28),
+      0 0 0 rgb(0 0 0 / 0);
+  }
+  .oil-btn:disabled,
+  .oil-btn[aria-disabled="true"] {
+    cursor: not-allowed;
+    color: var(--oil-ink-disabled);
+    background-color: var(--oil-sunken);
+    background-image: none;
+    border-color: var(--oil-line);
+    box-shadow: none;
+    transform: none;
+  }
+  .oil-btn svg {
+    width: 1.15em;
+    height: 1.15em;
+    flex: none;
+  }
+
+  .oil-btn--accent {
+    --_bg: var(--oil-accent);
+    --_fg: var(--oil-on-accent);
+  }
+  .oil-btn--gold {
+    --_bg: var(--oil-gold);
+    --_fg: var(--oil-on-gold);
+  }
+  .oil-btn--danger {
+    --_bg: var(--oil-danger);
+    --_fg: var(--oil-on-accent);
+  }
+  .oil-btn--secondary {
+    --_bg: var(--oil-canvas);
+    --_fg: var(--oil-ink);
+    --_edge: var(--oil-line-strong);
+    background-image: url("../assets/texture/weave.webp");
+    background-size: 128px;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.5),
+      var(--oil-shadow-1);
+  }
+  .oil-btn--secondary:hover {
+    background-color: var(--oil-raised);
+  }
+  .oil-btn--ghost {
+    --_bg: transparent;
+    --_fg: var(--oil-primary);
+    --_edge: transparent;
+    background-image: none;
+    box-shadow: none;
+  }
+  .oil-btn--ghost:hover {
+    background-color: color-mix(in srgb, var(--oil-primary) 10%, transparent);
+  }
+  .oil-btn--ghost:active {
+    box-shadow: none;
+  }
+  .oil-btn--sm {
+    min-height: 30px;
+    padding: 0 11px;
+    font-size: var(--oil-text-sm);
+  }
+  .oil-btn--lg {
+    min-height: 50px;
+    padding: 0 26px;
+    font-size: var(--oil-text-lg);
+    border-radius: var(--oil-radius-lg);
+  }
+  .oil-btn--block {
+    display: flex;
+    width: 100%;
+  }
+  .oil-btn--icon {
+    min-width: 38px;
+    padding: 0;
+  }
+  .oil-btn--icon.oil-btn--sm {
+    min-width: 30px;
+  }
+  .oil-btn[data-loading="true"] {
+    pointer-events: none;
+  }
+  .oil-btn[data-loading="true"] > svg {
+    display: none;
+  }
+  .oil-btn[data-loading="true"]::before {
+    content: "";
+    flex: none;
+    width: 1em;
+    height: 1em;
+    border: 2px solid var(--_fg);
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: oil-spin 0.7s linear infinite;
+  }
+
+  @keyframes oil-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* ───────── 表单 ───────── */
+  .oil-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+  .oil-field__label {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: var(--oil-text-sm);
+    font-weight: 600;
+    color: var(--oil-ink);
+  }
+  .oil-field__req {
+    color: var(--oil-accent);
+  }
+  .oil-field__hint {
+    font-size: var(--oil-text-xs);
+    color: var(--oil-ink-3);
+    line-height: 1.5;
+  }
+  .oil-field__error {
+    font-size: var(--oil-text-xs);
+    color: var(--oil-danger-ink);
+  }
+
+  .oil-input,
+  .oil-select,
+  .oil-textarea {
+    width: 100%;
+    min-height: 38px;
+    padding: 7px 11px;
+    border: 1px solid var(--oil-line-strong);
+    border-radius: var(--oil-radius-md);
+    background: var(--oil-raised);
+    box-shadow: var(--oil-inset);
+    color: var(--oil-ink);
+    font-size: var(--oil-text-md);
+    line-height: 1.5;
+    transition:
+      border-color var(--oil-fast),
+      box-shadow var(--oil-fast);
+  }
+  .oil-input::placeholder,
+  .oil-textarea::placeholder {
+    color: var(--oil-ink-disabled);
+  }
+  .oil-input:hover,
+  .oil-select:hover,
+  .oil-textarea:hover {
+    border-color: var(--oil-ink-3);
+  }
+  .oil-input:focus,
+  .oil-select:focus,
+  .oil-textarea:focus {
+    outline: none;
+    border-color: var(--oil-focus);
+    box-shadow:
+      var(--oil-inset),
+      0 0 0 3px color-mix(in srgb, var(--oil-focus) 22%, transparent);
+  }
+  .oil-input[aria-invalid="true"],
+  .oil-textarea[aria-invalid="true"] {
+    border-color: var(--oil-danger);
+  }
+  .oil-input:disabled,
+  .oil-select:disabled,
+  .oil-textarea:disabled {
+    background: var(--oil-sunken);
+    color: var(--oil-ink-disabled);
+    cursor: not-allowed;
+  }
+  .oil-textarea {
+    min-height: 96px;
+    resize: vertical;
+  }
+  .oil-select {
+    appearance: none;
+    padding-right: 34px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%2377695a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    cursor: pointer;
+  }
+  .oil-input-group {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .oil-input-group > svg {
+    position: absolute;
+    left: 11px;
+    width: 16px;
+    height: 16px;
+    color: var(--oil-ink-3);
+    pointer-events: none;
+  }
+  .oil-input-group > svg + .oil-input {
+    padding-left: 34px;
+  }
+
+  /* 勾选和单选 */
+  .oil-check {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-height: 24px;
+    cursor: pointer;
+    line-height: 1.5;
+  }
+  .oil-check input {
+    appearance: none;
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin: 1px 0 0;
+    border: 1.5px solid var(--oil-line-strong);
+    border-radius: 5px;
+    background: var(--oil-raised);
+    box-shadow: var(--oil-inset);
+    cursor: pointer;
+    transition:
+      background-color var(--oil-fast),
+      border-color var(--oil-fast);
+  }
+  .oil-check input[type="radio"] {
+    border-radius: 50%;
+  }
+  .oil-check input:checked {
+    border-color: var(--oil-primary);
+    background-color: var(--oil-primary);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5 10.5l3.4 3.4L15 6.8' fill='none' stroke='%23fbf6ea' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    box-shadow: none;
+  }
+  .oil-check input[type="radio"]:checked {
+    background-image: radial-gradient(circle, var(--oil-on-primary) 0 32%, transparent 36%);
+  }
+  [data-theme="dark"] .oil-check input:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5 10.5l3.4 3.4L15 6.8' fill='none' stroke='%231b140c' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+  [data-theme="dark"] .oil-check input[type="radio"]:checked {
+    background-image: radial-gradient(circle, var(--oil-on-primary) 0 32%, transparent 36%);
+  }
+  .oil-check input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* 开关 */
+  .oil-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+  }
+  .oil-switch input {
+    appearance: none;
+    position: relative;
+    flex: none;
+    width: 42px;
+    height: 24px;
+    margin: 0;
+    border: 1px solid var(--oil-line-strong);
+    border-radius: var(--oil-radius-pill);
+    background: var(--oil-sunken);
+    box-shadow: var(--oil-inset);
+    cursor: pointer;
+    transition: background-color var(--oil-slow) var(--oil-ease);
+  }
+  .oil-switch input::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--oil-pigment-lead-white);
+    box-shadow:
+      0 1px 2px rgb(40 28 16 / 0.45),
+      inset 0 -1px 0 rgb(0 0 0 / 0.1);
+    transition: transform var(--oil-slow) var(--oil-ease);
+  }
+  .oil-switch input:checked {
+    border-color: color-mix(in srgb, var(--oil-success) 70%, #000);
+    background: var(--oil-success);
+  }
+  .oil-switch input:checked::after {
+    transform: translateX(18px);
+  }
+  .oil-switch input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* 滑块：轨道上抹了一道颜料。--_pct 由组件按当前值写入 */
+  .oil-slider {
+    --_pct: 50%;
+    appearance: none;
+    width: 100%;
+    height: 24px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .oil-slider::-webkit-slider-runnable-track {
+    height: 8px;
+    border-radius: var(--oil-radius-pill);
+    border: 1px solid var(--oil-line-strong);
+    background: linear-gradient(90deg, var(--oil-primary) var(--_pct), var(--oil-sunken) var(--_pct));
+    box-shadow: var(--oil-inset);
+  }
+  .oil-slider::-moz-range-track {
+    height: 8px;
+    border-radius: var(--oil-radius-pill);
+    border: 1px solid var(--oil-line-strong);
+    background: linear-gradient(90deg, var(--oil-primary) var(--_pct), var(--oil-sunken) var(--_pct));
+  }
+  .oil-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 22px;
+    height: 22px;
+    margin-top: -8px;
+    border: 2px solid var(--oil-primary);
+    border-radius: 50%;
+    background: var(--oil-pigment-lead-white);
+    box-shadow: 0 1px 3px rgb(40 28 16 / 0.4);
+  }
+  .oil-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--oil-primary);
+    border-radius: 50%;
+    background: var(--oil-pigment-lead-white);
+    box-shadow: 0 1px 3px rgb(40 28 16 / 0.4);
+  }
+  .oil-slider-row {
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-3);
+  }
+  .oil-slider-row output {
+    flex: none;
+    min-width: 4.5em;
+    text-align: right;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 分段选择 */
+  .oil-segmented {
+    display: inline-flex;
+    padding: 3px;
+    gap: 2px;
+    border: 1px solid var(--oil-line-strong);
+    border-radius: var(--oil-radius-md);
+    background: var(--oil-sunken);
+    box-shadow: var(--oil-inset);
+    max-width: 100%;
+  }
+  .oil-segmented button {
+    min-height: 30px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--oil-ink-2);
+    font-size: var(--oil-text-sm);
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color var(--oil-fast),
+      color var(--oil-fast);
+  }
+  .oil-segmented button:hover {
+    color: var(--oil-ink);
+  }
+  .oil-segmented button[aria-checked="true"] {
+    background: var(--oil-raised);
+    color: var(--oil-ink);
+    box-shadow: var(--oil-shadow-1);
+  }
+
+  /* 上传区 */
+  .oil-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--oil-space-2);
+    padding: var(--oil-space-8) var(--oil-space-6);
+    border: 1.5px dashed var(--oil-line-strong);
+    border-radius: var(--oil-radius-lg);
+    background: color-mix(in srgb, var(--oil-raised) 60%, transparent);
+    color: var(--oil-ink-2);
+    text-align: center;
+    cursor: pointer;
+    transition:
+      border-color var(--oil-fast),
+      background-color var(--oil-fast);
+  }
+  .oil-dropzone:hover,
+  .oil-dropzone[data-over="true"] {
+    border-color: var(--oil-primary);
+    background: color-mix(in srgb, var(--oil-primary) 7%, var(--oil-raised));
+  }
+  .oil-dropzone svg {
+    width: 28px;
+    height: 28px;
+    color: var(--oil-primary);
+  }
+  .oil-dropzone strong {
+    color: var(--oil-ink);
+  }
+
+  /* 可复制的一行（面试链接） */
+  .oil-copy {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--oil-line-strong);
+    border-radius: var(--oil-radius-md);
+    background: var(--oil-raised);
+    box-shadow: var(--oil-inset);
+    overflow: hidden;
+  }
+  .oil-copy code {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 9px 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--oil-font-mono);
+    font-size: var(--oil-text-sm);
+  }
+  .oil-copy button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
+    border: 0;
+    border-left: 1px solid var(--oil-line);
+    background: var(--oil-canvas);
+    color: var(--oil-primary);
+    font-weight: 600;
+    font-size: var(--oil-text-sm);
+    cursor: pointer;
+  }
+  .oil-copy button:hover {
+    background: var(--oil-neutral-soft);
+  }
+  .oil-copy button svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  /* ───────── 卡片：一块绷好的画布 ───────── */
+  .oil-card {
+    position: relative;
+    border: 1px solid var(--oil-line);
+    border-radius: var(--oil-radius-lg);
+    background-color: var(--oil-canvas);
+    background-image: url("../assets/texture/weave.webp");
+    background-size: 128px;
+    box-shadow: var(--oil-shadow-2);
+  }
+  .oil-card--flat {
+    box-shadow: none;
+  }
+  .oil-card--interactive {
+    cursor: pointer;
+    transition:
+      transform var(--oil-fast) var(--oil-ease),
+      box-shadow var(--oil-fast) var(--oil-ease);
+  }
+  .oil-card--interactive:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--oil-shadow-3);
+  }
+  .oil-card__head {
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-3);
+    padding: var(--oil-space-4) var(--oil-space-5);
+    border-bottom: 1px solid var(--oil-line);
+  }
+  .oil-card__title {
+    flex: 1 1 0;
+    min-width: 0;
+    font-family: var(--oil-font-display);
+    font-size: var(--oil-text-lg);
+    font-weight: 700;
+  }
+  .oil-card__body {
+    padding: var(--oil-space-5);
+  }
+  .oil-card__foot {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--oil-space-3);
+    padding: var(--oil-space-3) var(--oil-space-5);
+    border-top: 1px solid var(--oil-line);
+    background: color-mix(in srgb, var(--oil-sunken) 45%, transparent);
+    border-radius: 0 0 var(--oil-radius-lg) var(--oil-radius-lg);
+  }
+
+  /* 画框：鎏金外框、深色内槽，里面放画、照片或 video */
+  .oil-frame {
+    --_w: 10px;
+    position: relative;
+    padding: var(--_w);
+    border-radius: 3px;
+    background: var(--oil-gilt);
+    box-shadow:
+      inset 0 0 0 1px rgb(255 240 190 / 0.5),
+      inset 0 0 0 2px rgb(70 48 14 / 0.55),
+      var(--oil-shadow-2);
+  }
+  .oil-frame--thin {
+    --_w: 5px;
+  }
+  .oil-frame--wide {
+    --_w: 16px;
+  }
+  .oil-frame--dark {
+    background: linear-gradient(135deg, #1c1410, #4a3526 30%, #241a13 55%, #5a4230 80%, #17100c);
+    box-shadow:
+      inset 0 0 0 1px rgb(255 230 190 / 0.14),
+      var(--oil-shadow-2);
+  }
+  .oil-frame__inner {
+    position: relative;
+    overflow: hidden;
+    background: #120e0a;
+    box-shadow:
+      0 0 0 1px rgb(50 34 10 / 0.8),
+      inset 0 2px 8px rgb(0 0 0 / 0.6);
+  }
+  .oil-frame__inner > img,
+  .oil-frame__inner > video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  /* 画面上的一层罩光 */
+  .oil-frame__inner::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(125deg, rgb(255 255 255 / 0.09), rgb(255 255 255 / 0) 34%);
+    box-shadow: inset 0 0 22px rgb(0 0 0 / 0.38);
+  }
+
+  /* 横幅：一幅画做底，上面压字 */
+  .oil-hero {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--oil-radius-lg);
+    color: var(--oil-on-night);
+    background-color: var(--oil-night);
+    background-size: cover;
+    background-position: center;
+    box-shadow: var(--oil-shadow-2);
+    isolation: isolate;
+  }
+  .oil-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: linear-gradient(90deg, rgb(14 22 36 / 0.86), rgb(14 22 36 / 0.55) 42%, rgb(14 22 36 / 0) 72%);
+  }
+  .oil-hero__body {
+    padding: var(--oil-space-8);
+    max-width: 640px;
+  }
+  .oil-hero .oil-eyebrow,
+  .oil-hero .oil-muted {
+    color: var(--oil-on-night-2);
+  }
+
+  /* ───────── 标签 ───────── */
+  .oil-badge {
+    --_c: var(--oil-ink-2);
+    --_bg: var(--oil-neutral-soft);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 22px;
+    padding: 0 9px;
+    border-radius: var(--oil-radius-pill);
+    background: var(--_bg);
+    color: var(--_c);
+    font-size: var(--oil-text-xs);
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .oil-badge::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    background: currentColor;
+    -webkit-mask: url("../assets/brush/dab.webp") center / contain no-repeat;
+    mask: url("../assets/brush/dab.webp") center / contain no-repeat;
+  }
+  .oil-badge--plain::before {
+    display: none;
+  }
+  .oil-badge--success {
+    --_c: var(--oil-success-ink);
+    --_bg: var(--oil-success-soft);
+  }
+  .oil-badge--warning {
+    --_c: var(--oil-warning-ink);
+    --_bg: var(--oil-warning-soft);
+  }
+  .oil-badge--danger {
+    --_c: var(--oil-danger-ink);
+    --_bg: var(--oil-danger-soft);
+  }
+  .oil-badge--info {
+    --_c: var(--oil-info-ink);
+    --_bg: var(--oil-info-soft);
+  }
+  .oil-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 9px;
+    border: 1px solid var(--oil-line);
+    border-radius: var(--oil-radius-sm);
+    background: var(--oil-raised);
+    color: var(--oil-ink-2);
+    font-size: var(--oil-text-xs);
+    white-space: nowrap;
+  }
+
+  /* ───────── 表格 ───────── */
+  .oil-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .oil-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--oil-text-md);
+  }
+  .oil-table th {
+    padding: 10px var(--oil-space-4);
+    border-bottom: 1px solid var(--oil-line-strong);
+    background: color-mix(in srgb, var(--oil-sunken) 55%, transparent);
+    color: var(--oil-ink-3);
+    font-size: var(--oil-text-xs);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .oil-table td {
+    padding: 12px var(--oil-space-4);
+    border-bottom: 1px solid var(--oil-line);
+    vertical-align: middle;
+  }
+  .oil-table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .oil-table tbody tr {
+    transition: background-color var(--oil-fast);
+  }
+  .oil-table--hover tbody tr:hover {
+    background: color-mix(in srgb, var(--oil-gold) 9%, transparent);
+  }
+  .oil-table tr[data-clickable="true"] {
+    cursor: pointer;
+  }
+  .oil-table .oil-table__num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ───────── 标签页 ───────── */
+  .oil-tabs {
+    display: flex;
+    gap: var(--oil-space-6);
+    border-bottom: 1px solid var(--oil-line);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .oil-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .oil-tab {
+    position: relative;
+    flex: none;
+    padding: 10px 2px 12px;
+    border: 0;
+    background: none;
+    color: var(--oil-ink-3);
+    font-size: var(--oil-text-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: color var(--oil-fast);
+  }
+  .oil-tab:hover {
+    color: var(--oil-ink);
+  }
+  .oil-tab[aria-selected="true"] {
+    color: var(--oil-ink);
+  }
+  .oil-tab[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    inset: auto -8px -4px -8px;
+    height: 9px;
+    background: var(--oil-accent);
+    -webkit-mask: url("../assets/brush/underline.webp") center / 100% 100% no-repeat;
+    mask: url("../assets/brush/underline.webp") center / 100% 100% no-repeat;
+  }
+  .oil-tab__count {
+    margin-left: 6px;
+    color: var(--oil-ink-3);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ───────── 对话框 ───────── */
+  .oil-dialog {
+    width: min(560px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    padding: 0;
+    border: 1px solid var(--oil-line-strong);
+    border-radius: var(--oil-radius-lg);
+    background-color: var(--oil-canvas);
+    background-image: url("../assets/texture/weave.webp");
+    background-size: 128px;
+    color: var(--oil-ink);
+    box-shadow: var(--oil-shadow-3);
+    overflow: hidden;
+  }
+  .oil-dialog--wide {
+    width: min(820px, calc(100vw - 32px));
+  }
+  .oil-dialog[open] {
+    display: flex;
+    flex-direction: column;
+    animation: oil-rise var(--oil-slow) var(--oil-ease);
+  }
+  .oil-dialog::backdrop {
+    background: rgb(24 16 10 / 0.58);
+  }
+  .oil-dialog__head {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--oil-space-3);
+    padding: var(--oil-space-5) var(--oil-space-6) var(--oil-space-3);
+  }
+  .oil-dialog__title {
+    flex: 1 1 0;
+    font-family: var(--oil-font-display);
+    font-size: var(--oil-title-sm);
+    font-weight: 700;
+    line-height: 1.3;
+  }
+  .oil-dialog__body {
+    padding: var(--oil-space-2) var(--oil-space-6) var(--oil-space-5);
+    overflow-y: auto;
+  }
+  .oil-dialog__foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--oil-space-3);
+    padding: var(--oil-space-4) var(--oil-space-6);
+    border-top: 1px solid var(--oil-line);
+    background: color-mix(in srgb, var(--oil-sunken) 45%, transparent);
+  }
+  @keyframes oil-rise {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+  }
+
+  /* ───────── 提示横幅 ───────── */
+  .oil-banner {
+    --_c: var(--oil-info-ink);
+    --_bg: var(--oil-info-soft);
+    --_bar: var(--oil-info);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--oil-space-3);
+    padding: var(--oil-space-3) var(--oil-space-4);
+    border-radius: var(--oil-radius-md);
+    border: 1px solid color-mix(in srgb, var(--_bar) 30%, transparent);
+    border-left: 4px solid var(--_bar);
+    background: var(--_bg);
+    color: var(--_c);
+    font-size: var(--oil-text-md);
+  }
+  .oil-banner > svg {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+  }
+  .oil-banner__body {
+    flex: 1 1 0;
+    min-width: 0;
+    color: var(--oil-ink);
+  }
+  .oil-banner__title {
+    font-weight: 600;
+    color: var(--_c);
+  }
+  .oil-banner--success {
+    --_c: var(--oil-success-ink);
+    --_bg: var(--oil-success-soft);
+    --_bar: var(--oil-success);
+  }
+  .oil-banner--warning {
+    --_c: var(--oil-warning-ink);
+    --_bg: var(--oil-warning-soft);
+    --_bar: var(--oil-warning);
+  }
+  .oil-banner--danger {
+    --_c: var(--oil-danger-ink);
+    --_bg: var(--oil-danger-soft);
+    --_bar: var(--oil-danger);
+  }
+  /* 贴在页面最上面的状态条（断网、重连、上传进度） */
+  .oil-banner--top {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    border-radius: 0;
+    border-width: 0 0 1px;
+    padding-top: calc(var(--oil-space-3) + env(safe-area-inset-top, 0px));
+  }
+
+  /* ───────── 进度 ───────── */
+  .oil-progress {
+    --_c: var(--oil-primary);
+    height: 10px;
+    border: 1px solid var(--oil-line-strong);
+    border-radius: var(--oil-radius-pill);
+    background: var(--oil-sunken);
+    box-shadow: var(--oil-inset);
+    overflow: hidden;
+  }
+  .oil-progress__bar {
+    height: 100%;
+    width: 100%;
+    border-radius: inherit;
+    background-color: var(--_c);
+    background-image:
+      url("../assets/texture/impasto.webp"), linear-gradient(180deg, rgb(255 255 255 / 0.25), rgb(0 0 0 / 0.12));
+    background-size:
+      256px,
+      auto;
+    transform-origin: left;
+    transform: scaleX(var(--_v, 0));
+    transition: transform var(--oil-slow) var(--oil-ease);
+  }
+  .oil-progress--success {
+    --_c: var(--oil-success);
+  }
+  .oil-progress--warning {
+    --_c: var(--oil-warning);
+  }
+  .oil-progress--danger {
+    --_c: var(--oil-danger);
+  }
+  .oil-progress--accent {
+    --_c: var(--oil-accent);
+  }
+  .oil-progress--gold {
+    --_c: var(--oil-gold);
+  }
+  .oil-progress--sm {
+    height: 6px;
+  }
+
+  .oil-ring {
+    --_c: var(--oil-primary);
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+  }
+  .oil-ring svg {
+    transform: rotate(-90deg);
+  }
+  .oil-ring__track {
+    fill: none;
+    stroke: var(--oil-sunken);
+  }
+  .oil-ring__value {
+    fill: none;
+    stroke: var(--_c);
+    stroke-linecap: round;
+    transition: stroke-dashoffset var(--oil-slow) var(--oil-ease);
+  }
+  .oil-ring__label {
+    position: absolute;
+    font-family: var(--oil-font-display);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .oil-spinner {
+    display: inline-block;
+    width: 1.2em;
+    height: 1.2em;
+    border: 2px solid var(--oil-line-strong);
+    border-top-color: var(--oil-primary);
+    border-radius: 50%;
+    animation: oil-spin 0.8s linear infinite;
+  }
+
+  .oil-skeleton {
+    border-radius: var(--oil-radius-sm);
+    background: var(--oil-neutral-soft);
+    animation: oil-breathe 1.4s ease-in-out infinite alternate;
+  }
+  @keyframes oil-breathe {
+    to {
+      opacity: 0.45;
+    }
+  }
+
+  /* ───────── 数字、头像、键值 ───────── */
+  .oil-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .oil-stat__value {
+    font-family: var(--oil-font-display);
+    font-size: var(--oil-title-lg);
+    font-weight: 700;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+  .oil-stat__value small {
+    margin-left: 4px;
+    font-family: var(--oil-font-body);
+    font-size: var(--oil-text-sm);
+    font-weight: 400;
+    color: var(--oil-ink-3);
+  }
+  .oil-stat__label {
+    font-size: var(--oil-text-sm);
+    color: var(--oil-ink-2);
+  }
+  .oil-stat__delta {
+    font-size: var(--oil-text-xs);
+    color: var(--oil-ink-3);
+  }
+
+  .oil-avatar {
+    --_s: 36px;
+    --_c: var(--oil-pigment-prussian);
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: var(--_s);
+    height: var(--_s);
+    color: #fbf6ea;
+    font-family: var(--oil-font-display);
+    font-size: calc(var(--_s) * 0.42);
+    font-weight: 700;
+    line-height: 1;
+    isolation: isolate;
+  }
+  /* 底是一团颜料，不是正圆 */
+  .oil-avatar::before {
+    content: "";
+    position: absolute;
+    inset: -6%;
+    z-index: -1;
+    background: var(--_c);
+    -webkit-mask: url("../assets/brush/dab.webp") center / 100% 100% no-repeat;
+    mask: url("../assets/brush/dab.webp") center / 100% 100% no-repeat;
+  }
+  .oil-avatar--lg {
+    --_s: 56px;
+  }
+  .oil-avatar--xl {
+    --_s: 84px;
+  }
+  .oil-avatar[data-tone="1"] {
+    --_c: var(--oil-pigment-vermilion);
+  }
+  .oil-avatar[data-tone="2"] {
+    --_c: var(--oil-pigment-viridian);
+  }
+  .oil-avatar[data-tone="3"] {
+    --_c: var(--oil-pigment-sienna);
+  }
+  .oil-avatar[data-tone="4"] {
+    --_c: var(--oil-pigment-ultramarine);
+  }
+  .oil-avatar[data-tone="5"] {
+    --_c: var(--oil-pigment-alizarin);
+  }
+  .oil-avatar[data-tone="6"] {
+    --_c: #8a6a22;
+  }
+
+  .oil-kv {
+    display: grid;
+    grid-template-columns: minmax(84px, max-content) 1fr;
+    gap: 8px var(--oil-space-5);
+    margin: 0;
+  }
+  .oil-kv dt {
+    color: var(--oil-ink-3);
+    font-size: var(--oil-text-sm);
+  }
+  .oil-kv dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  /* 评分条：一笔抹出来的长度 */
+  .oil-score {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px var(--oil-space-3);
+    align-items: baseline;
+  }
+  .oil-score__label {
+    font-weight: 600;
+  }
+  .oil-score__value {
+    font-family: var(--oil-font-display);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .oil-score__track {
+    grid-column: 1 / -1;
+    position: relative;
+    height: 14px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--oil-sunken) 80%, transparent);
+    overflow: hidden;
+  }
+  .oil-score__stroke {
+    --_c: var(--oil-primary);
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--_v, 0%);
+    background: var(--_c);
+    -webkit-mask: url("../assets/brush/stroke.webp") left center / 100% 190% no-repeat;
+    mask: url("../assets/brush/stroke.webp") left center / 100% 190% no-repeat;
+    transition: width var(--oil-slow) var(--oil-ease);
+  }
+
+  /* ───────── 步骤 ───────── */
+  .oil-steps {
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .oil-step {
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-2);
+    color: var(--oil-ink-3);
+    font-size: var(--oil-text-sm);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .oil-step__dot {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border: 1.5px solid var(--oil-line-strong);
+    border-radius: 50%;
+    background: var(--oil-raised);
+    font-size: var(--oil-text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+  .oil-step__dot svg {
+    width: 14px;
+    height: 14px;
+  }
+  .oil-step[data-state="current"] {
+    color: var(--oil-ink);
+  }
+  .oil-step[data-state="current"] .oil-step__dot {
+    border-color: var(--oil-accent);
+    background: var(--oil-accent);
+    color: var(--oil-on-accent);
+  }
+  .oil-step[data-state="done"] .oil-step__dot {
+    border-color: var(--oil-success);
+    background: var(--oil-success);
+    color: #fbf6ea;
+  }
+  .oil-step__line {
+    flex: 1 1 16px;
+    min-width: 12px;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--oil-line-strong);
+  }
+  .oil-step__line[data-done="true"] {
+    background: var(--oil-success);
+  }
+  /* 窄屏只留圆点，当前步骤的文字放在下面由使用方显示 */
+  .oil-steps--compact .oil-step__text {
+    display: none;
+  }
+  /* 手机宽度放不下四五个步骤名：只留当前这一步的文字 */
+  @media (max-width: 640px) {
+    .oil-step:not([data-state="current"]) .oil-step__text {
+      display: none;
+    }
+    .oil-table {
+      min-width: 600px;
+    }
+  }
+
+  /* ───────── 空状态 ───────── */
+  .oil-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--oil-space-3);
+    padding: var(--oil-space-10) var(--oil-space-6);
+    text-align: center;
+  }
+  .oil-empty .oil-frame {
+    width: 148px;
+    margin-bottom: var(--oil-space-2);
+  }
+  .oil-empty__title {
+    font-family: var(--oil-font-display);
+    font-size: var(--oil-text-xl);
+    font-weight: 700;
+  }
+  .oil-empty__desc {
+    max-width: 44ch;
+    color: var(--oil-ink-2);
+  }
+
+  /* ───────── 后台骨架 ───────── */
+  .oil-shell {
+    display: grid;
+    grid-template-columns: 248px minmax(0, 1fr);
+    min-height: 100dvh;
+  }
+  .oil-sidebar {
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    padding: var(--oil-space-5) var(--oil-space-3);
+    color: var(--oil-on-night);
+    background-color: var(--oil-night);
+    background-image: linear-gradient(rgb(18 14 10 / 0.38), rgb(18 14 10 / 0.62)), url("../assets/paintings/palette.webp");
+    background-size: cover;
+    background-position: center;
+    box-shadow: inset -1px 0 0 rgb(0 0 0 / 0.5);
+    overflow-y: auto;
+  }
+  .oil-brand {
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-3);
+    padding: 0 var(--oil-space-3) var(--oil-space-5);
+  }
+  .oil-brand__mark {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 38px;
+    height: 38px;
+    color: var(--oil-pigment-umber);
+    font-family: var(--oil-font-display);
+    font-size: 20px;
+    font-weight: 700;
+    background: var(--oil-pigment-ochre);
+    -webkit-mask: url("../assets/brush/dab.webp") center / 100% 100% no-repeat;
+    mask: url("../assets/brush/dab.webp") center / 100% 100% no-repeat;
+  }
+  .oil-brand__name {
+    font-family: var(--oil-font-display);
+    font-size: var(--oil-text-xl);
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .oil-brand__sub {
+    font-size: var(--oil-text-xs);
+    color: var(--oil-on-night-2);
+    letter-spacing: 0.1em;
+  }
+  .oil-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .oil-nav__section {
+    padding: var(--oil-space-4) var(--oil-space-3) var(--oil-space-2);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    color: rgb(240 231 214 / 0.62);
+  }
+  .oil-nav__item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-3);
+    min-height: 40px;
+    padding: 0 var(--oil-space-3);
+    border: 0;
+    border-radius: var(--oil-radius-md);
+    background: none;
+    color: var(--oil-on-night-2);
+    font-size: var(--oil-text-md);
+    font-weight: 500;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    isolation: isolate;
+    transition: color var(--oil-fast);
+  }
+  .oil-nav__item svg {
+    flex: none;
+    width: 18px;
+    height: 18px;
+  }
+  .oil-nav__item:hover {
+    color: var(--oil-on-night);
+    background: rgb(240 231 214 / 0.07);
+  }
+  /* 当前项后面是一笔土黄 */
+  .oil-nav__item[aria-current="page"] {
+    color: var(--oil-pigment-umber);
+    font-weight: 700;
+    background: none;
+  }
+  .oil-nav__item[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    inset: -3px -6px -3px -4px;
+    z-index: -1;
+    background: var(--oil-pigment-ochre);
+    -webkit-mask: url("../assets/brush/stroke.webp") center / 100% 100% no-repeat;
+    mask: url("../assets/brush/stroke.webp") center / 100% 100% no-repeat;
+  }
+  .oil-nav__badge {
+    margin-left: auto;
+    min-width: 20px;
+    padding: 2px 6px;
+    border-radius: var(--oil-radius-pill);
+    background: rgb(240 231 214 / 0.16);
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .oil-nav__item[aria-current="page"] .oil-nav__badge {
+    background: rgb(42 32 25 / 0.2);
+  }
+  .oil-sidebar__foot {
+    margin-top: auto;
+    padding: var(--oil-space-4) var(--oil-space-3) 0;
+    border-top: 1px solid var(--oil-night-line);
+    font-size: var(--oil-text-xs);
+    color: var(--oil-on-night-2);
+  }
+  .oil-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .oil-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-3);
+    min-height: 56px;
+    padding: 0 var(--oil-space-8);
+    border-bottom: 1px solid var(--oil-line);
+    background: color-mix(in srgb, var(--oil-linen) 88%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .oil-topbar__menu {
+    display: none;
+  }
+  .oil-content {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: var(--oil-space-8);
+  }
+  .oil-page-head {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--oil-space-4);
+    margin-bottom: var(--oil-space-6);
+    flex-wrap: wrap;
+  }
+  .oil-page-head__text {
+    flex: 1 1 320px;
+    min-width: 0;
+  }
+  .oil-page-head__title {
+    font-size: var(--oil-title-md);
+  }
+  .oil-page-head__desc {
+    margin-top: var(--oil-space-3);
+    color: var(--oil-ink-2);
+    max-width: 68ch;
+  }
+  .oil-page-head__actions {
+    display: flex;
+    gap: var(--oil-space-3);
+    flex-wrap: wrap;
+  }
+  .oil-crumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: var(--oil-space-2);
+    font-size: var(--oil-text-sm);
+    color: var(--oil-ink-3);
+  }
+  .oil-crumbs a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .oil-crumbs a:hover {
+    color: var(--oil-ink);
+    text-decoration: underline;
+  }
+
+  @media (max-width: 900px) {
+    .oil-shell {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .oil-sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      z-index: 50;
+      width: min(280px, 84vw);
+      transform: translateX(-100%);
+      transition: transform var(--oil-slow) var(--oil-ease);
+    }
+    .oil-shell[data-nav-open="true"] .oil-sidebar {
+      transform: none;
+      box-shadow: var(--oil-shadow-3);
+    }
+    .oil-shell__scrim {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      border: 0;
+      background: rgb(24 16 10 / 0.5);
+    }
+    .oil-topbar {
+      padding: 0 var(--oil-space-4);
+    }
+    .oil-topbar__menu {
+      display: inline-flex;
+    }
+    .oil-content {
+      padding: var(--oil-space-5) var(--oil-space-4);
+    }
+  }
+  @media (min-width: 901px) {
+    .oil-shell__scrim {
+      display: none;
+    }
+  }
+
+  /* 轻提示 */
+  .oil-toasts {
+    position: fixed;
+    right: var(--oil-space-5);
+    bottom: calc(var(--oil-space-5) + env(safe-area-inset-bottom, 0px));
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+    gap: var(--oil-space-2);
+    max-width: min(380px, calc(100vw - 32px));
+  }
+  .oil-toast {
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-3);
+    padding: var(--oil-space-3) var(--oil-space-4);
+    border-radius: var(--oil-radius-md);
+    background: var(--oil-night-2);
+    color: var(--oil-on-night);
+    box-shadow: var(--oil-shadow-3);
+    animation: oil-rise var(--oil-slow) var(--oil-ease);
+  }
+  .oil-toast svg {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    color: var(--oil-pigment-naples);
+  }
+}
