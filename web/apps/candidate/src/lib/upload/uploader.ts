@@ -84,7 +84,12 @@ export interface UploaderOptions {
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** 第 n 次连续失败后等多久：指数增长，封顶，再乘上 0.5 到 1 的随机系数避免齐步重试。 */
-export function retryDelayMs(failures: number, baseDelayMs: number, maxDelayMs: number, random: number): number {
+export function retryDelayMs(
+  failures: number,
+  baseDelayMs: number,
+  maxDelayMs: number,
+  random: number,
+): number {
   const exponential = Math.min(maxDelayMs, baseDelayMs * 2 ** Math.max(0, failures - 1));
   return Math.round(exponential * (0.5 + random / 2));
 }

@@ -29,7 +29,8 @@ export function recorderFactory(
   return () => {
     const videoTracks = cameraStream.getVideoTracks();
     const stream = new MediaStream([...videoTracks, ...mixedAudio.getAudioTracks()]);
-    const candidates = videoTracks.length > 0 ? RECORDING_MIME_CANDIDATES : AUDIO_ONLY_MIME_CANDIDATES;
+    const candidates =
+      videoTracks.length > 0 ? RECORDING_MIME_CANDIDATES : AUDIO_ONLY_MIME_CANDIDATES;
     const mimeType = pickRecordingMime((mime) => MediaRecorder.isTypeSupported(mime), candidates);
     const merged = { ...DEFAULT_RECORDER_SETTINGS, ...settings };
     return new MediaRecorder(stream, {

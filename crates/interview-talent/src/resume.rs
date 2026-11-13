@@ -8,13 +8,12 @@
 //!
 //! 这里不写任何版式规则或正则：简历的版式千奇百怪，交给大模型读。
 
-use interview_llm::{
-    ChatModel, ChatRequest, ContentPart, FinishReason, LlmError, Message, Usage, chat_json,
-};
+use interview_llm::{ChatModel, ChatRequest, ContentPart, FinishReason, LlmError, Message, Usage};
 use serde::Deserialize;
 
 use crate::document::ResumeContent;
 use crate::error::TalentError;
+use crate::json::chat_json_private;
 use crate::lenient;
 use crate::model::ParsedResume;
 use crate::settings::TalentAiSettings;
@@ -29,6 +28,9 @@ pub struct ResumeReading {
     pub parsed: ParsedResume,
     /// 两步加起来的大模型用量。
     pub usage: Usage,
+    /// 文件的页数超过了上限时，这里是实际读了的页数：只读了前这么多页，后面的没有读。
+    /// 全部读完了是 `None`。
+    pub pages_read_of_longer_file: Option<usize>,
 }
 
 impl std::fmt::Debug for ResumeReading {
@@ -38,6 +40,7 @@ impl std::fmt::Debug for ResumeReading {
             .field("text_chars", &self.text.chars().count())
             .field("work_experience", &self.parsed.work_experience.len())
             .field("usage", &self.usage)
+            .field("pages_read_of_longer_file", &self.pages_read_of_longer_file)
             .finish()
     }
 }
@@ -56,13 +59,19 @@ pub async fn read_resume(
     settings: &TalentAiSettings,
 ) -> Result<ResumeReading, TalentError> {
     let mut usage = Usage::default();
+    let mut pages_read_of_longer_file = None;
     let text = match content {
         ResumeContent::Text(text) => text.trim().to_owned(),
         ResumeContent::Pages {
-            pages, text_layer, ..
+            pages,
+            text_layer,
+            truncated,
         } => {
             if pages.is_empty() {
                 return Err(TalentError::Unreadable);
+            }
+            if *truncated {
+                pages_read_of_longer_file = Some(pages.len());
             }
             let (text, transcribe_usage) =
                 transcribe(model, pages, text_layer.as_deref(), settings).await?;
@@ -81,6 +90,7 @@ pub async fn read_resume(
         text,
         parsed,
         usage,
+        pages_read_of_longer_file,
     })
 }
 
@@ -273,8 +283,17 @@ is_resume 填 false，reason 用一句话说明原因，resume 填 null。\n\n\
     .with_max_tokens(MAX_OUTPUT_TOKENS)
     .with_temperature(0.0);
 
-    let reply = chat_json::<Extraction>(model, request).await?;
-    let extraction = reply.value;
+    let (extraction, usage) = chat_json_private::<Extraction, _>(model, request, |extraction| {
+        // 说是简历，却什么都没整理出来：让模型重来，不能当成一份空的简历收下
+        if extraction.is_resume && extraction.resume == ParsedResume::default() {
+            Err("resume 里什么都没有。请按格式把简历的内容整理进 resume；\
+如果这段文字确实不是简历，is_resume 填 false，并在 reason 里说明原因"
+                .to_owned())
+        } else {
+            Ok(())
+        }
+    })
+    .await?;
     if !extraction.is_resume {
         return Err(TalentError::NotAResume(
             extraction
@@ -286,7 +305,7 @@ is_resume 填 false，reason 用一句话说明原因，resume 填 null。\n\n\
     let mut parsed = extraction.resume;
     parsed.phone = parsed.phone.as_deref().and_then(normalize_phone);
     parsed.email = parsed.email.map(|email| email.to_lowercase());
-    Ok((parsed, reply.usage))
+    Ok((parsed, usage))
 }
 
 /// 手机号统一成一种写法，方便认出同一个人：去掉空格和横线，大陆手机号去掉 +86。
@@ -430,6 +449,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn says_how_many_pages_were_read_when_the_file_was_longer() {
+        let settings = TalentAiSettings::default();
+        let model = ScriptedModel::new()
+            .reply("# 林知夏")
+            .reply(EXTRACTION)
+            .reply("# 林知夏")
+            .reply(EXTRACTION);
+
+        let whole = read_resume(&model, &pages(2), &settings)
+            .await
+            .expect("读得出来");
+        assert_eq!(whole.pages_read_of_longer_file, None);
+
+        let ResumeContent::Pages {
+            pages, text_layer, ..
+        } = pages(2)
+        else {
+            unreachable!("pages() 给的就是页面");
+        };
+        let cut = ResumeContent::Pages {
+            pages,
+            text_layer,
+            truncated: true,
+        };
+        let partial = read_resume(&model, &cut, &settings)
+            .await
+            .expect("读得出来");
+        assert_eq!(partial.pages_read_of_longer_file, Some(2));
+    }
+
+    #[tokio::test]
     async fn truncated_transcription_is_an_error() {
         let model = ScriptedModel::new().reply_with(|response| {
             response.content = "# 林知夏".to_owned();
@@ -444,6 +494,55 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn format_errors_do_not_repeat_resume_content() {
+        // 模型把工作经历写成了一段话，不是列表。报错里不能把这段话带出来：
+        // 报错会进日志，重试用完之后还会写进任务的失败原因里
+        const WRONG: &str =
+            r#"{"is_resume": true, "resume": {"work_experience": "在杭州示例云负责订单结算服务"}}"#;
+        let model = ScriptedModel::new().reply(WRONG).reply(WRONG).reply(WRONG);
+        let content = ResumeContent::Text("林知夏\n高级后端工程师".to_owned());
+        let error = read_resume(&model, &content, &TalentAiSettings::default())
+            .await
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(matches!(error, TalentError::Llm(_)), "{message}");
+        assert!(!message.contains("订单结算"), "{message}");
+        assert!(!message.contains("杭州"), "{message}");
+
+        // 让模型修改的那句话里也不带，但要说清楚是哪种错
+        let requests = model.requests();
+        assert_eq!(requests.len(), 3);
+        let feedback = requests[1]
+            .messages
+            .last()
+            .expect("有反馈")
+            .content
+            .as_text();
+        assert!(!feedback.contains("订单结算"), "{feedback}");
+        assert!(feedback.contains("expected a sequence"), "{feedback}");
+    }
+
+    #[tokio::test]
+    async fn an_empty_result_is_sent_back_instead_of_accepted() {
+        // 模型什么都没整理出来：不能当成一份空的简历收下
+        let model = ScriptedModel::new().reply("{}").reply(EXTRACTION);
+        let content = ResumeContent::Text("林知夏\n高级后端工程师".to_owned());
+        let reading = read_resume(&model, &content, &TalentAiSettings::default())
+            .await
+            .expect("第二次整理出来了");
+        assert_eq!(reading.parsed.name.as_deref(), Some("林知夏"));
+        assert_eq!(model.requests().len(), 2);
+
+        // 一直是空的：报错，不存一份空结果
+        const EMPTY: &str = r#"{"is_resume": true, "resume": null}"#;
+        let model = ScriptedModel::new().reply(EMPTY).reply(EMPTY).reply(EMPTY);
+        let error = read_resume(&model, &content, &TalentAiSettings::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(error, TalentError::Llm(_)), "{error}");
+    }
+
     #[test]
     fn debug_output_has_no_resume_content() {
         let reading = ResumeReading {
@@ -453,6 +552,7 @@ mod tests {
                 ..ParsedResume::default()
             },
             usage: Usage::default(),
+            pages_read_of_longer_file: None,
         };
         let debug = format!("{reading:?}");
         assert!(!debug.contains("林知夏"), "{debug}");

@@ -27,6 +27,15 @@ class FakeRecorder implements RecorderLike {
     queueMicrotask(() => this.onstop?.());
   }
 
+  /** 攒着还没吐出来的内容。 */
+  buffered = "";
+
+  requestData(): void {
+    const data = this.buffered;
+    this.buffered = "";
+    this.emit(data);
+  }
+
   emit(text: string): void {
     this.ondataavailable?.({ data: new Blob([text]) });
   }
@@ -88,7 +97,9 @@ describe("SegmentRecorder", () => {
     expect(await text(store, 0)).toBe("aaa");
     expect(await text(store, 2)).toBe("tail");
     const first = await store.getChunk({ sessionKey: SESSION, segmentId: "seg-1", seq: 0 });
-    expect(first?.sha256).toBe(await sha256Hex(new TextEncoder().encode("aaa").buffer as ArrayBuffer));
+    expect(first?.sha256).toBe(
+      await sha256Hex(new TextEncoder().encode("aaa").buffer as ArrayBuffer),
+    );
     // 三个分片各通知一次，段结束再通知一次
     expect(storedCount()).toBe(4);
   });
@@ -153,6 +164,38 @@ describe("SegmentRecorder", () => {
     expect(errors.map((error) => error.message)).toEqual(["存储空间不足"]);
     expect((await store.listChunks(SESSION, "seg-1")).map((chunk) => chunk.seq)).toEqual([0, 2]);
     expect((await store.listSegments(SESSION))[0]?.totalChunks).toBe(3);
+  });
+
+  it("flush 马上切出一片，序号接着排；没在录的时候什么也不做", async () => {
+    const { recorder, fake, store } = setup();
+    recorder.flush(); // 还没开始
+    await recorder.start();
+    fake.emit("a");
+    fake.buffered = "答完这一题时攒着的";
+    recorder.flush();
+    fake.emit("c");
+    fake.finalData = null;
+    await recorder.stop();
+    recorder.flush(); // 已经停了
+
+    expect(await text(store, 1)).toBe("答完这一题时攒着的");
+    expect((await store.listChunks(SESSION, "seg-1")).map((chunk) => chunk.seq)).toEqual([0, 1, 2]);
+  });
+
+  it("浏览器不支持马上切片，或者切的时候报错，都不影响录制", async () => {
+    const { recorder, fake, store, errors } = setup();
+    await recorder.start();
+    fake.requestData = () => {
+      throw new DOMException("not recording", "InvalidStateError");
+    };
+    recorder.flush();
+    (fake as RecorderLike).requestData = undefined;
+    recorder.flush();
+    fake.emit("a");
+    await recorder.stop();
+
+    expect(errors).toEqual([]);
+    expect((await store.listChunks(SESSION, "seg-1")).map((chunk) => chunk.seq)).toEqual([0, 1]);
   });
 
   it("录制器报错时转给 onError", async () => {

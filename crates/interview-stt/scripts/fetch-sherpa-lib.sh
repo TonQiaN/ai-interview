@@ -6,7 +6,16 @@
 # 构建脚本不认系统证书，会下载失败。这时先跑这个脚本用 curl 下好，再按它打印的那行设环境变量。
 #
 # 用法：eval "$(crates/interview-stt/scripts/fetch-sherpa-lib.sh)"
+#
+# 加 --extract 会把压缩包也解开，改成设 SHERPA_ONNX_LIB_DIR（构建脚本直接用这个目录，不下载也不解压）。
+# CI 用这种方式：构建脚本默认把库解到 target/ 里，target/ 的缓存恢复后目录还在、里面的库却可能被清掉，
+# 这时构建脚本以为库已经在了，链接时才报找不到 sherpa-onnx-c-api。放在 target/ 外面就没有这个问题。
 set -euo pipefail
+
+extract=false
+if [ "${1:-}" = "--extract" ]; then
+  extract=true
+fi
 
 version="2.0.1"
 cache="${SHERPA_ONNX_ARCHIVE_DIR:-$HOME/.cache/sherpa-onnx}"
@@ -32,4 +41,18 @@ if [ "$actual" != "$sha" ]; then
   rm -f "$cache/$archive"
   exit 1
 fi
-echo "export SHERPA_ONNX_ARCHIVE_DIR=$cache"
+if [ "$extract" = false ]; then
+  echo "export SHERPA_ONNX_ARCHIVE_DIR=$cache"
+  exit 0
+fi
+
+lib_dir="$cache/${archive%.tar.bz2}/lib"
+if [ ! -f "$lib_dir/libsherpa-onnx-c-api.a" ]; then
+  rm -rf "${lib_dir%/lib}"
+  tar -xjf "$cache/$archive" -C "$cache"
+fi
+if [ ! -f "$lib_dir/libsherpa-onnx-c-api.a" ]; then
+  echo "压缩包里没有 lib/libsherpa-onnx-c-api.a：$cache/$archive" >&2
+  exit 1
+fi
+echo "export SHERPA_ONNX_LIB_DIR=$lib_dir"

@@ -28,6 +28,8 @@ use uuid::Uuid;
 
 use super::{Harness, config, error_code, planner};
 
+mod recordings;
+
 /// 写报告的假模型。报告的几步是并发的，谁先调用不确定，所以按提示词里的任务标题分发。
 #[derive(Default)]
 struct ReportModel {
@@ -354,11 +356,26 @@ impl<'a> Turn<'a> {
 
 /// 测试用的语音识别：按脚本依次返回文字，对外报的后端名不是 `fake`
 /// （收尾任务不采用假后端的结果，见 `fake_backend_never_writes_transcripts`）。
-struct ScriptedStt(FakeTranscriber);
+/// 顺便记下每次拿到的是多长、多响的一段声音。
+struct ScriptedStt {
+    inner: FakeTranscriber,
+    heard: Mutex<Vec<Heard>>,
+}
+
+/// 语音识别拿到的一段声音。
+#[derive(Debug, Clone, Copy)]
+struct Heard {
+    duration_ms: u64,
+    rms: f32,
+}
 
 impl ScriptedStt {
     fn calls(&self) -> usize {
-        self.0.calls()
+        self.inner.calls()
+    }
+
+    fn heard(&self) -> Vec<Heard> {
+        self.heard.lock().unwrap().clone()
     }
 }
 
@@ -367,7 +384,7 @@ impl Transcriber for ScriptedStt {
     async fn status(&self) -> SttStatus {
         SttStatus {
             backend: "scripted".into(),
-            ..self.0.status().await
+            ..self.inner.status().await
         }
     }
 
@@ -375,7 +392,7 @@ impl Transcriber for ScriptedStt {
         &self,
         options: &TranscribeOptions,
     ) -> Result<Box<dyn TranscribeSession>, SttError> {
-        self.0.start_session(options).await
+        self.inner.start_session(options).await
     }
 
     async fn transcribe(
@@ -383,14 +400,19 @@ impl Transcriber for ScriptedStt {
         audio: &Audio,
         options: &TranscribeOptions,
     ) -> Result<Transcript, SttError> {
-        self.0.transcribe(audio, options).await
+        self.heard.lock().unwrap().push(Heard {
+            duration_ms: audio.duration_ms(),
+            rms: audio.rms(),
+        });
+        self.inner.transcribe(audio, options).await
     }
 }
 
 fn stt(script: &[&str]) -> Arc<ScriptedStt> {
-    Arc::new(ScriptedStt(FakeTranscriber::with_script(
-        script.iter().copied(),
-    )))
+    Arc::new(ScriptedStt {
+        inner: FakeTranscriber::with_script(script.iter().copied()),
+        heard: Mutex::default(),
+    })
 }
 
 /// 面试前用出题的假模型，面试后换成写报告的假模型和语音识别。

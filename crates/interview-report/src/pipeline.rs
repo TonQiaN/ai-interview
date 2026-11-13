@@ -9,7 +9,7 @@
 //!
 //! 除了综合建议，任何一步失败都不会让整份报告失败：那一部分留空，原因记在 `meta.failed_stages`。
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -30,8 +30,8 @@ use crate::report::{
     ReviewFlagCode, RiskLevel, SCHEMA_VERSION, StageFailure, Usage, null_as_default,
 };
 use crate::transcript::{
-    Assignment, QuestionGroup, group_by_question, provided_assignment, question_timing,
-    render_context, timing_overview,
+    Assignment, QuestionGroup, group_by_question, lookup_by_alias, provided_assignment,
+    question_timing, render_context, segment_alias, timing_overview,
 };
 
 /// 分析的选项。
@@ -108,7 +108,7 @@ pub async fn analyze(
                 return None; // 这道题没被问到，不评
             }
             let stage = format!("question:{}", group.root.id);
-            let task = prompts::question_task(group);
+            let task = prompts::question_task(group, &record.transcript);
             Some(
                 runner
                     .run::<QuestionJudgement>(&stage, context, &task)
@@ -460,12 +460,10 @@ async fn align(record: &InterviewRecord, runner: &Runner<'_>) -> Result<Assignme
         .run("alignment", &context, prompts::ALIGNMENT_TASK)
         .await?;
 
-    let positions: HashMap<&str, usize> = record
-        .transcript
-        .iter()
-        .enumerate()
-        .map(|(i, s)| (s.id.as_str(), i))
-        .collect();
+    let positions = lookup_by_alias(
+        record.transcript.iter().map(|s| s.id.as_str()),
+        segment_alias,
+    );
     let mut assignment = Assignment::new();
     for section in &alignment.sections {
         let (Some(&first), Some(&last)) = (

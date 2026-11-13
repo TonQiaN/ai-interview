@@ -103,7 +103,7 @@ cargo build --release -p <用到它的二进制> --features sherpa
 | `AI_INTERVIEW_STT_MODEL_DIR` | 模型目录，`sherpa` 后端必填 |
 | `AI_INTERVIEW_STT_THREADS` | 识别一段话用几个线程，默认 2 |
 
-在云端开发容器里编译：出网要过代理，sherpa-onnx 的构建脚本不认代理签发的证书，会下载失败。先跑一次 `eval "$(crates/interview-stt/scripts/fetch-sherpa-lib.sh)"`，它用 curl 把预编译库下到本地并设好 `SHERPA_ONNX_ARCHIVE_DIR`，之后正常编译。Mac 和 GitHub Actions 不需要这一步。
+在云端开发容器里编译：出网要过代理，sherpa-onnx 的构建脚本不认代理签发的证书，会下载失败。先跑一次 `eval "$(crates/interview-stt/scripts/fetch-sherpa-lib.sh)"`，它用 curl 把预编译库下到本地并设好 `SHERPA_ONNX_ARCHIVE_DIR`，之后正常编译。Mac 不需要这一步。GitHub Actions 里用的是 `fetch-sherpa-lib.sh --extract`：把库解到 `target/` 外面并设 `SHERPA_ONNX_LIB_DIR`，免得 `target/` 的缓存恢复后库文件不全、链接时报找不到 `sherpa-onnx-c-api`。
 
 ### 试一下
 
@@ -139,6 +139,42 @@ let transcript = session.finish().await?;               // 答完了：转完最
 - 候选人说的话是个人信息，这个 crate 不把转写文字写进日志，调用方也不要写。
 
 测试里用 `FakeTranscriber::with_script(["候选人的回答……"])`：它不听内容，把给定的文字铺在音频里有声音的地方。
+
+## 面试中：从录像分片里现场转写
+
+候选人的声音只有一条上行的路：浏览器把录像（WebM 或分片 MP4）切成小块传上来，不另外传一路音频。服务端用 ffmpeg 把分片解成 16 kHz 单声道音频，再喂给识别。`RecordingTranscript` 把这两步包在一起，一段录制（`interview_recordings` 的一行）对应一个：
+
+```rust
+use interview_audio::Ffmpeg;
+use interview_stt::{RecordingTranscript, TranscribeOptions};
+
+let recording = RecordingTranscript::start(&Ffmpeg::from_env(), stt.clone(), TranscribeOptions::default())?;
+
+// 每收到一块分片（存进 BlobStore 之后）
+recording.push_chunk(seq, &bytes).await?;
+
+// 一题答完：要这一题从开始到结束说了什么。分片上传比说话晚一两秒，所以给一个最长等待时间
+let words = recording.words_between(answer_start_ms, answer_end_ms, Duration::from_secs(5)).await?;
+let transcript = words.transcript.shifted(recording_start_ms);   // 换到面试的时间轴上
+if !words.complete { /* 等到超时音频还没到齐（上传慢、断网），拿到的是已经到了的部分 */ }
+
+// 录制结束
+let whole = recording.finish().await?;
+```
+
+要点：
+
+- **时间轴。** `push_chunk` 进去的是这段录制的分片，出来的时间相对这段录制的开头（0 毫秒是 `interview_recordings.start_ms` 那一刻）。写进 `interview_turns` 前加上 `start_ms`。
+- **分片可以乱序、重复。** 按 `seq` 排好再解，重复的丢掉。缺的那块一直不来、后面积压超过 256 块时报 `ChunkMissing`。
+- **一句话跨在两题中间**时按每个字开始的时间归到其中一题，不会两边都算。
+- **`words_between` 会截断正在说的那句话**，所以要在候选人说完之后调（静音判定通过，或者候选人点了「答完了」）。
+- **服务重启后**内存里的状态没了。用 `RecordingTranscript::resuming(.., skip_before_ms)` 新建一个，把这段录制已经存下来的分片从第 0 块按顺序再喂一遍：解码很快（实测 10 分钟、41 MB 的录像约 2 秒），`skip_before_ms`（当前这一题开始的时间）之前的只计时间、不重新识别。
+- **没装 ffmpeg** 时 `start` 返回 `LiveError::Media(MediaError::FfmpegMissing)`，报错里写了怎么装、怎么用 `AI_INTERVIEW_FFMPEG` 指路径。系统状态（`GET /api/v1/system/status`）里有一项 `ffmpeg`。
+- 只有音频、不经过录像的场合（比如测试、以后的实时通道）直接用 `LiveTranscript`：`push(&audio)` 喂音频，其余一样。
+
+面试结束后对整段录像重新转写（质量比现场的稳，因为不会在题目边界截断）用 `Ffmpeg::decode_file` 或 `decode_file_range(path, start_ms, end_ms)` 取出音频，再调 `Transcriber::transcribe`。
+
+实测（云端容器，ffmpeg 6.1.1）：常驻的 ffmpeg 在收到一块分片后 10 到 50 毫秒内吐出对应的音频，WebM（VP8 加 Opus）和分片 MP4（AAC）都一样。Opus 32 kbps 压缩过的声音和原始录音相比，X-ASR 认出来的字基本没有差别（`sherpa_live` 里有一条测试比这个）。
 
 ## 重现选型测试
 

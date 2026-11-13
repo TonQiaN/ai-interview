@@ -1,8 +1,9 @@
 //! 候选人画像：让大模型根据简历归纳这个人的水平、亮点、疑点和面试要核实的地方。
 
-use interview_llm::{ChatModel, ChatRequest, Message, Usage, chat_json_checked};
+use interview_llm::{ChatModel, ChatRequest, Message, Usage};
 
 use crate::error::TalentError;
+use crate::json::chat_json_private;
 use crate::model::{CandidateProfile, ParsedResume};
 use crate::settings::TalentAiSettings;
 
@@ -68,7 +69,8 @@ pub async fn generate_profile(
         .with_thinking(settings.profile_thinking)
         .with_max_tokens(8192);
 
-    let reply = chat_json_checked::<CandidateProfile, _>(model, request, 3, |profile| {
+    // 画像写的是候选人，格式不对时的报错里不能带着内容，所以不直接用 chat_json
+    let reply = chat_json_private::<CandidateProfile, _>(model, request, |profile| {
         if profile.is_empty() {
             Err("headline 和 summary 不能为空".to_owned())
         } else {
@@ -76,7 +78,7 @@ pub async fn generate_profile(
         }
     })
     .await?;
-    Ok((reply.value, reply.usage))
+    Ok(reply)
 }
 
 /// 去掉姓名和联系方式的简历信息。

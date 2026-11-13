@@ -102,6 +102,7 @@ let events = ProctorEvent::from_raw(vec![
 
 - `source` 是 `transcript`（转写里的话）、`resume`（简历原文）或 `event`（过程事件，带 `event_id`）。
 - 模型只给片段 id 和引文。时间、说话人是程序核对之后回填的：在那个片段里逐字找引文，找不到再到相邻片段和整份转写里找，还找不到的证据直接丢掉，丢了多少记在 `meta.evidence.dropped`。所以页面上出现的每一条引文，转写里都真的有。
+- `segment_id` 和 `event_id` 是输入记录里的原始编号（接入面试场次后是数据库里的 id）。发给模型的内容里用的是短编号（`s1`、`e1`……），程序再换回来，这样不占字数，模型也不容易抄错。
 - `quote_match`：`exact` 逐字对上；`approximate` 大致对上（模型改了个别字）；`whole_segment` 没给引文，指的是整个片段。
 - 丢弃的证据超过五分之一时，会出现 `weak_evidence` 的复核提示。
 

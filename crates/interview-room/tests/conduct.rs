@@ -8,7 +8,8 @@ use async_trait::async_trait;
 use common::{TestApp, agree, create_invite, error_code, interview_status, prepared, run_tasks};
 use interview_llm::testing::ScriptedModel;
 use interview_platform::testing::{self, TestRequest, TestResponse};
-use interview_room::{AnswerTranscriber, Deps, RoomConfig};
+use interview_room::{AnswerTranscriber, AnswerTranscript, Deps, RoomConfig};
+use interview_stt::{Segment, Transcript};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
@@ -376,12 +377,25 @@ async fn a_refresh_picks_up_at_the_current_utterance(pool: PgPool) {
     let (interview_id, token) = prepared(&app, json!({ "mode": "conversational" })).await;
     let opening = start(&app, &token).await;
     let question = advance(&app, &token, &played(&opening, 100)).await;
-    let (started_at,): (chrono::DateTime<chrono::Utc>,) =
-        sqlx::query_as("SELECT started_at FROM interviews WHERE id = $1")
-            .bind(interview_id)
-            .fetch_one(&app.ctx.db)
-            .await
-            .unwrap();
+    // 假装面试已经进行了一分半钟
+    let (started_at,): (chrono::DateTime<chrono::Utc>,) = sqlx::query_as(
+        "UPDATE interviews SET started_at = started_at - interval '90 seconds'
+          WHERE id = $1 RETURNING started_at",
+    )
+    .bind(interview_id)
+    .fetch_one(&app.ctx.db)
+    .await
+    .unwrap();
+
+    // 续面的那一步和原来是同一句，只有「已经进行了多久」换成了服务端现在的时间：
+    // 页面拿它当时间轴的起点，刷新前后两段录像才不会叠在一起
+    let same_step_at_server_time = |step: &Value| {
+        let elapsed = step["progress"]["elapsed_ms"].as_i64().unwrap();
+        assert!((90_000..100_000).contains(&elapsed), "{elapsed}");
+        let mut step = step.clone();
+        step["progress"]["elapsed_ms"] = question["progress"]["elapsed_ms"].clone();
+        assert_eq!(step, question);
+    };
 
     let session = TestRequest::get("/api/v1/room/session")
         .bearer(&token)
@@ -390,10 +404,11 @@ async fn a_refresh_picks_up_at_the_current_utterance(pool: PgPool) {
         .json();
     assert_eq!(session["stage"], "in_progress");
     assert_eq!(session["mode"], "scripted");
-    assert_eq!(session["resume"], question);
+    assert_eq!(session["end_reason"], Value::Null);
+    same_step_at_server_time(&session["resume"]);
 
     // 刷新之后页面重新点「开始」：接着问第一题，开始时间不变
-    assert_eq!(start(&app, &token).await, question);
+    same_step_at_server_time(&start(&app, &token).await);
     let (unchanged,): (chrono::DateTime<chrono::Utc>,) =
         sqlx::query_as("SELECT started_at FROM interviews WHERE id = $1")
             .bind(interview_id)
@@ -403,7 +418,7 @@ async fn a_refresh_picks_up_at_the_current_utterance(pool: PgPool) {
     assert_eq!(unchanged, started_at);
     assert_eq!(queued_tasks(&app, "room.watchdog").await.len(), 1);
 
-    let ack = advance(&app, &token, &answered(&question, 200, "timeout")).await;
+    let ack = advance(&app, &token, &answered(&question, 95_000, "timeout")).await;
     assert_eq!(key(&ack), "ack.1");
 }
 
@@ -528,13 +543,31 @@ impl FakeTranscriber {
 
 #[async_trait]
 impl AnswerTranscriber for FakeTranscriber {
-    async fn answer_text(&self, interview_id: Uuid, start_ms: i64, end_ms: i64) -> Option<String> {
+    async fn answer(
+        &self,
+        interview_id: Uuid,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Option<AnswerTranscript> {
         self.asked
             .lock()
             .unwrap()
             .push((interview_id, start_ms, end_ms));
         let _permit = self.gate.acquire().await.ok()?;
-        self.text.map(str::to_owned)
+        let (start_ms, end_ms) = (start_ms as u64, end_ms as u64);
+        Some(AnswerTranscript {
+            transcript: Transcript {
+                segments: vec![Segment {
+                    start_ms,
+                    end_ms,
+                    text: self.text?.to_owned(),
+                    words: Vec::new(),
+                    confidence: Some(0.5),
+                }],
+                audio_duration_ms: end_ms - start_ms,
+            },
+            engine: "test".to_owned(),
+        })
     }
 }
 
@@ -596,9 +629,10 @@ async fn a_weak_answer_gets_the_prepared_follow_up(pool: PgPool) {
     assert_eq!(follow_up["progress"]["index"], 1, "追问不算新的一题");
 
     // 识别的是候选人刚答的那一段，文字记进了对话
+    // 从面试官那句话播完（230）算起，到候选人答完（290）
     assert_eq!(
         transcriber.asked.lock().unwrap().as_slice(),
-        [(interview_id, 240, 290)]
+        [(interview_id, 230, 290)]
     );
     let answer = turns(&app, interview_id)
         .await
@@ -606,6 +640,18 @@ async fn a_weak_answer_gets_the_prepared_follow_up(pool: PgPool) {
         .find(|turn| turn.1 == "candidate")
         .unwrap();
     assert_eq!(answer.3, "我们团队做了很多事情。");
+    let stored: (Option<String>, Option<f32>, String) = sqlx::query_as(
+        "SELECT stt_engine, confidence, transcript_source FROM interview_turns
+          WHERE interview_id = $1 AND speaker = 'candidate'",
+    )
+    .bind(interview_id)
+    .fetch_one(&app.ctx.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored,
+        (Some("test".to_owned()), Some(0.5), "live".to_owned())
+    );
 
     // 模型只调了一次，用量记了账
     assert_eq!(model.requests().len(), 1);
@@ -674,6 +720,16 @@ async fn a_candidate_who_leaves_ends_the_interview(pool: PgPool) {
     .await;
     assert_eq!(left.status, 204, "{}", left.text());
     assert_eq!(interview_status(&app.ctx, interview_id).await, "abandoned");
+
+    // 之后再打开链接，页面知道面试是怎么结束的
+    let session = TestRequest::get("/api/v1/room/session")
+        .bearer(&token)
+        .send(&app.public)
+        .await
+        .json();
+    assert_eq!(session["stage"], "finished");
+    assert_eq!(session["end_reason"], "candidate_left");
+    assert_eq!(session["resume"], Value::Null);
     assert_eq!(
         end_reason(&app, interview_id).await.as_deref(),
         Some("candidate_left")

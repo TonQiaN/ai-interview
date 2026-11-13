@@ -13,7 +13,11 @@ import {
   type PageEventBinding,
   type PageTargets,
 } from "../lib/events/collector";
-import { type CapabilityReport, checkCapabilities, readBrowserEnvironment } from "../lib/flow/capabilities";
+import {
+  type CapabilityReport,
+  checkCapabilities,
+  readBrowserEnvironment,
+} from "../lib/flow/capabilities";
 import { readInviteToken } from "../lib/flow/link";
 import { InterviewRunner, levelFromDb, type RunnerSnapshot } from "../lib/interview/runner";
 import { AudioGraph, type LevelFrame } from "../lib/media/audio-graph";
@@ -22,7 +26,12 @@ import type { MediaErrorKind } from "../lib/media/errors";
 import { recorderFactory } from "../lib/recording/create-recorder";
 import { SegmentRecorder } from "../lib/recording/segment-recorder";
 import { Timeline } from "../lib/timeline";
-import { type ChunkStore, MemoryChunkStore, type RecordingTrack, sha256Hex } from "../lib/upload/chunk-store";
+import {
+  type ChunkStore,
+  MemoryChunkStore,
+  type RecordingTrack,
+  sha256Hex,
+} from "../lib/upload/chunk-store";
 import { IndexedDbChunkStore } from "../lib/upload/idb-chunk-store";
 import { closeOrphanSegments } from "../lib/upload/orphans";
 import { retryDelayMs, Uploader, type UploadStatus } from "../lib/upload/uploader";
@@ -85,7 +94,13 @@ export interface SessionSnapshot {
   finishReason: string | null;
 }
 
-const INITIAL_DEVICE: DeviceState = { permission: "idle", error: null, hasVideo: false, micHeard: false, speaker: "idle" };
+const INITIAL_DEVICE: DeviceState = {
+  permission: "idle",
+  error: null,
+  hasVideo: false,
+  micHeard: false,
+  speaker: "idle",
+};
 
 export interface InterviewSessionOptions {
   /** location.hash。 */
@@ -172,7 +187,9 @@ export class InterviewSession {
     if (!this.api) {
       this.api = this.createApi(token);
       // 本地队列按面试区分。用令牌的摘要做键，令牌本身不落盘
-      this.sessionKey = (await sha256Hex(new TextEncoder().encode(token).buffer as ArrayBuffer)).slice(0, 32);
+      this.sessionKey = (
+        await sha256Hex(new TextEncoder().encode(token).buffer as ArrayBuffer)
+      ).slice(0, 32);
     }
     const api = this.api;
 
@@ -195,7 +212,7 @@ export class InterviewSession {
 
     if (room.stage === "finished") {
       // 面试已经结束。上次如果有没传完的录像，这次接着传
-      this.patch({ room, stage: "finishing" });
+      this.patch({ room, stage: "finishing", finishReason: room.end_reason ?? null });
       void this.drainUploads();
       return;
     }
@@ -278,7 +295,10 @@ export class InterviewSession {
     if (!room || !this.api) return;
     await this.action(async () => {
       await this.api?.postConsent(room.consent.version, agreedKeys);
-      this.patch({ room: { ...room, consent: { ...room.consent, agreed: true } }, stage: "device" });
+      this.patch({
+        room: { ...room, consent: { ...room.consent, agreed: true } },
+        stage: "device",
+      });
     });
   }
 
@@ -320,13 +340,18 @@ export class InterviewSession {
   }
 
   private async capture(room: RoomSession): Promise<MediaStream> {
-    const settings = { width: room.recording.width, height: room.recording.height, frameRate: room.recording.frame_rate };
+    const settings = {
+      width: room.recording.width,
+      height: room.recording.height,
+      frameRate: room.recording.frame_rate,
+    };
     try {
       return await requestCapture({ video: true, ...settings });
     } catch (error) {
       // 这场面试不强制摄像头时，没有摄像头就只用麦克风
       const noCamera =
-        error instanceof CaptureError && (error.kind === "device_not_found" || error.kind === "constraints_unsatisfied");
+        error instanceof CaptureError &&
+        (error.kind === "device_not_found" || error.kind === "constraints_unsatisfied");
       if (room.camera_required || !noCamera) throw error;
       return requestCapture({ video: false });
     }
@@ -377,7 +402,9 @@ export class InterviewSession {
     await this.action(async () => {
       await graph.resume();
       const first = await api.start();
-      this.timeline = new Timeline(first.action === "say" ? first.progress.elapsed_ms : (room.elapsed_ms ?? 0));
+      this.timeline = new Timeline(
+        first.action === "say" ? first.progress.elapsed_ms : (room.elapsed_ms ?? 0),
+      );
       this.collector?.record("interview_started", { resumed: room.stage === "in_progress" });
 
       await this.startRecording();
@@ -391,16 +418,24 @@ export class InterviewSession {
         vad: this.vad,
         onTurnEvent: (event) => {
           if (event.type === "user_replay" || event.type === "user_continue") {
-            this.collector?.record(event.type === "user_replay" ? "question_replayed" : "answer_continued");
+            this.collector?.record(
+              event.type === "user_replay" ? "question_replayed" : "answer_continued",
+            );
           }
         },
+        // 答完一题马上切一片录像传上去：服务端要用这段声音转写，判断接下来问什么
+        onAnswerEnded: () => this.recorder?.flush(),
       });
       this.runner = runner;
       this.cleanups.push(
         runner.subscribe((snapshot) => this.patch({ runner: snapshot })),
         () => runner.stop(),
       );
-      this.patch({ stage: "interview", runner: runner.getSnapshot(), room: { ...room, stage: "in_progress" } });
+      this.patch({
+        stage: "interview",
+        runner: runner.getSnapshot(),
+        room: { ...room, stage: "in_progress" },
+      });
 
       void this.runInterview(runner, first);
     });
@@ -507,7 +542,10 @@ export class InterviewSession {
     } else if (this.snapshot.stage === "device" || this.snapshot.stage === "ready") {
       if (cause !== "ended") return;
       // 检测阶段设备没了：回到检测页重新来
-      this.patch({ stage: "device", device: { ...INITIAL_DEVICE, permission: "failed", error: "device_not_found" } });
+      this.patch({
+        stage: "device",
+        device: { ...INITIAL_DEVICE, permission: "failed", error: "device_not_found" },
+      });
     }
   }
 
@@ -540,7 +578,9 @@ export class InterviewSession {
         return;
       } catch (error) {
         if (error instanceof RoomApiError && !error.retryable) return;
-        await new Promise((resolve) => setTimeout(resolve, retryDelayMs(failures, 1_000, 10_000, Math.random())));
+        await new Promise((resolve) =>
+          setTimeout(resolve, retryDelayMs(failures, 1_000, 10_000, Math.random())),
+        );
       }
     }
   }
@@ -584,7 +624,11 @@ export class InterviewSession {
     } else {
       // 设备检测阶段：听到候选人说话就算麦克风通过
       const event = this.vad.process(frame.rms, frame.frameMs);
-      if (event?.type === "speech_start" && !this.snapshot.device.micHeard && this.snapshot.device.speaker !== "playing") {
+      if (
+        event?.type === "speech_start" &&
+        !this.snapshot.device.micHeard &&
+        this.snapshot.device.speaker !== "playing"
+      ) {
         this.patch({ device: { ...this.snapshot.device, micHeard: true } });
       }
     }
@@ -605,12 +649,22 @@ export class InterviewSession {
     try {
       await run();
     } catch (error) {
-      if (error instanceof RoomApiError && !error.retryable && error.kind !== "conflict" && error.kind !== "rejected") {
+      if (
+        error instanceof RoomApiError &&
+        !error.retryable &&
+        error.kind !== "conflict" &&
+        error.kind !== "rejected"
+      ) {
         this.fail(problemOf(error));
       } else if (error instanceof CaptureError) {
         this.patch({ actionError: `capture:${error.kind}` });
       } else {
-        this.patch({ actionError: error instanceof RoomApiError && error.kind === "network" ? "network" : messageOf(error) });
+        this.patch({
+          actionError:
+            error instanceof RoomApiError && error.kind === "network"
+              ? "network"
+              : messageOf(error),
+        });
       }
     } finally {
       this.patch({ busy: false });

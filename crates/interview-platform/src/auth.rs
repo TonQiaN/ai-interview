@@ -156,10 +156,20 @@ pub async fn require_admin(
     let Some(token) = session_token(request.headers()) else {
         return ApiError::unauthenticated().into_response();
     };
-    match authenticate(&ctx.db, &token).await {
-        Ok(Some(user)) => {
+    match authenticate_session(&ctx.db, &token).await {
+        Ok(Some((user, extended))) => {
             request.extensions_mut().insert(user);
-            next.run(request).await
+            let mut response = next.run(request).await;
+            // 库里的有效期顺延了，浏览器里的 cookie 也要跟着顺延，
+            // 不然 cookie 会在登录 14 天后过期，哪怕这期间一直在用。
+            // handler 自己种了 cookie（比如退出登录）就不动。
+            if extended && !response.headers().contains_key(header::SET_COOKIE) {
+                response.headers_mut().append(
+                    header::SET_COOKIE,
+                    session_cookie(&token, ctx.config.cookies_secure()),
+                );
+            }
+            response
         }
         Ok(None) => ApiError::unauthenticated().into_response(),
         Err(err) => ApiError::internal(err).into_response(),
@@ -207,6 +217,15 @@ pub fn session_token(headers: &HeaderMap) -> Option<String> {
 
 /// 用会话令牌找到账号。令牌无效、过期、账号被停用都返回 `None`。
 pub async fn authenticate(db: &PgPool, token: &str) -> Result<Option<AdminUser>, sqlx::Error> {
+    Ok(authenticate_session(db, token).await?.map(|(user, _)| user))
+}
+
+/// 同 [`authenticate`]，多返回一个值：这次有没有顺延会话的有效期。
+/// 顺延了的话，调用方要把 cookie 重新种一遍。
+async fn authenticate_session(
+    db: &PgPool,
+    token: &str,
+) -> Result<Option<(AdminUser, bool)>, sqlx::Error> {
     let row: Option<(Uuid, DateTime<Utc>, Uuid, String, String, String)> = sqlx::query_as(
         "SELECT s.id, s.last_seen_at, u.id, u.email, u.display_name, u.role
          FROM admin_sessions s JOIN admin_users u ON u.id = s.user_id
@@ -219,7 +238,8 @@ pub async fn authenticate(db: &PgPool, token: &str) -> Result<Option<AdminUser>,
         return Ok(None);
     };
     // 顺延有效期。不用每个请求都写库，隔几分钟写一次就够
-    if Utc::now() - last_seen_at > chrono::Duration::minutes(5) {
+    let extended = Utc::now() - last_seen_at > chrono::Duration::minutes(5);
+    if extended {
         sqlx::query(
             "UPDATE admin_sessions SET last_seen_at = now(), expires_at = now() + make_interval(secs => $2)
              WHERE id = $1",
@@ -229,12 +249,15 @@ pub async fn authenticate(db: &PgPool, token: &str) -> Result<Option<AdminUser>,
         .execute(db)
         .await?;
     }
-    Ok(Some(AdminUser {
-        id,
-        email,
-        display_name,
-        role,
-    }))
+    Ok(Some((
+        AdminUser {
+            id,
+            email,
+            display_name,
+            role,
+        },
+        extended,
+    )))
 }
 
 /// 登录请求。
@@ -247,44 +270,91 @@ pub struct LoginRequest {
 /// 同一个邮箱 10 分钟内最多输错这么多次。计数在内存里，重启清零。
 const MAX_FAILED_LOGINS: usize = 10;
 const FAILED_LOGIN_WINDOW: Duration = Duration::from_secs(600);
+/// 最多同时给这么多个邮箱计数。满了先清过期的，还满就挤掉最久没动静的那个。
+const MAX_TRACKED_EMAILS: usize = 10_000;
+/// 邮箱地址的长度上限（RFC 5321）。更长的不可能是真账号，不查库也不计数。
+const MAX_EMAIL_LEN: usize = 254;
 
-static FAILED_LOGINS: LazyLock<Mutex<HashMap<String, Vec<Instant>>>> =
-    LazyLock::new(Mutex::default);
+static FAILED_LOGINS: LazyLock<Mutex<FailureLog>> =
+    LazyLock::new(|| Mutex::new(FailureLog::new(MAX_TRACKED_EMAILS)));
 
-fn too_many_failures(email: &str) -> bool {
-    let mut failures = FAILED_LOGINS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let Some(times) = failures.get_mut(email) else {
-        return false;
-    };
-    times.retain(|at| at.elapsed() < FAILED_LOGIN_WINDOW);
-    if times.is_empty() {
-        failures.remove(email);
-        return false;
-    }
-    times.len() >= MAX_FAILED_LOGINS
-}
-
-fn record_failure(email: &str) {
-    let mut failures = FAILED_LOGINS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    // 别让有人拿随机邮箱把内存撑大
-    if failures.len() > 10_000 {
-        failures.retain(|_, times| times.iter().any(|at| at.elapsed() < FAILED_LOGIN_WINDOW));
-    }
-    failures
-        .entry(email.to_owned())
-        .or_default()
-        .push(Instant::now());
-}
-
-fn clear_failures(email: &str) {
+fn failed_logins() -> std::sync::MutexGuard<'static, FailureLog> {
     FAILED_LOGINS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(email);
+}
+
+/// 登录失败的记录。占的内存有上限：邮箱个数不超过 `capacity`，
+/// 每个邮箱最多记 [`MAX_FAILED_LOGINS`] 次，邮箱长度由调用方限制。
+#[derive(Debug)]
+struct FailureLog {
+    capacity: usize,
+    by_email: HashMap<String, Vec<Instant>>,
+}
+
+impl FailureLog {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            by_email: HashMap::new(),
+        }
+    }
+
+    fn too_many(&mut self, email: &str, now: Instant) -> bool {
+        let Some(times) = self.by_email.get_mut(email) else {
+            return false;
+        };
+        times.retain(|at| now.duration_since(*at) < FAILED_LOGIN_WINDOW);
+        if times.is_empty() {
+            self.by_email.remove(email);
+            return false;
+        }
+        times.len() >= MAX_FAILED_LOGINS
+    }
+
+    fn record(&mut self, email: &str, now: Instant) {
+        if !self.by_email.contains_key(email) && self.by_email.len() >= self.capacity {
+            self.make_room(now);
+        }
+        let times = self.by_email.entry(email.to_owned()).or_default();
+        // 并发的请求可能同时走到这里，多出来的不用记，已经够锁住了
+        if times.len() >= MAX_FAILED_LOGINS {
+            times.remove(0);
+        }
+        times.push(now);
+    }
+
+    fn clear(&mut self, email: &str) {
+        self.by_email.remove(email);
+    }
+
+    /// 腾出至少一个位置。
+    fn make_room(&mut self, now: Instant) {
+        self.by_email.retain(|_, times| {
+            times
+                .iter()
+                .any(|at| now.duration_since(*at) < FAILED_LOGIN_WINDOW)
+        });
+        while self.by_email.len() >= self.capacity {
+            let stalest = self
+                .by_email
+                .iter()
+                .min_by_key(|(_, times)| times.last().copied())
+                .map(|(email, _)| email.clone());
+            match stalest {
+                Some(email) => self.by_email.remove(&email),
+                None => break,
+            };
+        }
+    }
+}
+
+fn invalid_credentials() -> ApiError {
+    ApiError::new(
+        axum::http::StatusCode::UNAUTHORIZED,
+        "invalid_credentials",
+        "邮箱或密码不对",
+    )
 }
 
 /// 核对邮箱和密码，建一个会话。返回账号和会话令牌（令牌要种到 cookie 里）。
@@ -297,7 +367,10 @@ pub async fn login(
     if email.is_empty() || request.password.is_empty() {
         return Err(ApiError::bad_request("请填写邮箱和密码"));
     }
-    if too_many_failures(&email) {
+    if email.len() > MAX_EMAIL_LEN {
+        return Err(invalid_credentials());
+    }
+    if failed_logins().too_many(&email, Instant::now()) {
         return Err(ApiError::rate_limited("密码输错次数太多，请 10 分钟后再试"));
     }
     let row: Option<(Uuid, String, String, String, String)> = sqlx::query_as(
@@ -322,14 +395,10 @@ pub async fn login(
     };
     let password_ok = verify_password_async(request.password, stored_hash).await;
     let Some(user) = user.filter(|_| password_ok) else {
-        record_failure(&email);
-        return Err(ApiError::new(
-            axum::http::StatusCode::UNAUTHORIZED,
-            "invalid_credentials",
-            "邮箱或密码不对",
-        ));
+        failed_logins().record(&email, Instant::now());
+        return Err(invalid_credentials());
     };
-    clear_failures(&email);
+    failed_logins().clear(&email);
 
     let token = generate_token();
     sqlx::query(
@@ -664,12 +733,76 @@ mod tests {
                 .code(),
             "rate_limited"
         );
-        clear_failures("throttle@example.com");
+        failed_logins().clear("throttle@example.com");
         assert!(
             login(&pool, request("long-enough-password"), None)
                 .await
                 .is_ok()
         );
+    }
+
+    #[sqlx::test(migrator = "MIGRATOR")]
+    async fn absurdly_long_emails_are_not_tracked(pool: PgPool) {
+        let email = format!("{}@example.com", "a".repeat(MAX_EMAIL_LEN));
+        let err = login(
+            &pool,
+            LoginRequest {
+                email: email.clone(),
+                password: "whatever-pass".into(),
+            },
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code(), "invalid_credentials");
+        assert!(!failed_logins().by_email.contains_key(&email));
+    }
+
+    #[test]
+    fn failure_log_never_grows_past_its_capacity() {
+        let start = Instant::now();
+        let mut log = FailureLog::new(3);
+        for (i, email) in ["a", "b", "c", "d", "e"].into_iter().enumerate() {
+            log.record(email, start + Duration::from_secs(i as u64));
+            assert!(log.by_email.len() <= 3);
+        }
+        // 挤掉的是最久没动静的
+        let mut kept: Vec<_> = log.by_email.keys().cloned().collect();
+        kept.sort();
+        assert_eq!(kept, ["c", "d", "e"]);
+
+        // 已经在记的邮箱继续记，不用腾位置
+        log.record("c", start + Duration::from_secs(10));
+        assert_eq!(log.by_email.len(), 3);
+        assert_eq!(log.by_email["c"].len(), 2);
+    }
+
+    #[test]
+    fn failure_log_drops_expired_entries_before_evicting() {
+        let start = Instant::now();
+        let mut log = FailureLog::new(2);
+        log.record("old", start);
+        log.record("recent", start + FAILED_LOGIN_WINDOW);
+        log.record("new", start + FAILED_LOGIN_WINDOW + Duration::from_secs(1));
+        let mut kept: Vec<_> = log.by_email.keys().cloned().collect();
+        kept.sort();
+        assert_eq!(kept, ["new", "recent"]);
+    }
+
+    #[test]
+    fn failure_log_caps_attempts_per_email() {
+        let start = Instant::now();
+        let mut log = FailureLog::new(10);
+        for i in 0..(MAX_FAILED_LOGINS as u64 * 3) {
+            log.record("a", start + Duration::from_secs(i));
+        }
+        assert_eq!(log.by_email["a"].len(), MAX_FAILED_LOGINS);
+        let now = start + Duration::from_secs(MAX_FAILED_LOGINS as u64 * 3);
+        assert!(log.too_many("a", now));
+        assert!(!log.too_many("b", now));
+        // 过了窗口就放行，记录也清掉
+        assert!(!log.too_many("a", now + FAILED_LOGIN_WINDOW));
+        assert!(log.by_email.is_empty());
     }
 
     #[sqlx::test(migrator = "MIGRATOR")]

@@ -7,13 +7,16 @@
 //! ```
 //!
 //! 测试音频用的是模型压缩包里自带的示例录音（公开的测试语料，不是真实候选人的声音）。
+//! 现场转写那一条还要装 ffmpeg。
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
-use interview_audio::{Audio, decode_wav};
+use interview_audio::{Audio, Ffmpeg, decode_wav, encode_wav};
 use interview_stt::{
-    ASR_MODEL_DIR_NAME, MODEL_DIR_ENV_VAR, SherpaConfig, SherpaTranscriber, SttError,
-    TranscribeOptions, Transcriber, Transcript,
+    ASR_MODEL_DIR_NAME, MODEL_DIR_ENV_VAR, RecordingTranscript, SherpaConfig, SherpaTranscriber,
+    SttError, TranscribeOptions, Transcriber, Transcript,
 };
 
 fn model_dir() -> PathBuf {
@@ -158,6 +161,110 @@ async fn silence_and_noise_give_an_empty_transcript() {
         .await
         .unwrap();
     assert!(transcript.is_empty(), "{}", transcript.text());
+}
+
+/// 去掉标点和空格，只留字，用来比两次识别的结果。
+fn letters(text: &str) -> Vec<char> {
+    text.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// `b` 里有多大比例的字也在 `a` 里（不看顺序）。
+fn overlap(a: &[char], b: &[char]) -> f32 {
+    let mut pool = a.to_vec();
+    let mut found = 0;
+    for c in b {
+        if let Some(index) = pool.iter().position(|p| p == c) {
+            pool.swap_remove(index);
+            found += 1;
+        }
+    }
+    found as f32 / b.len().max(1) as f32
+}
+
+/// 整条现场转写的路：浏览器录的 WebM 分片 → ffmpeg 解码 → 真模型 → 按时间段取每一题的回答。
+#[tokio::test]
+#[ignore = "需要真模型和 ffmpeg"]
+async fn a_recording_uploaded_in_chunks_is_transcribed_answer_by_answer() {
+    let stt: Arc<dyn Transcriber> = Arc::new(load().await);
+    let ffmpeg = Ffmpeg::from_env();
+    ffmpeg.version().await.expect("这条测试要装 ffmpeg");
+
+    // 每段示例录音当作一题的回答，两题之间隔 2 秒
+    let clips = sample_wavs();
+    let gap_ms = 2_000;
+    let audio = joined(&clips, gap_ms);
+    let mut answers = Vec::new();
+    let mut at_ms = 500;
+    for clip in &clips {
+        answers.push((at_ms - 300, at_ms + clip.duration_ms() + 700));
+        at_ms += clip.duration_ms() + gap_ms;
+    }
+
+    // 编成浏览器 MediaRecorder 录出来的那种 WebM（Opus）
+    let dir = tempfile::tempdir().unwrap();
+    let wav = dir.path().join("answers.wav");
+    let webm = dir.path().join("answers.webm");
+    std::fs::write(&wav, encode_wav(&audio)).unwrap();
+    let encoded = std::process::Command::new(ffmpeg.program())
+        .args(["-nostdin", "-v", "error", "-y", "-i"])
+        .arg(&wav)
+        .args(["-c:a", "libopus", "-b:a", "32k", "-live", "1", "-f", "webm"])
+        .arg(&webm)
+        .status()
+        .unwrap();
+    assert!(encoded.success());
+    let bytes = std::fs::read(&webm).unwrap();
+
+    let recording = Arc::new(
+        RecordingTranscript::start(&ffmpeg, stt.clone(), TranscribeOptions::default()).unwrap(),
+    );
+    // 一边上传分片
+    let uploader = {
+        let recording = recording.clone();
+        tokio::spawn(async move {
+            for (seq, chunk) in bytes.chunks(8 * 1024).enumerate() {
+                recording.push_chunk(seq as u64, chunk).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+    };
+    // 一边按题取回答。问的时候这一段的分片可能还没传到，要能等
+    for (clip, (start_ms, end_ms)) in clips.iter().zip(&answers) {
+        let words = recording
+            .words_between(*start_ms, *end_ms, Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert!(words.complete, "等了一分钟音频还没到齐");
+        let live = words.transcript;
+        // 时间在整段录制的时间轴上，都落在问的这一段里
+        for word in live.words() {
+            assert!(
+                (*start_ms..*end_ms).contains(&word.start_ms),
+                "{word:?} 不在 {start_ms} 到 {end_ms} 之间"
+            );
+        }
+
+        // 和直接转写这段录音比：经过 Opus 压缩和分片，认出来的字应该基本一样
+        let direct = stt
+            .transcribe(clip, &TranscribeOptions::default())
+            .await
+            .unwrap();
+        println!("现场：{}\n直接：{}", live.text(), direct.text());
+        let (live, direct) = (letters(&live.text()), letters(&direct.text()));
+        assert!(!direct.is_empty());
+        assert!(
+            overlap(&live, &direct) >= 0.7 && overlap(&direct, &live) >= 0.7,
+            "现场转写和直接转写差得太多"
+        );
+    }
+    uploader.await.unwrap();
+
+    let whole = recording.finish().await.unwrap();
+    assert_well_formed(&whole);
+    assert!(whole.audio_duration_ms.abs_diff(audio.duration_ms()) <= 100);
 }
 
 // 这一条不需要模型，带 sherpa 特性的 CI 会跑

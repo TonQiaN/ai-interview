@@ -9,10 +9,10 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "mock": "node dev/mock-room-server.mjs",
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@ai-interview/api-client": "workspace:*",
     "@ai-interview/ui": "workspace:*",
     "lucide-react": "^1.72.0",
     "react": "^19.3.1",

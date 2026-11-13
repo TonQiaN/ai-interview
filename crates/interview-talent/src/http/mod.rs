@@ -12,7 +12,7 @@ pub mod candidates;
 pub mod positions;
 pub mod raas;
 pub mod resumes;
-mod upload;
+pub(crate) mod upload;
 
 pub use upload::ResumeUploadForm;
 

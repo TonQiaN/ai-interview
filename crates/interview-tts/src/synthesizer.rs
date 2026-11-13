@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use futures_util::{StreamExt, TryStreamExt, stream};
 use interview_audio::{Audio, decode_wav, encode_wav};
@@ -58,7 +58,7 @@ pub struct BatchOutcome {
 #[derive(Clone)]
 pub struct Synthesizer {
     backend: Arc<dyn TtsBackend>,
-    cache: Option<Arc<dyn AudioCache>>,
+    cache: OnceLock<Arc<dyn AudioCache>>,
     max_attempts: u32,
 }
 
@@ -66,15 +66,22 @@ impl Synthesizer {
     pub fn new(backend: Arc<dyn TtsBackend>) -> Self {
         Self {
             backend,
-            cache: None,
+            cache: OnceLock::new(),
             max_attempts: 2,
         }
     }
 
     /// 接上缓存。不接也能用，只是每次都重新合成。
-    pub fn with_cache(mut self, cache: Arc<dyn AudioCache>) -> Self {
-        self.cache = Some(cache);
+    pub fn with_cache(self, cache: Arc<dyn AudioCache>) -> Self {
+        self.attach_cache(cache);
         self
+    }
+
+    /// 给已经在用的合成入口接上缓存。只有第一次有效：已经接过缓存的话保持原来的，返回 `false`。
+    ///
+    /// 服务进程装配时用：合成入口先按环境变量建好，等存储准备好了再把缓存接上。
+    pub fn attach_cache(&self, cache: Arc<dyn AudioCache>) -> bool {
+        self.cache.set(cache).is_ok()
     }
 
     /// 后端返回的音频明显不对时，一段最多合成几次（每次换一个种子）。默认 2 次。
@@ -236,7 +243,7 @@ impl Synthesizer {
     }
 
     async fn read_cache(&self, content_hash: &str) -> Option<Synthesized> {
-        let cache = self.cache.as_ref()?;
+        let cache = self.cache.get()?;
         let wav = match cache.get(content_hash).await {
             Ok(Some(wav)) => wav,
             Ok(None) => return None,
@@ -261,7 +268,9 @@ impl Synthesizer {
     }
 
     async fn write_cache(&self, content_hash: &str, wav: &[u8]) {
-        let Some(cache) = &self.cache else { return };
+        let Some(cache) = self.cache.get() else {
+            return;
+        };
         if let Err(error) = cache.put(content_hash, wav).await {
             tracing::warn!(%error, "写合成缓存失败，结果照常返回");
         }

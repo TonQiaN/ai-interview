@@ -64,14 +64,14 @@ import {
 
 type Seek = (ms: number) => void;
 
-const matchNote: Partial<Record<Evidence["quote_match"], string>> = {
+const matchNote: Partial<Record<NonNullable<Evidence["quote_match"]>, string>> = {
   approximate: "大意，和原话不完全一样",
   whole_segment: "引的是整段话",
   unchecked: "没有核对过原话",
 };
 
 function Quote({ evidence, onSeek }: { evidence: Evidence; onSeek: Seek }) {
-  const note = matchNote[evidence.quote_match];
+  const note = evidence.quote_match ? matchNote[evidence.quote_match] : undefined;
   const mark = note && (
     <span className="adm-quote__mark" title={note}>
       {evidence.quote_match === "approximate"
@@ -106,7 +106,7 @@ function Quote({ evidence, onSeek }: { evidence: Evidence; onSeek: Seek }) {
         ? speakerLabel[evidence.speaker]
         : null;
   const start = evidence.start_ms;
-  if (start === undefined) {
+  if (start === undefined || start === null) {
     return (
       <div className="adm-quote adm-quote--static">
         <span>
@@ -245,8 +245,8 @@ function ReportNav({
   );
 }
 
-function Rated({ label, value }: { label: string; value: number | null }) {
-  if (value === null) {
+function Rated({ label, value }: { label: string; value?: number | null }) {
+  if (value === null || value === undefined) {
     return (
       <div className="adm-rated">
         <span className="adm-rated__label">{label}</span>
@@ -376,10 +376,11 @@ function Question({
   const facts = item.asked
     ? [
         `说了 ${duration(t.candidate_speaking_ms)}`,
-        t.response_latency_ms !== null &&
+        typeof t.response_latency_ms === "number" &&
           `开口前停了 ${(t.response_latency_ms / 1000).toFixed(1)} 秒`,
-        t.chars_per_minute !== null && `每分钟 ${Math.round(t.chars_per_minute)} 字`,
-        t.longest_pause_ms !== null && `中间最长停顿 ${(t.longest_pause_ms / 1000).toFixed(1)} 秒`,
+        typeof t.chars_per_minute === "number" && `每分钟 ${Math.round(t.chars_per_minute)} 字`,
+        typeof t.longest_pause_ms === "number" &&
+          `中间最长停顿 ${(t.longest_pause_ms / 1000).toFixed(1)} 秒`,
       ].filter(Boolean)
     : [];
 
@@ -715,7 +716,7 @@ export function ReportView({ report, onSeek, onRegenerate }: ReportViewProps) {
           <div>
             <dt>用量</dt>
             <dd>
-              调用 {usage.calls} 次，用时 {duration(report.meta.elapsed_ms)}
+              用时 {duration(report.meta.elapsed_ms)}
               <small>
                 输入 {usage.prompt_tokens.toLocaleString("zh-CN")}、输出{" "}
                 {usage.completion_tokens.toLocaleString("zh-CN")} token

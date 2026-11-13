@@ -114,6 +114,16 @@ export const http = {
 };
 
 /** 把错误变成一句给人看的话 */
+/** 422 时后端按字段列出的原因，键是字段路径（比如 `answer.max_sec`） */
+export function fieldErrors(e: unknown): Record<string, string> {
+  if (!(e instanceof ApiError) || e.status !== 422) return {};
+  if (!e.details || typeof e.details !== "object" || Array.isArray(e.details)) return {};
+  const out: Record<string, string> = {};
+  for (const [field, reason] of Object.entries(e.details))
+    if (typeof reason === "string") out[field] = reason;
+  return out;
+}
+
 export function errorMessage(e: unknown): string {
   if (e instanceof ApiError) return e.message;
   if (e instanceof Error) return e.message;

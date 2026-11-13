@@ -2,7 +2,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
 // 候选人面试页。部署在 /i/ 下，开发时把 /api 转给本机后端。
-// 没有后端时可以先起模拟服务：pnpm mock（见 dev/mock-room-server.mjs）。
+// 后端怎么起、怎么造一场能点开的面试，见 README.md 的「怎么跑」。
 const apiTarget = process.env.AI_INTERVIEW_API_URL ?? "http://127.0.0.1:8080";
 
 export default defineConfig({

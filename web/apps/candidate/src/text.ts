@@ -15,7 +15,10 @@ export const IN_APP_BROWSER_NAME: Record<InAppBrowser, string> = {
   alipay: "支付宝",
 };
 
-export const PROBLEM_TEXT: Record<Exclude<ProblemKind, "unsupported">, { title: string; description: string }> = {
+export const PROBLEM_TEXT: Record<
+  Exclude<ProblemKind, "unsupported">,
+  { title: string; description: string }
+> = {
   missing_link: {
     title: "链接不完整",
     description: "这个地址里缺少面试信息。请直接点击招聘人员发给你的完整链接，不要手动输入或截断。",
@@ -54,11 +57,17 @@ export const MEDIA_ERROR_TEXT: Record<MediaErrorKind, { title: string; steps: st
   },
   device_not_found: {
     title: "没有找到摄像头或麦克风",
-    steps: ["确认设备已经接好；用耳机的话检查耳机上的麦克风。", "台式机可能没有内置摄像头，可以换用手机或笔记本。"],
+    steps: [
+      "确认设备已经接好；用耳机的话检查耳机上的麦克风。",
+      "台式机可能没有内置摄像头，可以换用手机或笔记本。",
+    ],
   },
   device_in_use: {
     title: "摄像头或麦克风被别的应用占用了",
-    steps: ["关掉正在使用摄像头或麦克风的应用（视频会议、相机、其他浏览器标签页）。", "然后点「重新检测」。"],
+    steps: [
+      "关掉正在使用摄像头或麦克风的应用（视频会议、相机、其他浏览器标签页）。",
+      "然后点「重新检测」。",
+    ],
   },
   insecure_context: {
     title: "当前页面不能使用摄像头和麦克风",

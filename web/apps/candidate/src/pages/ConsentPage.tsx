@@ -13,11 +13,13 @@ export interface ConsentPageProps {
 export function ConsentPage({ room, busy, error, onAgree }: ConsentPageProps) {
   const [checked, setChecked] = useState<Set<string>>(() => new Set());
   const items = useMemo(
-    () => room.consent.items.map((item) => ({ id: item.key, label: item.title, detail: item.body })),
+    () =>
+      room.consent.items.map((item) => ({ id: item.key, label: item.title, detail: item.body })),
     [room.consent.items],
   );
   const required = useMemo(
-    () => items.filter((item) => room.consent.items.find((source) => source.key === item.id)?.required),
+    () =>
+      items.filter((item) => room.consent.items.find((source) => source.key === item.id)?.required),
     [items, room.consent.items],
   );
   const ready = allConsented(required, checked);
@@ -27,8 +29,19 @@ export function ConsentPage({ room, busy, error, onAgree }: ConsentPageProps) {
       header={<Steps compact steps={FLOW_STEPS} current={1} />}
       footer={
         <>
-          {error && <Banner tone="danger">{error === "network" ? "网络不稳定，没有提交成功，请再试一次。" : error}</Banner>}
-          <Button size="lg" block variant="accent" disabled={!ready} loading={busy} onClick={() => onAgree([...checked])}>
+          {error && (
+            <Banner tone="danger">
+              {error === "network" ? "网络不稳定，没有提交成功，请再试一次。" : error}
+            </Banner>
+          )}
+          <Button
+            size="lg"
+            block
+            variant="accent"
+            disabled={!ready}
+            loading={busy}
+            onClick={() => onAgree([...checked])}
+          >
             同意并继续
           </Button>
         </>

@@ -691,35 +691,45 @@ async fn raw_room_events_are_merged_and_shown_to_the_model() {
     let mut record = sample_record();
     record.events = ProctorEvent::from_raw(vec![
         RawEvent {
-            id: "e0".to_owned(),
+            id: "evt-opened".to_owned(),
             kind: "page_opened".to_owned(),
             at_ms: None,
             payload: serde_json::json!({"in_app_browser": "wechat"}),
         },
         RawEvent {
-            id: "e1".to_owned(),
+            id: "evt-hidden".to_owned(),
             kind: "visibility_hidden".to_owned(),
             at_ms: Some(119_000),
             payload: serde_json::json!({}),
         },
         RawEvent {
-            id: "e2".to_owned(),
+            id: "evt-visible".to_owned(),
             kind: "visibility_visible".to_owned(),
             at_ms: Some(124_000),
             payload: serde_json::json!({"duration_ms": 5000}),
         },
     ]);
-    let model = full_model();
+    // 模型按短编号引用第二条事件
+    let integrity = INTEGRITY.replace(r#""event_id": "e1""#, r#""event_id": "e2""#);
+    assert_ne!(integrity, INTEGRITY);
+    let model = RoutedModel::new()
+        .on("question:q1", Q1)
+        .on("question:q2", Q2)
+        .on("requirements", REQUIREMENTS)
+        .on("resume", RESUME)
+        .on("integrity", &integrity)
+        .on("communication", COMMUNICATION)
+        .on("synthesis", SYNTHESIS);
     let report = analyze(&record, &model, &AnalyzeOptions::default())
         .await
         .unwrap();
 
     let prompt = model.requests()[0].1.messages[1].content.as_text();
-    assert!(prompt.contains(r#"[e0 | 开始前 | page_opened | -] {"in_app_browser":"wechat"}"#));
-    assert!(prompt.contains("[e1 | 01:59 | visibility_hidden | 5.0秒]"));
+    assert!(prompt.contains(r#"[e1 | 开始前 | page_opened | -] {"in_app_browser":"wechat"}"#));
+    assert!(prompt.contains("[e2 | 01:59 | visibility_hidden | 5.0秒]"));
     assert!(!prompt.contains("visibility_visible |"));
 
-    // 引用这条事件的证据对到离开的那一段时间
+    // 引用这条事件的证据写的是原来的编号，时间对到离开的那一段
     let integrity = report.integrity.unwrap();
     let event = integrity
         .signals
@@ -727,6 +737,40 @@ async fn raw_room_events_are_merged_and_shown_to_the_model() {
         .flat_map(|signal| &signal.evidence)
         .find(|evidence| evidence.source == EvidenceSource::Event)
         .unwrap();
+    assert_eq!(event.event_id.as_deref(), Some("evt-hidden"));
     assert_eq!(event.start_ms, Some(119_000));
     assert_eq!(event.end_ms, Some(124_000));
+}
+
+#[tokio::test]
+async fn long_ids_are_shown_as_short_ones_and_mapped_back() {
+    // 库里的片段编号是 UUID。提示里用 s1、s2 这样的短编号，报告里写回原来的编号
+    let mut record = sample_record();
+    let original: Vec<String> = (1..=record.transcript.len())
+        .map(|n| format!("0193a7c2-5f1e-7b3a-9c4d-{n:012}"))
+        .collect();
+    for (segment, id) in record.transcript.iter_mut().zip(&original) {
+        segment.id.clone_from(id);
+    }
+    let model = full_model();
+    let report = analyze(&record, &model, &AnalyzeOptions::default())
+        .await
+        .unwrap();
+
+    let prompt = model.requests()[0].1.messages[1].content.as_text();
+    assert!(prompt.contains("[s2 | "));
+    assert!(!prompt.contains("0193a7c2"));
+
+    // 样例回答里故意放了一条对不上原文的证据，和用短编号时一样只丢这一条
+    assert_eq!(report.meta.evidence.dropped, 1);
+    assert_eq!(report.questions[0].segment_ids, original[1..5]);
+    let cited: Vec<&str> = report.questions[0]
+        .judgement
+        .iter()
+        .flat_map(|j| j.strengths.iter().chain(&j.weaknesses))
+        .flat_map(|finding| &finding.evidence)
+        .filter_map(|evidence| evidence.segment_id.as_deref())
+        .collect();
+    assert!(!cited.is_empty());
+    assert!(cited.iter().all(|id| original.iter().any(|o| o == id)));
 }

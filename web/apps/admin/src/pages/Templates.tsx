@@ -1,39 +1,20 @@
-import { Badge, Button, buttonClass, Card, CardBody, PageHeader, useToast } from "@ai-interview/ui";
-import { Plus, Star, Trash2 } from "lucide-react";
+import { Button, buttonClass, Card, CardBody, PageHeader, useToast } from "@ai-interview/ui";
+import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { errorMessage } from "../api/http";
-import { useDeleteTemplate, useSaveTemplate, useTemplates } from "../api/queries";
+import { useDeleteTemplate, useTemplates } from "../api/queries";
 import type { InterviewTemplate } from "../api/types";
 import { configSummary } from "../components/ConfigForm";
 import { Confirm, Empty, QueryView } from "../components/common";
 import { relativeTime } from "../lib/format";
 
-function SetDefault({ template }: { template: InterviewTemplate }) {
-  const save = useSaveTemplate(template.id);
-  const toast = useToast();
-  return (
-    <Button
-      size="sm"
-      variant="ghost"
-      icon={<Star aria-hidden="true" />}
-      loading={save.isPending}
-      onClick={() =>
-        save.mutate(
-          { is_default: true },
-          {
-            onSuccess: () => toast(`「${template.name}」已设为默认`),
-            onError: (e) => toast(errorMessage(e)),
-          },
-        )
-      }
-    >
-      设为默认
-    </Button>
-  );
+/** 卡片上列几条最能说明这个模板的要求 */
+function requirements(t: InterviewTemplate): string[] {
+  return [...t.config.focus_instructions, ...t.config.must_ask_questions].slice(0, 4);
 }
 
-/** 面试设置的模板：把常用的时长、考察重点、思考强度、声音存下来，安排面试时一选就好。 */
+/** 面试设置的模板：把常用的时长、考察要求、思考强度存下来，安排面试时一选就好。 */
 export function TemplatesPage() {
   const templates = useTemplates();
   const remove = useDeleteTemplate();
@@ -44,7 +25,7 @@ export function TemplatesPage() {
     <>
       <PageHeader
         title="面试设置"
-        description="把常用的一套设置存成模板：面多久、重点考察什么、面试官想得多深、用什么声音。安排面试时选一个，还可以再按这一场调整。"
+        description="把常用的一套设置存成模板：面多久、重点考察什么、哪些题必须问、面试官想得多深。安排面试时选一个，还可以再按这一场调整。"
         actions={
           <Link to="/templates/new" className={buttonClass()}>
             <Plus aria-hidden="true" />
@@ -68,13 +49,12 @@ export function TemplatesPage() {
                       <Link to={`/templates/${t.id}`} className="adm-link adm-template__name">
                         {t.name}
                       </Link>
-                      {t.is_default && <Badge tone="success">默认</Badge>}
                     </div>
                     {t.description && <p className="adm-template__desc">{t.description}</p>}
                     <p className="adm-item__sub">{configSummary(t.config)}</p>
-                    {t.config.focus_prompts.length > 0 && (
+                    {requirements(t).length > 0 && (
                       <ul className="adm-bullets adm-bullets--muted adm-template__focus">
-                        {t.config.focus_prompts.map((p) => (
+                        {requirements(t).map((p) => (
                           <li key={p}>{p}</li>
                         ))}
                       </ul>
@@ -82,23 +62,20 @@ export function TemplatesPage() {
                     <div className="adm-template__foot">
                       <span className="adm-item__sub">改于 {relativeTime(t.updated_at)}</span>
                       <span className="oil-row">
-                        {!t.is_default && <SetDefault template={t} />}
                         <Link
                           to={`/templates/${t.id}`}
                           className={buttonClass({ variant: "secondary", size: "sm" })}
                         >
                           编辑
                         </Link>
-                        {!t.is_default && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            iconOnly
-                            aria-label={`删除${t.name}`}
-                            icon={<Trash2 aria-hidden="true" />}
-                            onClick={() => setDeleting(t)}
-                          />
-                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          iconOnly
+                          aria-label={`删除${t.name}`}
+                          icon={<Trash2 aria-hidden="true" />}
+                          onClick={() => setDeleting(t)}
+                        />
                       </span>
                     </div>
                   </CardBody>

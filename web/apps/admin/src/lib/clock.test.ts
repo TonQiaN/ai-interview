@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeTurnIndex } from "./clock";
+import { activeTurnIndex, segmentAt } from "./clock";
 
 const turns = [
   { start_ms: 1000, end_ms: 5000 },
@@ -22,5 +22,21 @@ describe("当前说到哪一句", () => {
   });
   it("没有内容时是 -1", () => {
     expect(activeTurnIndex([], 100)).toBe(-1);
+  });
+});
+
+describe("该放哪一段录制", () => {
+  const segments = [{ start_ms: 0 }, { start_ms: 60_000 }, { start_ms: 95_000 }];
+  it("落在一段里面", () => {
+    expect(segmentAt(segments, 70_000)).toBe(1);
+  });
+  it("正好在一段的开头", () => {
+    expect(segmentAt(segments, 95_000)).toBe(2);
+  });
+  it("第一段开始之前算第一段", () => {
+    expect(segmentAt([{ start_ms: 4000 }], 1000)).toBe(0);
+  });
+  it("只有一段", () => {
+    expect(segmentAt([{ start_ms: 0 }], 999_000)).toBe(0);
   });
 });

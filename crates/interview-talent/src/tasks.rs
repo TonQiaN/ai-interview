@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::deps::Deps;
 use crate::document::ResumeContent;
 use crate::error::TalentError;
+use crate::http::upload::is_placeholder_name;
 use crate::metering::Metered;
 use crate::model::{CandidateProfile, ParsedResume};
 use crate::profile::{ProfileInput, generate_profile};
@@ -27,7 +28,8 @@ use crate::store::{candidates, resumes};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ParsePayload {
     pub resume_id: Uuid,
-    /// 用简历里的姓名替换候选人现有的名字。上传简历自动建候选人时用，那时的名字是占位的。
+    /// 候选人现在的名字是占位的，读完可以用简历里的姓名换掉。上传简历自动建候选人时用。
+    /// 真要换的时候还会再确认一次名字没被改过。
     #[serde(default)]
     pub adopt_name: bool,
 }
@@ -57,6 +59,14 @@ const LLM_MISSING: &str = "还没有配置大模型，简历没法解析。配�
 const LLM_DOWN: &str = "大模型暂时不可用，简历没有解析成。请稍后点「重新解析」";
 const FILE_MISSING: &str = "简历原件找不到了，请重新上传";
 const UNFINISHED: &str = "解析中途出错，没有完成。请点「重新解析」";
+
+/// 给 HR 看的提示：文件太长，只读了前面一部分。
+fn too_many_pages(read: usize) -> String {
+    format!(
+        "这份文件页数太多，只读了前 {read} 页，后面的内容没有读到。\
+         后面如果还有工作经历或项目，请把简历精简到 {read} 页以内再上传"
+    )
+}
 
 async fn run_parse(deps: &Deps, task: &Task) -> TaskResult {
     let payload: ParsePayload = task.payload_as()?;
@@ -108,7 +118,15 @@ async fn parse(deps: &Deps, task: &Task, payload: &ParsePayload, last_attempt: b
                 .await;
             match reading {
                 Ok(reading) => {
-                    resumes::mark_done(db, resume.id, &reading.text, &reading.parsed).await?;
+                    let warning = reading.pages_read_of_longer_file.map(too_many_pages);
+                    resumes::mark_done(
+                        db,
+                        resume.id,
+                        &reading.text,
+                        &reading.parsed,
+                        warning.as_deref(),
+                    )
+                    .await?;
                     reading.parsed
                 }
                 Err(error) => return give_up_or_retry(deps, resume.id, error, last_attempt).await,
@@ -119,12 +137,23 @@ async fn parse(deps: &Deps, task: &Task, payload: &ParsePayload, last_attempt: b
     // 第二步：主简历的内容用来补全候选人的基本信息和生成画像。
     // 是不是主简历不能看开头读到的那一眼：读简历和写画像各要十几秒，这期间可能有更新的简历
     // 传上来顶替了它。所以每次往候选人身上写的时候再确认，不是主简历了就不写
+    //
+    // 名字也一样：排任务时名字还是占位的，才会让我们用简历里的姓名去换。可这期间 HR 可能
+    // 已经自己填了名字，所以现在再看一眼，还是占位名才换，并且只在写的那一刻名字没变时换
+    let placeholder_name = if payload.adopt_name {
+        candidates::get(db, resume.candidate_id)
+            .await?
+            .filter(|candidate| is_placeholder_name(candidate, resume.file_name.as_deref()))
+            .map(|candidate| candidate.name)
+    } else {
+        None
+    };
     let still_primary = candidates::fill_from_resume(
         db,
         resume.candidate_id,
         resume.id,
         &parsed,
-        payload.adopt_name,
+        placeholder_name.as_deref(),
     )
     .await?;
     if !still_primary {

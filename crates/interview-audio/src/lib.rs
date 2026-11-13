@@ -6,16 +6,20 @@
 //! - [`decode_wav`]、[`encode_wav`]：WAV 字节和 [`Audio`] 互转，不碰文件系统。
 //! - [`Audio::resample`]：换采样率（TTS 出来是 22.05 或 24 kHz，STT 和实时通道要 16 kHz）。
 //! - [`detect_speech`]：按能量找出说话的段，不需要模型。
+//! - [`Ffmpeg`]：用 ffmpeg 把录像里的声音解成 [`Audio`]。整个文件一次解完，或者用 [`MediaDecoder`]
+//!   边收录像分片边解。这是唯一需要外部程序的部分。
 //!
 //! 项目约定的两种线上格式：实时通道是 16 kHz 单声道 PCM16 小端（[`REALTIME_SAMPLE_RATE`]），
 //! 存进 BlobStore 的音频是 PCM16 的 WAV。
 
 mod buffer;
+mod media;
 mod resample;
 mod silence;
 mod wav;
 
 pub use buffer::Audio;
+pub use media::{DecodedAudio, FFMPEG_ENV_VAR, Ffmpeg, MediaDecoder, MediaError};
 pub use silence::{SilenceConfig, SpeechSegment, detect_speech};
 pub use wav::{decode_wav, encode_wav};
 

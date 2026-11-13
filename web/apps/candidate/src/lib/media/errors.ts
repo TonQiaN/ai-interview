@@ -24,7 +24,8 @@ export type MediaErrorKind =
  *              也兼容旧浏览器用的名字。
  */
 export function classifyMediaError(error: unknown): MediaErrorKind {
-  const name = typeof error === "object" && error !== null && "name" in error ? String(error.name) : "";
+  const name =
+    typeof error === "object" && error !== null && "name" in error ? String(error.name) : "";
   switch (name) {
     case "NotAllowedError":
     case "PermissionDeniedError":

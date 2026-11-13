@@ -1,62 +1,105 @@
+import { execFileSync } from "node:child_process";
 import { expect, type Page } from "@playwright/test";
 
-/** 模拟服务认识的几个假令牌，和 dev/mock-room-server.mjs 里的一致。 */
-export const TOKENS = {
-  valid: "mock-interview-token-000001",
-  expired: "mock-expired-token-00000001",
-  revoked: "mock-revoked-token-00000001",
-  unknown: "mock-unknown-token-00000001",
-};
+/** 造出来的一场面试：题目和语音都备好了，链接已经发出。 */
+export interface SeededInterview {
+  interview_id: string;
+  /** 能用的链接令牌 */
+  token: string;
+  /** 同一场面试的一条过期了的链接 */
+  expired_token: string;
+  /** 同一场面试的一条撤销了的链接 */
+  revoked_token: string;
+}
 
-const mockUrl = () => process.env.E2E_MOCK_URL ?? "http://127.0.0.1:18080";
-
-export interface MockSegment {
-  segment_id: string;
-  track: string;
-  content_type: string;
+export interface RoomTurn {
+  seq: number;
+  speaker: "interviewer" | "candidate";
+  utterance_key: string | null;
   start_ms: number;
-  received: number[];
-  bytes: number;
+  end_ms: number | null;
+  end_reason: string | null;
+  /** 这一句有没有文字。候选人的话要转写出来才有 */
+  has_text: boolean;
+  /** 候选人的话是哪个识别后端转写的 */
+  stt_engine: string | null;
+}
+
+export interface RoomRecording {
+  track: string;
+  segment: number;
+  content_type: string;
+  status: string;
+  start_ms: number;
+  duration_ms: number | null;
   total_chunks: number | null;
+  size_bytes: number | null;
+  /** 收到了哪几片 */
+  chunks: number[];
+  /** 合并好的文件在磁盘上的位置 */
   file: string | null;
 }
 
-export interface MockTurn {
-  utterance_key: string;
-  playback_start_ms: number | null;
-  playback_end_ms: number | null;
-  answer_start_ms: number | null;
-  answer_end_ms: number | null;
+/** 后端库里这场面试现在的样子。 */
+export interface RoomState {
+  status: string;
   end_reason: string | null;
-  replays: number;
+  turns: RoomTurn[];
+  events: {
+    kind: string;
+    source: string;
+    at_ms: number | null;
+    payload: Record<string, unknown>;
+  }[];
+  recordings: RoomRecording[];
 }
 
-export interface MockState {
-  stage: string;
-  consent_agreed: boolean;
-  index: number;
-  turns: MockTurn[];
-  events: { kind: string; at_ms: number | null; payload: Record<string, unknown> }[];
-  device_checks: Record<string, unknown>[];
-  segments: MockSegment[];
-  finish_reason: string | null;
+/** 跑造数据的小工具（crates/interview-room/examples/demo.rs），它和后端用同一个库和数据目录。 */
+function demo<T>(...args: string[]): T {
+  const bin = process.env.E2E_DEMO_BIN;
+  const env = process.env.E2E_BACKEND_ENV;
+  if (!bin || !env) throw new Error("没有后端的环境信息，要通过 playwright.config.ts 来跑");
+  const output = execFileSync(bin, args, {
+    env: { ...process.env, ...JSON.parse(env) },
+    encoding: "utf8",
+  });
+  return JSON.parse(output) as T;
 }
 
-/** 清空模拟服务的状态，并按需要调整它的行为。答题静音时长默认调短，测试跑得快一些。 */
-export async function resetMock(config: Record<string, unknown> = {}): Promise<void> {
-  await fetch(`${mockUrl()}/__mock/reset`, { method: "POST" });
-  await configureMock({ silenceSec: 1.5, ...config });
+/**
+ * 造一场面试。答题静音时长默认 2 秒：假麦克风每 5 秒里说 2.5 秒、安静 2.5 秒，
+ * 所以每道题大约 5 秒答完，测试跑得快。
+ */
+export function seedInterview({ silenceSec = 2, minSec = 1, maxSec = 60 } = {}): SeededInterview {
+  return demo(
+    "seed",
+    "--silence-sec",
+    String(silenceSec),
+    "--min-sec",
+    String(minSec),
+    "--max-sec",
+    String(maxSec),
+  );
 }
 
-export async function configureMock(config: Record<string, unknown>): Promise<void> {
-  await fetch(`${mockUrl()}/__mock/config`, { method: "POST", body: JSON.stringify(config) });
-}
+export const roomState = (interview: SeededInterview): RoomState =>
+  demo("state", interview.interview_id);
 
-export async function mockState(): Promise<MockState> {
-  return (await (await fetch(`${mockUrl()}/__mock/state`)).json()) as MockState;
-}
+/** 面试官依次说了哪几句。 */
+export const spokenKeys = (state: RoomState): (string | null)[] =>
+  state.turns.filter((turn) => turn.speaker === "interviewer").map((turn) => turn.utterance_key);
 
-export const open = (page: Page, token: string | null = TOKENS.valid) => page.goto(token === null ? "/i/" : `/i/#${token}`);
+/** 候选人回答某一句的那一段。 */
+export const answerTo = (state: RoomState, key: string): RoomTurn | undefined =>
+  state.turns.find((turn) => turn.speaker === "candidate" && turn.utterance_key === key);
+
+export const eventKinds = (state: RoomState): string[] => state.events.map((event) => event.kind);
+
+/** 一个格式正确但后端不认识的令牌。 */
+export const UNKNOWN_TOKEN = "unknown-token-that-nobody-issued-0000000001";
+
+export const open = (page: Page, token: string | null) =>
+  page.goto(token === null ? "/i/" : `/i/#${token}`);
 
 export const button = (page: Page, name: string) => page.getByRole("button", { name, exact: true });
 
@@ -73,23 +116,43 @@ export async function passPreflight(page: Page, { resuming = false } = {}): Prom
   await button(page, "下一步").click();
 }
 
-/** 从打开链接一路走到面试开始。 */
-export async function enterInterview(page: Page): Promise<void> {
-  await open(page);
+/** 造一场面试，从打开链接一路走到面试开始。 */
+export async function enterInterview(
+  page: Page,
+  options: Parameters<typeof seedInterview>[0] = {},
+): Promise<SeededInterview> {
+  const interview = seedInterview(options);
+  await open(page, interview.token);
   await passPreflight(page);
   await button(page, "开始面试").click();
   await expect(page.getByText("录制中")).toBeVisible();
+  return interview;
 }
 
 /** 等到正在问某一题。 */
 export const expectQuestion = (page: Page, index: number, total = 3) =>
   expect(page.getByText(`第 ${index} 题 / 共 ${total} 题`)).toBeVisible({ timeout: 30_000 });
 
-/** 每一段录像都收齐了分片并且完成了合并。 */
-export function expectSegmentsComplete(segments: MockSegment[]): void {
-  for (const segment of segments) {
-    expect(segment.total_chunks, `段 ${segment.segment_id} 没有合并`).not.toBeNull();
-    expect(segment.received).toEqual(Array.from({ length: segment.total_chunks ?? 0 }, (_, seq) => seq));
-    expect(segment.bytes).toBeGreaterThan(0);
+/**
+ * 等后端把每一段录像都合并好，返回那时的状态。合并是后台任务，面试结束后要等一小会儿。
+ * 每一段都收齐了分片：片号从 0 连到 total_chunks - 1，一片不少。
+ */
+export async function expectRecordingsReady(
+  interview: SeededInterview,
+  count: number,
+): Promise<RoomState> {
+  await expect
+    .poll(() => roomState(interview).recordings.map((recording) => recording.status), {
+      timeout: 30_000,
+    })
+    .toEqual(Array.from({ length: count }, () => "ready"));
+  const state = roomState(interview);
+  for (const recording of state.recordings) {
+    expect(recording.total_chunks, `第 ${recording.segment} 段没有说一共多少片`).not.toBeNull();
+    expect(recording.chunks).toEqual(
+      Array.from({ length: recording.total_chunks ?? 0 }, (_, seq) => seq),
+    );
+    expect(recording.size_bytes).toBeGreaterThan(0);
   }
+  return state;
 }

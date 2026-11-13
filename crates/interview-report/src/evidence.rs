@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use crate::record::{InterviewRecord, ProctorEvent, Segment};
 use crate::report::{Evidence, EvidenceSource, EvidenceStats, QuoteMatch};
+use crate::transcript::{event_alias, lookup_by_alias, segment_alias};
 
 /// 引文可以跨相邻的几个片段（语音识别的断句不一定和意思一致）。
 const WINDOW: usize = 3;
@@ -16,12 +17,15 @@ const MIN_APPROXIMATE_CHARS: usize = 6;
 /// 一场面试里可以被引用的全部材料。
 pub(crate) struct EvidenceIndex<'a> {
     segments: &'a [Segment],
-    positions: HashMap<&'a str, usize>,
+    /// 模型写的片段编号（短编号或原来的编号）对应第几个片段。
+    positions: HashMap<String, usize>,
     normalized: Vec<Vec<char>>,
     /// 和 `normalized` 一一对应：每个字的起止时间。没有逐字时间戳的片段，每个字都是整个片段的起止时间。
     times: Vec<Vec<(u64, u64)>>,
     resume: Vec<char>,
-    events: HashMap<&'a str, &'a ProctorEvent>,
+    /// 模型写的事件编号对应第几个事件。
+    event_positions: HashMap<String, usize>,
+    events: &'a [ProctorEvent],
 }
 
 /// 只留字母、数字和汉字并转小写，标点、空白、全半角的差别不影响比对。
@@ -111,12 +115,10 @@ impl<'a> EvidenceIndex<'a> {
     pub(crate) fn new(record: &'a InterviewRecord) -> Self {
         Self {
             segments: &record.transcript,
-            positions: record
-                .transcript
-                .iter()
-                .enumerate()
-                .map(|(index, segment)| (segment.id.as_str(), index))
-                .collect(),
+            positions: lookup_by_alias(
+                record.transcript.iter().map(|s| s.id.as_str()),
+                segment_alias,
+            ),
             normalized: record
                 .transcript
                 .iter()
@@ -124,7 +126,11 @@ impl<'a> EvidenceIndex<'a> {
                 .collect(),
             times: record.transcript.iter().map(char_times).collect(),
             resume: normalize(&record.candidate.resume),
-            events: record.events.iter().map(|e| (e.id.as_str(), e)).collect(),
+            event_positions: lookup_by_alias(
+                record.events.iter().map(|e| e.id.as_str()),
+                event_alias,
+            ),
+            events: &record.events,
         }
     }
 
@@ -166,7 +172,8 @@ impl<'a> EvidenceIndex<'a> {
     }
 
     fn resolve_event(&self, evidence: &Evidence) -> Option<Evidence> {
-        let event = self.events.get(evidence.event_id.as_deref()?)?;
+        let position = self.event_positions.get(evidence.event_id.as_deref()?)?;
+        let event = self.events.get(*position)?;
         let quote = match &event.detail {
             Some(detail) if !detail.trim().is_empty() => format!("{}：{}", event.kind, detail),
             _ => event.kind.clone(),

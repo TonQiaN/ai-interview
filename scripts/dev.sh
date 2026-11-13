@@ -36,4 +36,10 @@ if ! is_set AI_INTERVIEW_ADMIN_EMAIL; then
   echo "本机开发账号：admin@example.com  密码：$AI_INTERVIEW_ADMIN_PASSWORD"
 fi
 
+# ffmpeg：面试中从录像分片里取出候选人的声音、合并录像后补时长。没装也能启动，这里只提醒一句
+if ! command -v "${AI_INTERVIEW_FFMPEG:-ffmpeg}" >/dev/null 2>&1 && ! grep -qs "^AI_INTERVIEW_FFMPEG=." .env; then
+  echo "提醒：没找到 ffmpeg。面试中听不到候选人的回答，录像也拖不了进度条。" >&2
+  echo "      Debian/Ubuntu：sudo apt-get install ffmpeg；macOS：brew install ffmpeg" >&2
+fi
+
 exec cargo run -p interview-server -- serve

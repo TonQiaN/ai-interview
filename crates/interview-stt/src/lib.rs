@@ -5,6 +5,9 @@
 //! - [`Transcriber`]：识别后端的接口。整段转写用 [`Transcriber::transcribe`]；
 //!   边录边转用 [`Transcriber::start_session`] 开一个 [`TranscribeSession`]，音频来一块喂一块，
 //!   候选人每说完一句（停顿半秒多）这一句的文字就定下来，答完时不用再等整段转写。
+//! - [`RecordingTranscript`]：面试进行中的现场转写。浏览器上传的录像分片到一块喂一块，
+//!   随时可以问「这段录制里从第几毫秒到第几毫秒说了什么」。面试间在候选人答完一题时用它拿文字。
+//!   [`LiveTranscript`] 是它不带解码的那一半，喂的是已经解好的音频。
 //! - [`Transcript`]、[`Segment`]、[`Word`]：转写结果。时间都是相对这段音频开头的毫秒数，
 //!   写进 `interview_turns` 之前用 [`Transcript::shifted`] 换到面试的时间轴上。
 //!   [`Word`] 序列化成 `{"w": "字", "s": 1200, "e": 1350}`，就是 `interview_turns.words` 的格式。
@@ -19,6 +22,7 @@
 
 mod config;
 mod fake;
+mod live;
 #[cfg(feature = "sherpa")]
 mod sherpa;
 mod transcriber;
@@ -27,6 +31,7 @@ mod words;
 
 pub use config::{BACKEND_ENV_VAR, MODEL_DIR_ENV_VAR, SttBackend, SttConfig, THREADS_ENV_VAR};
 pub use fake::FakeTranscriber;
+pub use live::{LiveError, LiveTranscript, LiveWords, RecordingTranscript};
 #[cfg(feature = "sherpa")]
 pub use sherpa::{ASR_MODEL_DIR_NAME, SherpaConfig, SherpaTranscriber, VAD_MODEL_FILE_NAME};
 pub use transcriber::{

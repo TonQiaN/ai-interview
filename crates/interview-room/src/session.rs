@@ -62,6 +62,8 @@ pub struct RoomSession {
     pub elapsed_ms: Option<i64>,
     /// 续面时接下来该做的一步；还没开始或已结束是 null
     pub resume: Option<NextStep>,
+    /// 面试是怎么结束的，取值和「下一步」里 `finish` 的 `reason` 一样；还没结束是 null
+    pub end_reason: Option<String>,
     /// 链接什么时候过期
     pub expires_at: DateTime<Utc>,
 }
@@ -120,8 +122,13 @@ pub(crate) async fn consent_agreed(deps: &Deps, access: &RoomAccess) -> ApiResul
     )
 )]
 async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<Json<RoomSession>> {
-    let (raw_config, position_title, candidate_name): (Value, String, String) = sqlx::query_as(
-        "SELECT i.config, p.title, c.name
+    let (raw_config, position_title, candidate_name, end_reason): (
+        Value,
+        String,
+        String,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT i.config, p.title, c.name, i.end_reason
            FROM interviews i
            JOIN positions p ON p.id = i.position_id
            JOIN candidates c ON c.id = i.candidate_id
@@ -170,6 +177,7 @@ async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<
         answer: answer_settings(&config),
         elapsed_ms: access.elapsed_ms(Utc::now()),
         resume: conduct::resume_step(&deps, &access).await?,
+        end_reason: end_reason.filter(|_| access.stage() == RoomStage::Finished),
         expires_at: access.expires_at,
     }))
 }

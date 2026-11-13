@@ -396,20 +396,22 @@ pub async fn find_duplicates(
 
 /// 用简历里读出来的信息补全候选人的基本信息：已经有值的不动。
 ///
-/// `adopt_name` 为真时用简历里的姓名替换现有的（上传简历自动建的候选人，原来的名字是占位的）。
+/// `placeholder_name` 是候选人现在的占位名（上传简历自动建的候选人，名字先用文件名顶着）。
+/// 给了的话，写的那一刻名字还是它才换成简历里的姓名：读简历要十几秒，这期间 HR 可能已经
+/// 自己把名字填上了，填过的不动。
 ///
-/// 只有这份简历现在还是主简历时才写。读简历要十几秒，这期间可能有更新的简历传上来顶替了它，
+/// 只有这份简历现在还是主简历时才写。读简历的这段时间里可能有更新的简历传上来顶替了它，
 /// 所以在写的那一刻再确认一次。返回有没有写。
 pub async fn fill_from_resume(
     db: &PgPool,
     id: Uuid,
     resume_id: Uuid,
     resume: &ParsedResume,
-    adopt_name: bool,
+    placeholder_name: Option<&str>,
 ) -> sqlx::Result<bool> {
     let done = sqlx::query(
         "UPDATE candidates
-         SET name = CASE WHEN $2 AND $3::text IS NOT NULL THEN $3 ELSE name END,
+         SET name = CASE WHEN name = $2 AND $3::text IS NOT NULL THEN $3 ELSE name END,
              email = COALESCE(email, $4),
              phone = COALESCE(phone, $5),
              current_title = COALESCE(current_title, $6),
@@ -420,7 +422,7 @@ pub async fn fill_from_resume(
                        WHERE resumes.id = $9 AND resumes.candidate_id = $1 AND resumes.is_primary)",
     )
     .bind(id)
-    .bind(adopt_name)
+    .bind(placeholder_name)
     .bind(&resume.name)
     .bind(&resume.email)
     .bind(&resume.phone)
