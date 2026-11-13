@@ -1,0 +1,229 @@
+{
+  "interview_id": "sample-sales-early-exit",
+  "job": {
+    "title": "企业软件销售代表",
+    "description": "负责中小企业客户的开拓和签约。要求：一年以上 B 端销售经验；能独立完成从线索到签约的全过程；抗压，目标感强。",
+    "must_have": [
+      "一年以上 B 端销售经验",
+      "能独立完成从线索到签约的全过程"
+    ],
+    "nice_to_have": []
+  },
+  "candidate": {
+    "candidate_id": "candidate-sales-early-exit",
+    "resume": "工作经历\n2024.02 至 2025.08 某财税软件公司 销售\n- 负责中小企业客户的电话销售\n2023.07 至 2024.01 某房产中介 置业顾问\n\n教育\n2019 至 2023 工商管理 本科"
+  },
+  "config": {
+    "round": "第一轮 AI 初筛，通过后还有两轮人工面试",
+    "expected_minutes": 15,
+    "focus_points": []
+  },
+  "questions": [
+    {
+      "id": "q1",
+      "text": "介绍一下你上一份销售工作，主要卖什么、卖给谁、业绩怎么样？",
+      "intent": "看销售经历和业绩",
+      "scoring_guide": "有具体的客户类型、客单价、业绩数字",
+      "weight": 2.0
+    },
+    {
+      "id": "q2",
+      "text": "讲一个你从头跟到签约的单子，过程中最难的是哪一步？",
+      "intent": "看独立成单的能力",
+      "scoring_guide": "有完整的过程和具体的难点",
+      "weight": 2.0
+    },
+    {
+      "id": "q3",
+      "text": "客户说「你们太贵了，别家便宜一半」，你怎么回应？",
+      "intent": "看应对异议的能力",
+      "scoring_guide": "不是直接降价，能问清情况、讲价值"
+    },
+    {
+      "id": "q4",
+      "text": "如果连续两个月没完成业绩，你会怎么调整？",
+      "intent": "看抗压和复盘",
+      "scoring_guide": "有具体的分析和动作"
+    },
+    {
+      "id": "q5",
+      "text": "你为什么想做企业软件销售？",
+      "intent": "看动机",
+      "scoring_guide": "理由具体"
+    },
+    {
+      "id": "q1.f1",
+      "text": "「一般般」大概是个什么水平？一个月能签几单，在团队里排第几？",
+      "parent_id": "q1"
+    },
+    {
+      "id": "q1.f2",
+      "text": "那你打电话，一天大概打多少个？接通了之后一般怎么往下推？",
+      "parent_id": "q1"
+    },
+    {
+      "id": "q2.f1",
+      "text": "那演示之后呢，报价、谈条款这些你有参与吗？哪怕一个客户，你回忆一下。",
+      "parent_id": "q2"
+    },
+    {
+      "id": "q3.f1",
+      "text": "除了申请折扣，你还会做什么？比如说，你怎么跟客户解释咱们这个价格。",
+      "parent_id": "q3"
+    }
+  ],
+  "transcript": [
+    {
+      "id": "s1",
+      "speaker": "interviewer",
+      "start_ms": 2400,
+      "end_ms": 14185,
+      "text": "你好，我是这次初面的面试官，咱们大概聊十五分钟，主要想了解一下你之前的销售经历，后面还有几个情景问题。不用紧张，正常说就行。"
+    },
+    {
+      "id": "s2",
+      "speaker": "interviewer",
+      "start_ms": 15085,
+      "end_ms": 22370,
+      "text": "那咱们开始吧。第一题，介绍一下你上一份销售工作，主要卖什么、卖给谁、业绩怎么样？",
+      "question_id": "q1"
+    },
+    {
+      "id": "s3",
+      "speaker": "candidate",
+      "start_ms": 23970,
+      "end_ms": 32443,
+      "text": "呃……上一份是在一家做财税软件的公司，就是打电话，卖给中小企业。业绩的话，还行吧，一般般。",
+      "question_id": "q1"
+    },
+    {
+      "id": "s4",
+      "speaker": "interviewer",
+      "start_ms": 33343,
+      "end_ms": 38700,
+      "text": "「一般般」大概是个什么水平？一个月能签几单，在团队里排第几？",
+      "question_id": "q1.f1"
+    },
+    {
+      "id": "s5",
+      "speaker": "candidate",
+      "start_ms": 40900,
+      "end_ms": 46354,
+      "text": "具体数字不太记得了，一个月几单吧。排名……这个没怎么关注过。",
+      "question_id": "q1.f1"
+    },
+    {
+      "id": "s6",
+      "speaker": "interviewer",
+      "start_ms": 47254,
+      "end_ms": 52611,
+      "text": "那你打电话，一天大概打多少个？接通了之后一般怎么往下推？",
+      "question_id": "q1.f2"
+    },
+    {
+      "id": "s7",
+      "speaker": "candidate",
+      "start_ms": 55211,
+      "end_ms": 61655,
+      "text": "一天……几十个吧，记不清了。接通了就把产品说一下，有兴趣的就加个微信。",
+      "question_id": "q1.f2"
+    },
+    {
+      "id": "s8",
+      "speaker": "interviewer",
+      "start_ms": 62555,
+      "end_ms": 68340,
+      "text": "好。第二题，讲一个你从头跟到签越的单子，过程中最难的是哪一步？",
+      "question_id": "q2"
+    },
+    {
+      "id": "s9",
+      "speaker": "candidate",
+      "start_ms": 71940,
+      "end_ms": 83552,
+      "text": "嗯……从头跟到签约的……基本都是打电话，客户有兴趣就约演式，演式是别的同事做的。我这边……好像没有特别完整跟下来的。",
+      "question_id": "q2"
+    },
+    {
+      "id": "s10",
+      "speaker": "interviewer",
+      "start_ms": 84452,
+      "end_ms": 90666,
+      "text": "那演示之后呢，报价、谈条款这些你有参与吗？哪怕一个客户，你回忆一下。",
+      "question_id": "q2.f1"
+    },
+    {
+      "id": "s11",
+      "speaker": "candidate",
+      "start_ms": 94866,
+      "end_ms": 100397,
+      "text": "没有，那些都是他们跟的。我这边就是约到演式，后面就交出去了。",
+      "question_id": "q2.f1"
+    },
+    {
+      "id": "s12",
+      "speaker": "interviewer",
+      "start_ms": 101297,
+      "end_ms": 106225,
+      "text": "行。第三题，客户说「你们太贵了，别家便宜一半」，你怎么回应？",
+      "question_id": "q3"
+    },
+    {
+      "id": "s13",
+      "speaker": "candidate",
+      "start_ms": 108025,
+      "end_ms": 111275,
+      "text": "那就……看看能不能申请个折叩吧。",
+      "question_id": "q3"
+    },
+    {
+      "id": "s14",
+      "speaker": "interviewer",
+      "start_ms": 112175,
+      "end_ms": 118389,
+      "text": "除了申请折扣，你还会做什么？比如说，你怎么跟客户解释咱们这个价格。",
+      "question_id": "q3.f1"
+    },
+    {
+      "id": "s15",
+      "speaker": "candidate",
+      "start_ms": 120889,
+      "end_ms": 125142,
+      "text": "呃……那，那我也没什么别的办法了，就问问主管吧。",
+      "question_id": "q3.f1"
+    },
+    {
+      "id": "s16",
+      "speaker": "interviewer",
+      "start_ms": 126042,
+      "end_ms": 131184,
+      "text": "好，第四题，如果连续两个月没完成业级目标，你会怎么调整？",
+      "question_id": "q4"
+    },
+    {
+      "id": "s17",
+      "speaker": "candidate",
+      "start_ms": 132384,
+      "end_ms": 136384,
+      "text": "不好意思啊，我这边临时有点事，今天先不面了吧。",
+      "question_id": "q4"
+    },
+    {
+      "id": "s18",
+      "speaker": "interviewer",
+      "start_ms": 137284,
+      "end_ms": 140284,
+      "text": "好的，那今天先到这里，你先忙，再见。"
+    }
+  ],
+  "events": [
+    {
+      "id": "e1",
+      "at_ms": 91866,
+      "kind": "network_offline",
+      "duration_ms": 3000
+    }
+  ],
+  "duration_ms": 141284,
+  "end_reason": "第四题刚问出，候选人以「临时有点事」为由中止面试并离开，第四题未作答，第五题未问。"
+}

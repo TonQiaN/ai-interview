@@ -1,0 +1,1945 @@
+{
+  "schema_version": 1,
+  "interview_id": "sample-backend-third-party",
+  "generated_at_ms": 1794537663331,
+  "recommendation": {
+    "decision": "borderline",
+    "confidence": "medium",
+    "headline": "项目细节尚可，但三题疑有旁人提示，须先核实",
+    "overview": "候选人约两年多的 Go + MySQL 后端经历，优惠券超发排查、Redis 预扣库存、与同事争论库存放哪这几段讲得具体、有过程有反思，缓存这块与岗位对得上。但消息队列只在边缘参与，事务与死锁是转述同事，Go 熟练度和三年经验都没被验证。更关键的是 q2、q3、q4 开口前各出现一次画外提示，作答期间画面还出现两张人脸，诚信风险偏高，建议 HR 先核实再定是否进下一轮。",
+    "key_reasons": [
+      {
+        "point": "q1 项目经历真实感强：讲清了超发如何被发现、日志里看到什么、唯一索引为什么不够、又怎么补 Redis 预扣，还明确了个人负责范围",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "是运营那边发现的，活动结束对账的时候发现发出去的券比我们配的多，就反馈到我们这边。我先看了下日志，确实同一个用户会有两条领取记录",
+            "start_ms": 81171,
+            "end_ms": 120771,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "加了唯一索引之后重复领是挡住了，但库存还是会扣多，所以又加了瑞迪斯预扣，就是……先扣减，扣减的返回值小于零就直接拒绝掉",
+            "start_ms": 81171,
+            "end_ms": 120771,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "这块基本是我一个人做的，从接口到后面的压测。",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "缓存（Redis）是岗位硬性要求里唯一能确认达到的一项，且有他自己的判断和顾虑，不是只提名词",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "先用瑞迪斯预扣库存，扣成功了再落库",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s22",
+            "quote": "库存还是以数据库为准，瑞迪斯做预扣，然后定时对账",
+            "start_ms": 409865,
+            "end_ms": 455198,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s22",
+            "quote": "我当时主要是担心两边数据不一致，这个顾虑现在其实也还在",
+            "start_ms": 409865,
+            "end_ms": 455198,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "有基本的排查顺序意识，不是上来重启或乱试：先监控指标判断影响范围，再查慢查询，再看依赖服务",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "我的思路是，先看监控，再看慢查寻。先看监控上的吞吐亮、响应时间，还有数据库的 CPU、连接数这些指标",
+            "start_ms": 238274,
+            "end_ms": 276024,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "判断是整个系统都慢了，还是只有下单这一个接口慢",
+            "start_ms": 238274,
+            "end_ms": 276024,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "point": "诚信风险高：q2、q3、q4 开口前各出现一句「其他人」的直接答题指令，候选人随后作答与其高度一致，这三题的等待时间是 9–11 秒，而其余三题只有 2 秒左右",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "你就说用消息队列削峰",
+            "start_ms": 132171,
+            "end_ms": 134671,
+            "speaker": "other",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s12",
+            "quote": "先看监控，再看慢查询",
+            "start_ms": 228824,
+            "end_ms": 231074,
+            "speaker": "other",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s17",
+            "quote": "说可重复读和幻读",
+            "start_ms": 318333,
+            "end_ms": 320333,
+            "speaker": "other",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "q3 作答中段（04:07–04:19）页面检测到画面中有两张人脸，与画外提示的时间点相邻，属旁证",
+        "evidence": [
+          {
+            "source": "event",
+            "event_id": "e1",
+            "quote": "face_count_changed：2",
+            "start_ms": 247274,
+            "end_ms": 247274,
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e2",
+            "quote": "face_count_changed：1",
+            "start_ms": 259274,
+            "end_ms": 259274,
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "消息队列达不到「实际使用经验」：说不出具体组件、说是同事搭的、只调过生产端，积压那次也不在场；简历里也没写过消息队列",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "具体是哪个我有点记不太清了，好像是卡夫卡吧，是组里另一个同事搭的，我主要是调了一下生产端",
+            "start_ms": 191217,
+            "end_ms": 216782,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "具体怎么处理的我就不太清楚了，那天我正好不在",
+            "start_ms": 191217,
+            "end_ms": 216782,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "resume",
+            "quote": "Go、MySQL、Redis",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "数据库事务实战薄弱：能背隔离级别，但被追问实际死锁时原因记不清、排查是同事做的，讲不出为什么调更新顺序就能解决",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "具体为什么……我记不太清了，当时是另一个同事看的，好像是把更新顺序调了一下就好了",
+            "start_ms": 374090,
+            "end_ms": 399180,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "呃……幻读好像没有特别遇到。死锁的话……好像有过一次",
+            "start_ms": 374090,
+            "end_ms": 399180,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "两条硬性要求无法确认：简历只有 2022.07 起一段经历，「三年以上」存疑；Go 只出现在简历，六道题没有一道触及语言层面",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "2022.07 至今 某在线教育公司 后端工程师",
+            "quote_match": "exact"
+          },
+          {
+            "source": "resume",
+            "quote": "参与课程订单系统的开发和维护，使用 Go 和 MySQL",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "项目结果全部没有量化：超发规模、改造后大促峰值、压测结论都没给，无法判断 Redis 预扣方案的实际效果；他本人也承认现在业务量太小",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "嗯，大概是这么个过程。",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s24",
+            "quote": "现在做的量还是太小了",
+            "start_ms": 464512,
+            "end_ms": 496512,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ]
+  },
+  "overall_score": 65,
+  "competencies": [
+    {
+      "name": "专业能力",
+      "rating": 3,
+      "comment": "Redis 预扣库存和唯一索引防重是实处，索引与 explain 也知道；但消息队列只碰过生产端、说不出组件，事务停在背概念、死锁经历是同事处理的，Go 完全没有考察。整体是「能干活但深度不够」，够不上熟练。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s5",
+          "quote": "先扣减，扣减的返回值小于零就直接拒绝掉",
+          "start_ms": 81171,
+          "end_ms": 120771,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s10",
+          "quote": "是组里另一个同事搭的，我主要是调了一下生产端",
+          "start_ms": 191217,
+          "end_ms": 216782,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s15",
+          "quote": "具体加哪个字段的索引，得看那个 SQL 的查询条件，用 explain 看一下。",
+          "start_ms": 288881,
+          "end_ms": 309076,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "解决问题",
+      "rating": 3,
+      "comment": "q1 的定位过程是真实的：从对账异常到查日志确认并发重复判断，再到分两步补救，逻辑清楚。但 q3 的排查思路来自画外提示，追问到加索引之后就没了下文，缺少评估、验证、兜底，看不出能独立扛复杂故障。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s5",
+          "quote": "我先看了下日志，确实同一个用户会有两条领取记录",
+          "start_ms": 81171,
+          "end_ms": 120771,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s15",
+          "quote": "呃……看它执行了多久吧，还有……扫描的行数？如果没走索引的话，就……加个索引。",
+          "start_ms": 288881,
+          "end_ms": 309076,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "沟通表达",
+      "rating": 3,
+      "comment": "表达有条理，q5 按「我的理由—对方理由—怎么解决—现在怎么看」展开，听着顺畅；不会的也正面承认而不硬编。但六题里有三题的关键要点是先由旁人说出他才接着讲的，这几题的清晰与切题有多少属于他本人，无法从转写判断。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s22",
+          "quote": "后来把这个事情拿到组会上，让 leader 一起看，最后是折中了一下",
+          "start_ms": 409865,
+          "end_ms": 455198,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s20",
+          "quote": "具体为什么……我记不太清了，当时是另一个同事看的",
+          "start_ms": 374090,
+          "end_ms": 399180,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "学习与成长",
+      "rating": 3,
+      "comment": "q5 里有事后反思，能承认同事有道理、也说得出自己顾虑还在，这种复盘意识是加分项；也主动承认现在量级小。但说他就是空口的一句「想深入学高并发」，过去一两年为此做过什么，完全没讲。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s22",
+          "quote": "现在回头看，我觉得他说的也有道理，因为大促那个量确实数据库扛不住",
+          "start_ms": 409865,
+          "end_ms": 455198,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s24",
+          "quote": "高并发这块我一直想深入学一下，现在做的量还是太小了",
+          "start_ms": 464512,
+          "end_ms": 496512,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "动机与契合",
+      "rating": 3,
+      "comment": "离职原因讲得实在（行业下行、工作重复），也把目标岗位的交易系统、高并发和自身诉求挂上了钩。但发展方向基本是 JD 复述，没讲为什么选这家公司，也没说明自己为转向高并发做了什么准备，稳定性还看不出。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s24",
+          "quote": "主要是现在这家公司业务偏教育，这两年你也知道，行业整体一般，做的东西也比较重复",
+          "start_ms": 464512,
+          "end_ms": 496512,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s24",
+          "quote": "我希望在后端这块做得更深一点，比如能把一个系统的性能优化、稳定性这些摸透，能独立负责一个模块",
+          "start_ms": 464512,
+          "end_ms": 496512,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "职业素养",
+      "rating": 2,
+      "comment": "好的一面是不知道就说不知道，明确划清「那天我不在」「是同事看的」，没有编造。但整场有三道题在开口前接受画外提示，作答中还出现第二张人脸，这是诚信层面的严重疑点，必须由 HR 核实后才能判断。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s7",
+          "quote": "你就说用消息队列削峰",
+          "start_ms": 132171,
+          "end_ms": 134671,
+          "speaker": "other",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s17",
+          "quote": "说可重复读和幻读",
+          "start_ms": 318333,
+          "end_ms": 320333,
+          "speaker": "other",
+          "quote_match": "exact"
+        },
+        {
+          "source": "event",
+          "event_id": "e1",
+          "quote": "face_count_changed：2",
+          "start_ms": 247274,
+          "end_ms": 247274,
+          "quote_match": "exact"
+        }
+      ]
+    }
+  ],
+  "focus_checks": [],
+  "questions": [
+    {
+      "question_id": "q1",
+      "question_text": "请用两三分钟介绍一下你最近做的、你觉得最有挑战的一个项目，重点讲你自己负责的部分。",
+      "asked": true,
+      "segment_ids": [
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "timing": {
+        "start_ms": 13585,
+        "end_ms": 120771,
+        "response_latency_ms": 2100,
+        "candidate_speaking_ms": 87373,
+        "candidate_chars": 376,
+        "chars_per_minute": 258,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人介绍自己在课程订单系统负责优惠券模块，讲了领券接口在大促时券超发的问题：最初直接查库扣库存，运营对账时发现超发，日志里看到并发下同一用户产生两条领取记录；后来加了唯一索引挡重复领取，又改成 Redis 预扣库存、扣减返回小于零直接拒绝。他表示这块从接口到压测基本由他一人完成，因时间紧没有引入分布式锁。",
+        "rating": 4,
+        "rating_reason": "切题且有具体内容：讲清了业务背景、问题现象、发现途径（运营对账+查日志）、两个具体改动及其先后因果关系，也明确了个人负责范围（接口到压测），符合「讲得出自己做了什么、难点在哪」。扣分在于结果部分完全没有量化，超发规模、改动后的效果、压测数据都没说；Redis 预扣与落库之间的一致性、失败回滚、对账机制也没展开，深度只到「做了两个改动」为止，未达到优秀档。",
+        "strengths": [
+          {
+            "point": "问题定位过程具体，不是只给结论：说清了超发是运营对账发现，并自己从日志中定位到并发重复判断的原因",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s5",
+                "quote": "是运营那边发现的，活动结束对账的时候发现发出去的券比我们配的多，就反馈到我们这边。我先看了下日志，确实同一个用户会有两条领取记录",
+                "start_ms": 81171,
+                "end_ms": 120771,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "讲出了方案演进和取舍：唯一索引只解决重复领取，解决不了库存扣多，因此补充 Redis 预扣，并说明扣减返回值小于零即拒绝的具体判断逻辑",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s5",
+                "quote": "加了唯一索引之后重复领是挡住了，但库存还是会扣多，所以又加了瑞迪斯预扣，就是……先扣减，扣减的返回值小于零就直接拒绝掉",
+                "start_ms": 81171,
+                "end_ms": 120771,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "明确了个人承担的范围，不是只讲团队做了什么",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s3",
+                "quote": "这块基本是我一个人做的，从接口到后面的压测。",
+                "start_ms": 24470,
+                "end_ms": 72243,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "结果完全没有量化：超发了多少、改动后大促实际 QPS、压测结论、是否还发生过超发都没讲，无法判断方案实际效果",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s3",
+                "quote": "嗯，大概是这么个过程。",
+                "start_ms": 24470,
+                "end_ms": 72243,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "关键一致性风险没讲透：Redis 预扣成功后落库失败怎么办、缓存与数据库库存如何对账、为什么没上分布式锁只归因于「时间紧」，没有技术层面的说明",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s5",
+                "quote": "没有做那种很复杂的分布式锁，当时时间也比较紧。",
+                "start_ms": 81171,
+                "end_ms": 120771,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "对根因解释不完整：加了唯一索引后库存仍然扣多，说明扣减与插入的顺序或事务边界有问题，候选人只描述了现象没有说明原因",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s5",
+                "quote": "加了唯一索引之后重复领是挡住了，但库存还是会扣多",
+                "start_ms": 81171,
+                "end_ms": 120771,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请具体讲一下领券接口 Redis 预扣库存的完整链路：预扣成功后写库失败或超时怎么处理？缓存里的剩余库存和数据库如何保证最终一致、有没有对账或补偿机制？当时大促的峰值请求量和改造前后的压测数据大概是多少？"
+      }
+    },
+    {
+      "question_id": "q2",
+      "question_text": "这个项目里你做过的最重要的一个技术决定是什么？当时还有哪些别的方案，为什么没选？",
+      "asked": true,
+      "segment_ids": [
+        "s6",
+        "s7",
+        "s8",
+        "s9",
+        "s10"
+      ],
+      "timing": {
+        "start_ms": 121671,
+        "end_ms": 216782,
+        "response_latency_ms": 10300,
+        "candidate_speaking_ms": 63797,
+        "candidate_chars": 235,
+        "chars_per_minute": 221,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人称这个项目最重要的技术决定是用消息队列做削峰，下单请求先入队再由后端消费；备选方案是加机器和限流，因成本高和用户体验差被否。追问下他说不出用的是哪个消息队列，称是同事搭的、自己只调了生产端；被问到消费积压时表示记不清，当时不在。转写中还有第三人在他作答前直接提示答案。",
+        "rating": 2,
+        "rating_reason": "表面上答到了「决定+备选方案+理由」，符合评分要点前半部分，但理由停在成本高、体验差这类泛泛表述，没有量级、没有结果数据，也没有他自己的设计细节。追问暴露他只是外围参与者：产品选型不清、积压处理不明，因此这个「最重要的技术决定」更像听来的而非亲历。再加上作答前有旁人直接给他答案，实质内容可信度打折，综合给 2 分。",
+        "strengths": [
+          {
+            "point": "能明确说出一个技术决定，并给出两个被否掉的备选方案和取舍理由，具备基本的方案对比意识",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s8",
+                "quote": "用消息对列来做削峰",
+                "start_ms": 140971,
+                "end_ms": 179203,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s8",
+                "quote": "加机器成本比较高，限流的话用户体验不太好，会被拒绝掉",
+                "start_ms": 140971,
+                "end_ms": 179203,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "能说清削峰方案的基本思路：请求先入队，后端异步消费，避免系统被打挂",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s8",
+                "quote": "这样流量再大也能先缓冲一下，保证系统不被打挂",
+                "start_ms": 140971,
+                "end_ms": 179203,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "追问下说不清具体用的是哪个消息队列，并明确是同事搭建、自己只动过生产端，说明他并非这个决定的负责人",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s10",
+                "quote": "具体是哪个我有点记不太清了，好像是卡夫卡吧，是组里另一个同事搭的，我主要是调了一下生产端",
+                "start_ms": 191217,
+                "end_ms": 216782,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "对削峰方案的关键风险（消费积压）没有一手经验，只能说「加消费者」这种笼统答案",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s10",
+                "quote": "具体怎么处理的我就不太清楚了，那天我正好不在",
+                "start_ms": 191217,
+                "end_ms": 216782,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s10",
+                "quote": "消费不过来的话……嗯，应该是加消费者吧，多开几个实例",
+                "start_ms": 191217,
+                "end_ms": 216782,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "取舍理由偏空泛，没有流量量级、机器成本或限流阈值的任何具体数据，无法判断这个决定是否经过真实权衡",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s8",
+                "quote": "加机器成本比较高，限流的话用户体验不太好",
+                "start_ms": 140971,
+                "end_ms": 179203,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "诚信疑点：候选人作答前，现场有第三人直接提示答案，与随后答案内容高度一致；也可能是环境噪音或旁人无意插话，需要 HR 复核",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s7",
+                "quote": "你就说用消息队列削峰",
+                "start_ms": 132171,
+                "end_ms": 134671,
+                "speaker": "other",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s8",
+                "quote": "我觉得最重要的一个技术决定是，用消息对列来做削峰",
+                "start_ms": 140971,
+                "end_ms": 179203,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请让他讲一个完全由他自己拍板的技术决定（不要用消息队列这个例子），说清当时的数据量级、备选方案的量化对比和上线后的结果；同时追问他在生产端具体改了什么、消息是否做了幂等和失败重试，以及积压时的监控指标和告警阈值。另外 HR 需核实面试时是否有人在旁提示。"
+      }
+    },
+    {
+      "question_id": "q3",
+      "question_text": "假设线上下单接口的响应时间突然从 100 毫秒涨到 2 秒，你会怎么一步步排查？",
+      "asked": true,
+      "segment_ids": [
+        "s11",
+        "s12",
+        "s13",
+        "s14",
+        "s15"
+      ],
+      "timing": {
+        "start_ms": 217682,
+        "end_ms": 309076,
+        "response_latency_ms": 10950,
+        "candidate_speaking_ms": 57945,
+        "candidate_chars": 220,
+        "chars_per_minute": 227,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人给出了一套分层排查思路：先看监控上的吞吐量、响应时间和数据库 CPU、连接数，判断是整个系统变慢还是只有下单接口变慢；再查慢查询日志，看是否有 SQL 索引失效或表数据量变大；然后检查 Redis、消息队列等依赖服务。追问环节表示会看慢查询日志里的执行时间和扫描行数，如果没走索引就加索引，并先用 explain 确认查询条件和字段。",
+        "rating": 4,
+        "rating_reason": "对照评分要点，候选人做到了「有先后顺序」和「分层定位」：从监控指标到数据库、依赖服务逐层收窄，并提到慢查询日志、扫描行数、explain 等具体手段，没有出现「上来就重启」这类减分表现，因此高于 3 分。不足在于缺少「先看最近的发布和变更」这一关键第一步，也没提到链路追踪、日志、连接池等进一步定位手段；追问部分停留在「加索引、用 explain」的基础层面，没有涉及加索引前的评估和验证。按「有具体内容、个别地方不够深入」评为 4 分。需要提醒 HR：该题作答前的 s12 出现了另一人的提示「先看监控，再看慢查询」，候选人随后的开场表述与提示几乎一字不差，内容评分仅针对这段作答本身，实际排查能力需人工复核。",
+        "strengths": [
+          {
+            "point": "排查有明确顺序，先监控后数据库，不是盲目操作",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "我的思路是，先看监控，再看慢查寻。先看监控上的吞吐亮、响应时间，还有数据库的 CPU、连接数这些指标",
+                "start_ms": 238274,
+                "end_ms": 276024,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "能按「先判断影响范围再定位」的方式收窄问题，区分整体变慢和单接口变慢",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "判断是整个系统都慢了，还是只有下单这一个接口慢",
+                "start_ms": 238274,
+                "end_ms": 276024,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "知道要检查下游依赖，点到了 Redis 和消息队列",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "再看一下依赖的服务，像瑞迪斯、消息队列这些有没有问题。",
+                "start_ms": 238274,
+                "end_ms": 276024,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "追问环节给出了看慢查询日志的具体字段，并知道用 explain 验证索引",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "具体加哪个字段的索引，得看那个 SQL 的查询条件，用 explain 看一下。",
+                "start_ms": 288881,
+                "end_ms": 309076,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "漏掉了「先看最近的发布和配置变更」，直接从监控跳到慢查询，实际排查中这一步往往最快定位问题",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "先看监控，再看慢查寻。",
+                "start_ms": 238274,
+                "end_ms": 276024,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "追问回答偏基础，只说了查执行时间和扫描行数、加索引，没有讲加索引前怎么评估（选择性、大表 DDL 风险、是否走覆盖索引），也没说加完后怎么验证效果",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "呃……看它执行了多久吧，还有……扫描的行数？如果没走索引的话，就……加个索引。",
+                "start_ms": 288881,
+                "end_ms": 309076,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "全程只有通用思路，没有提到任何一次自己实际处理线上慢请求的经历、用过的工具或最终根因，无法判断是否亲身排查过",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "嗯，大概是这个顺序。",
+                "start_ms": 238274,
+                "end_ms": 276024,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "诚信迹象，需人工核实：作答前出现他人提示，候选人随后的开场思路与提示几乎完全一致",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s12",
+                "quote": "先看监控，再看慢查询",
+                "start_ms": 228824,
+                "end_ms": 231074,
+                "speaker": "other",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "我的思路是，先看监控，再看慢查寻。",
+                "start_ms": 238274,
+                "end_ms": 276024,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "如果监控指标都正常、慢查询日志里也没有明显的慢 SQL，你接下来靠什么手段把问题定位到具体环节？另外，线上大表直接加索引前你会做哪些评估和操作？"
+      }
+    },
+    {
+      "question_id": "q4",
+      "question_text": "说说数据库事务的隔离级别，以及你在项目里遇到过的和它有关的问题。",
+      "asked": true,
+      "segment_ids": [
+        "s16",
+        "s17",
+        "s18",
+        "s19",
+        "s20"
+      ],
+      "timing": {
+        "start_ms": 309976,
+        "end_ms": 399180,
+        "response_latency_ms": 9200,
+        "candidate_speaking_ms": 61090,
+        "candidate_chars": 227,
+        "chars_per_minute": 222,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人先背了四种隔离级别的名称，指出 MySQL 默认是可重复读，并说明可重复读能避免不可重复读、但存在幻读，幻读靠间隙锁解决；项目层面只说到「我们用的是 MySQL，默认就是可重复读」。追问实际遇到的问题时，他说没遇到过幻读，只记得一次优惠券库存更新的死锁，两个事务互相等待、数据库回滚了一个，但原因记不清，是同事看的，好像改了更新顺序就好了。",
+        "rating": 3,
+        "rating_reason": "基础概念部分基本正确、有结构（四种级别、默认级别、幻读与间隙锁），符合岗位对数据库基础的最低要求，这部分能看出基本能力。但概念只展开到可重复读一项，另外两个级别完全没提各自的问题；项目实例细节严重不足——不知道死锁的具体成因、没有自己动手排查的过程、修复手段也是转述同事的，属于「内容偏泛、细节不足」，达不到 4 分所要求的「有具体内容」。按评分标准给 3 分。",
+        "strengths": [
+          {
+            "point": "能完整列出四种隔离级别并点出 MySQL 默认是可重复读，概念没有硬伤",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s18",
+                "quote": "隔离级别有四种，读未提交、读已提交、可重复读，还有串行化。嗯……默认的是可重复读。",
+                "start_ms": 326033,
+                "end_ms": 362033,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "知道可重复读的典型问题是幻读，并知道幻读靠间隙锁解决，说明对 InnoDB 的实现有基本认识",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s18",
+                "quote": "但是会有换读，就是同一个事务里两次查询，第二次查出来多了一行",
+                "start_ms": 326033,
+                "end_ms": 362033,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s18",
+                "quote": "幻读要靠间隙锁来解决",
+                "start_ms": 326033,
+                "end_ms": 362033,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "能举出一个与事务相关的真实场景（优惠券库存更新时的死锁），说明确实接触过这类问题",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s20",
+                "quote": "死锁的话……好像有过一次，是那个券的库存更新，两个事务互相等，后来数据库自己回滚了一个",
+                "start_ms": 374090,
+                "end_ms": 399180,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "对四个级别只详细讲了可重复读，读未提交、读已提交各自会导致什么问题（脏读、不可重复读）完全没提，串行化也没展开，深度停留在背诵层面",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s18",
+                "quote": "可重复读就是……同一个事务里多次读同一个数据，读到的结果是一样的，解决了不可重复读的问题",
+                "start_ms": 326033,
+                "end_ms": 362033,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "项目实例经不起追问：死锁的成因记不清，排查是同事做的，他只记得「调了更新顺序」这个结论，说不清为什么这样能解决、涉及哪些锁",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s20",
+                "quote": "具体为什么……我记不太清了，当时是另一个同事看的，好像是把更新顺序调了一下就好了",
+                "start_ms": 374090,
+                "end_ms": 399180,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "作答前约 6 秒出现第三人说话，内容与随后答案的要点（可重复读、幻读）高度吻合，需人工核实作答环境",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s17",
+                "quote": "说可重复读和幻读",
+                "start_ms": 318333,
+                "end_ms": 320333,
+                "speaker": "other",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请他在不提示的情况下，完整复盘那次优惠券库存死锁：当时两个事务各自执行了哪些 SQL、按什么顺序持有和等待锁、怎么从数据库的错误日志或死锁日志里确认的，以及为什么把更新顺序统一之后就能避免；再追问他们为什么保留可重复读而没有改成读已提交。"
+      }
+    },
+    {
+      "question_id": "q5",
+      "question_text": "讲一次你和同事在技术方案上意见不一致的经历，最后是怎么解决的？",
+      "asked": true,
+      "segment_ids": [
+        "s21",
+        "s22"
+      ],
+      "timing": {
+        "start_ms": 400080,
+        "end_ms": 455198,
+        "response_latency_ms": 2500,
+        "candidate_speaking_ms": 45333,
+        "candidate_chars": 204,
+        "chars_per_minute": 270,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人讲了优惠券库存该放数据库还是放 Redis 的分歧：自己主张放数据库、用行锁，理由是量不大、实现简单好排查；同事主张放 Redis，理由是性能好。两人争了很久没说服对方，最后拿到组会上由 leader 一起看，折中为数据库为准、Redis 做预扣、定时对账。他还反思同事有道理，因为大促的量数据库扛不住，并承认自己担心两边数据不一致的顾虑现在还在。",
+        "rating": 4,
+        "rating_reason": "切题，有具体的分歧点，双方的理由和自己的取舍都讲出来了，也讲清了解决路径（组会 + leader + 折中方案）和事后反思，属于有具体内容的良好档。没给 5 分是因为：对方的理由只用“性能好”一句带过，没有展开争点；达成一致的过程只说了“拿到组会上”，没讲清楚是怎么被说服、按什么标准定的折中；折中方案上线后的实际效果（对账有没有发现过不一致）没有交代。",
+        "strengths": [
+          {
+            "point": "分歧点具体，且说清了自己的判断依据（行锁、量级、可维护性），不是空谈沟通",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "我当时的想法是直接放数据库，用行锁，因为量其实没那么大，而且放数据库简单，出问题好查",
+                "start_ms": 409865,
+                "end_ms": 455198,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "给出了明确的解决方式和最终方案，不是“后来沟通好了”这种笼统表述",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "最后是折中了一下，库存还是以数据库为准，瑞迪斯做预扣，然后定时对账",
+                "start_ms": 409865,
+                "end_ms": 455198,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "有事后反思和对自己顾虑的坦诚承认，能看出他不是在背标准答案",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "我当时主要是担心两边数据不一致，这个顾虑现在其实也还在",
+                "start_ms": 409865,
+                "end_ms": 455198,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "同事一方的理由只有一句“性能好”，没有还原对方的具体论据，冲突的实质内容偏薄",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "另一个同事他觉得应该放瑞迪斯，说性能好",
+                "start_ms": 409865,
+                "end_ms": 455198,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "只说了“拿到组会上”，没讲清楚最后是按什么依据拍板的、自己是怎么被说服或妥协的；而且承认当时“谁也没说服谁”，说明共识更多靠上级裁决，个人推动沟通的部分有限",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "我们俩就……争了挺久，谁也没说服谁",
+                "start_ms": 409865,
+                "end_ms": 455198,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "折中方案上线后的结果没交代，尤其是他担心的数据不一致是否真发生过、对账起到作用没有",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "然后定时对账",
+                "start_ms": 409865,
+                "end_ms": 455198,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "这套“数据库为准、Redis 预扣、定时对账”的折中方案上线后，对账有没有真的对出过不一致？如果有，你们是怎么定位和处理这种不一致的；如果从来没有，你怎么确认它是可靠的？"
+      }
+    },
+    {
+      "question_id": "q6",
+      "question_text": "你为什么考虑这个机会？未来两三年想往什么方向发展？",
+      "asked": true,
+      "segment_ids": [
+        "s23",
+        "s24"
+      ],
+      "timing": {
+        "start_ms": 456098,
+        "end_ms": 496512,
+        "response_latency_ms": 2200,
+        "candidate_speaking_ms": 32000,
+        "candidate_chars": 152,
+        "chars_per_minute": 285,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人说换机会的主要原因是现在公司做教育行业、行业整体一般、工作内容重复，想去业务更稳定、技术挑战更大的地方；并提到看到这个岗位是做交易系统的，自己一直想深入高并发，现在做的量太小。未来两三年希望在后台做得更深，把性能优化、稳定性摸透，能独立负责一个模块。",
+        "rating": 3,
+        "rating_reason": "动机部分基本切题，能说出具体的处境（教育行业下行、工作重复）和目标岗位的关联点（交易系统、高并发），可信度尚可，不是空话。但发展方向那半段基本是岗位职责的复述——性能优化、稳定性、独立负责模块，没有具体路径、时间点或衡量标准；也没有说明为什么选这家公司、对这个岗位了解多少，以及为转向高并发做过什么准备。按标准属于「基本切题、内容偏泛、细节不足」，给 3 分。",
+        "strengths": [
+          {
+            "point": "离职动机讲得比较实在，给出了行业和岗位内容两方面的具体原因，不是套话",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "主要是现在这家公司业务偏教育，这两年你也知道，行业整体一般，做的东西也比较重复",
+                "start_ms": 464512,
+                "end_ms": 496512,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "把动机和岗位特点挂上了钩，说明自己关注的是交易系统和高并发方向",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "我看到这个岗位是做交易系统的，高并发这块我一直想深入学一下，现在做的量还是太小了",
+                "start_ms": 464512,
+                "end_ms": 496512,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "对自身差距有清醒认识，主动承认现在业务量小、高并发经验不足",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "高并发这块我一直想深入学一下，现在做的量还是太小了",
+                "start_ms": 464512,
+                "end_ms": 496512,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "发展方向说得太笼统，基本是岗位 JD 的复述，没有具体路径或可验证的目标",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "我希望在后端这块做得更深一点，比如能把一个系统的性能优化、稳定性这些摸透，能独立负责一个模块",
+                "start_ms": 464512,
+                "end_ms": 496512,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "只说了对岗位方向感兴趣，没有说明为什么选这家公司、对这个岗位/业务了解多少，动机与本公司关联弱",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "然后我看到这个岗位是做交易系统的",
+                "start_ms": 464512,
+                "end_ms": 496512,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "承认自己量级小，但没有说明为此做过什么准备（学习、副业项目、内部争取），也没有交代现在的真实量级，说服力不足",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "现在做的量还是太小了",
+                "start_ms": 464512,
+                "end_ms": 496512,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "你说现在「量太小」，具体是什么量级（下单 QPS、日订单量、数据规模大概多少）？为了补上高并发这块的差距，过去一两年你具体做过哪些准备？"
+      }
+    }
+  ],
+  "requirement_match": {
+    "match_level": "medium",
+    "summary": "候选人有约两年多的 Go + MySQL 项目经历，优惠券超发、Redis 预扣库存、唯一索引这几段讲得比较具体，与岗位的基础工程要求部分对得上；但工作年限接近三年无法确认，消息队列只调过生产端、组件和积压处理都说不清，事务和线上排查停留在概念层面，也没有交易系统和高并发规模的经验，两个加分项基本空白。另需 HR 重点核实：q2、q3、q4 作答前都出现第三人小声提示答案的语音（s7、s12、s17），且与这三题 9–11 秒的异常等待时间吻合，候选人随后作答内容与提示高度一致，这会影响本次所有技术回答的可信度。",
+    "items": [
+      {
+        "requirement": "三年以上后端开发经验",
+        "importance": "must_have",
+        "verdict": "partially_met",
+        "basis": "resume",
+        "reasoning": "简历只有一段 2022.07 至今的后端工程师经历，没有更早的相关经历；面试中也没有补充工作年限或此前经历。是否满三年取决于当前日期，目前只能算接近，无法确认达标。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "2022.07 至今 某在线教育公司 后端工程师",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "熟练掌握 Go 或 Rust",
+        "importance": "must_have",
+        "verdict": "met",
+        "basis": "both",
+        "reasoning": "简历写明用 Go 开发课程订单系统，面试描述的工作内容（Redis 预扣库存、唯一索引防重、消息队列削峰、接口压测）与 Go 后端开发场景一致，没有出现矛盾。但面试全程没有追问 Go 语言层面的细节，熟练程度本身未被直接验证。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "参与课程订单系统的开发和维护，使用 Go 和 MySQL",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "熟悉关系数据库的索引和事务",
+        "importance": "must_have",
+        "verdict": "partially_met",
+        "basis": "interview",
+        "reasoning": "索引部分有真实例子：用唯一索引解决同一用户并发重复领券，知道用 explain 看执行计划和扫描行数。事务部分能背出四种隔离级别、可重复读和间隙锁解决幻读，但被追问实际经历时，死锁那次是别的同事处理的，原因讲不清，幻读也没遇到过，属于概念清楚、实战薄弱。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "加了唯一索引之后重复领是挡住了，但库存还是会扣多",
+            "start_ms": 81171,
+            "end_ms": 120771,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s15",
+            "quote": "看它执行了多久吧，还有……扫描的行数？",
+            "start_ms": 288881,
+            "end_ms": 309076,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s18",
+            "quote": "幻读要靠间隙锁来解决",
+            "start_ms": 326033,
+            "end_ms": 362033,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "当时是另一个同事看的，好像是把更新顺序调了一下就好了",
+            "start_ms": 374090,
+            "end_ms": 399180,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "能独立排查线上问题",
+        "importance": "must_have",
+        "verdict": "partially_met",
+        "basis": "interview",
+        "reasoning": "有一次自己动手的排查：运营对账发现券超发后，他查日志定位到并发请求同时通过校验。排查思路也有顺序（监控指标→区分整体还是单接口→慢查询→Redis/消息队列等依赖）。但追问拿到慢查询日志看什么时只答了执行时长和扫描行数，再往下就只剩「加索引、用 explain」，深度不足以支撑独立处理复杂线上故障。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "我先看了下日志，确实同一个用户会有两条领取记录",
+            "start_ms": 81171,
+            "end_ms": 120771,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "先看监控，再看慢查寻",
+            "start_ms": 238274,
+            "end_ms": 276024,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s15",
+            "quote": "如果没走索引的话，就……加个索引",
+            "start_ms": 288881,
+            "end_ms": 309076,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "有消息队列的实际使用经验",
+        "importance": "must_have",
+        "verdict": "partially_met",
+        "basis": "interview",
+        "reasoning": "能说出用消息队列做削峰的理由（加机器成本高、限流影响体验），但具体组件记不清、只说是同事搭的、自己只调了生产端，积压那次也不在场、不知道处理方式。属于接触过但没有真正负责，离「实际使用经验」有距离。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s8",
+            "quote": "用消息对列来做削峰",
+            "start_ms": 140971,
+            "end_ms": 179203,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "具体是哪个我有点记不太清了，好像是卡夫卡吧",
+            "start_ms": 191217,
+            "end_ms": 216782,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "是组里另一个同事搭的，我主要是调了一下生产端",
+            "start_ms": 191217,
+            "end_ms": 216782,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "有缓存的实际使用经验",
+        "importance": "must_have",
+        "verdict": "met",
+        "basis": "interview",
+        "reasoning": "用 Redis 预扣库存解决超发，讲清了扣减逻辑（返回值小于零直接拒绝）、与唯一索引的分工，以及后来和同事争论「库存放数据库还是放 Redis」后形成的「数据库为准 + Redis 预扣 + 定时对账」方案。这是他自己做的部分，细节经得起追问。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "先用瑞迪斯预扣库存，扣成功了再落库",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "先扣减，扣减的返回值小于零就直接拒绝掉",
+            "start_ms": 81171,
+            "end_ms": 120771,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s22",
+            "quote": "库存还是以数据库为准，瑞迪斯做预扣，然后定时对账",
+            "start_ms": 409865,
+            "end_ms": 455198,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "交易类系统后端开发经验（下单链路、稳定性保障）",
+        "importance": "must_have",
+        "verdict": "partially_met",
+        "basis": "interview",
+        "reasoning": "做的是在线教育的课程订单和优惠券模块，涉及下单、领券、库存，链路属性与交易系统部分相通；但模块较窄（自述主要负责优惠券接口），且自己承认业务量小，没有交易系统核心的账务、一致性、资金安全等经历。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "我主要负责里面的优惠券模块，就是领券、用券这块的接口",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s24",
+            "quote": "现在做的量还是太小了",
+            "start_ms": 464512,
+            "end_ms": 496512,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "有高并发交易系统的经验（加分项）",
+        "importance": "nice_to_have",
+        "verdict": "partially_met",
+        "basis": "interview",
+        "reasoning": "有大促抢券的场景和相应处理（唯一索引防重、Redis 预扣、消息队列缓冲），算是接触过高并发写入问题；但规模有限，本人也说量太小，且这些方案的效果（超发是否彻底解决、峰值多少）面试中没有给出数据。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "因为有的活动力度大，比如大促的时候，一瞬间很多人来抢",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s24",
+            "quote": "高并发这块我一直想深入学一下",
+            "start_ms": 464512,
+            "end_ms": 496512,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "做过系统拆分或重构（加分项）",
+        "importance": "nice_to_have",
+        "verdict": "unknown",
+        "basis": "none",
+        "reasoning": "简历和面试都没有提到任何系统拆分、服务化或重构的经历，无法判断。",
+        "evidence": []
+      }
+    ]
+  },
+  "resume_verification": {
+    "credibility": "medium",
+    "summary": "核心经历（课程订单系统里的优惠券模块）能讲出对账发现超发、加唯一索引、Redis 预扣库存等具体细节，和简历一致；但面试中三次出现「其他人」在同一题目下低声提示答案（s7「你就说用消息队列削峰」、s12「先看监控，再看慢查询」、s17「说可重复读和幻读」），提示的正是随后候选人的回答要点。并且 q2 的「消息队列削峰」在追问具体是哪个中间件、积压如何处理时，候选人答「记不太清」「另一个同事搭的」「那天我正好不在」，且简历中并未写过消息队列，所以这条经历是否属于本人存疑，需要人工核实。另外，MySQL 事务在项目中排查死锁的部分，候选人全推给同事，实际深度低于简历给人的印象。",
+    "claims": [
+      {
+        "claim": "参与课程订单系统的开发和维护，使用 Go 和 MySQL",
+        "verdict": "corroborated",
+        "reasoning": "候选人能讲出订单系统的业务背景和只有亲身做过才说得出的细节：超发是运营对账时发现的、日志里出现同一用户两条领取记录、先加唯一索引挡住重复领取但库存仍会扣多、最终改为 Redis 预扣，与简历中的订单系统经历一致。但「使用 Go」的部分在面试中完全没有体现，另见下一条。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "参与课程订单系统的开发和维护，使用 Go 和 MySQL",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "我最近做得比较多的就是课程订单系统，我们是在线教育，用户买课下单",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "后来我们改成了先用瑞迪斯预扣库存，扣成功了再落库",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "是运营那边发现的，活动结束对账的时候发现发出去的券比我们配的多",
+            "start_ms": 81171,
+            "end_ms": 120771,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": null
+      },
+      {
+        "claim": "负责优惠券模块的接口开发",
+        "verdict": "corroborated",
+        "reasoning": "候选人把负责范围讲得很具体：领券、用券接口，从接口开发到压测都由他一人完成；q5 里还能讲出券库存放数据库还是放 Redis 的方案争论和折中做法，细节自洽。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "负责优惠券模块的接口开发",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "我主要负责里面的优惠券模块，就是领券、用券这块的接口",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "这块基本是我一个人做的，从接口到后面的压测",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": null
+      },
+      {
+        "claim": "技能掌握 Go",
+        "verdict": "not_covered",
+        "reasoning": "简历技能栏列了 Go，但六道题里没有任何一题涉及语言层面，候选人全程也没提过 Go 的用法、并发模型或踩过的坑，无法判断实际熟练度。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "Go、MySQL、Redis",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "请他用 Go 讲一段自己写过的代码（比如领取接口的并发控制），并追问 goroutine/channel 或连接池调优的实际用法。"
+      },
+      {
+        "claim": "技能掌握 MySQL（索引、事务）",
+        "verdict": "partially_corroborated",
+        "reasoning": "索引部分有实处：唯一索引挡重复领取、之后仍需 Redis 预扣库存的逻辑，以及慢查询看执行计划、扫描行数，方向都对。但事务部分只背出了四种隔离级别和可重复读、幻读、间隙锁等教科书内容，被追问实际遇到的死锁时，他说记不清、当时是另一个同事看的，讲不出自己的排查过程，深度与「熟悉索引和事务」的说法不完全相称。另外 q2/q3/q4 三题都有旁人在开口前提示要点，也削弱了对基础掌握程度的判断。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "Go、MySQL、Redis",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "另外给领取记录加了一个唯一锁引，防止同一个人重复领",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s18",
+            "quote": "隔离级别有四种，读未提交、读已提交、可重复读，还有串行化。",
+            "start_ms": 326033,
+            "end_ms": 362033,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "我记不太清了，当时是另一个同事看的",
+            "start_ms": 374090,
+            "end_ms": 399180,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "让他完整复述一次自己参与排查的死锁或慢查询：当时的 SQL、锁等待日志里看到了什么、最终怎么改的；再问唯一索引建在哪些字段上、冲突时接口返回什么。"
+      },
+      {
+        "claim": "技能掌握 Redis",
+        "verdict": "corroborated",
+        "reasoning": "不只是提到名词：他讲了预扣库存按返回值判断、返回值小于零直接拒绝的具体做法，以及 q5 里「数据库为准 + Redis 预扣 + 定时对账」这一折中方案的形成过程和自己的顾虑，属于亲身参与才讲得出的内容。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "Go、MySQL、Redis",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "先扣减，扣减的返回值小于零就直接拒绝掉",
+            "start_ms": 81171,
+            "end_ms": 120771,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s22",
+            "quote": "库存还是以数据库为准，瑞迪斯做预扣，然后定时对账",
+            "start_ms": 409865,
+            "end_ms": 455198,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": null
+      },
+      {
+        "claim": "2022 年 7 月至今在该在线教育公司任后端工程师（约三年经验）",
+        "verdict": "not_covered",
+        "reasoning": "面试没有问工作起止时间或年限，候选人只在动机题里笼统提到行业这两年整体一般，无法据此确认年限，也无法确认这段时间是否一直是全职后端开发。这一点关系到「三年以上后端开发经验」这条硬性要求，需要人工核实。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "2022.07 至今 某在线教育公司 后端工程师",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "核实在职起止时间、是否有实习或兼职计入，并请他说明入职后前半年和后一年分别独立负责了哪些模块。"
+      }
+    ]
+  },
+  "integrity": {
+    "risk_level": "high",
+    "summary": "面试过程中出现三次画外第三人直接给答案的情况：这些提示分别出现在候选人作答 q2、q3、q4 时，且恰好是这三道题，候选人在开口前停顿了 9 到 11 秒；其他题目只停顿 2 秒左右。q3 作答期间，页面还检测到画面中有两张人脸。综合来看，基本可以认定有人在旁边提示。不过候选人本人在 q1（超发、加唯一索引、Redis 预扣）和 q5（库存放库还是放 Redis 的争论）上讲得具体、有细节、还带自我检讨，不像是整场都照着稿子念，更像是遇到不熟的问题时接受外部提示。",
+    "signals": [
+      {
+        "kind": "third_party",
+        "severity": "high",
+        "reliability": "high",
+        "description": "转写中出现三次说话人标为「其他人」的短句，内容都是直接的答题指令，且都紧接在面试官提问之后、候选人作答之前：q2 前有人说「你就说用消息队列削峰」，q3 前有人说「先看监控，再看慢查询」，q4 前有人说「说可重复读和幻读」。候选人在 q3 和 q4 的回答里，基本按提示展开，先讲监控和慢查询，再讲四种隔离级别。",
+        "alternative_explanations": "有可能是同一房间的同事或家人随口出声，也可能候选人在念自己准备的环境音或自我复述，被识别成独立说话人。但从「你就说……」这种命令式措辞，以及提示内容与随后答案的高度吻合看，这些解释的说服力不强。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "你就说用消息队列削峰",
+            "start_ms": 132171,
+            "end_ms": 134671,
+            "speaker": "other",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s12",
+            "quote": "先看监控，再看慢查询",
+            "start_ms": 228824,
+            "end_ms": 231074,
+            "speaker": "other",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s17",
+            "quote": "说可重复读和幻读",
+            "start_ms": 318333,
+            "end_ms": 320333,
+            "speaker": "other",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "kind": "timing_pattern",
+        "severity": "medium",
+        "reliability": "medium",
+        "description": "候选人开口前的等待时间分布很不均匀：q1、q5、q6 分别只等了 2.1 秒、2.5 秒、2.2 秒，而 q2、q3、q4 分别等了 10.3 秒、10.9 秒、9.2 秒。等待较久的三道题，恰好就是出现画外提示的三道题。例如 q2 中面试官 02:10 问完，画外提示在 02:10 到 02:14 出现，候选人直到 02:20 才开口。",
+        "alternative_explanations": "q2 到 q4 本身偏难或偏概念，需要思考；也可能候选人在回忆哪段经历合适。单看计时不足以说明问题，但与画外提示的时间点叠在一起时，可信度会提高。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "你就说用消息队列削峰",
+            "start_ms": 132171,
+            "end_ms": 134671,
+            "speaker": "other",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "kind": "page_event",
+        "severity": "medium",
+        "reliability": "medium",
+        "description": "04:07 画面中检测到两个人脸，持续到 04:19 又回到一张脸。这段时间正好落在 q3 候选人作答（03:58 到 04:36）的中段，而 q3 之前的 03:48 到 03:51 刚出现过一句画外提示。",
+        "alternative_explanations": "可能是家人、室友从候选人身后经过或短暂入镜；也可能是摄像头把人脸误检成了两张脸，例如反光、照片或姿态变化。这条本身不足以定性，只能作为旁证。",
+        "evidence": [
+          {
+            "source": "event",
+            "event_id": "e1",
+            "quote": "face_count_changed：2",
+            "start_ms": 247274,
+            "end_ms": 247274,
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e2",
+            "quote": "face_count_changed：1",
+            "start_ms": 259274,
+            "end_ms": 259274,
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "kind": "depth_mismatch",
+        "severity": "medium",
+        "reliability": "medium",
+        "description": "q2 的回答能完整讲出「消息队列削峰」的取舍，但一追问具体实现和个人参与情况，就说不清了：用哪个消息队列，说是「另一个同事搭的」，只调了生产端；有没有积压，说是「那天我正好不在」。q4 追问死锁时同样表示「当时是另一个同事看的」「记不太清了」。这与 q1、q5 中讲得具体的表现形成反差。",
+        "alternative_explanations": "候选人自述 2022 年入职，资历较浅，消息队列和死锁确实是同事主导，自己只参与边缘部分，这种情况在真实工作中很常见。也可能是紧张或时间久远记不清。注意 q1 的超发排查和 q5 的方案争论都讲出了过程、理由和结果，说明并非完全没有真实经历。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "具体是哪个我有点记不太清了，好像是卡夫卡吧，是组里另一个同事搭的，我主要是调了一下生产端。",
+            "start_ms": 191217,
+            "end_ms": 216782,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "有没有积压过……好像是有过一次，具体怎么处理的我就不太清楚了，那天我正好不在。",
+            "start_ms": 191217,
+            "end_ms": 216782,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "具体为什么……我记不太清了，当时是另一个同事看的，好像是把更新顺序调了一下就好了。",
+            "start_ms": 374090,
+            "end_ms": 399180,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ]
+  },
+  "communication": {
+    "summary": "候选人能把项目背景、自己负责的部分和改动讲清楚，q3、q5 的回答有明显的先后顺序和双方视角，整体听起来通顺、不绕圈。但一到细节追问就明显变薄，多次用「好像是」「记不太清了」收尾，而且 q2、q3、q4 三题在开口前都有旁人先把要点说出来，这几题能算候选人本人多少，无法从转写里判断。",
+    "aspects": [
+      {
+        "aspect": "clarity",
+        "rating": 3,
+        "observation": "讲项目时能把「领券超发—加唯一索引—Redis 预扣」这条线说明白，听的人不用猜。但被追问细节时表述模糊：消息队列是「好像是卡夫卡吧」，慢查询看什么答成「看它执行了多久吧，还有……扫描的行数？」，关键信息给不出来，需要听者自己补。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "后来我们改成了先用瑞迪斯预扣库存，扣成功了再落库",
+            "start_ms": 24470,
+            "end_ms": 72243,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "好像是卡夫卡吧，是组里另一个同事搭的，我主要是调了一下生产端",
+            "start_ms": 191217,
+            "end_ms": 216782,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s15",
+            "quote": "呃……看它执行了多久吧，还有……扫描的行数？",
+            "start_ms": 288881,
+            "end_ms": 309076,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "aspect": "structure",
+        "rating": 4,
+        "observation": "多数回答有清晰的骨架，不是想到哪说到哪。q3 明确给了分层顺序「先看监控，再看慢查询……再看依赖服务……大概是这个顺序」；q5 按「我的理由—对方理由—怎么解决—现在怎么看」展开，还补了事后反思；q4 按四种隔离级别依次罗列。扣分在于部分回答停在结论层，比如 q3.f1 加索引之后就没有下一步了。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "我的思路是，先看监控，再看慢查寻。",
+            "start_ms": 238274,
+            "end_ms": 276024,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "然后……再看一下依赖的服务，像瑞迪斯、消息队列这些有没有问题。",
+            "start_ms": 238274,
+            "end_ms": 276024,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s22",
+            "quote": "后来把这个事情拿到组会上，让 leader 一起看，最后是折中了一下",
+            "start_ms": 409865,
+            "end_ms": 455198,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "aspect": "responsiveness",
+        "rating": 4,
+        "observation": "六个问题基本都答在被问的那件事上，没有跑题或绕开。对不会的追问也是正面回应而非转移，比如直接说「幻读好像没有特别遇到」，q2.f1 承认只负责生产端。减分点在于 q2、q3、q4 的关键方向在候选人开口前先由旁人说出，他的回答与提示高度吻合，切题性里有多少属于他本人无法分辨。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "我主要是调了一下生产端",
+            "start_ms": 191217,
+            "end_ms": 216782,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "呃……幻读好像没有特别遇到。死锁的话……好像有过一次",
+            "start_ms": 374090,
+            "end_ms": 399180,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s24",
+            "quote": "主要是现在这家公司业务偏教育，这两年你也知道，行业整体一般",
+            "start_ms": 464512,
+            "end_ms": 496512,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "aspect": "composure",
+        "rating": 3,
+        "observation": "面对答不上来的追问，他是坦率承认并划清边界，没有硬编也没情绪化，这一点是稳的：直接说「那天我正好不在」「当时是另一个同事看的」。但稳定性上有明显疑点：q2、q3、q4 开口前分别空了 10.3 秒、10.9 秒、9.2 秒，而这三段空档里都出现了旁人的提示语，提示之后他才开始作答，说明这几题不是自己启动的；过程中画面人数还从 1 变成 2 又变回 1。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "有没有积压过……好像是有过一次，具体怎么处理的我就不太清楚了",
+            "start_ms": 191217,
+            "end_ms": 216782,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "具体为什么……我记不太清了，当时是另一个同事看的",
+            "start_ms": 374090,
+            "end_ms": 399180,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e1",
+            "quote": "face_count_changed：2",
+            "start_ms": 247274,
+            "end_ms": 247274,
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ],
+    "reliability_note": "只能依据转写文字和计时推断，看不到表情、听不到语气，慌张与否无法直接判断；更关键的是转写里有三次旁人替候选人报要点（s7、s12、s17），画面人数也出现过 2 人，本页评分无法排除「回答不完全出自候选人本人」的影响，建议人工面试时单独复测这几题。"
+  },
+  "next_round": {
+    "focus_areas": [
+      "诚信复核：确认 AI 面试时是否有他人在场提示，必要时安排现场或全程录屏的单独面试",
+      "真实技术深度：剥离消息队列、隔离级别这两个已被提示过的题目，用他自己做的优惠券模块往深里挖",
+      "Go 语言能力：本轮完全没有考察，需验证是熟练使用还是仅停留在简历上",
+      "工作年限与量级：核实三年经验和真实业务规模，判断能否承接高并发交易系统"
+    ],
+    "questions": [
+      {
+        "question": "请现场完整讲一遍领券接口从接收到返回的处理流程，包括 Redis 预扣、写库、唯一索引分别在什么位置，预扣成功但写库超时的那条请求最后怎么收场。",
+        "purpose": "用他自称最熟的项目验证真实深度，同时核对此前 q1、q5 的说法是否前后一致"
+      },
+      {
+        "question": "不讲消息队列。请讲一个由你自己拍板的技术决定，说清当时的数据量级、备选方案怎么比较、上线后结果如何。",
+        "purpose": "绕开被提示过的答案，看他有没有独立做技术判断的经历"
+      },
+      {
+        "question": "用 Go 讲一段你写过的并发相关代码：领取接口怎么防止同一个用户并发进入，goroutine、channel 或连接池你实际怎么用的。",
+        "purpose": "补上本轮完全没考察的 Go 语言能力，验证「熟练掌握」这条硬性要求"
+      },
+      {
+        "question": "你们大促时领券的峰值请求大概多少 QPS、日订单量多少？改造前后压测数据是多少？超发那次大概多发了多少张？",
+        "purpose": "拿到量级数据，判断是否具备高并发经验，也验证他是不是真的参与过压测"
+      },
+      {
+        "question": "如果监控指标正常、慢查询日志里也没有明显慢 SQL，下单接口还是 2 秒，你靠什么手段把问题定位到具体环节？",
+        "purpose": "在无人提示的情况下重测排查思路，看他是否有独立的分层定位能力"
+      },
+      {
+        "question": "本次 AI 面试时，q2、q3、q4 作答前都出现了他人的语音提示，画面也短暂出现两个人。请说明当时的情况。",
+        "purpose": "直接核实诚信疑点，由 HR 判断是否影响后续流程"
+      }
+    ]
+  },
+  "timing": {
+    "duration_ms": 503769,
+    "expected_ms": 1200000,
+    "candidate_speaking_ms": 347538,
+    "interviewer_speaking_ms": 92781,
+    "questions_planned": 6,
+    "questions_asked": 6,
+    "questions_answered": 6
+  },
+  "review_flags": [
+    {
+      "code": "integrity_risk",
+      "message": "发现 4 条诚信方面的迹象，风险等级为高，请回看录像核实后再做决定。"
+    }
+  ],
+  "limitations": [
+    "实际面试仅 8 分 23 秒，六题平均每题不到 1 分半，追问深度受限，很多能力只能看到表层",
+    "Go 语言能力、编码能力、系统设计完全没有考察，无法判断是否满足「熟练掌握 Go」这条硬性要求",
+    "转写为语音识别结果，存在同音错字（如「瑞迪斯」「慢查寻」「换读」），已按最合理意思理解，但不排除个别表述被误识",
+    "三次画外提示只能从转写和画面人数推断，看不到现场画面也听不到语气，是否为他人提示需 HR 复核",
+    "工作年限只有简历一段经历，面试未涉及，是否满三年无法从材料确认"
+  ],
+  "meta": {
+    "model": "deepseek-flash",
+    "thinking": "high",
+    "prompt_version": 1,
+    "system_fingerprints": [
+      "bc19ba97cbe016479903222bb1578db6"
+    ],
+    "usage": {
+      "calls": 11,
+      "prompt_tokens": 56058,
+      "completion_tokens": 31720,
+      "reasoning_tokens": 17755,
+      "cache_hit_tokens": 40832,
+      "cache_miss_tokens": 15226
+    },
+    "elapsed_ms": 58761,
+    "evidence": {
+      "cited": 135,
+      "exact": 135,
+      "approximate": 0,
+      "whole_segment": 0,
+      "dropped": 0
+    },
+    "failed_stages": []
+  }
+}
