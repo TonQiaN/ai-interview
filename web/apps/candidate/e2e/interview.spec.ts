@@ -102,6 +102,11 @@ test("从打开链接到面试完成：逐题问答，静音自动进入下一�
   // 开始面试时申请了屏幕常亮，申请的结果记了下来
   const wakeLock = state.events.find((event) => event.kind === "screen_wake_lock");
   expect(wakeLock?.payload).toMatchObject({ supported: true });
+  // 录像传完也记了一条，带着面试结束后等了多久
+  const uploaded = state.events.find((event) => event.kind === "upload_finished");
+  expect(Number(uploaded?.payload.uploaded_bytes)).toBeGreaterThan(0);
+  expect(Number(uploaded?.payload.wait_ms)).toBeGreaterThanOrEqual(0);
+  expect(kinds).not.toContain("upload_stalled");
 
   // 一段录像；有画面有声音，时长盖住整场面试
   const [recording] = state.recordings;
@@ -252,6 +257,11 @@ test("面试中断网：继续录制，恢复后补传，一片不少", async ({
   // 断网那几秒的分片也在：总片数盖得住整场时长（每片 1 秒）
   expect(state.recordings[0]?.chunks.length ?? 0).toBeGreaterThan(before + 3);
   expect(eventKinds(state)).toEqual(expect.arrayContaining(["network_offline", "network_online"]));
+  // 录像传不动、又传动了，各记了一条，带着停了多久
+  const stalled = state.events.find((event) => event.kind === "upload_stalled");
+  expect(["offline", "retrying"]).toContain(stalled?.payload.cause);
+  const recovered = state.events.find((event) => event.kind === "upload_recovered");
+  expect(Number(recovered?.payload.stalled_ms)).toBeGreaterThan(3000);
 });
 
 test("提交答案时服务暂时不可用，会自动重试，不丢题", async ({ page }) => {
