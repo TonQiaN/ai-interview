@@ -65,7 +65,8 @@ pub fn position_from_raas(detail: &JobPostingDetail) -> ImportedPosition {
             .unwrap_or_else(|| "未命名岗位".to_owned()),
         department: summary.department.clone(),
         location: (!summary.cities.is_empty()).then(|| summary.cities.join("、")),
-        employment_type: summary.recruitment_type.clone(),
+        // RAAS 没有用工形式这一项。它的「招聘类型」（社招、校招）是另一回事，不能填在这里
+        employment_type: None,
         seniority: summary.expected_level.clone(),
         description: detail.responsibility.clone().unwrap_or_default(),
         requirements,
@@ -435,6 +436,8 @@ mod tests {
         assert_eq!(draft.department.as_deref(), Some("支付平台部"));
         assert_eq!(draft.location.as_deref(), Some("杭州、上海"));
         assert_eq!(draft.seniority.as_deref(), Some("P6"));
+        // 「社招」是招聘类型，不是用工形式（全职、实习这些），不能填进用工形式里
+        assert_eq!(draft.employment_type, None);
         assert_eq!(draft.description, "负责清结算核心服务。");
         assert_eq!(
             draft.requirements,

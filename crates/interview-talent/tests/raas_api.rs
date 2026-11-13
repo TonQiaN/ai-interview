@@ -72,6 +72,7 @@ fn posting(id: &str, title: &str) -> Value {
         "headcount": 2,
         "work_years": "5 年以上",
         "degree_requirement": "本科",
+        "recruitment_type": "社招",
         "salary_range": "30-45K",
         "expected_level": "P6",
         "responsibility": "负责清结算核心服务。",
@@ -290,10 +291,12 @@ async fn importing_a_position_keeps_local_edits_unless_refreshed(pool: PgPool) {
         position["extra"]["raas"]["job_requisition_id"],
         "JRQ-20261101-0001"
     );
+    // RAAS 的「社招」是招聘类型，不是用工形式
+    assert!(position["employment_type"].is_null());
 
     // HR 在我们这边改了名字，再导一次不该被盖掉
     let patched = TestRequest::patch(format!("/api/v1/positions/{id}"))
-        .json(&json!({"title": "后端负责人"}))
+        .json(&json!({"title": "后端负责人", "employment_type": "全职"}))
         .send(&app.router)
         .await;
     assert_eq!(patched.status, StatusCode::OK, "{}", patched.text());
@@ -307,6 +310,9 @@ async fn importing_a_position_keeps_local_edits_unless_refreshed(pool: PgPool) {
     assert_eq!(refreshed["items"][0]["outcome"], "refreshed");
     assert_eq!(refreshed["items"][0]["position_id"], id.as_str());
     assert_eq!(refreshed["items"][0]["title"], "高级后端工程师");
+    // 用工形式 RAAS 里没有，HR 填的留着
+    let position = get(&app, &format!("/api/v1/positions/{id}")).await;
+    assert_eq!(position["employment_type"], "全职");
 
     // 归档以后再导入，恢复原来那一条，不另建
     let archived = TestRequest::delete(format!("/api/v1/positions/{id}"))
