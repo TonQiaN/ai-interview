@@ -83,6 +83,7 @@ import {
   synthStatusTone,
   thinkingLabel,
 } from "../lib/format";
+import { updateOutcome } from "../lib/replan";
 
 type Tab = "overview" | "questions" | "invites" | "replay" | "report";
 
@@ -399,8 +400,14 @@ function EditConfigDialog({
               save.mutate(
                 { config: cleanConfig(config), voice_id: voiceId },
                 {
-                  onSuccess: () => {
-                    toast(interview.has_plan ? "设置改了，题目和语音需要重新准备" : "设置已保存");
+                  onSuccess: (updated) => {
+                    toast(
+                      updateOutcome({
+                        hadPlan: interview.has_plan,
+                        voiceChanged: (updated.voice_id ?? null) !== (interview.voice_id ?? null),
+                        reasons: updated.replan_reasons,
+                      }),
+                    );
                     onClose();
                   },
                 },
@@ -415,7 +422,7 @@ function EditConfigDialog({
       <div className="oil-stack">
         {interview.has_plan && (
           <Banner tone="warning">
-            题目已经按原来的设置出好了。改了设置之后，题目和语音要重新生成；只换音色的话，题目不变，语音重新合成。
+            题目已经按原来的设置出好了。时长、第几轮、面试官、考察要求这类写进题目里的设置改了，题目和语音要重新生成；答题节奏、提前结束、模型怎么想这类只在面试进行时起作用的，改了题目和语音都留着；只换声音的话，题目不变，语音重新合成。
           </Banner>
         )}
         {save.error && <Banner tone="danger">{errorMessage(save.error)}</Banner>}
