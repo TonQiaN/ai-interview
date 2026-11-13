@@ -381,6 +381,7 @@ export const eventLabel: Record<string, string> = {
   answer_continued: "要求继续回答",
   events_dropped: "有事件没有记下来",
   face_count_changed: "画面里的人数变了",
+  frames_checked: "抽查录像画面",
 };
 
 export type EventSeverity = "info" | "notice" | "warning";
@@ -437,6 +438,27 @@ export function eventNote(event: EventLike): string | null {
   if (chars !== null) parts.push(`${chars} 个字`);
   const count = num(p.count);
   if (event.kind === "face_count_changed" && count !== null) parts.push(`变成 ${count} 个人`);
+  // 报告分析录像画面时记下来的：这一段画面里有几个人、一共几帧
+  const people = num(p.people);
+  if (event.kind === "face_count_changed" && people !== null) {
+    parts.push(people === 0 ? "没有人" : `${people} 个人`);
+    const frames = num(p.frames);
+    if (frames !== null) parts.push(`共 ${frames} 帧`);
+    const note = str(p.note);
+    if (note) parts.push(note);
+  }
+  if (event.kind === "frames_checked") {
+    const frames = num(p.frames);
+    if (frames !== null) parts.push(`抽了 ${frames} 帧`);
+    const flagged = num(p.flagged);
+    if (flagged) parts.push(`${flagged} 帧有情况`);
+    const unreadable = num(p.unreadable);
+    if (unreadable) parts.push(`${unreadable} 帧看不清`);
+  }
+  if (event.kind === "interview_finished") {
+    const reason = str(p.reason);
+    if (reason) parts.push(endReasonLabel[reason] ?? reason);
+  }
   if (Array.isArray(p.kinds)) {
     const names = p.kinds.map((k) => deviceKindLabel[String(k)] ?? String(k));
     if (names.length > 0) parts.push(names.join("、"));
@@ -455,6 +477,9 @@ export function eventNote(event: EventLike): string | null {
     }
     const kbps = num(p.uplink_kbps);
     if (kbps !== null) parts.push(`上行 ${Math.round(kbps)} kbps`);
+    // 无头浏览器一般是程序在操作，不是人坐在电脑前，值得提一句；整串 UA 不摆出来
+    if (str(p.user_agent)?.includes("HeadlessChrome"))
+      parts.push("浏览器是无头 Chrome，一般是自动化程序在用");
   }
   const browser = str(p.in_app_browser);
   if (browser) parts.push(`在${browser}内置浏览器里打开`);
@@ -490,6 +515,25 @@ export function foldEvents<T extends EventLike>(events: T[]): T[] {
 }
 
 /** 事件的一句话说明：种类加补充 */
+/**
+ * 报告里引用过程记录时，后端给的原话是「种类：内容」（内容是 JSON）。换成给人看的话。
+ * 认不出来就原样显示。
+ */
+export function eventEvidenceText(quote: string): string {
+  const match = /^([a-z_]+)(?:[：:]\s*([\s\S]*))?$/.exec(quote.trim());
+  const kind = match?.[1];
+  if (!kind || !(kind in eventLabel)) return quote;
+  let payload: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(match?.[2] ?? "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+      payload = parsed as Record<string, unknown>;
+  } catch {
+    // 内容读不出来，只说是哪一类事件
+  }
+  return eventText({ kind, payload });
+}
+
 export function eventText(event: EventLike): string {
   const name = eventLabel[event.kind] ?? event.kind;
   const note = eventNote(event);
@@ -650,4 +694,27 @@ export function elapsedMs(i: {
   if (!i.started_at || !i.ended_at) return null;
   const ms = Date.parse(i.ended_at) - Date.parse(i.started_at);
   return Number.isFinite(ms) && ms >= 0 ? ms : null;
+}
+
+/**
+ * 逐字稿里一句话名字后面的说明。面试官的话是照稿念的，不用标；
+ * 候选人的话是识别出来的：没识别出内容要说明白，面试后还没重新转写的标一下。
+ */
+export function turnNote(turn: {
+  speaker: string;
+  transcript_source: string;
+  text: string;
+}): string | null {
+  if (turn.speaker !== "candidate") return null;
+  if (turn.text.trim() === "") return "没有识别出说话内容";
+  return turn.transcript_source === "live" ? "实时转写，还没校对" : null;
+}
+
+/** 简历是整理成 Markdown 存的，报告引用原文时把标题、列表、加粗的记号去掉再给人看。 */
+export function resumeQuote(quote: string): string {
+  return quote
+    .split("\n")
+    .map((line) => line.replace(/^\s*(#{1,6}|[-*+])\s+/, "").replace(/\*\*(.+?)\*\*/g, "$1"))
+    .join("\n")
+    .trim();
 }
