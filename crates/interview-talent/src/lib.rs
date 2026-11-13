@@ -6,6 +6,7 @@
 //!   并整理成 [`ParsedResume`]。不写版式规则，版式的事交给大模型。
 //! - [`profile`]：根据简历生成 [`CandidateProfile`]（候选人画像）。
 //! - [`position`]：把一段岗位描述原文整理成岗位的各个字段。
+//! - [`raas`]：把 RAAS 里的岗位和候选人换成我们自己的结构。
 //! - [`model`]：存进 JSONB 列的三个结构（`resumes.parsed`、`candidates.profile`、`positions.extra`）。
 //!
 //! 简历是个人信息：带简历内容的类型的 `Debug` 输出只有规模，没有内容；报错信息里不带简历正文；
@@ -17,6 +18,7 @@ mod lenient;
 pub mod model;
 pub mod position;
 pub mod profile;
+pub mod raas;
 pub mod render;
 pub mod resume;
 mod settings;

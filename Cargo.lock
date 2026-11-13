@@ -805,6 +805,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "interview-llm",
+ "interview-raas",
  "serde",
  "serde_json",
  "tempfile",
