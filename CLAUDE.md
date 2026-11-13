@@ -25,6 +25,8 @@ scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息
 
 需要真模型或真 TTS 的测试标 `#[ignore]`，用 `cargo test -- --ignored` 手动跑。CI 不跑这些。
 
+真模型测试读 `DEEPSEEK_API_KEY`，会产生少量费用，云端容器里可以直接跑：`cargo test -p interview-llm --test live -- --ignored --nocapture`。
+
 ## 目录
 
 完整的归属表在 `docs/architecture/README.md`，这里是速查：
@@ -42,6 +44,7 @@ scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息
 改这些之前先问 Ryan，不要自己推翻：
 
 - 主体语言是 Rust。workspace 加 `crates/*`，edition 2024，最低 Rust 1.90。
+- 大模型用 DeepSeek 的 `deepseek-flash`（当前是 V4.1-Flash-1017，没有带日期的模型 ID）。业务代码只依赖 `interview-llm` 的 `ChatModel`，不要自己拼 HTTP 请求；测试用 `ScriptedModel`，不要在普通测试里联网。
 - TTS 只在 IndexTTS 2、IndexTTS 2.5、BreezeTTS2 三个里选，运行时必须能切换（`AI_INTERVIEW_TTS_ENGINE`）。目前默认 IndexTTS 2 克隆 R001 音色。不引入第四个 TTS，不用收费的云端语音接口。
 - 三个 TTS 的推理只能在 Apple Silicon 的 Mac 上跑。云端容器和 CI 只能跑不依赖模型的测试。
 - 充分用 GitHub：每件事有 issue，改动走分支和 PR，检查交给 Actions。
@@ -54,7 +57,7 @@ scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息
 - 中文写文档、注释和用户能看到的文案；代码标识符用英文。
 - 错误：库用 `thiserror`，二进制用 `anyhow`。不要对外部输入 `unwrap()`。
 - 不写 `unsafe`（workspace 里设了 forbid）。clippy 警告当错误处理，不要用 `#[allow]` 压掉，除非写明理由。
-- 云端容器的出网经过代理并重新签发证书：HTTP 客户端要信任系统证书（reqwest 用 `rustls-tls-native-roots` 或 native-tls），不要关 TLS 校验。
+- 云端容器的出网经过代理并重新签发证书：HTTP 客户端要信任系统证书（reqwest 0.13 默认的 rustls 就走系统证书校验，不要换成内置根证书的方案），不要关 TLS 校验。
 - JSON 字段用 `snake_case`；接口出错返回统一的错误结构（见 `docs/architecture/api.md`）。
 - 数据库查询用 sqlx 的运行时接口（`query_as` 等），不用要离线缓存的 `query!` 宏；要数据库的测试用 `#[sqlx::test]`。
 - 候选人的简历、录像、声音是个人信息：不进日志，不进测试数据，发给大模型的内容只带任务需要的部分。
