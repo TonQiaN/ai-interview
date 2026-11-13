@@ -207,6 +207,7 @@ HR 侧：
 | `POST /api/v1/room/uplink-probe` | 测上行网速用：请求体是一段字节（最多 1 MiB），服务端收完就丢，什么都不存。页面按花了多久算出网速，随设备检测结果一起上报 |
 | `POST /api/v1/room/start` | 开始面试，返回第一句话。已经开始的面试再调一次，返回当前该播的那一句（刷新后续面用）；已经结束的返回 `finish`。还没同意返回 409（`consent_required`） |
 | `POST /api/v1/room/advance` | 每播完一句调一次，要听回答的那一句等候选人答完再调（带起止毫秒、结束原因），返回下一步。逐题和实时对话都用它 |
+| `POST /api/v1/room/pause-check` | 实时对话里，候选人停顿了一下、还没到算答完的时长时问一次：这段话说完没有。返回 `{ "verdict": "done" \| "wait" \| "unknown" }`，见下面的「实时对话」 |
 | `GET /api/v1/room/utterances/{key}/audio` | 面试官语音，支持 Range。只能取当前这一句、`preload_audio_urls` 里的和已经播过的，别的返回 404。实时对话里现场生成的话带 `?part=N`（第几句） |
 | `POST /api/v1/room/events` | 批量上报过程事件 |
 | `PUT /api/v1/room/recordings/{track}/{segment}` | 登记一段录制（幂等）。`{segment}` 是浏览器生成的 UUID，请求体是 `{ "content_type", "start_ms" }` |
@@ -302,6 +303,12 @@ HR 侧：
 
 - **哪种方式在开始时定下来**。`POST /room/start` 时配置是实时对话、大模型和语音合成都接上了、语音识别能用，这场面试就按实时对话进行到底；少一样就按逐题进行。`GET /room/session` 的 `mode` 在开始前是按当时的条件估的，开始后是实际用的。
 - **判断「说完了」更快**。`answer.silence_sec` 取配置值和 `AI_INTERVIEW_ROOM_REALTIME_SILENCE_SEC`（默认 2 秒）里小的那个，`min_sec` 最多 1 秒。判断仍然在页面上做。
+- **停顿时先问一次**。实时对话的 `answer` 里多一项 `pause_check`：`{ "after_ms": 500, "done_silence_ms": 1000, "wait_silence_ms": 3000, "max_checks": 8 }`。候选人的声音停了 `after_ms` 毫秒，页面把手头的录像传上来，调 `POST /room/pause-check`，请求体是 `{ "seq", "utterance_key", "playback_end_ms", "answer_start_ms", "answer_end_ms" }`（和之后 `advance` 报这段回答时是同一组数）。服务端趁这会儿转写这半段话，让模型判断说完没有：
+  - `done`：说完了。这次停顿静音满 `done_silence_ms` 就算答完，不用等满 `silence_sec`。面试官怎么接这时已经在准备，之后 `advance` 报上来的是同一段话（起止时刻一样）就直接用，不再问一遍模型。
+  - `wait`：话没说完（半句话、在想）。这次停顿静音满 `wait_silence_ms` 才算答完。
+  - `unknown`：没有结论（没开这个功能、这一步不听回答、模型或转写没赶上、同一段回答问得太多）。按 `silence_sec` 算。接口报错、超时也当成这个。
+
+  候选人接着说了，上一次的结论和备好的回应都作废，下一次停顿重新问，一段回答里最多问 `max_checks` 次。这个接口不改变面试的进度，也不往对话记录里写东西，调不调、调几次都不影响 `advance` 的结果。逐题模式的 `answer` 里没有 `pause_check`，接口一律回 `unknown`。
 - **候选人答完之后没有固定的过渡语**。`advance` 会等到面试官的第一句准备好才返回，通常一到几秒：转写这段回答、模型决定怎么接、现场生成的话还要合成。最多等 30 秒，到时候返回 503（`answer_pending`），页面原样重试，后台接着准备。
 - **现场生成的话一句一拍**。模型的一段话（比如「明白。那个方案里你本人负责哪一块？」）按句子拆开，合成好一句发一句：短的接话先播，后面的问句在它播的时候合成。同一段话的几拍 `utterance.key` 相同（追问是 `<题目>.p<N>`，回应是 `<题目>.r<N>`），`utterance.text` 是各自那一句，`audio_url` 用 `?part=N` 区分，最后一拍 `expects_answer` 为真。`seq` 照常每拍加一。
 - **现场合成的语音只在轮到它时能取**（当前这一拍和 `preload_audio_urls` 里的）。合成失败或超过 20 秒的那一句 `audio_url` 是 null，页面显示文字。
@@ -319,7 +326,7 @@ HR 侧：
 
 延迟的实测数字见 `crates/interview-room/README.md` 的「实时对话」。
 
-以后可以做的优化（都还没做）：用 WebSocket 上传麦克风的 PCM，由服务端判断说完了没有（`interview-stt` 的 `TurnListener`，可以省掉大部分静音等待）；候选人插话时打断面试官（`BargeInDetector`）；面试官的语音边合成边播。这几项怎么接见 `docs/speech/realtime.md`。
+以后可以做的优化（都还没做）：用 WebSocket 上传麦克风的 PCM，由服务端听出说完了没有（`interview-stt` 的 `TurnListener`，现在是页面听出停顿、服务端让模型判断）；候选人插话时打断面试官（`BargeInDetector`）；面试官的语音边合成边播。这几项怎么接见 `docs/speech/realtime.md`。
 
 ### 过程事件
 

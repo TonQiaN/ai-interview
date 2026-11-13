@@ -20,6 +20,7 @@ import {
   eventNote,
   eventSeverity,
   eventText,
+  eventWhen,
   fileSize,
   foldEvents,
   speakerLabel,
@@ -291,9 +292,7 @@ export function ReplayPlayer({
               <ul className="adm-timeline">
                 {events.map((e) => (
                   <li key={e.id}>
-                    <span className="adm-turn__time">
-                      {typeof e.at_ms === "number" ? clock(e.at_ms) : "开始前"}
-                    </span>
+                    <span className="adm-turn__time">{eventWhen(e, events)}</span>
                     <span>
                       {typeof e.at_ms !== "number" ? (
                         (eventLabel[e.kind] ?? e.kind)
