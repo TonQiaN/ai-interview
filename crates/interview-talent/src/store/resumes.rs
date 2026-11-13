@@ -42,6 +42,8 @@ pub struct ResumeDetail {
     pub resume: Resume,
     /// 简历全文（Markdown）。解析完成后才有
     pub text_content: Option<String>,
+    /// 给面试出题和写报告用的简历文字：不带姓名、手机、邮箱、住址。解析完成后才有
+    pub interview_text: Option<String>,
     /// 结构化的简历。解析完成后才有
     #[sqlx(json(nullable))]
     pub parsed: Option<ParsedResume>,
@@ -115,7 +117,7 @@ pub async fn get(db: &PgPool, id: Uuid) -> sqlx::Result<Option<Resume>> {
 
 pub async fn get_detail(db: &PgPool, id: Uuid) -> sqlx::Result<Option<ResumeDetail>> {
     sqlx::query_as(&format!(
-        "SELECT {COLUMNS}, text_content, parsed FROM resumes WHERE id = $1"
+        "SELECT {COLUMNS}, text_content, interview_text, parsed FROM resumes WHERE id = $1"
     ))
     .bind(id)
     .fetch_optional(db)
@@ -124,7 +126,7 @@ pub async fn get_detail(db: &PgPool, id: Uuid) -> sqlx::Result<Option<ResumeDeta
 
 pub async fn get_record(db: &PgPool, id: Uuid) -> sqlx::Result<Option<ResumeRecord>> {
     sqlx::query_as(&format!(
-        "SELECT {COLUMNS}, text_content, parsed, blob_key FROM resumes WHERE id = $1"
+        "SELECT {COLUMNS}, text_content, interview_text, parsed, blob_key FROM resumes WHERE id = $1"
     ))
     .bind(id)
     .fetch_optional(db)
@@ -158,7 +160,7 @@ pub async fn primary_for(db: &PgPool, candidate_ids: &[Uuid]) -> sqlx::Result<Ve
 /// 一位候选人的主简历，带正文。
 pub async fn primary_detail(db: &PgPool, candidate_id: Uuid) -> sqlx::Result<Option<ResumeDetail>> {
     sqlx::query_as(&format!(
-        "SELECT {COLUMNS}, text_content, parsed FROM resumes
+        "SELECT {COLUMNS}, text_content, interview_text, parsed FROM resumes
          WHERE candidate_id = $1 AND is_primary"
     ))
     .bind(candidate_id)
@@ -201,12 +203,13 @@ pub async fn mark_done(
     sqlx::query(
         "UPDATE resumes
          SET parse_status = 'done', parse_error = NULL, parsed_at = now(),
-             text_content = $2, parsed = $3
+             text_content = $2, parsed = $3, interview_text = $4
          WHERE id = $1",
     )
     .bind(id)
     .bind(text)
     .bind(Json(parsed))
+    .bind(parsed.to_interview_text())
     .execute(db)
     .await?;
     Ok(())
@@ -239,7 +242,8 @@ pub async fn fail_if_unfinished(db: &PgPool, id: Uuid, reason: &str) -> sqlx::Re
 pub async fn reset_for_parse(conn: &mut PgConnection, id: Uuid) -> sqlx::Result<bool> {
     let done = sqlx::query(
         "UPDATE resumes
-         SET parse_status = 'pending', parse_error = NULL, parsed = NULL, parsed_at = NULL
+         SET parse_status = 'pending', parse_error = NULL, parsed = NULL, parsed_at = NULL,
+             interview_text = NULL
          WHERE id = $1",
     )
     .bind(id)
