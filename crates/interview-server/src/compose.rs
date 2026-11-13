@@ -128,7 +128,11 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
     // ── ⑤ 候选人面试间：interview-room ──
     let room = interview_room::Deps::new(ctx.clone(), interview_room::RoomConfig::from_env())
         .with_llm(shared.llm.clone())
-        .with_stt(shared.stt.clone());
+        .with_stt(shared.stt.clone())
+        .with_voice(Arc::new(RoomVoice {
+            ctx: ctx.clone(),
+            synth: shared.synth.clone(),
+        }));
     api = api.merge(interview_room::router(room.clone()));
     interview_room::register_tasks(&mut tasks, room);
 
@@ -152,6 +156,33 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
     ));
 
     Composed { api, tasks }
+}
+
+/// 实时对话里面试官现场说的话：用这场面试选的音色合成。
+struct RoomVoice {
+    ctx: AppContext,
+    synth: Arc<Synthesizer>,
+}
+
+#[async_trait]
+impl interview_room::LiveVoice for RoomVoice {
+    async fn speak(
+        &self,
+        voice_id: Option<interview_room::VoiceId>,
+        language: interview_room::Language,
+        text: &str,
+    ) -> Result<interview_room::SpokenAudio, String> {
+        let voice = interview_flow::voice::resolve(&self.ctx, voice_id, language).await?;
+        let spoken = self
+            .synth
+            .synthesize(&voice.request(text))
+            .await
+            .map_err(|err| err.to_string())?;
+        Ok(interview_room::SpokenAudio {
+            duration_ms: spoken.duration_ms(),
+            wav: spoken.wav,
+        })
+    }
 }
 
 /// 大模型有没有配置。只看有没有密钥，不真的调用（调用要花钱）。

@@ -70,7 +70,13 @@ function demo<T>(...args: string[]): T {
  * 造一场面试。答题静音时长默认 2 秒：假麦克风每 5 秒里说 2.5 秒、安静 2.5 秒，
  * 所以每道题大约 5 秒答完，测试跑得快。
  */
-export function seedInterview({ silenceSec = 2, minSec = 1, maxSec = 60 } = {}): SeededInterview {
+export function seedInterview({
+  silenceSec = 2,
+  minSec = 1,
+  maxSec = 60,
+  /** 配成实时对话。后端接了真的大模型和语音识别（E2E_REAL=1）时才真的按实时对话进行 */
+  realtime = false,
+} = {}): SeededInterview {
   return demo(
     "seed",
     "--silence-sec",
@@ -79,6 +85,8 @@ export function seedInterview({ silenceSec = 2, minSec = 1, maxSec = 60 } = {}):
     String(minSec),
     "--max-sec",
     String(maxSec),
+    "--realtime",
+    realtime ? "1" : "0",
   );
 }
 

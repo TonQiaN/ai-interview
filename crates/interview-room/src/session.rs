@@ -12,13 +12,13 @@ use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::Deps;
 use crate::access::{RoomAccess, RoomStage};
 use crate::conduct;
 use crate::config::RecordingSettings;
 use crate::consent::{CONSENT_VERSION, ConsentItem, consent_items};
 use crate::events::{self, NewEvent};
 use crate::protocol::{AnswerSettings, NextStep, RoomMode};
+use crate::{Deps, realtime};
 
 pub(crate) fn router() -> OpenApiRouter<Deps> {
     OpenApiRouter::new()
@@ -78,17 +78,38 @@ pub(crate) fn parse_config(interview_id: uuid::Uuid, raw: Value) -> InterviewCon
 
 /// 这场面试用哪种方式进行。
 ///
-/// 实时对话的通道还没接上，配置成实时对话的面试先按逐题进行：题目和语音是同一份，
-/// 只是追问用提前写好的，不现场生成。
-pub(crate) fn room_mode(_config: &InterviewConfig) -> RoomMode {
-    RoomMode::Scripted
+/// 已经开始的面试看它存着的进度是哪一种（开始的时候定下来，中途不变）；还没开始的看现在
+/// 能不能按实时对话进行。配置成实时对话但条件不够（没有大模型、语音识别或面试官的声音）的面试
+/// 按逐题进行：题目和语音是同一份，只是追问用提前写好的，不现场生成。
+async fn room_mode(deps: &Deps, config: &InterviewConfig, state: Option<&Value>) -> RoomMode {
+    let realtime = match state.filter(|state| !state.is_null()) {
+        Some(state) => realtime::is_state(state),
+        None => realtime::enabled(deps, config).await,
+    };
+    if realtime {
+        RoomMode::Realtime
+    } else {
+        RoomMode::Scripted
+    }
 }
 
-pub(crate) fn answer_settings(config: &InterviewConfig) -> AnswerSettings {
-    AnswerSettings {
-        silence_sec: config.answer.silence_sec,
-        max_sec: config.answer.max_sec,
-        min_sec: config.answer.min_sec,
+fn answer_settings(deps: &Deps, config: &InterviewConfig, mode: RoomMode) -> AnswerSettings {
+    let answer = &config.answer;
+    match mode {
+        RoomMode::Scripted => AnswerSettings {
+            silence_sec: answer.silence_sec,
+            max_sec: answer.max_sec,
+            min_sec: answer.min_sec,
+        },
+        RoomMode::Realtime => {
+            let window =
+                realtime::answer_window(deps, answer.silence_sec, answer.max_sec, answer.min_sec);
+            AnswerSettings {
+                silence_sec: window.silence_sec,
+                max_sec: window.max_sec,
+                min_sec: window.min_sec,
+            }
+        }
     }
 }
 
@@ -122,13 +143,14 @@ pub(crate) async fn consent_agreed(deps: &Deps, access: &RoomAccess) -> ApiResul
     )
 )]
 async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<Json<RoomSession>> {
-    let (raw_config, position_title, candidate_name, end_reason): (
+    let (raw_config, position_title, candidate_name, end_reason, runtime_state): (
         Value,
         String,
         String,
         Option<String>,
+        Option<Value>,
     ) = sqlx::query_as(
-        "SELECT i.config, p.title, c.name, i.end_reason
+        "SELECT i.config, p.title, c.name, i.end_reason, i.runtime_state
            FROM interviews i
            JOIN positions p ON p.id = i.position_id
            JOIN candidates c ON c.id = i.candidate_id
@@ -138,6 +160,7 @@ async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<
     .fetch_one(&deps.ctx.db)
     .await?;
     let config = parse_config(access.interview_id, raw_config);
+    let mode = room_mode(&deps, &config, runtime_state.as_ref()).await;
 
     let display: Option<(Value,)> = sqlx::query_as("SELECT value FROM app_settings WHERE key = $1")
         .bind(DISPLAY_SETTING_KEY)
@@ -165,7 +188,7 @@ async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<
         position_title,
         company_name,
         candidate_name,
-        mode: room_mode(&config),
+        mode,
         expected_duration_sec: config.target_duration_minutes.saturating_mul(60),
         camera_required: deps.config.camera_required,
         consent: ConsentState {
@@ -174,7 +197,7 @@ async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<
             agreed: consent_agreed(&deps, &access).await?,
         },
         recording: deps.config.recording.clone(),
-        answer: answer_settings(&config),
+        answer: answer_settings(&deps, &config, mode),
         elapsed_ms: access.elapsed_ms(Utc::now()),
         resume: conduct::resume_step(&deps, &access).await?,
         end_reason: end_reason.filter(|_| access.stage() == RoomStage::Finished),
