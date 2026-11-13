@@ -47,6 +47,8 @@ cargo run -p interview-engine --example simulate -- crates/interview-engine/fixt
 
 改了出题或判断回答的提示词，要用这两个命令实际跑一遍看结果，单元测试用的是假模型，测不出提示词的好坏。
 
+语音合成的真模型只能在 Mac 上跑，由 `tts/worker/worker.py` 提供（协议见 `tts/worker/README.md`）。后端通过 `AI_INTERVIEW_TTS_BACKEND=worker` 和 `AI_INTERVIEW_TTS_WORKER_URLS` 连它，默认是输出测试音的假后端。不用 Mac 也能测协议：`python3 tts/worker/worker.py --engines index2,index25,breeze2 --fake --port 7800` 起一个不加载模型的 worker，`cargo test -p interview-tts --test worker_backend` 会自己起一个（需要 python3）。改了协议，`worker.py`、`crates/interview-tts/src/worker.rs` 和 `tts/worker/README.md` 要一起改。
+
 语音识别的真模型（X-ASR，约 170 MB，CPU 就能跑，不花钱）默认不编进来，要用时加 `--features sherpa`：
 
 ```bash
