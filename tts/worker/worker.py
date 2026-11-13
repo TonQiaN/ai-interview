@@ -36,6 +36,9 @@ from pathlib import Path
 PROTOCOL_VERSION = 1
 MAX_REFERENCE_BYTES = 20 * 1024 * 1024
 MAX_REQUEST_BYTES = 256 * 1024
+# 请求里 diffusion_steps 允许的范围。后端那边的范围（crates/interview-tts/src/request.rs）要和这里一致
+MIN_DIFFUSION_STEPS = 4
+MAX_DIFFUSION_STEPS = 50
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 log = logging.getLogger("tts-worker")
@@ -187,6 +190,15 @@ class Worker:
         style = body.get("style") or {}
         if not isinstance(style, dict):
             raise invalid("style 要是 JSON 对象")
+        diffusion_steps = body.get("diffusion_steps")
+        if diffusion_steps is not None and (
+            isinstance(diffusion_steps, bool)
+            or not isinstance(diffusion_steps, int)
+            or not MIN_DIFFUSION_STEPS <= diffusion_steps <= MAX_DIFFUSION_STEPS
+        ):
+            raise invalid(
+                f"diffusion_steps 要是 {MIN_DIFFUSION_STEPS} 到 {MAX_DIFFUSION_STEPS} 之间的整数，不给就用引擎默认的"
+            )
         return engine, {
             "text": text,
             "language": body.get("language") or "zh",
@@ -197,6 +209,7 @@ class Worker:
             "emotion_strength": float(style.get("emotion_strength", 0.65)),
             "instruction": style.get("instruction"),
             "seed": int(body.get("seed", 42)),
+            "diffusion_steps": diffusion_steps,
         }
 
 
