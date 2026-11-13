@@ -26,9 +26,10 @@ impl Audio {
         if !bytes.len().is_multiple_of(2) {
             return Err(AudioError::OddPcmLength(bytes.len()));
         }
-        let samples = bytes
-            .chunks_exact(2)
-            .map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0)
+        let (pairs, _) = bytes.as_chunks::<2>();
+        let samples = pairs
+            .iter()
+            .map(|pair| f32::from(i16::from_le_bytes(*pair)) / 32768.0)
             .collect();
         Self::new(sample_rate, samples)
     }
