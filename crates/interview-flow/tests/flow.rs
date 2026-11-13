@@ -540,6 +540,7 @@ async fn changing_config_drops_the_plan_but_changing_voice_keeps_it(pool: PgPool
         .await;
     assert_eq!(response.status, StatusCode::OK, "{}", response.text());
     assert_eq!(response.json()["status"], "ready");
+    assert_eq!(response.json()["replan_reasons"], json!([]));
 
     // 只换音色：题目留着，语音要重新合成
     let voice_id: Uuid = sqlx::query_scalar(
@@ -559,6 +560,7 @@ async fn changing_config_drops_the_plan_but_changing_voice_keeps_it(pool: PgPool
     let detail = response.json();
     assert_eq!(detail["status"], "draft");
     assert_eq!(detail["has_plan"], true);
+    assert_eq!(detail["replan_reasons"], json!([]));
     assert_eq!(detail["synth"]["done"], 0);
     assert_eq!(detail["synth"]["total"], total);
 
@@ -567,7 +569,7 @@ async fn changing_config_drops_the_plan_but_changing_voice_keeps_it(pool: PgPool
     assert_eq!(detail["status"], "ready", "{detail}");
     assert_eq!(again.tts.calls(), total);
 
-    // 改配置：题目作废
+    // 改了写进题目里的配置：题目作废
     let mut changed = config();
     changed["target_duration_minutes"] = json!(40);
     let response = h
@@ -580,11 +582,23 @@ async fn changing_config_drops_the_plan_but_changing_voice_keeps_it(pool: PgPool
     let detail = response.json();
     assert_eq!(detail["status"], "draft");
     assert_eq!(detail["has_plan"], false);
+    assert_eq!(detail["replan_reasons"], json!(["target_duration_minutes"]));
     assert_eq!(detail["synth"]["total"], 0);
     assert_eq!(detail["config"]["target_duration_minutes"], 40);
     let plan = h.get(&format!("/api/v1/interviews/{id}/plan")).await;
     assert_eq!(plan.status, StatusCode::NOT_FOUND);
     assert_eq!(error_code(&plan), "plan_not_ready");
+
+    // 没有题目的时候再改，谈不上重新出题
+    changed["target_duration_minutes"] = json!(30);
+    let response = h
+        .patch(
+            &format!("/api/v1/interviews/{id}"),
+            json!({ "config": changed }),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    assert_eq!(response.json()["replan_reasons"], json!([]));
 
     let response = h
         .patch(
@@ -600,6 +614,115 @@ async fn changing_config_drops_the_plan_but_changing_voice_keeps_it(pool: PgPool
         )
         .await;
     assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn config_changes_that_leave_the_questions_alone_keep_the_plan(pool: PgPool) {
+    let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;
+    let id = h.create(config()).await;
+    assert_eq!(h.prepare(&id).await["status"], "ready");
+    let before = h.utterances(&id).await;
+    let plan_before = h.get(&format!("/api/v1/interviews/{id}/plan")).await.json();
+    assert_eq!(plan_before["questions"][1]["follow_ups"][0]["key"], "q2.f1");
+
+    // 面试中才用到的设置：题目和语音原样留着，不用重新准备
+    let mut changed = config();
+    changed["answer"] = json!({ "min_sec": 5 });
+    changed["early_stop"] = json!({ "enabled": false });
+    changed["live_thinking"] = json!({ "enabled": true, "effort": "low" });
+    let response = h
+        .patch(
+            &format!("/api/v1/interviews/{id}"),
+            json!({ "config": changed }),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let detail = response.json();
+    assert_eq!(detail["status"], "ready", "{detail}");
+    assert_eq!(detail["has_plan"], true);
+    assert_eq!(detail["replan_reasons"], json!([]));
+    assert_eq!(detail["config"]["answer"]["min_sec"], 5);
+    assert_eq!(detail["config"]["live_thinking"]["enabled"], true);
+    assert_eq!(detail["synth"]["done"], before.len());
+    assert_eq!(h.utterances(&id).await, before);
+    let plan = h.get(&format!("/api/v1/interviews/{id}/plan")).await.json();
+    assert_eq!(plan, plan_before);
+
+    // 单题最长时间调小、不许追问：题目还能用，计划跟着收拾一下，多出来的那句追问去掉
+    changed["answer"] = json!({ "min_sec": 5, "max_sec": 90 });
+    changed["follow_ups"] = json!({ "max_per_question": 0 });
+    let response = h
+        .patch(
+            &format!("/api/v1/interviews/{id}"),
+            json!({ "config": changed }),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let detail = response.json();
+    assert_eq!(detail["status"], "ready", "{detail}");
+    assert_eq!(detail["replan_reasons"], json!([]));
+    let plan = h.get(&format!("/api/v1/interviews/{id}/plan")).await.json();
+    assert_eq!(plan["questions"][1]["follow_ups"], json!([]));
+    assert_eq!(plan["questions"][1]["expected_answer_sec"], 90);
+    assert_eq!(
+        plan["questions"][1]["text"],
+        plan_before["questions"][1]["text"]
+    );
+    let after = h.utterances(&id).await;
+    assert_eq!(after.len(), before.len() - 1);
+    assert!(after.iter().all(|line| line["key"] != "q2.f1"));
+    // 留下来的话语音都还在，不用重新合成
+    assert_eq!(detail["synth"]["done"], after.len());
+    assert_eq!(detail["synth"]["total"], after.len());
+    assert_eq!(h.tts.calls(), before.len());
+
+    // 追问上限调回去：要多写追问，得重新出题
+    changed["follow_ups"] = json!({ "max_per_question": 1 });
+    let response = h
+        .patch(
+            &format!("/api/v1/interviews/{id}"),
+            json!({ "config": changed }),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let detail = response.json();
+    assert_eq!(detail["status"], "draft");
+    assert_eq!(detail["has_plan"], false);
+    assert_eq!(
+        detail["replan_reasons"],
+        json!(["follow_ups.max_per_question"])
+    );
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn changing_the_resume_drops_the_plan(pool: PgPool) {
+    let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;
+    let id = h.create(config()).await;
+    assert_eq!(h.prepare(&id).await["status"], "ready");
+
+    let resume_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO resumes (candidate_id, text_content, interview_text, parse_status) \
+         VALUES ($1, '五年后端开发经验。', '五年后端开发经验。', 'done') RETURNING id",
+    )
+    .bind(h.candidate_id)
+    .fetch_one(&h.ctx.db)
+    .await
+    .unwrap();
+    // 顺手改一项不影响题目的配置：原因里只有简历
+    let mut changed = config();
+    changed["early_stop"] = json!({ "enabled": false });
+    let response = h
+        .patch(
+            &format!("/api/v1/interviews/{id}"),
+            json!({ "resume_id": resume_id, "config": changed }),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let detail = response.json();
+    assert_eq!(detail["status"], "draft");
+    assert_eq!(detail["has_plan"], false);
+    assert_eq!(detail["replan_reasons"], json!(["resume_id"]));
+    assert_eq!(detail["synth"]["total"], 0);
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]

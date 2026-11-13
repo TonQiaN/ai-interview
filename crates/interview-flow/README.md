@@ -22,11 +22,13 @@
 draft ──prepare──▶ preparing ──成功──▶ ready ──（面试间线发链接）──▶ invited ──▶ …
   ▲                    │
   │                    └──失败──▶ prepare_failed ──prepare──▶ preparing
-  └── ready / prepare_failed 时改了配置、简历或音色
+  └── ready / prepare_failed 时换了简历或音色，或者改了写进题目里的配置
 ```
 
 - 只有 `draft`、`prepare_failed`、`ready` 能改。
-- 改配置或简历：题目作废。只换音色：题目保留，只重新合成。
+- 换简历，或者改了写进题目里的配置（时长、面试官、考察要求等）：题目作废，回到 `draft`，接口返回的 `replan_reasons` 里是导致重新出题的字段。
+- 改的配置不影响题目（早停、思考模式、单题最长时间、把追问上限调小等）：题目和语音都留着，状态不变。计划跟着新配置收拾一下（`InterviewPlan::conform_to`：去掉多出来的追问、压短预期回答时间），去掉的追问对应的那句话一并删掉。哪些配置算哪一类由引擎判断（`InterviewConfig::replan_reasons`）。
+- 只换音色：题目保留，回到 `draft`，只重新合成。
 - 准备任务可以重复执行：已经有题目就不重新出，只合成还没有音频的句子。
 - 要 HR 处理的失败（没配大模型、音色不能用、某几句合成失败）不重试，原因写在 `prepare_error`；简历还在解析、数据库抖动这类交给任务队列重试，重试用完才算失败。
 

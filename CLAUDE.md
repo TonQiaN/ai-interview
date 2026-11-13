@@ -71,7 +71,7 @@ export DATABASE_URL=$(scripts/dev-db.sh url)
 cargo test -p interview-server --features sherpa --test live -- --ignored --nocapture
 ```
 
-它会打印题目、每一步等了多久、转写出来的回答、报告结论和大模型的花费。在 Mac 上再设 `AI_INTERVIEW_TTS_BACKEND=worker`，就连真的语音合成一起跑。
+它会打印题目、每一步等了多久、转写出来的回答、报告结论和大模型的花费。示例录音的内容和题目无关，模型听到三题答非所问就会提前结束面试，这是正常的。在 Mac 上再设 `AI_INTERVIEW_TTS_BACKEND=worker`，就连真的语音合成一起跑。
 
 改了模块之间的约定（任务名和内容、面试状态怎么流转、别的模块要读的表），跑一遍端到端测试 `crates/interview-server/tests/e2e.rs`，流程变了就一起改它。两个测试共用的部分在 `crates/interview-server/tests/common/`。
 

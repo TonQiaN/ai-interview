@@ -271,6 +271,8 @@ let mut turn = detector.into_turn(TurnConfig::default());
 
 实时字幕是把还没说完的那一段从头再识别一遍得到的（X-ASR 不是流式模型），所以话越长每次越慢。VAD 最长 15 秒切一段，一段内重新识别的总量有上限。
 
+加上大模型和语音合成以后整条链路要多久，见 [realtime.md](realtime.md)。
+
 `TurnListener` 开的会话会出实时字幕；`Transcriber::start_session` 开的不出，CPU 用得少，录像现场转写用的是后者。要自己开带实时字幕的会话用 `Transcriber::start_streaming_session`，没说完的那一段从 `TranscribeSession::partial()` 取。
 
 ## 重现选型测试

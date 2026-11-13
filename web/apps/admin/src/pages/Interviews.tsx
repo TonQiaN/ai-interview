@@ -31,7 +31,7 @@ export function InterviewsPage() {
   const status = statuses.find((s) => s === params.get("status")) ?? "";
   const q = params.get("q") ?? "";
   const page = Number(params.get("page") ?? 1) || 1;
-  const interviews = useInterviews({ status, q, page, page_size: 20 });
+  const interviews = useInterviews({ status: status || undefined, q, page, page_size: 20 });
   const filtered = Boolean(q || status);
 
   function update(patch: Record<string, string>) {

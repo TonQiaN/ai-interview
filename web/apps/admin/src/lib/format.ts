@@ -9,6 +9,7 @@ import type {
   Effort,
   Emotion,
   FocusVerdict,
+  IntegritySignal,
   InterviewerStyle,
   InterviewMode,
   InterviewStage,
@@ -285,12 +286,13 @@ export const claimVerdictTone: Record<ClaimVerdict, Tone> = {
   contradicted: "danger",
 };
 
-export const signalKindLabel: Record<string, string> = {
+export const signalKindLabel: Record<IntegritySignal["kind"], string> = {
   scripted_answer: "像在念稿",
   timing_pattern: "答题节奏异常",
   depth_mismatch: "深浅不一致",
   page_event: "页面操作",
   third_party: "疑似有其他人",
+  video_frame: "录像画面",
   identity: "身份存疑",
   manipulation: "试图影响面试官",
   other: "其他",
