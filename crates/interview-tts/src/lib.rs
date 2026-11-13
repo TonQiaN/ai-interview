@@ -10,21 +10,27 @@
 //! 2. 交给 [`Synthesizer`]。它检查请求、查缓存、把长文切成引擎能接受的小段、调后端、检查结果、写缓存。
 //!    面试准备阶段用 [`Synthesizer::synthesize_batch`] 一次合成所有题目，实时对话用
 //!    [`Synthesizer::synthesize_stream`]。
-//! 3. 后端实现 [`TtsBackend`]。三个引擎的推理只能在 Apple Silicon 的 Mac 上跑，
-//!    云端和 CI 用 [`FakeBackend`]（输出测试音）。
+//! 3. 后端实现 [`TtsBackend`]，用 [`TtsConfig`] 从环境变量选。三个引擎的推理只能在 Apple Silicon 的 Mac 上跑：
+//!    [`WorkerBackend`] 通过 HTTP 调 Mac 上常驻的 worker（`tts/worker/`），云端和 CI 用 [`FakeBackend`]（输出测试音）。
 //!
 //! 参考录音是真人的声音：[`ReferenceAudio`] 的调试输出不带音频内容，日志里只出现它的哈希。
 
 mod backend;
 mod cache;
+mod config;
 mod engine;
 mod fake;
 mod request;
 mod segment;
 mod synthesizer;
+mod worker;
 
 pub use backend::{AudioStream, EngineStatus, TtsBackend, TtsError};
 pub use cache::{AudioCache, CacheError, DirCache, MemoryCache, cache_blob_key};
+pub use config::{
+    BACKEND_ENV_VAR, TtsBackendKind, TtsConfig, TtsConfigError, WORKER_TOKEN_ENV_VAR,
+    WORKER_URLS_ENV_VAR, backend_from_env,
+};
 pub use engine::{ENGINE_ENV_VAR, EngineId, EngineSpec, Language, UnknownEngine};
 pub use fake::FakeBackend;
 pub use request::{
@@ -33,3 +39,4 @@ pub use request::{
 };
 pub use segment::split_text;
 pub use synthesizer::{BatchItem, BatchOutcome, Synthesized, Synthesizer};
+pub use worker::{WorkerBackend, WorkerUrlError};

@@ -14,32 +14,14 @@ use interview_raas::{
 use crate::model::{PositionExtra, RaasPositionRef};
 use crate::position::PositionDraft;
 use crate::resume::normalize_phone;
-
-/// 岗位在我们这边的状态。和 `positions.status` 的取值一致。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImportedPositionStatus {
-    Open,
-    Paused,
-    Closed,
-}
-
-impl ImportedPositionStatus {
-    /// 写进 `positions.status` 的值。
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Paused => "paused",
-            Self::Closed => "closed",
-        }
-    }
-}
+use crate::store::positions::PositionStatus;
 
 /// 从 RAAS 导入的一个岗位。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedPosition {
     /// RAAS 里的岗位编号，存 `positions.external_ref`。
     pub external_ref: String,
-    pub status: ImportedPositionStatus,
+    pub status: PositionStatus,
     pub draft: PositionDraft,
 }
 
@@ -83,7 +65,8 @@ pub fn position_from_raas(detail: &JobPostingDetail) -> ImportedPosition {
             .unwrap_or_else(|| "未命名岗位".to_owned()),
         department: summary.department.clone(),
         location: (!summary.cities.is_empty()).then(|| summary.cities.join("、")),
-        employment_type: summary.recruitment_type.clone(),
+        // RAAS 没有用工形式这一项。它的「招聘类型」（社招、校招）是另一回事，不能填在这里
+        employment_type: None,
         seniority: summary.expected_level.clone(),
         description: detail.responsibility.clone().unwrap_or_default(),
         requirements,
@@ -101,10 +84,10 @@ pub fn position_from_raas(detail: &JobPostingDetail) -> ImportedPosition {
 }
 
 /// RAAS 的岗位状态对应到我们的三种。拿不准的都算开放：导入进来就是为了安排面试。
-fn position_status(
+pub(crate) fn position_status(
     publish_status: Option<&str>,
     requirement_status: Option<&str>,
-) -> ImportedPositionStatus {
+) -> PositionStatus {
     let is = |wanted: &[&str]| {
         [publish_status, requirement_status]
             .into_iter()
@@ -112,11 +95,11 @@ fn position_status(
             .any(|status| wanted.contains(&status))
     };
     if is(&["closed", "terminated"]) {
-        ImportedPositionStatus::Closed
+        PositionStatus::Closed
     } else if is(&["paused", "suspended"]) {
-        ImportedPositionStatus::Paused
+        PositionStatus::Paused
     } else {
-        ImportedPositionStatus::Open
+        PositionStatus::Open
     }
 }
 
@@ -175,6 +158,9 @@ impl std::fmt::Debug for ImportedCandidate {
     }
 }
 
+/// RAAS 里没填姓名的候选人，先用这个名字建档，等简历解析出姓名再换掉。
+pub(crate) const UNNAMED_CANDIDATE: &str = "未填写姓名";
+
 /// 把 RAAS 的候选人详情换成我们建档要的基本信息。
 pub fn candidate_from_raas(detail: &CandidateDetail) -> ImportedCandidate {
     ImportedCandidate {
@@ -182,7 +168,7 @@ pub fn candidate_from_raas(detail: &CandidateDetail) -> ImportedCandidate {
         name: detail
             .name
             .clone()
-            .unwrap_or_else(|| "未填写姓名".to_owned()),
+            .unwrap_or_else(|| UNNAMED_CANDIDATE.to_owned()),
         email: detail.email.as_ref().map(|email| email.to_lowercase()),
         phone: detail.mobile.as_deref().and_then(normalize_phone),
         current_title: detail.current_title.clone(),
@@ -286,6 +272,22 @@ pub fn resume_markdown(detail: &CandidateDetail, record: Option<&ResumeRecord>) 
     }
 
     out.trim_end().to_owned()
+}
+
+/// RAAS 的解析结果里有没有值得拼成简历的内容。只有姓名和联系方式的不算。
+pub fn has_resume_content(detail: &CandidateDetail, record: Option<&ResumeRecord>) -> bool {
+    let from_detail = !detail.work_experience.is_empty()
+        || !detail.education_history.is_empty()
+        || !detail.project_experience.is_empty()
+        || !detail.skills.is_empty();
+    let from_record = record.is_some_and(|record| {
+        record.summary.is_some()
+            || !record.work_history.is_empty()
+            || !record.education_history.is_empty()
+            || !record.project_history.is_empty()
+            || !record.skills_extracted.is_empty()
+    });
+    from_detail || from_record
 }
 
 fn push_field(fields: &mut Vec<String>, label: &str, value: Option<&str>) {
@@ -428,12 +430,14 @@ mod tests {
         let imported = position_from_raas(&posting());
 
         assert_eq!(imported.external_ref, "jp-001");
-        assert_eq!(imported.status, ImportedPositionStatus::Open);
+        assert_eq!(imported.status, PositionStatus::Open);
         let draft = imported.draft;
         assert_eq!(draft.title, "高级后端工程师");
         assert_eq!(draft.department.as_deref(), Some("支付平台部"));
         assert_eq!(draft.location.as_deref(), Some("杭州、上海"));
         assert_eq!(draft.seniority.as_deref(), Some("P6"));
+        // 「社招」是招聘类型，不是用工形式（全职、实习这些），不能填进用工形式里
+        assert_eq!(draft.employment_type, None);
         assert_eq!(draft.description, "负责清结算核心服务。");
         assert_eq!(
             draft.requirements,
@@ -463,21 +467,21 @@ mod tests {
     fn maps_raas_statuses() {
         assert_eq!(
             position_status(Some("distributed"), Some("recruiting")),
-            ImportedPositionStatus::Open
+            PositionStatus::Open
         );
         assert_eq!(
             position_status(Some("paused"), Some("recruiting")),
-            ImportedPositionStatus::Paused
+            PositionStatus::Paused
         );
         assert_eq!(
             position_status(Some("distributed"), Some("suspended")),
-            ImportedPositionStatus::Paused
+            PositionStatus::Paused
         );
         assert_eq!(
             position_status(Some("paused"), Some("closed")),
-            ImportedPositionStatus::Closed
+            PositionStatus::Closed
         );
-        assert_eq!(position_status(None, None), ImportedPositionStatus::Open);
+        assert_eq!(position_status(None, None), PositionStatus::Open);
     }
 
     fn candidate() -> CandidateDetail {

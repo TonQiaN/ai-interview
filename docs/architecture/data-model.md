@@ -152,4 +152,4 @@ BlobStore 用字符串键，全小写，斜杠分层。库里只存键。约定�
 | 简历文字 | `resumes.interview_text`。`parse_status = 'done'` 之后才有；候选人没有简历或还没解析完时为空，出题只按岗位来 |
 | 画像 | `candidates.profile`（`interview_talent::CandidateProfile`），`interview_focus` 是建议追问的点；`profile_updated_at` 为空表示还没生成 |
 
-发给大模型的简历一律用 `interview_text`，不要用 `text_content`：`text_content` 是原样的全文，里面有姓名、手机、邮箱、住址。
+发给大模型的简历一律用 `interview_text`，不要用 `text_content`：`text_content` 是原样的全文，里面有姓名、手机、邮箱、住址。`interview_text` 里候选人自己写在自我介绍、项目描述里的姓名、手机、邮箱也会被换成「候选人」和「（已隐去）」，所以称呼候选人要用 `candidates.name`，不要指望从简历文字里读到。

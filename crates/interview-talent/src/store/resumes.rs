@@ -170,7 +170,7 @@ pub async fn primary_detail(db: &PgPool, candidate_id: Uuid) -> sqlx::Result<Opt
 
 /// 这位候选人是不是已经传过内容一模一样的文件。
 pub async fn find_by_sha256(
-    db: &PgPool,
+    db: impl sqlx::PgExecutor<'_>,
     candidate_id: Uuid,
     sha256: &str,
 ) -> sqlx::Result<Option<Resume>> {
@@ -236,6 +236,16 @@ pub async fn fail_if_unfinished(db: &PgPool, id: Uuid, reason: &str) -> sqlx::Re
     .execute(db)
     .await?;
     Ok(())
+}
+
+/// 这份简历是不是在等着解析。
+pub async fn is_pending(db: &PgPool, id: Uuid) -> sqlx::Result<bool> {
+    let pending: Option<bool> =
+        sqlx::query_scalar("SELECT parse_status = 'pending' FROM resumes WHERE id = $1")
+            .bind(id)
+            .fetch_optional(db)
+            .await?;
+    Ok(pending.unwrap_or(false))
 }
 
 /// 准备重新解析：状态回到排队中，丢掉上次的结果。返回 `false` 表示简历不存在。

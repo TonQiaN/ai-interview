@@ -17,6 +17,19 @@ pub struct TestApp {
     pub router: Router,
 }
 
+impl TestApp {
+    /// 同一个应用（同一个数据库、同一批存好的文件）配上大模型之后的样子。
+    pub async fn with_model(&self, model: Arc<dyn ChatModel>) -> TestApp {
+        let admin = testing::create_admin(&self.ctx).await;
+        let deps = Deps::new(self.ctx.clone(), Some(model));
+        let (router, _api) = interview_talent::router(deps).split_for_parts();
+        TestApp {
+            ctx: self.ctx.clone(),
+            router: testing::as_admin(router, admin),
+        }
+    }
+}
+
 /// 不带大模型的应用。
 pub async fn app(pool: PgPool) -> TestApp {
     build(pool, None).await
@@ -31,6 +44,26 @@ async fn build(pool: PgPool, llm: Option<Arc<dyn ChatModel>>) -> TestApp {
     let ctx = testing::test_context(pool);
     let admin = testing::create_admin(&ctx).await;
     let (router, _api) = interview_talent::router(Deps::new(ctx.clone(), llm)).split_for_parts();
+    TestApp {
+        ctx,
+        router: testing::as_admin(router, admin),
+    }
+}
+
+/// 接了一个 RAAS（测试里是本地的假服务器）的应用。账号是随便写的。
+pub async fn app_with_raas(
+    pool: PgPool,
+    raas_url: &str,
+    llm: Option<Arc<dyn ChatModel>>,
+) -> TestApp {
+    let ctx = testing::test_context(pool);
+    let admin = testing::create_admin(&ctx).await;
+    let raas = interview_raas::RaasClient::new(interview_raas::RaasConfig::new(
+        raas_url, "tester", "secret",
+    ))
+    .expect("客户端应能创建");
+    let deps = Deps::new(ctx.clone(), llm).with_raas(Arc::new(raas));
+    let (router, _api) = interview_talent::router(deps).split_for_parts();
     TestApp {
         ctx,
         router: testing::as_admin(router, admin),

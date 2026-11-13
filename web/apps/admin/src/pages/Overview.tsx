@@ -1,9 +1,10 @@
-import { Badge, Button, Card, CardBody, CardHeader, Hero, Stat } from "@ai-interview/ui";
-import { ArrowRight, CircleAlert, CircleCheck, Plus } from "lucide-react";
+import { Button, Card, CardBody, CardHeader, Hero, Stat } from "@ai-interview/ui";
+import { ArrowRight, Plus } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { useInterviews, useMe, useSystemStatus } from "../api/queries";
 import type { InterviewSummary } from "../api/types";
 import { Empty, Person, QueryView, RecommendationBadge, StatusBadge } from "../components/common";
+import { SystemStatusList } from "../components/SystemStatusList";
 import { relativeTime } from "../lib/format";
 
 /** 需要 HR 动手的面试，和该做的事 */
@@ -121,34 +122,7 @@ export function OverviewPage() {
                   />
                   <CardBody>
                     <QueryView query={system}>
-                      {({ components }) => (
-                        <ul className="adm-list">
-                          {components.map((c) => (
-                            <li key={c.key} className="adm-item">
-                              {c.ok ? (
-                                <CircleCheck
-                                  aria-hidden="true"
-                                  size={18}
-                                  color="var(--oil-success)"
-                                />
-                              ) : (
-                                <CircleAlert
-                                  aria-hidden="true"
-                                  size={18}
-                                  color="var(--oil-danger)"
-                                />
-                              )}
-                              <div className="adm-item__main">
-                                <div>{c.name}</div>
-                                {c.detail && <div className="adm-item__sub">{c.detail}</div>}
-                              </div>
-                              <Badge tone={c.ok ? "success" : "danger"} plain>
-                                {c.ok ? "正常" : "有问题"}
-                              </Badge>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
+                      {({ components }) => <SystemStatusList components={components} />}
                     </QueryView>
                   </CardBody>
                 </Card>

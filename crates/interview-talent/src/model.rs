@@ -76,7 +76,24 @@ impl ParsedResume {
     ///
     /// 只带和岗位能力有关的内容：经历、项目、教育、技能。姓名、手机、邮箱、现居地、期望薪资
     /// 都不带，这些出题用不上，不该发给大模型。存在 `resumes.interview_text`。
+    ///
+    /// 个人简介、工作内容、自我评价这些是照抄原文的，候选人可能在里面写了自己的名字和联系方式，
+    /// 所以拼好之后再把姓名、手机号、邮箱从整段文字里去掉。
     pub fn to_interview_text(&self) -> String {
+        let mut text = self.interview_sections();
+        if let Some(email) = self.email.as_deref().filter(|email| email.len() >= 3) {
+            text = redact_ignoring_case(&text, email);
+        }
+        if let Some(phone) = &self.phone {
+            text = redact_number(&text, phone);
+        }
+        if let Some(name) = self.name.as_deref() {
+            text = redact_name(&text, name);
+        }
+        text
+    }
+
+    fn interview_sections(&self) -> String {
         let mut out = String::new();
         let overview: Vec<String> = [
             self.current_title.clone(),
@@ -163,6 +180,108 @@ impl ParsedResume {
         }
         out.trim_end().to_owned()
     }
+}
+
+/// 去掉的联系方式换成这个。
+const REDACTED: &str = "（已隐去）";
+/// 去掉的姓名换成这个，句子还读得通。
+const REDACTED_NAME: &str = "候选人";
+
+/// 去掉一段文字里的某个词，不分大小写（邮箱用）。
+fn redact_ignoring_case(text: &str, word: &str) -> String {
+    // 只转 ASCII 的大小写，字节位置不变，可以拿小写里找到的位置去切原文
+    let haystack = text.to_ascii_lowercase();
+    let needle = word.to_ascii_lowercase();
+    let mut out = String::with_capacity(text.len());
+    let mut rest = 0;
+    while let Some(found) = haystack[rest..].find(&needle) {
+        let start = rest + found;
+        out.push_str(&text[rest..start]);
+        out.push_str(REDACTED);
+        rest = start + needle.len();
+    }
+    out.push_str(&text[rest..]);
+    out
+}
+
+/// 去掉一段文字里的某个号码。号码中间夹着空格、横线、括号（`138-0000-1234`）也认得出来。
+fn redact_number(text: &str, number: &str) -> String {
+    let digits: String = number.chars().filter(char::is_ascii_digit).collect();
+    // 带国家码的手机号，文字里多半写的是不带国家码的
+    let core = match digits.strip_prefix("86") {
+        Some(rest) if digits.len() > 11 => rest,
+        _ => digits.as_str(),
+    };
+    // 太短的数字串容易和年份、数量撞上，不处理
+    if core.len() < 7 {
+        return text.to_owned();
+    }
+
+    // 把文字里的数字按「串」收起来：两个数字之间最多隔两个分隔符，算同一串
+    let mut runs: Vec<Vec<(usize, char)>> = Vec::new();
+    let mut gap: Option<usize> = None;
+    for (index, ch) in text.char_indices() {
+        if ch.is_ascii_digit() {
+            match (gap, runs.last_mut()) {
+                (Some(gap), Some(run)) if gap <= 2 => run.push((index, ch)),
+                _ => runs.push(vec![(index, ch)]),
+            }
+            gap = Some(0);
+        } else if matches!(ch, ' ' | '-' | '.' | '(' | ')' | '\u{a0}') {
+            gap = gap.map(|gap| gap + 1);
+        } else {
+            gap = None;
+        }
+    }
+
+    let mut out = String::with_capacity(text.len());
+    let mut rest = 0;
+    for run in runs {
+        let run_digits: String = run.iter().map(|(_, digit)| *digit).collect();
+        let mut from = 0;
+        while let Some(found) = run_digits[from..].find(core) {
+            let first = from + found;
+            let last = first + core.len() - 1;
+            // 数字都是单字节的，最后一个数字的位置加一就是这段的结尾
+            let (start, end) = (run[first].0, run[last].0 + 1);
+            out.push_str(&text[rest..start]);
+            out.push_str(REDACTED);
+            rest = end;
+            from = last + 1;
+        }
+    }
+    out.push_str(&text[rest..]);
+    out
+}
+
+/// 去掉一段文字里的姓名。
+fn redact_name(text: &str, name: &str) -> String {
+    let name = name.trim();
+    if name.chars().count() < 2 {
+        return text.to_owned();
+    }
+    if !name.is_ascii() {
+        return text.replace(name, REDACTED_NAME);
+    }
+    // 英文名只在它是一个完整的词时才去掉，免得把 Linux 里的 Li 也换了
+    let is_word_char = |ch: char| ch.is_ascii_alphanumeric();
+    let mut out = String::with_capacity(text.len());
+    let mut rest = 0;
+    let mut from = 0;
+    while let Some(found) = text[from..].find(name) {
+        let start = from + found;
+        let end = start + name.len();
+        let before = text[..start].chars().next_back().is_some_and(is_word_char);
+        let after = text[end..].chars().next().is_some_and(is_word_char);
+        if !before && !after {
+            out.push_str(&text[rest..start]);
+            out.push_str(REDACTED_NAME);
+            rest = end;
+        }
+        from = end;
+    }
+    out.push_str(&text[rest..]);
+    out
 }
 
 fn push_section(out: &mut String, title: &str, body: &str) {
@@ -506,6 +625,59 @@ mod tests {
             assert!(!text.contains(secret), "不该带 {secret}");
         }
         assert_eq!(ParsedResume::default().to_interview_text(), "");
+    }
+
+    #[test]
+    fn interview_text_hides_identity_written_inside_free_text() {
+        let resume = ParsedResume {
+            name: Some("林知夏".to_owned()),
+            phone: Some("+8613800001234".to_owned()),
+            email: Some("linzhixia@example.com".to_owned()),
+            summary: Some(
+                "我是林知夏，8 年后端经验。联系我：LinZhixia@Example.com，电话 138-0000-1234。"
+                    .to_owned(),
+            ),
+            work_experience: vec![WorkExperience {
+                company: Some("杭州示例云科技有限公司".to_owned()),
+                description: Some(
+                    "林知夏负责结算链路，2021 到 2023 年处理了 13800001234 笔以外的对账差异。"
+                        .to_owned(),
+                ),
+                ..WorkExperience::default()
+            }],
+            self_evaluation: Some("手机（微信同号）：138 0000 1234，随时联系。".to_owned()),
+            ..ParsedResume::default()
+        };
+        let text = resume.to_interview_text();
+        for secret in [
+            "林知夏",
+            "13800001234",
+            "138-0000-1234",
+            "138 0000 1234",
+            "example.com",
+            "Example.com",
+        ] {
+            assert!(!text.contains(secret), "不该带 {secret}：\n{text}");
+        }
+        // 其余内容原样保留
+        assert!(text.contains("8 年后端经验"));
+        assert!(text.contains("候选人负责结算链路，2021 到 2023 年"));
+        assert!(text.contains("随时联系"));
+    }
+
+    #[test]
+    fn redacting_leaves_unrelated_text_alone() {
+        let resume = ParsedResume {
+            name: Some("Li".to_owned()),
+            phone: Some("13800001234".to_owned()),
+            summary: Some("Li 熟悉 Linux，订单号 2013800001 开头，2019 - 2021 在职。".to_owned()),
+            ..ParsedResume::default()
+        };
+        let text = resume.to_interview_text();
+        assert_eq!(
+            text,
+            "## 个人简介\n\n候选人 熟悉 Linux，订单号 2013800001 开头，2019 - 2021 在职。"
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@ import type { Tone } from "@ai-interview/ui";
 import type {
   ClaimVerdict,
   CommunicationAspect,
+  ComponentState,
   Credibility,
   Decision,
   FocusVerdict,
@@ -10,6 +11,7 @@ import type {
   InviteStatus,
   Level,
   ParseStatus,
+  PositionStatus,
   Recommendation,
   ReportStatus,
   RequirementVerdict,
@@ -423,3 +425,42 @@ export function scoreColor(score: number): string {
 export function yearMonth(value: string | null): string {
   return value ? value.replace("-", ".") : "至今";
 }
+
+// ───────── 系统状态 ─────────
+
+/** 后端按名字报各个依赖的状态，这里是名字对应的中文 */
+export const componentLabel: Record<string, string> = {
+  database: "数据库",
+  llm: "大模型（DeepSeek）",
+  tts: "语音合成",
+  stt: "语音识别",
+  raas: "RAAS",
+  storage: "文件存储",
+  jobs: "后台任务",
+};
+
+export const componentStateLabel: Record<ComponentState, string> = {
+  ok: "正常",
+  degraded: "部分可用",
+  down: "不可用",
+  not_configured: "没有配置",
+};
+
+export const componentStateTone: Record<ComponentState, Tone> = {
+  ok: "success",
+  degraded: "warning",
+  down: "danger",
+  not_configured: "neutral",
+};
+
+export const positionStatusLabel: Record<PositionStatus, string> = {
+  open: "在招",
+  paused: "暂停",
+  closed: "已关闭",
+};
+
+export const positionStatusTone: Record<PositionStatus, Tone> = {
+  open: "success",
+  paused: "warning",
+  closed: "neutral",
+};

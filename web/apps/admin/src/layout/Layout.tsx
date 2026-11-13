@@ -114,7 +114,7 @@ export function Layout() {
           <Avatar name={me.data.display_name} />
           <div className="oil-grow">
             <div className="adm-ellipsis">{me.data.display_name}</div>
-            <div className="adm-sidebar-sub adm-ellipsis">{me.data.username}</div>
+            <div className="adm-sidebar-sub adm-ellipsis">{me.data.email}</div>
           </div>
           <Button
             variant="ghost"

@@ -45,6 +45,10 @@ pub struct RoomConfig {
     pub ffmpeg: String,
     /// ffprobe 的路径或命令名，读录像时长用
     pub ffprobe: String,
+    /// 面试进行中，页面多少分钟没有任何动静（不上报、不传录像）就算候选人离开了
+    pub abandon_after_minutes: u32,
+    /// 判断一段回答最多等多少秒。超过了就不等模型，按顺序问下一题
+    pub settle_timeout_sec: u32,
 }
 
 impl RoomConfig {
@@ -72,11 +76,25 @@ impl RoomConfig {
             });
         let ffmpeg = env_opt("AI_INTERVIEW_FFMPEG").unwrap_or(default.ffmpeg.clone());
         let ffprobe = env_opt("AI_INTERVIEW_FFPROBE").unwrap_or(default.ffprobe.clone());
+        let abandon_after_minutes = env_parse(
+            "AI_INTERVIEW_ROOM_ABANDON_MINUTES",
+            default.abandon_after_minutes,
+        )
+        .ok()
+        .filter(|minutes| (1..=24 * 60).contains(minutes))
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "AI_INTERVIEW_ROOM_ABANDON_MINUTES 要在 1 到 1440 之间，这次用默认值 {}",
+                default.abandon_after_minutes
+            );
+            default.abandon_after_minutes
+        });
         Self {
             invite_ttl_hours,
             camera_required,
             ffmpeg,
             ffprobe,
+            abandon_after_minutes,
             ..default
         }
     }
@@ -91,6 +109,8 @@ impl Default for RoomConfig {
             recording: RecordingSettings::default(),
             ffmpeg: "ffmpeg".to_owned(),
             ffprobe: "ffprobe".to_owned(),
+            abandon_after_minutes: 15,
+            settle_timeout_sec: 20,
         }
     }
 }

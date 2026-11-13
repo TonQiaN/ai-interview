@@ -10,14 +10,17 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as { from?: string } | null)?.from ?? "/";
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   if (me.data) return <Navigate to={from} replace />;
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    login.mutate({ username, password }, { onSuccess: () => navigate(from, { replace: true }) });
+    login.mutate(
+      { email: email.trim(), password },
+      { onSuccess: () => navigate(from, { replace: true }) },
+    );
   }
 
   return (
@@ -43,16 +46,17 @@ export function LoginPage() {
               登录
             </h2>
           </div>
-          {isMock && <Banner tone="info">现在是演示数据，账号和密码随便填就能进。</Banner>}
+          {isMock && <Banner tone="info">现在是演示数据，邮箱和密码随便填就能进。</Banner>}
           {login.error && <Banner tone="danger">{errorMessage(login.error)}</Banner>}
-          <Field label="账号" required>
+          <Field label="邮箱" required>
             {({ id }) => (
               <Input
                 id={id}
-                value={username}
+                type="email"
+                value={email}
                 autoComplete="username"
                 autoFocus
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e) => setEmail(e.target.value)}
               />
             )}
           </Field>
@@ -72,7 +76,7 @@ export function LoginPage() {
             size="lg"
             block
             loading={login.isPending}
-            disabled={!username.trim() || !password}
+            disabled={!email.trim() || !password}
           >
             登录
           </Button>

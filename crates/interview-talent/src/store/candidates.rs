@@ -1,5 +1,7 @@
 //! `candidates` 表的读写。
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use interview_platform::http::{Page, PageQuery};
 use serde::{Deserialize, Serialize};
@@ -163,6 +165,69 @@ pub async fn insert(conn: &mut PgConnection, new: NewCandidate) -> sqlx::Result<
     .bind(new.source)
     .bind(new.external_ref)
     .bind(new.created_by)
+    .fetch_one(conn)
+    .await
+}
+
+/// 按来源系统里的编号取一位候选人。归档的也能取到。
+pub async fn get_by_external_ref(
+    db: &PgPool,
+    source: CandidateSource,
+    external_ref: &str,
+) -> sqlx::Result<Option<Candidate>> {
+    sqlx::query_as(&format!(
+        "SELECT {COLUMNS} FROM candidates WHERE source = $1 AND external_ref = $2"
+    ))
+    .bind(source)
+    .bind(external_ref)
+    .fetch_optional(db)
+    .await
+}
+
+/// 这些来源编号里，哪些已经导入过（不含归档的）：来源编号 → 我们的候选人 id。
+pub async fn imported_ids(
+    db: &PgPool,
+    source: CandidateSource,
+    external_refs: &[String],
+) -> sqlx::Result<HashMap<String, Uuid>> {
+    if external_refs.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows: Vec<(String, Uuid)> = sqlx::query_as(
+        "SELECT external_ref, id FROM candidates
+         WHERE source = $1 AND external_ref = ANY($2) AND archived_at IS NULL",
+    )
+    .bind(source)
+    .bind(external_refs)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().collect())
+}
+
+/// 用来源系统里的信息补全一位导入的候选人：已经有值的不动（HR 可能改过），归档的顺便恢复。
+pub async fn fill_from_source(
+    conn: &mut PgConnection,
+    id: Uuid,
+    new: &NewCandidate,
+) -> sqlx::Result<Candidate> {
+    sqlx::query_as(&format!(
+        "UPDATE candidates
+         SET email = COALESCE(email, $2),
+             phone = COALESCE(phone, $3),
+             current_title = COALESCE(current_title, $4),
+             current_company = COALESCE(current_company, $5),
+             location = COALESCE(location, $6),
+             external_synced_at = now(),
+             archived_at = NULL
+         WHERE id = $1
+         RETURNING {COLUMNS}"
+    ))
+    .bind(id)
+    .bind(&new.email)
+    .bind(&new.phone)
+    .bind(&new.current_title)
+    .bind(&new.current_company)
+    .bind(&new.location)
     .fetch_one(conn)
     .await
 }
@@ -332,13 +397,17 @@ pub async fn find_duplicates(
 /// 用简历里读出来的信息补全候选人的基本信息：已经有值的不动。
 ///
 /// `adopt_name` 为真时用简历里的姓名替换现有的（上传简历自动建的候选人，原来的名字是占位的）。
+///
+/// 只有这份简历现在还是主简历时才写。读简历要十几秒，这期间可能有更新的简历传上来顶替了它，
+/// 所以在写的那一刻再确认一次。返回有没有写。
 pub async fn fill_from_resume(
     db: &PgPool,
     id: Uuid,
+    resume_id: Uuid,
     resume: &ParsedResume,
     adopt_name: bool,
-) -> sqlx::Result<()> {
-    sqlx::query(
+) -> sqlx::Result<bool> {
+    let done = sqlx::query(
         "UPDATE candidates
          SET name = CASE WHEN $2 AND $3::text IS NOT NULL THEN $3 ELSE name END,
              email = COALESCE(email, $4),
@@ -346,7 +415,9 @@ pub async fn fill_from_resume(
              current_title = COALESCE(current_title, $6),
              current_company = COALESCE(current_company, $7),
              location = COALESCE(location, $8)
-         WHERE id = $1 AND archived_at IS NULL",
+         WHERE id = $1 AND archived_at IS NULL
+           AND EXISTS (SELECT 1 FROM resumes
+                       WHERE resumes.id = $9 AND resumes.candidate_id = $1 AND resumes.is_primary)",
     )
     .bind(id)
     .bind(adopt_name)
@@ -356,9 +427,31 @@ pub async fn fill_from_resume(
     .bind(&resume.current_title)
     .bind(&resume.current_company)
     .bind(&resume.location)
+    .bind(resume_id)
     .execute(db)
     .await?;
-    Ok(())
+    Ok(done.rows_affected() == 1)
+}
+
+/// 存一份根据某份简历生成的画像。只有这份简历现在还是主简历时才存，返回有没有存。
+pub async fn set_profile_from_resume(
+    db: &PgPool,
+    id: Uuid,
+    resume_id: Uuid,
+    profile: &CandidateProfile,
+) -> sqlx::Result<bool> {
+    let done = sqlx::query(
+        "UPDATE candidates SET profile = $2, profile_updated_at = now()
+         WHERE id = $1
+           AND EXISTS (SELECT 1 FROM resumes
+                       WHERE resumes.id = $3 AND resumes.candidate_id = $1 AND resumes.is_primary)",
+    )
+    .bind(id)
+    .bind(Json(profile))
+    .bind(resume_id)
+    .execute(db)
+    .await?;
+    Ok(done.rows_affected() == 1)
 }
 
 /// 存画像。

@@ -1,5 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Interview, InterviewReport, Invite, Page, Utterance } from "../types";
+import type {
+  Candidate,
+  CandidateDetail,
+  ImportedCandidate,
+  Interview,
+  InterviewReport,
+  Invite,
+  Page,
+  Position,
+  PositionDraft,
+  RaasCandidateImportItem,
+  RaasPosition,
+  RaasPositionImportItem,
+  Resume,
+  ResumeDetail,
+  Utterance,
+} from "../types";
 import { createMockServer } from "./server";
 
 type Server = ReturnType<typeof createMockServer>;
@@ -21,7 +37,7 @@ async function call<T>(
 }
 
 async function login(server: Server) {
-  await call(server, "POST", "/auth/login", { username: "hr", password: "demo" });
+  await call(server, "POST", "/auth/login", { email: "hr@example.com", password: "demo" });
 }
 
 describe("假后端", () => {
@@ -50,7 +66,7 @@ describe("假后端", () => {
       server,
       "POST",
       "/auth/login",
-      { username: "hr", password: "wrong" },
+      { email: "hr@example.com", password: "wrong" },
     );
     expect(status).toBe(401);
     expect(data.error.code).toBe("invalid_credentials");
@@ -177,19 +193,146 @@ describe("假后端", () => {
     }
   });
 
-  it("从 RAAS 导入岗位后，这个岗位标成已导入", async () => {
+  it("从 RAAS 导入岗位后，这个岗位标成已导入；再导一次不会重复建", async () => {
     await login(server);
     const before = server.db.positions.length;
-    const imported = await call<{ imported: unknown[] }>(server, "POST", "/raas/positions/import", {
-      refs: ["JR-2026-1103"],
-    });
-    expect(imported.status).toBe(200);
-    expect(server.db.positions).toHaveLength(before + 1);
-    const list = await call<Page<{ ref: string; already_imported: boolean }>>(
+    const imported = await call<{ items: RaasPositionImportItem[] }>(
       server,
-      "GET",
-      "/raas/positions?page_size=50",
+      "POST",
+      "/raas/positions/import",
+      { refs: ["JR-2026-1103", "JR-0000-0000"], refresh: false },
     );
-    expect(list.data.items.find((p) => p.ref === "JR-2026-1103")?.already_imported).toBe(true);
+    expect(imported.status).toBe(200);
+    expect(imported.data.items.map((i) => i.outcome)).toEqual(["created", "failed"]);
+    expect(server.db.positions).toHaveLength(before + 1);
+    const list = await call<Page<RaasPosition>>(server, "GET", "/raas/positions?page_size=50");
+    const row = list.data.items.find((p) => p.external_ref === "JR-2026-1103");
+    expect(row?.imported_position_id).toBe(imported.data.items[0]?.position_id);
+
+    const again = await call<{ items: RaasPositionImportItem[] }>(
+      server,
+      "POST",
+      "/raas/positions/import",
+      { refs: ["JR-2026-1103"] },
+    );
+    expect(again.data.items[0]?.outcome).toBe("already_imported");
+    expect(server.db.positions).toHaveLength(before + 1);
+  });
+
+  it("一次导入超过 20 个被拒绝", async () => {
+    await login(server);
+    const refs = Array.from({ length: 21 }, (_, i) => `JR-${i}`);
+    expect((await call(server, "POST", "/raas/positions/import", { refs })).status).toBe(422);
+  });
+
+  it("从 RAAS 导入候选人，简历排队去读", async () => {
+    await login(server);
+    const result = await call<{ items: RaasCandidateImportItem[] }>(
+      server,
+      "POST",
+      "/raas/candidates/import",
+      { refs: ["CAND-88012"] },
+    );
+    const item = result.data.items[0];
+    expect(item?.outcome).toBe("created");
+    expect(item?.resume).toBe("queued");
+    const detail = await call<CandidateDetail>(server, "GET", `/candidates/${item?.candidate_id}`);
+    expect(detail.data.source).toBe("raas");
+    expect(detail.data.primary_resume?.id).toBe(item?.resume_id);
+  });
+
+  it("手机号和已有的候选人一样时返回 409 和那些人，确认之后可以照样建", async () => {
+    await login(server);
+    const existing = server.db.candidates[0];
+    if (!existing) throw new Error("演示数据里应该有候选人");
+    const input = { name: "同名测试", phone: existing.phone };
+    const refused = await call<{
+      error: { code: string; details: { duplicates: Array<{ id: string }> } };
+    }>(server, "POST", "/candidates", input);
+    expect(refused.status).toBe(409);
+    expect(refused.data.error.code).toBe("duplicate_candidate");
+    expect(refused.data.error.details.duplicates.map((d) => d.id)).toEqual([existing.id]);
+
+    const created = await call<CandidateDetail>(server, "POST", "/candidates", {
+      ...input,
+      allow_duplicate: true,
+    });
+    expect(created.status).toBe(200);
+    expect(created.data.possible_duplicates.map((d) => d.id)).toEqual([existing.id]);
+  });
+
+  it("上传简历建候选人：先读简历，读完再出画像，简历内容查得到", async () => {
+    await login(server);
+    const form = new FormData();
+    form.set("file", new File(["简历正文"], "周知行-简历.pdf", { type: "application/pdf" }));
+    const response = await server.fetch("/api/v1/candidates/import", {
+      method: "POST",
+      body: form,
+    });
+    const { candidate, resume } = (await response.json()) as ImportedCandidate;
+    expect(resume.is_primary).toBe(true);
+
+    const reading = await call<CandidateDetail>(server, "GET", `/candidates/${candidate.id}`);
+    expect(reading.data.primary_resume?.parse_status).toBe("running");
+    expect(reading.data.profile_updated_at).toBeNull();
+
+    // 简历读完了，画像还要再等一下
+    await vi.advanceTimersByTimeAsync(110);
+    const parsed = await call<CandidateDetail>(server, "GET", `/candidates/${candidate.id}`);
+    expect(parsed.data.name).toBe("周知行");
+    expect(parsed.data.primary_resume?.parse_status).toBe("done");
+    expect(parsed.data.profile_updated_at).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(100);
+    const done = await call<CandidateDetail>(server, "GET", `/candidates/${candidate.id}`);
+    expect(done.data.profile_updated_at).not.toBeNull();
+    expect(done.data.profile.core_skills.length).toBeGreaterThan(0);
+
+    const content = await call<ResumeDetail>(server, "GET", `/resumes/${resume.id}`);
+    expect(content.data.parsed?.work_experience.length).toBeGreaterThan(0);
+  });
+
+  it("删掉主简历，剩下最新的一份顶上", async () => {
+    await login(server);
+    const candidate = server.db.candidates[0];
+    if (!candidate) throw new Error("演示数据里应该有候选人");
+    const first = server.db.resumes.find((r) => r.candidate_id === candidate.id);
+    const form = new FormData();
+    form.set("file", new File(["新的"], "新简历.pdf"));
+    const added = (await (
+      await server.fetch(`/api/v1/candidates/${candidate.id}/resumes`, {
+        method: "POST",
+        body: form,
+      })
+    ).json()) as Resume;
+    expect(added.is_primary).toBe(true);
+    expect((await call(server, "DELETE", `/resumes/${added.id}`)).status).toBe(204);
+    const list = await call<Page<Resume>>(server, "GET", `/candidates/${candidate.id}/resumes`);
+    expect(list.data.items.map((r) => [r.id, r.is_primary])).toEqual([[first?.id, true]]);
+  });
+
+  it("归档的岗位和候选人不出现在列表里", async () => {
+    await login(server);
+    const position = server.db.positions[0];
+    const candidate = server.db.candidates[0];
+    if (!position || !candidate) throw new Error("演示数据不完整");
+    expect((await call(server, "DELETE", `/positions/${position.id}`)).status).toBe(204);
+    expect((await call(server, "DELETE", `/candidates/${candidate.id}`)).status).toBe(204);
+    const positions = await call<Page<Position>>(server, "GET", "/positions?page_size=100");
+    const candidates = await call<Page<Candidate>>(server, "GET", "/candidates?page_size=100");
+    expect(positions.data.items.some((p) => p.id === position.id)).toBe(false);
+    expect(candidates.data.items.some((c) => c.id === candidate.id)).toBe(false);
+  });
+
+  it("粘贴岗位描述能整理出草稿，但不保存", async () => {
+    await login(server);
+    const before = server.db.positions.length;
+    const draft = await call<PositionDraft>(server, "POST", "/positions/draft", {
+      text: "数据工程师\n负责数仓建设，工作地点上海\n任职要求\n熟悉 Spark\n3 年以上经验",
+    });
+    expect(draft.data.title).toBe("数据工程师");
+    expect(draft.data.location).toBe("上海");
+    expect(draft.data.requirements).toContain("熟悉 Spark");
+    expect(server.db.positions).toHaveLength(before);
   });
 });

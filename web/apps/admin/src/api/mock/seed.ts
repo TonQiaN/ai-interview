@@ -12,7 +12,10 @@ import type {
   InterviewStatus,
   InterviewTemplate,
   Invite,
+  ParsedResume,
   Position,
+  PositionExtra,
+  RaasCandidate,
   RaasPosition,
   Recording,
   Resume,
@@ -157,31 +160,72 @@ export function seedVoices(): Voice[] {
     },
   ];
 }
+export const emptyExtra: PositionExtra = {
+  benefits: null,
+  client_name: null,
+  degree_requirement: null,
+  evaluation_rules: null,
+  experience_requirement: null,
+  hard_requirements: [],
+  headcount: null,
+  interview_focus: [],
+  keywords: [],
+  language_requirement: null,
+  must_have_skills: [],
+  negative_requirements: [],
+  nice_to_have: [],
+  nice_to_have_skills: [],
+  raas: null,
+  salary_range: null,
+};
+
+interface PositionMeta {
+  department: string;
+  location: string;
+  salary_range: string;
+  headcount: string;
+  source: Position["source"];
+  external_ref: string | null;
+}
+
 /** 岗位的职责和要求取自样例里的岗位描述，这样报告里的「要求对照」和岗位页说的是一回事 */
-function positionFrom(
-  name: SampleName,
-  meta: Pick<
-    Position,
-    "department" | "location" | "salary_range" | "headcount" | "source" | "external_ref"
-  >,
-  createdAt: number,
-): Position {
+function positionFrom(name: SampleName, meta: PositionMeta, createdAt: number): Position {
   const { job } = samples[name].record;
   const [duty = job.description] = job.description.split("要求：");
   const requirements = [...job.must_have, ...job.nice_to_have.map((item) => `加分：${item}`)].join(
     "\n",
   );
+  const { salary_range, headcount, ...rest } = meta;
   return {
     id: newId(),
     title: job.title,
     employment_type: "全职",
+    seniority: null,
     description: duty.trim(),
     requirements,
     status: "open",
-    interview_count: 0,
+    extra: {
+      ...emptyExtra,
+      salary_range,
+      headcount,
+      hard_requirements: job.must_have,
+      nice_to_have: job.nice_to_have,
+      raas:
+        meta.source === "raas"
+          ? {
+              client_job_id: null,
+              job_posting_id: meta.external_ref,
+              job_requisition_id: meta.external_ref,
+              publish_status: "recruiting",
+            }
+          : null,
+    },
+    external_synced_at: meta.source === "raas" ? iso(createdAt) : null,
+    archived_at: null,
+    created_by: null,
     created_at: iso(createdAt),
     updated_at: iso(createdAt + 2 * DAY),
-    ...meta,
+    ...rest,
   };
 }
 
@@ -193,7 +237,7 @@ export function seedPositions(): Position[] {
         department: "交易平台部",
         location: "杭州",
         salary_range: "30–50K · 15 薪",
-        headcount: 2,
+        headcount: "2 人",
         source: "manual",
         external_ref: null,
       },
@@ -205,7 +249,7 @@ export function seedPositions(): Position[] {
         department: "产品部",
         location: "上海",
         salary_range: "25–40K",
-        headcount: 1,
+        headcount: "1 人",
         source: "raas",
         external_ref: "JR-2026-1042",
       },
@@ -217,7 +261,7 @@ export function seedPositions(): Position[] {
         department: "数据部",
         location: "北京",
         salary_range: "20–35K",
-        headcount: 1,
+        headcount: "1 人",
         source: "raas",
         external_ref: "JR-2026-1077",
       },
@@ -229,7 +273,7 @@ export function seedPositions(): Position[] {
         department: "体验技术部",
         location: "杭州",
         salary_range: "22–38K",
-        headcount: 1,
+        headcount: "1 人",
         source: "manual",
         external_ref: null,
       },
@@ -241,7 +285,7 @@ export function seedPositions(): Position[] {
         department: "运营部",
         location: "成都",
         salary_range: "12–20K",
-        headcount: 1,
+        headcount: "1 人",
         source: "manual",
         external_ref: null,
       },
@@ -253,7 +297,7 @@ export function seedPositions(): Position[] {
         department: "销售部",
         location: "深圳",
         salary_range: "8–15K · 另有提成",
-        headcount: 3,
+        headcount: "3 人",
         source: "manual",
         external_ref: null,
       },
@@ -262,62 +306,214 @@ export function seedPositions(): Position[] {
   ];
 }
 
+function raasPosition(
+  ref: string,
+  title: string,
+  client: string,
+  city: string,
+  headcount: number,
+  updatedAt: number,
+  salary: string,
+): RaasPosition {
+  return {
+    external_ref: ref,
+    job_requisition_ref: ref.replace("JP-", "JR-"),
+    title,
+    client_name: client,
+    department: null,
+    cities: [city],
+    headcount,
+    work_years: "3 年以上",
+    degree_requirement: "本科",
+    salary_range: salary,
+    expected_level: null,
+    status: "open",
+    updated_at: iso(updatedAt),
+    // 导入过没有由假后端按岗位的 external_ref 现算
+    imported_position_id: null,
+  };
+}
+
+/** RAAS 里能看到的岗位。前两个在演示数据里已经导入过 */
 export const raasPositions: RaasPosition[] = [
-  {
-    ref: "JR-2026-1042",
-    title: "产品经理（B 端 SaaS）",
-    client_name: "示例客户甲",
-    location: "上海",
-    headcount: 1,
-    updated_at: iso(-14 * DAY),
-    already_imported: true,
-  },
-  {
-    ref: "JR-2026-1077",
-    title: "数据分析师",
-    client_name: "示例客户甲",
-    location: "北京",
-    headcount: 1,
-    updated_at: iso(-8 * DAY),
-    already_imported: true,
-  },
-  {
-    ref: "JR-2026-1103",
-    title: "Java 开发工程师",
-    client_name: "示例客户乙",
-    location: "深圳",
-    headcount: 5,
-    updated_at: iso(-3 * DAY),
-    already_imported: false,
-  },
-  {
-    ref: "JR-2026-1108",
-    title: "测试开发工程师",
-    client_name: "示例客户乙",
-    location: "深圳",
-    headcount: 2,
-    updated_at: iso(-2 * DAY),
-    already_imported: false,
-  },
-  {
-    ref: "JR-2026-1115",
-    title: "运维工程师（SRE）",
-    client_name: "示例客户丙",
-    location: "成都",
-    headcount: 1,
-    updated_at: iso(-1 * DAY),
-    already_imported: false,
-  },
-  {
-    ref: "JR-2026-1121",
-    title: "算法工程师（推荐）",
-    client_name: "示例客户丙",
-    location: "北京",
-    headcount: 2,
-    updated_at: iso(-5 * HOUR),
-    already_imported: false,
-  },
+  raasPosition(
+    "JR-2026-1042",
+    "产品经理（B 端 SaaS）",
+    "示例客户甲",
+    "上海",
+    1,
+    -14 * DAY,
+    "25–40K",
+  ),
+  raasPosition("JR-2026-1077", "数据分析师", "示例客户甲", "北京", 1, -8 * DAY, "20–35K"),
+  raasPosition("JR-2026-1103", "Java 开发工程师", "示例客户乙", "深圳", 5, -3 * DAY, "20–35K"),
+  raasPosition("JR-2026-1108", "测试开发工程师", "示例客户乙", "深圳", 2, -2 * DAY, "18–30K"),
+  raasPosition("JR-2026-1115", "运维工程师（SRE）", "示例客户丙", "成都", 1, -1 * DAY, "20–32K"),
+  raasPosition("JR-2026-1121", "算法工程师（推荐）", "示例客户丙", "北京", 2, -5 * HOUR, "35–60K"),
 ];
+
+function raasCandidate(
+  ref: string,
+  name: string,
+  title: string,
+  company: string,
+  city: string,
+  years: number,
+  skills: string[],
+  appliedTo: string,
+): RaasCandidate {
+  return {
+    external_ref: ref,
+    name,
+    current_title: title,
+    current_company: company,
+    current_city: city,
+    degree: "本科",
+    experience_years: years,
+    graduation_school: "示例大学",
+    major: null,
+    skills,
+    latest_application_job_title: appliedTo,
+    imported_candidate_id: null,
+  };
+}
+
+/** RAAS 里能看到的候选人，都是编的 */
+export const raasCandidates: RaasCandidate[] = [
+  raasCandidate(
+    "CAND-88012",
+    "祝安澜",
+    "Java 开发工程师",
+    "示例软件",
+    "深圳",
+    5,
+    ["Java", "Spring", "MySQL"],
+    "Java 开发工程师",
+  ),
+  raasCandidate(
+    "CAND-88027",
+    "岑子墨",
+    "测试开发工程师",
+    "示例互联网",
+    "深圳",
+    4,
+    ["Python", "自动化测试", "Jenkins"],
+    "测试开发工程师",
+  ),
+  raasCandidate(
+    "CAND-88031",
+    "阮清和",
+    "运维工程师",
+    "示例云服务",
+    "成都",
+    6,
+    ["Kubernetes", "Prometheus", "Shell"],
+    "运维工程师（SRE）",
+  ),
+  raasCandidate(
+    "CAND-88046",
+    "丁若溪",
+    "算法工程师",
+    "示例内容平台",
+    "北京",
+    3,
+    ["Python", "PyTorch", "推荐系统"],
+    "算法工程师（推荐）",
+  ),
+  raasCandidate(
+    "CAND-88052",
+    "柏舟",
+    "后端工程师",
+    "示例金融科技",
+    "深圳",
+    8,
+    ["Java", "Go", "分布式事务"],
+    "Java 开发工程师",
+  ),
+];
+
+/** 演示数据里人物的简历要点。假后端由它拼出画像和简历解析结果两份东西 */
+export interface SeedProfile {
+  summary: string;
+  highlights: string[];
+  skills: string[];
+  experiences: Array<{
+    company: string;
+    title: string;
+    start: string;
+    end: string | null;
+    summary: string;
+  }>;
+  education: Array<{ school: string; degree: string; major: string; start: string; end: string }>;
+  to_verify: string[];
+}
+
+export const emptyProfile: CandidateProfile = {
+  headline: "",
+  summary: "",
+  core_skills: [],
+  domains: [],
+  strengths: [],
+  risks: [],
+  interview_focus: [],
+  highest_degree: null,
+  seniority: null,
+  years_of_experience: null,
+};
+
+/** 画像：对这个人的归纳 */
+export function profileFrom(
+  seed: SeedProfile,
+  person: { title: string | null; years: number | null },
+): CandidateProfile {
+  return {
+    headline: [person.years == null ? null : `${person.years} 年经验`, person.title]
+      .filter(Boolean)
+      .join("的"),
+    summary: seed.summary,
+    core_skills: seed.skills.map((name) => ({ name, level: null, evidence: null })),
+    domains: [],
+    strengths: seed.highlights,
+    risks: [],
+    interview_focus: seed.to_verify,
+    highest_degree: seed.education[0]?.degree ?? null,
+    seniority: null,
+    years_of_experience: person.years,
+  };
+}
+
+/** 简历解析结果：简历上写了什么 */
+export function parsedFrom(seed: SeedProfile, c: Candidate): ParsedResume {
+  return {
+    name: c.name,
+    phone: c.phone ?? null,
+    email: c.email ?? null,
+    location: c.location ?? null,
+    current_company: c.current_company ?? null,
+    current_title: c.current_title ?? null,
+    highest_degree: seed.education[0]?.degree ?? null,
+    years_of_experience: c.profile.years_of_experience,
+    summary: seed.summary,
+    self_evaluation: null,
+    skills: seed.skills,
+    languages: [],
+    certifications: [],
+    awards: [],
+    education: seed.education.map((e) => ({ ...e, description: null })),
+    work_experience: seed.experiences.map((e) => ({
+      company: e.company,
+      title: e.title,
+      start: e.start,
+      end: e.end,
+      is_current: e.end === null,
+      location: null,
+      description: e.summary,
+      technologies: [],
+    })),
+    projects: [],
+    job_intention: { positions: [], cities: [], salary: null, availability: null, notes: null },
+  };
+}
 
 interface PersonSeed {
   name: string;
@@ -326,7 +522,7 @@ interface PersonSeed {
   company: string | null;
   years: number | null;
   location: string | null;
-  profile: CandidateProfile | null;
+  profile: SeedProfile | null;
   createdAt: number;
 }
 
@@ -712,30 +908,47 @@ export function seedCandidates(): Candidate[] {
       email: `${p.mail}@example.com`,
       current_title: p.title,
       current_company: p.company,
-      years_of_experience: p.years,
       location: p.location,
-      source: "resume",
-      note: null,
-      profile: p.profile,
-      profile_status: p.profile ? "done" : "running",
-      interview_count: 0,
+      source: "upload",
+      notes: null,
+      profile: p.profile ? profileFrom(p.profile, p) : emptyProfile,
+      profile_updated_at: p.profile ? iso(p.createdAt + 2 * MIN) : null,
+      external_ref: null,
+      external_synced_at: null,
+      archived_at: null,
+      created_by: null,
       created_at: iso(p.createdAt),
-      updated_at: iso(p.createdAt + HOUR),
+      updated_at: iso(Math.min(p.createdAt + HOUR, p.createdAt / 2)),
     }),
   );
 }
 
-export function seedResumes(candidates: Candidate[]): Resume[] {
-  return candidates.map((c) => ({
-    id: newId(),
-    candidate_id: c.id,
-    file_name: `${c.name}-简历.pdf`,
-    mime_type: "application/pdf",
-    size_bytes: 180_000 + c.name.length * 41_000,
-    parse_status: c.profile_status ?? "done",
-    parse_error: null,
-    created_at: c.created_at,
-  }));
+/** 每位候选人一份简历。画像还没出来的那位，简历还在读 */
+export function seedResumes(candidates: Candidate[]): {
+  resumes: Resume[];
+  parsed: Map<string, ParsedResume>;
+} {
+  const parsed = new Map<string, ParsedResume>();
+  const resumes = candidates.map((c, index): Resume => {
+    const seed = people[index]?.profile ?? null;
+    const id = newId();
+    if (seed) parsed.set(id, parsedFrom(seed, c));
+    return {
+      id,
+      candidate_id: c.id,
+      file_name: `${c.name}-简历.pdf`,
+      content_type: "application/pdf",
+      size_bytes: 180_000 + c.name.length * 41_000,
+      has_file: true,
+      is_primary: true,
+      parse_status: seed ? "done" : "running",
+      parse_error: null,
+      parsed_at: seed ? iso(Date.parse(c.created_at) - Date.now() + MIN) : null,
+      created_at: c.created_at,
+      updated_at: c.created_at,
+    };
+  });
+  return { resumes, parsed };
 }
 
 export function seedTemplates(voiceId: string): InterviewTemplate[] {
@@ -789,6 +1002,8 @@ export interface Seed {
   positions: Position[];
   candidates: Candidate[];
   resumes: Resume[];
+  /** 简历读出来的内容，按简历 id 存 */
+  parsed: Map<string, ParsedResume>;
   voices: Voice[];
   templates: InterviewTemplate[];
   interviews: Interview[];
@@ -854,8 +1069,8 @@ export function buildSeed(): Seed {
     const interview: Interview = {
       id: newId(),
       status,
-      candidate: { id: c.id, name: c.name, current_title: c.current_title },
-      position: { id: p.id, title: p.title, department: p.department },
+      candidate: { id: c.id, name: c.name, current_title: c.current_title ?? null },
+      position: { id: p.id, title: p.title, department: p.department ?? null },
       mode: cfg.mode,
       expected_duration_min: cfg.expected_duration_min,
       started_at: null,
@@ -878,8 +1093,6 @@ export function buildSeed(): Seed {
     };
     interviews.push(interview);
     sampleOf.set(interview.id, name);
-    c.interview_count += 1;
-    p.interview_count += 1;
     return interview;
   }
 
@@ -1010,7 +1223,7 @@ export function buildSeed(): Seed {
   return {
     positions,
     candidates,
-    resumes: seedResumes(candidates),
+    ...seedResumes(candidates),
     voices,
     templates,
     interviews,

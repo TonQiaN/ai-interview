@@ -1,7 +1,7 @@
 //! 数据库读写。只碰 ① 归属的表；岗位、候选人、简历、音色只读。
 
 use chrono::{DateTime, Utc};
-use interview_core::{InterviewDecision, InterviewStatus, ReportStatus, SynthStatus};
+use interview_core::{InterviewDecision, InterviewStatus, ReportStatus, Speaker, SynthStatus};
 use interview_engine::{InterviewConfig, InterviewPlan, Utterance, UtteranceKind};
 use interview_platform::http::PageQuery;
 use serde_json::Value;
@@ -162,13 +162,7 @@ pub(crate) async fn detail(
             .bind(row.position_id)
             .fetch_one(db)
             .await?;
-    let report: Option<(Uuid, i32, ReportStatus, Option<DateTime<Utc>>)> = sqlx::query_as(
-        "SELECT id, version, status, generated_at FROM interview_reports \
-         WHERE interview_id = $1 ORDER BY version DESC LIMIT 1",
-    )
-    .bind(row.id)
-    .fetch_optional(db)
-    .await?;
+    let report = list_reports(db, row.id).await?.into_iter().next();
     let synth = synth_progress(db, row.id).await?;
     let config = row.config()?;
 
@@ -200,12 +194,7 @@ pub(crate) async fn detail(
         decision: row.decision,
         decision_note: row.decision_note,
         decided_at: row.decided_at,
-        report: report.map(|(id, version, status, generated_at)| ReportBrief {
-            id,
-            version,
-            status,
-            generated_at,
-        }),
+        report,
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
@@ -426,4 +415,231 @@ pub(crate) async fn utterance_audio(
     .bind(key)
     .fetch_optional(db)
     .await
+}
+
+// ───────────────────────── 面试后：对话记录和报告 ─────────────────────────
+
+/// `interview_turns` 的一行。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub(crate) struct TurnRow {
+    pub id: Uuid,
+    pub seq: i32,
+    pub speaker: Speaker,
+    pub utterance_key: Option<String>,
+    pub text: String,
+    pub start_ms: i64,
+    /// 没记结束时间的，面试官的话按音频时长补上
+    pub end_ms: Option<i64>,
+    pub audio_blob_key: Option<String>,
+    pub words: Option<Value>,
+    pub confidence: Option<f32>,
+    pub transcript_source: String,
+    pub end_reason: Option<String>,
+}
+
+pub(crate) async fn list_turns(
+    db: &PgPool,
+    interview_id: Uuid,
+) -> Result<Vec<TurnRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT t.id, t.seq, t.speaker, t.utterance_key, t.text, t.start_ms, \
+                COALESCE(t.end_ms, t.start_ms + u.audio_duration_ms) AS end_ms, \
+                t.audio_blob_key, t.words, t.confidence, t.transcript_source, \
+                t.end_reason \
+         FROM interview_turns t \
+         LEFT JOIN interview_utterances u \
+           ON u.interview_id = t.interview_id AND u.key = t.utterance_key \
+          AND t.speaker = 'interviewer' \
+         WHERE t.interview_id = $1 ORDER BY t.seq",
+    )
+    .bind(interview_id)
+    .fetch_all(db)
+    .await
+}
+
+/// 面试后重新转写的结果。
+pub(crate) struct FinalTranscript<'a> {
+    pub text: &'a str,
+    pub words: Value,
+    pub confidence: Option<f32>,
+    pub engine: &'a str,
+}
+
+pub(crate) async fn save_final_transcript(
+    db: &PgPool,
+    turn_id: Uuid,
+    transcript: FinalTranscript<'_>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE interview_turns SET text = $2, words = $3, confidence = $4, stt_engine = $5, \
+             transcript_source = 'final' \
+         WHERE id = $1",
+    )
+    .bind(turn_id)
+    .bind(transcript.text)
+    .bind(transcript.words)
+    .bind(transcript.confidence)
+    .bind(transcript.engine)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// 还没合并完的录像有几段。
+pub(crate) async fn open_recordings(db: &PgPool, interview_id: Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM interview_recordings \
+         WHERE interview_id = $1 AND status IN ('uploading', 'assembling')",
+    )
+    .bind(interview_id)
+    .fetch_one(db)
+    .await
+}
+
+/// `interview_reports` 的一行。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub(crate) struct ReportRow {
+    pub id: Uuid,
+    pub version: i32,
+    pub status: ReportStatus,
+    pub content: Option<Value>,
+    pub generated_at: Option<DateTime<Utc>>,
+}
+
+const REPORT_COLUMNS: &str = "id, version, status, content, generated_at";
+
+/// 某个版本的报告；`version` 为空时取最新生成好的那一版。
+pub(crate) async fn report_version(
+    db: &PgPool,
+    interview_id: Uuid,
+    version: Option<i32>,
+) -> Result<Option<ReportRow>, sqlx::Error> {
+    sqlx::query_as(&format!(
+        "SELECT {REPORT_COLUMNS} FROM interview_reports \
+         WHERE interview_id = $1 AND status = 'done' \
+           AND ($2::int IS NULL OR version = $2) \
+         ORDER BY version DESC LIMIT 1"
+    ))
+    .bind(interview_id)
+    .bind(version)
+    .fetch_optional(db)
+    .await
+}
+
+pub(crate) async fn list_reports(
+    db: &PgPool,
+    interview_id: Uuid,
+) -> Result<Vec<ReportBrief>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, version, status, error, generated_at FROM interview_reports \
+         WHERE interview_id = $1 ORDER BY version DESC",
+    )
+    .bind(interview_id)
+    .fetch_all(db)
+    .await
+}
+
+/// 这场面试最新的一份报告，并锁住面试这一行：同一时间只有一个事务能给它加新版本。
+pub(crate) async fn lock_latest_report(
+    conn: &mut PgConnection,
+    interview_id: Uuid,
+) -> Result<Option<ReportRow>, sqlx::Error> {
+    sqlx::query("SELECT 1 FROM interviews WHERE id = $1 FOR UPDATE")
+        .bind(interview_id)
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query_as(&format!(
+        "SELECT {REPORT_COLUMNS} FROM interview_reports \
+         WHERE interview_id = $1 ORDER BY version DESC LIMIT 1"
+    ))
+    .bind(interview_id)
+    .fetch_optional(&mut *conn)
+    .await
+}
+
+/// 加一个新版本的报告。要先调 [`lock_latest_report`]。
+pub(crate) async fn insert_report(
+    conn: &mut PgConnection,
+    interview_id: Uuid,
+    status: ReportStatus,
+    error: Option<&str>,
+) -> Result<ReportRow, sqlx::Error> {
+    sqlx::query_as(&format!(
+        "INSERT INTO interview_reports (id, interview_id, version, status, error) \
+         SELECT $1, $2, COALESCE(max(version), 0) + 1, $3, $4 \
+         FROM interview_reports WHERE interview_id = $2 \
+         RETURNING {REPORT_COLUMNS}"
+    ))
+    .bind(interview_core::new_id())
+    .bind(interview_id)
+    .bind(status)
+    .bind(error)
+    .fetch_one(&mut *conn)
+    .await
+}
+
+/// 把报告标成正在生成。已经结束的报告不动，返回 `false`。
+pub(crate) async fn start_report(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE interview_reports SET status = 'running', error = NULL \
+         WHERE id = $1 AND status IN ('pending', 'running')",
+    )
+    .bind(id)
+    .execute(db)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
+pub(crate) async fn finish_report(
+    db: &PgPool,
+    id: Uuid,
+    content: Value,
+    schema_version: i32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE interview_reports SET status = 'done', content = $2, schema_version = $3, \
+             error = NULL, generated_at = now() \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(content)
+    .bind(schema_version)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn fail_report(db: &PgPool, id: Uuid, error: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE interview_reports SET status = 'failed', error = $2 \
+         WHERE id = $1 AND status IN ('pending', 'running')",
+    )
+    .bind(id)
+    .bind(error)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// 记下 HR 的结论。改回 `pending` 时把是谁、什么时候定的也清掉。
+pub(crate) async fn set_decision(
+    db: &PgPool,
+    id: Uuid,
+    decision: InterviewDecision,
+    note: Option<&str>,
+    decided_by: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE interviews SET decision = $2, decision_note = $3, \
+             decided_by = CASE WHEN $2 = 'pending' THEN NULL ELSE $4 END, \
+             decided_at = CASE WHEN $2 = 'pending' THEN NULL ELSE now() END \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(decision)
+    .bind(note)
+    .bind(decided_by)
+    .execute(db)
+    .await?;
+    Ok(())
 }
