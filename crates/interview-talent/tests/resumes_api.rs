@@ -102,6 +102,11 @@ async fn uploads_parses_and_serves_a_resume(pool: PgPool) {
     assert!(after["parsed_at"].is_string());
     assert_eq!(after["text_content"], RESUME_TEXT);
     assert_eq!(after["parsed"]["name"], "林知夏");
+    // 出题用的文字里没有联系方式
+    let interview_text = after["interview_text"].as_str().expect("有出题用的文字");
+    assert!(interview_text.contains("Rust"), "{interview_text}");
+    assert!(!interview_text.contains("13800001234"), "{interview_text}");
+    assert!(!interview_text.contains("林知夏"), "{interview_text}");
     assert_eq!(after["parsed"]["skills"], json!(["Rust", "Go"]));
 
     // 手工建的候选人：名字不动，空着的字段补上
