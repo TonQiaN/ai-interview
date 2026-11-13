@@ -12,10 +12,10 @@ import {
 } from "@ai-interview/ui";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { errorMessage } from "../api/http";
+import { errorMessage, fieldErrors } from "../api/http";
 import { useConfigDefaults, useSaveTemplate, useTemplate } from "../api/queries";
 import type { InterviewConfig } from "../api/types";
-import { ConfigForm } from "../components/ConfigForm";
+import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import { LoadError, Loading } from "../components/common";
 
 interface Draft {
@@ -60,7 +60,7 @@ export function TemplateEditPage() {
       {
         name: draft.name.trim(),
         description: draft.description.trim() || null,
-        config: draft.config,
+        config: cleanConfig(draft.config),
       },
       {
         onSuccess: () => {
@@ -119,7 +119,11 @@ export function TemplateEditPage() {
         </CardBody>
       </Card>
       <div className="adm-section">
-        <ConfigForm value={draft.config} onChange={(config) => setDraft({ ...draft, config })} />
+        <ConfigForm
+          value={draft.config}
+          onChange={(config) => setDraft({ ...draft, config })}
+          errors={fieldErrors(save.error)}
+        />
       </div>
     </form>
   );

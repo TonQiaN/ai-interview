@@ -34,7 +34,7 @@ export function RecommendationBadge({ value }: { value: Recommendation | null })
 }
 
 export function DecisionBadge({ value }: { value: Decision }) {
-  return value === "undecided" ? null : (
+  return value === "pending" ? null : (
     <Badge tone={decisionTone[value]} plain>
       {decisionLabel[value]}
     </Badge>

@@ -178,6 +178,12 @@
     color: var(--oil-ink-3);
     font-size: var(--oil-text-sm);
   }
+  .adm-item__sub--warn {
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-1);
+    color: var(--oil-warning-ink);
+  }
 
   /* 表格里的人 */
   .adm-person {
@@ -322,6 +328,21 @@
   .adm-prompt .oil-input {
     flex: 1 1 0;
   }
+  .adm-competency {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) 104px auto;
+    gap: var(--oil-space-2);
+    align-items: start;
+  }
+  @media (max-width: 640px) {
+    .adm-competency {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .adm-competency > :nth-child(1),
+    .adm-competency > :nth-child(2) {
+      grid-column: 1 / -1;
+    }
+  }
   .adm-chips {
     display: flex;
     flex-wrap: wrap;
@@ -375,6 +396,25 @@
     margin-top: var(--oil-space-2);
     color: var(--oil-ink-3);
     font-size: var(--oil-text-sm);
+  }
+  .adm-utter__tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--oil-space-2);
+    margin-top: var(--oil-space-2);
+  }
+  .adm-utter__more {
+    margin-top: var(--oil-space-2);
+    color: var(--oil-ink-2);
+    font-size: var(--oil-text-sm);
+  }
+  .adm-utter__more summary {
+    cursor: pointer;
+    color: var(--oil-ink-3);
+  }
+  .adm-utter__more > div {
+    margin-top: var(--oil-space-2);
   }
   .adm-utter__side {
     display: flex;

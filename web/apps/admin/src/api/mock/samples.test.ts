@@ -19,12 +19,14 @@ import {
 } from "../../lib/format";
 import type { Evidence } from "../types";
 import {
+  planUtterances,
   type SampleName,
   sampleInterview,
+  samplePlan,
   sampleReport,
   samples,
-  sampleUtterances,
 } from "./samples";
+import { defaultConfig } from "./seed";
 
 const names = Object.keys(samples) as SampleName[];
 
@@ -76,7 +78,7 @@ describe.each(names)("样例 %s", (name) => {
     }
     for (const aspect of report.communication?.aspects ?? [])
       need(aspectLabel, aspect.aspect, "aspect");
-    for (const e of collectEvidence(report)) need(speakerLabel, e.speaker, "speaker");
+    for (const e of collectEvidence(report)) need(speakerLabel, e.speaker ?? undefined, "speaker");
     for (const e of record.events) need(eventLabel, e.kind, "event kind");
     expect(missing).toEqual([]);
   });
@@ -91,7 +93,8 @@ describe.each(names)("样例 %s", (name) => {
         lost.push(`转写 ${e.segment_id}`);
       if (e.source === "event" && (!e.event_id || !eventIds.has(e.event_id)))
         lost.push(`事件 ${e.event_id}`);
-      if (e.source !== "resume" && e.start_ms === undefined) lost.push(`没有时间：${e.quote}`);
+      if (e.source !== "resume" && typeof e.start_ms !== "number")
+        lost.push(`没有时间：${e.quote}`);
     }
     expect(lost).toEqual([]);
   });
@@ -103,17 +106,43 @@ describe.each(names)("样例 %s", (name) => {
     expect(report.interview_id).not.toBe("interview-1");
   });
 
-  it("提前准备的话里没有现场追问，开头和结尾各一句", () => {
-    const planned = sampleUtterances(name, true);
-    expect(planned.at(0)?.kind).toBe("opening");
-    expect(planned.at(-1)?.kind).toBe("closing");
-    expect(planned.some((u) => u.kind === "follow_up")).toBe(false);
-    expect(planned.filter((u) => u.kind === "question")).toHaveLength(
-      record.questions.filter((q) => !q.parent_id).length,
+  it("出好的题目：主问题和样例一样多，追问不超过设置的上限，每句话的键不重复", () => {
+    const plan = samplePlan(name, defaultConfig);
+    expect(plan.questions).toHaveLength(record.questions.filter((q) => !q.parent_id).length);
+    for (const q of plan.questions)
+      expect(q.follow_ups?.length ?? 0).toBeLessThanOrEqual(
+        defaultConfig.follow_ups.max_per_question,
+      );
+    const said = planUtterances(plan, true);
+    expect(said.at(0)?.key).toBe("opening");
+    expect(said.map((u) => u.key)).toContain("closing");
+    expect(new Set(said.map((u) => u.key)).size).toBe(said.length);
+    expect(said.filter((u) => u.kind === "follow_up")).toHaveLength(
+      plan.questions.reduce((sum, q) => sum + (q.follow_ups?.length ?? 0), 0),
     );
-    const all = sampleUtterances(name, false);
-    expect(all.filter((u) => u.kind === "follow_up")).toHaveLength(
-      record.questions.filter((q) => q.parent_id).length,
-    );
+
+    const noFollowUps = samplePlan(name, {
+      ...defaultConfig,
+      follow_ups: { enabled: false, max_per_question: 1 },
+      candidate_questions: "skip",
+    });
+    const quiet = planUtterances(noFollowUps, false);
+    expect(quiet.some((u) => u.kind === "follow_up")).toBe(false);
+    expect(quiet.some((u) => u.key === "candidate_questions")).toBe(false);
+    expect(quiet.every((u) => u.synth_status === "pending")).toBe(true);
+  });
+
+  it("回看的内容：事件按时间排好，成对的事件由回来的那条带上离开了多久", () => {
+    const data = sampleInterview(name, Date.parse("2026-11-01T02:00:00Z"), () => "id");
+    expect(data.turns.length).toBeGreaterThan(0);
+    expect(data.recordings.every((r) => r.status === "ready")).toBe(true);
+    for (const e of data.events) {
+      if (
+        e.kind === "visibility_visible" ||
+        e.kind === "window_focus" ||
+        e.kind === "network_online"
+      )
+        expect(typeof e.payload.duration_ms).toBe("number");
+    }
   });
 });
