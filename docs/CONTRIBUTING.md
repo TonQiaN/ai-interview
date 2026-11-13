@@ -51,7 +51,13 @@ Dependabot 每周给 Rust 依赖和 Actions 各开一个升级 PR。
 
 ## 标签
 
-用 GitHub 默认的标签就够：`enhancement`（任务）、`bug`（缺陷）、`documentation`、`question`。需要按模块分的时候再加 `tts`、`ci` 这样的标签。
+类型用 GitHub 默认的标签：`enhancement`（任务）、`bug`（缺陷）、`documentation`、`question`。
+
+七条开发线各有一个标签，issue 和 PR 都打上，方便按线筛：`line:foundation`（架构和工程底座）、`line:talent`（岗位和候选人）、`line:engine`（面试 AI 引擎）、`line:speech`（语音）、`line:room`（候选人面试网页）、`line:admin`（HR 管理后台）、`line:report`（分析报告）。需要别的线配合的 issue 打上对方的标签。
+
+## 并行开发
+
+每个目录归一条线，归属表在 [architecture/README.md](architecture/README.md)。只改自己归属的目录；共用文件（根 `Cargo.toml`、`Cargo.lock`、`migrations/`、`.env.example`）怎么改不打架，也写在那里。
 
 ## 仓库设置
 

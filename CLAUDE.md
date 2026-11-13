@@ -1,12 +1,14 @@
 # CLAUDE.md：给 AI 开发者的约定
 
-这是 AI 面试项目的主仓库。主体语言 Rust。现在是骨架阶段，面试功能还没开始写。
+这是 AI 面试项目的主仓库。主体语言 Rust，前端 TypeScript。七条开发线并行，各写各的目录。
 
 ## 先读
 
 1. `README.md`：现在有什么、怎么跑。
-2. `docs/CONTRIBUTING.md`：issue、分支、PR、合并的流程。
-3. `tts/README.md`：动语音合成之前必读。三个引擎怎么调用、实测数据、已知的坑都在里面。
+2. `docs/architecture/README.md`：技术栈、目录归属、模块怎么配合。**动手前先确认自己要改的目录归哪条线。**
+3. `docs/architecture/data-model.md` 和 `docs/architecture/api.md`：数据表和接口契约。
+4. `docs/CONTRIBUTING.md`：issue、分支、PR、合并的流程。
+5. `tts/README.md`：动语音合成之前必读。三个引擎怎么调用、实测数据、已知的坑都在里面。
 
 ## 命令
 
@@ -25,10 +27,15 @@ scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息
 
 ## 目录
 
-- `crates/interview-tts`：TTS 引擎清单（`EngineId`）、每个引擎的能力限制（`EngineSpec`）、请求检查。
-- `crates/interview-cli`：二进制 `ai-interview`。
-- `tts/`：三个引擎的版本锁定（`engines.json`、`upstreams.json`、`locks/`、`artifacts/`）和接入说明。
-- 新功能按职责加新的 crate，放在 `crates/` 下，名字用 `interview-` 开头。共用的依赖版本写在根 `Cargo.toml` 的 `[workspace.dependencies]`。
+完整的归属表在 `docs/architecture/README.md`，这里是速查：
+
+- `crates/`：Rust workspace，一个 crate 一个目录，名字用 `interview-` 开头。平台和面试场次（`interview-core`、`-platform`、`-flow`、`-server`、`-cli`）归架构线；`-talent`、`-raas` 归岗位和候选人线；`-llm`、`-engine` 归 AI 引擎线；`-tts`、`-stt`、`-audio` 归语音线；`-room` 归候选人网页线；`-report` 归分析报告线。
+- `web/`：前端 pnpm workspace。`apps/admin`（HR 后台）、`apps/candidate`（候选人面试页）、`packages/ui`（油画风格设计系统）、`packages/api-client`（由 OpenAPI 生成）。
+- `migrations/`：数据库迁移，只加新文件，文件名 `<UTC 时间戳 14 位>_<线名>_<说明>.sql`。
+- `tts/`：三个引擎的版本锁定（`engines.json`、`upstreams.json`、`locks/`、`artifacts/`）、接入说明、Python worker。
+- 共用的依赖版本写在根 `Cargo.toml` 的 `[workspace.dependencies]`，按字母序。
+
+只改自己归属的目录。要动别人的，开 issue 找那条线。
 
 ## 已经定的事
 
@@ -38,6 +45,8 @@ scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息
 - TTS 只在 IndexTTS 2、IndexTTS 2.5、BreezeTTS2 三个里选，运行时必须能切换（`AI_INTERVIEW_TTS_ENGINE`）。目前默认 IndexTTS 2 克隆 R001 音色。不引入第四个 TTS，不用收费的云端语音接口。
 - 三个 TTS 的推理只能在 Apple Silicon 的 Mac 上跑。云端容器和 CI 只能跑不依赖模型的测试。
 - 充分用 GitHub：每件事有 issue，改动走分支和 PR，检查交给 Actions。
+- 技术栈：axum、PostgreSQL 加 sqlx、本地磁盘的 BlobStore、Postgres 表做任务队列、utoipa 生成 OpenAPI、前端 React 加 Vite。大模型用 DeepSeek 的 `deepseek-flash`。细节和理由见 `docs/architecture/README.md`。
+- 工程问题优先用大模型解决（比如简历解析直接让模型读），不堆正则和手写规则。
 - 项目开源，许可是 AGPL-3.0（见 `LICENSE`）。加依赖之前确认它的许可和 AGPL-3.0 兼容。
 
 ## 规矩
@@ -46,6 +55,9 @@ scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息
 - 错误：库用 `thiserror`，二进制用 `anyhow`。不要对外部输入 `unwrap()`。
 - 不写 `unsafe`（workspace 里设了 forbid）。clippy 警告当错误处理，不要用 `#[allow]` 压掉，除非写明理由。
 - 云端容器的出网经过代理并重新签发证书：HTTP 客户端要信任系统证书（reqwest 用 `rustls-tls-native-roots` 或 native-tls），不要关 TLS 校验。
+- JSON 字段用 `snake_case`；接口出错返回统一的错误结构（见 `docs/architecture/api.md`）。
+- 数据库查询用 sqlx 的运行时接口（`query_as` 等），不用要离线缓存的 `query!` 宏；要数据库的测试用 `#[sqlx::test]`。
+- 候选人的简历、录像、声音是个人信息：不进日志，不进测试数据，发给大模型的内容只带任务需要的部分。
 - 改了引擎清单或能力限制，`tts/engines.json`、`crates/interview-tts` 和 `tts/README.md` 要一起改，有测试检查前两个对不对得上。
 - 一个 PR 一件事。修 bug 先写一个会失败的测试，再修。
 - 改了约定、命令或目录结构，同一个 PR 里更新这个文件。
