@@ -126,10 +126,7 @@ impl<'a> Recordings<'a> {
         if let Some(file) = self.files.get(key) {
             return Ok(file.path.clone());
         }
-        let file = match self.blobs.local_path(key) {
-            Some(path) => LocalFile { path, _temp: None },
-            None => download(self.blobs, key).await?,
-        };
+        let file = LocalFile::open(self.blobs, key).await?;
         let path = file.path.clone();
         self.files.insert(key.to_owned(), file);
         Ok(path)
@@ -160,9 +157,19 @@ fn covering(rows: &[RecordingRow], start_ms: i64, end_ms: i64) -> Vec<RecordingR
 }
 
 /// 一个在本机磁盘上的录像文件。下载来的临时文件在这个值丢掉时删除。
-struct LocalFile {
-    path: PathBuf,
+pub(crate) struct LocalFile {
+    pub(crate) path: PathBuf,
     _temp: Option<tempfile::TempPath>,
+}
+
+impl LocalFile {
+    /// 存储在本机磁盘上时直接用那个文件，不在本机时先下载到临时文件。
+    pub(crate) async fn open(blobs: &SharedBlobStore, key: &str) -> Result<Self, String> {
+        match blobs.local_path(key) {
+            Some(path) => Ok(Self { path, _temp: None }),
+            None => download(blobs, key).await,
+        }
+    }
 }
 
 /// 把存储里的文件下载到临时文件。分块读，不把整个录像放进内存。

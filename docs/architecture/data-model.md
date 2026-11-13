@@ -121,7 +121,8 @@ BlobStore 用字符串键，全小写，斜杠分层。库里只存键。约定�
 | `interviews/{interview_id}/recordings/{track}/{segment}/chunks/{seq}` | 录制分片 | ⑤ |
 | `interviews/{interview_id}/recordings/{track}/{segment}/recording.{ext}` | 合并后的录像 | ⑤ |
 | `interviews/{interview_id}/answers/{turn_seq}.wav` | 单段回答的音频 | ⑤ |
-| `interviews/{interview_id}/frames/{at_ms}.jpg` | 从录像里抽的帧 | ⑦ |
+| `interviews/{interview_id}/frames/{at_ms}.jpg` | 录像画面检查里不正常的帧（人数不对、有手机） | ①（内容由 ⑦ 的 `frames` 产出） |
+| `interviews/{interview_id}/frames/events.json` | 录像画面检查的结果，重新生成报告时复用 | ① |
 
 本地磁盘实现把它们放在 `AI_INTERVIEW_DATA_DIR/blobs/` 下。这个目录不进 Git。
 
