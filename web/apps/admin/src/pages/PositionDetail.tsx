@@ -15,21 +15,22 @@ import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api/http";
 import { useDeletePosition, useInterviews, usePosition, useSavePosition } from "../api/queries";
-import type { Position, PositionInput } from "../api/types";
+import type { Position, PositionExtra } from "../api/types";
 import { Confirm, Person, QueryView, RecommendationBadge, StatusBadge } from "../components/common";
-import { fullTime, relativeTime } from "../lib/format";
-import { PositionFields } from "./Positions";
+import { fullTime, positionStatusLabel, positionStatusTone, relativeTime } from "../lib/format";
+import { PositionFields, type PositionForm } from "./Positions";
 
-const pick = (p: Position): PositionInput => ({
+const pick = (p: Position): PositionForm => ({
   title: p.title,
-  department: p.department,
-  location: p.location,
-  employment_type: p.employment_type,
-  salary_range: p.salary_range,
-  headcount: p.headcount,
+  department: p.department ?? null,
+  location: p.location ?? null,
+  employment_type: p.employment_type ?? null,
+  seniority: p.seniority ?? null,
   description: p.description,
   requirements: p.requirements,
   status: p.status,
+  // 表单里没有的字段（关键词、加分项这些）原样带回去，不然保存的时候会丢
+  extra: p.extra,
 });
 
 function EditDialog({
@@ -87,6 +88,57 @@ function EditDialog({
   );
 }
 
+const extraLists: Array<[keyof PositionExtra, string]> = [
+  ["hard_requirements", "硬性要求"],
+  ["interview_focus", "面试重点考察"],
+  ["must_have_skills", "必须会的技能"],
+  ["nice_to_have_skills", "加分的技能"],
+  ["nice_to_have", "加分项"],
+  ["negative_requirements", "明确不要的"],
+];
+
+const extraTexts: Array<[keyof PositionExtra, string]> = [
+  ["experience_requirement", "工作年限"],
+  ["degree_requirement", "学历"],
+  ["language_requirement", "语言"],
+  ["benefits", "福利"],
+  ["evaluation_rules", "评估标准"],
+];
+
+/** 岗位的结构化信息：出题和报告会用到的要点。都没有就不显示这张卡 */
+function ExtraCard({ extra }: { extra: PositionExtra }) {
+  const lists = extraLists
+    .map(([key, label]) => [label, extra[key] as string[]] as const)
+    .filter(([, items]) => items.length > 0);
+  const texts = extraTexts
+    .map(([key, label]) => [label, extra[key] as string | null] as const)
+    .filter(([, value]) => Boolean(value));
+  if (lists.length === 0 && texts.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader title="要点" />
+      <CardBody>
+        <div className="oil-stack">
+          <p className="oil-muted adm-note">出题和写报告的时候会参考这些。</p>
+          {lists.map(([label, items]) => (
+            <div key={label}>
+              <div className="adm-label">{label}</div>
+              <ul className="adm-plain-list">
+                {items.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          {texts.length > 0 && (
+            <KeyValue items={texts.map(([label, value]) => [label, value ?? "—"])} />
+          )}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
 function Detail({ position }: { position: Position }) {
   const navigate = useNavigate();
   const toast = useToast();
@@ -102,10 +154,14 @@ function Detail({ position }: { position: Position }) {
         title={position.title}
         description={
           <span className="oil-row oil-row--wrap">
-            <Badge tone={position.status === "open" ? "success" : "neutral"}>
-              {position.status === "open" ? "在招" : "已关闭"}
+            <Badge tone={positionStatusTone[position.status]}>
+              {positionStatusLabel[position.status]}
             </Badge>
-            <span>{[position.department, position.location].filter(Boolean).join(" · ")}</span>
+            <span>
+              {[position.extra.client_name, position.department, position.location]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
           </span>
         }
         actions={
@@ -150,6 +206,7 @@ function Detail({ position }: { position: Position }) {
               </div>
             </CardBody>
           </Card>
+          <ExtraCard extra={position.extra} />
         </div>
 
         <div
@@ -161,8 +218,9 @@ function Detail({ position }: { position: Position }) {
               <KeyValue
                 items={[
                   ["用工形式", position.employment_type ?? "—"],
-                  ["薪资范围", position.salary_range ?? "—"],
-                  ["招几个人", position.headcount ?? "—"],
+                  ["职级", position.seniority ?? "—"],
+                  ["薪资范围", position.extra.salary_range ?? "—"],
+                  ["招几个人", position.extra.headcount ?? "—"],
                   [
                     "来源",
                     position.source === "raas"
@@ -241,7 +299,7 @@ function Detail({ position }: { position: Position }) {
           })
         }
       >
-        有面试记录的岗位不能删，可以改成「已关闭」。
+        删掉之后列表里不再显示这个岗位，已经安排的面试不受影响。
       </Confirm>
     </>
   );

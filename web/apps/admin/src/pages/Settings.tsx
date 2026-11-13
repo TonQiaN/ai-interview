@@ -1,10 +1,10 @@
-import { Badge, Banner, Card, CardBody, CardHeader, KeyValue, PageHeader } from "@ai-interview/ui";
-import { CircleAlert, CircleCheck } from "lucide-react";
+import { Banner, Card, CardBody, CardHeader, KeyValue, PageHeader } from "@ai-interview/ui";
 import { Link } from "react-router";
 import { isMock } from "../api/http";
 import { useConfigDefaults, useSystemStatus } from "../api/queries";
 import { configSummary } from "../components/ConfigForm";
 import { QueryView } from "../components/common";
+import { SystemStatusList } from "../components/SystemStatusList";
 
 /** 系统：各个依赖是不是就绪，和面试设置的默认值、可调范围。 */
 export function SettingsPage() {
@@ -24,26 +24,7 @@ export function SettingsPage() {
           <CardHeader title="运行状态" />
           <CardBody>
             <QueryView query={system}>
-              {({ components }) => (
-                <ul className="adm-list">
-                  {components.map((c) => (
-                    <li key={c.key} className="adm-item">
-                      {c.ok ? (
-                        <CircleCheck aria-hidden="true" size={18} color="var(--oil-success)" />
-                      ) : (
-                        <CircleAlert aria-hidden="true" size={18} color="var(--oil-danger)" />
-                      )}
-                      <div className="adm-item__main">
-                        <div>{c.name}</div>
-                        {c.detail && <div className="adm-item__sub">{c.detail}</div>}
-                      </div>
-                      <Badge tone={c.ok ? "success" : "danger"} plain>
-                        {c.ok ? "正常" : "有问题"}
-                      </Badge>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {({ components }) => <SystemStatusList components={components} />}
             </QueryView>
           </CardBody>
         </Card>

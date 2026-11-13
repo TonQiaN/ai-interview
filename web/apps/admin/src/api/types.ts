@@ -6,6 +6,8 @@
  * 它们的类型发布到 @ai-interview/api-client 之后，这个文件换成从那里导入。
  */
 
+import type { Schemas } from "@ai-interview/api-client";
+
 export interface Page<T> {
   items: T[];
   total: number;
@@ -17,131 +19,60 @@ export interface ApiErrorBody {
   error: { code: string; message: string; details: unknown };
 }
 
-export interface AdminUser {
-  id: string;
-  username: string;
-  display_name: string;
-}
+/** 这一段的类型直接取自后端的 OpenAPI 文档（@ai-interview/api-client），后端改了字段这里编译就会报错。 */
+export type AdminUser = Schemas["AdminUser"];
+export type LoginInput = Schemas["LoginRequest"];
 
 // ───────── 岗位 ─────────
 
-export type PositionStatus = "open" | "closed";
+export type PositionStatus = Schemas["PositionStatus"];
+export type PositionSource = Schemas["PositionSource"];
+export type PositionExtra = Schemas["PositionExtra"];
+export type Position = Schemas["Position"];
 
-export interface Position {
-  id: string;
-  title: string;
-  department: string | null;
-  location: string | null;
-  employment_type: string | null;
-  salary_range: string | null;
-  headcount: number | null;
-  description: string;
-  requirements: string;
-  status: PositionStatus;
-  source: "manual" | "raas";
-  external_ref: string | null;
-  interview_count: number;
-  created_at: string;
-  updated_at: string;
-}
+/** 新建和修改岗位时提交的内容 */
+export type PositionInput = Schemas["CreatePosition"];
 
-export type PositionInput = Pick<
-  Position,
-  | "title"
-  | "department"
-  | "location"
-  | "employment_type"
-  | "salary_range"
-  | "headcount"
-  | "description"
-  | "requirements"
-  | "status"
->;
+/** 把一段岗位描述交给大模型整理出来的草稿 */
+export type PositionDraft = Schemas["PositionDraft"];
 
-export interface RaasPosition {
-  ref: string;
-  title: string;
-  client_name: string | null;
-  location: string | null;
-  headcount: number | null;
-  updated_at: string;
-  already_imported: boolean;
-}
+// ───────── RAAS 导入：只从 RAAS 读，导进来的是一份独立的副本 ─────────
 
-export interface RaasStatus {
-  available: boolean;
-  message: string | null;
-}
+export type RaasStatus = Schemas["RaasStatus"];
+export type RaasPosition = Schemas["RaasPositionItem"];
+export type RaasCandidate = Schemas["RaasCandidateItem"];
+export type RaasImportOutcome = Schemas["ImportOutcome"];
+export type RaasPositionImportItem = Schemas["PositionImportItem"];
+export type RaasCandidateImportItem = Schemas["CandidateImportItem"];
 
-// ───────── 候选人 ─────────
+// ───────── 候选人和简历 ─────────
 
-export interface ProfileExperience {
-  company: string;
-  title: string;
-  start: string | null;
-  end: string | null;
-  summary: string;
-}
+export type CandidateSource = Schemas["CandidateSource"];
+export type ParseStatus = Schemas["ParseStatus"];
 
-export interface ProfileEducation {
-  school: string;
-  degree: string | null;
-  major: string | null;
-  start: string | null;
-  end: string | null;
-}
+export type CandidateProfile = Schemas["CandidateProfile"];
+export type ParsedResume = Schemas["ParsedResume"];
+export type DuplicateHint = Schemas["DuplicateHint"];
 
-export interface CandidateProfile {
-  summary: string;
-  highlights: string[];
-  skills: string[];
-  experiences: ProfileExperience[];
-  education: ProfileEducation[];
-  /** 简历里值得在面试中核实的地方 */
-  to_verify: string[];
-}
+export type Resume = Schemas["Resume"];
 
-export type ParseStatus = "pending" | "running" | "done" | "failed";
+/** 简历详情：多了全文和结构化结果，解析完成后才有 */
+export type ResumeDetail = Resume & {
+  text_content: string | null;
+  interview_text: string | null;
+  parsed: ParsedResume | null;
+};
 
-export interface Candidate {
-  id: string;
-  name: string;
-  phone: string | null;
-  email: string | null;
-  current_title: string | null;
-  current_company: string | null;
-  years_of_experience: number | null;
-  location: string | null;
-  source: "manual" | "resume" | "raas";
-  note: string | null;
-  profile: CandidateProfile | null;
-  profile_status: ParseStatus | null;
-  interview_count: number;
-  created_at: string;
-  updated_at: string;
-}
+export type Candidate = Schemas["Candidate"];
+export type CandidateListItem = Candidate & { primary_resume: Resume | null };
+export type CandidateDetail = CandidateListItem & { possible_duplicates: DuplicateHint[] };
 
-export type CandidateInput = Pick<
-  Candidate,
-  | "name"
-  | "phone"
-  | "email"
-  | "current_title"
-  | "current_company"
-  | "years_of_experience"
-  | "location"
-  | "note"
->;
+export type CandidateInput = Schemas["CreateCandidate"];
 
-export interface Resume {
-  id: string;
-  candidate_id: string;
-  file_name: string;
-  mime_type: string;
-  size_bytes: number;
-  parse_status: ParseStatus;
-  parse_error: string | null;
-  created_at: string;
+/** 上传简历建候选人的返回 */
+export interface ImportedCandidate {
+  candidate: Candidate;
+  resume: Resume;
 }
 
 // ───────── 语音 ─────────
@@ -605,11 +536,6 @@ export interface InterviewReport {
 
 // ───────── 系统 ─────────
 
-export interface SystemStatus {
-  components: {
-    key: "database" | "llm" | "tts" | "stt" | "raas";
-    name: string;
-    ok: boolean;
-    detail: string | null;
-  }[];
-}
+export type SystemStatus = Schemas["SystemStatus"];
+export type ComponentStatus = Schemas["ComponentStatus"];
+export type ComponentState = Schemas["ComponentState"];
