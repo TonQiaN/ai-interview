@@ -630,6 +630,8 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
         released: 0,
         first_ready_ms: None,
         stale: false,
+        tail_released: false,
+        settled_ms: None,
     };
     let candidate = CandidateTurn {
         text,
@@ -675,6 +677,7 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
     let spent = outcome.usage;
     let beats = speaker.released + u32::from(speaker.held.is_some());
     let first_ready_ms = speaker.first_ready_ms;
+    let settled_ms = speaker.settled_ms;
     finish_turn(deps, interview_id, &turn, speaker, outcome).await?;
     deps.realtime.notify(interview_id);
 
@@ -694,6 +697,7 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
         heard_ms,
         decision_ms = timing.decision_ms,
         first_ready_ms,
+        settled_ms,
         total_ms = started.elapsed().as_millis(),
         "实时对话接了一轮"
     );
@@ -727,8 +731,8 @@ async fn converse(
 
 /// 把引擎给出来的话一句一句准备好，排进队列。
 ///
-/// 最后一句要等这一轮想完才排：它播完是听回答还是结束面试，引擎想完了才知道。所以手里总留着
-/// 最新的一句（`held`），来了下一句才把它排进去。
+/// 最后一句播完是听回答还是结束面试，要等引擎说这一轮的话都给出来了（`Done`）才知道。所以手里
+/// 总留着最新的一句（`held`），来了下一句或者来了 `Done` 才把它排进去。
 struct Speaker<'a> {
     deps: &'a Deps,
     interview_id: Uuid,
@@ -750,6 +754,10 @@ struct Speaker<'a> {
     first_ready_ms: Option<u128>,
     /// 这一轮已经不作数了（面试结束了，或者状态被别的进程改了）
     stale: bool,
+    /// 最后一句已经提前排进队列了（引擎发了 `Done`），整轮想完时不用再排
+    tail_released: bool,
+    /// 多久之后知道这一轮的话都给出来了
+    settled_ms: Option<u128>,
 }
 
 impl Speaker<'_> {
@@ -781,12 +789,46 @@ impl Speaker<'_> {
                     progress: self.progress,
                 });
             }
-            // 引擎会加新的事件（#123），面试间不认识的先不管，免得它一加这里就编译不过
+            LiveEvent::Done {
+                listen, progress, ..
+            } => self.settle(listen.as_ref(), progress).await,
+            // 引擎以后再加事件，面试间不认识的先不管，免得它一加这里就编译不过
             #[allow(
                 unreachable_patterns,
-                reason = "现在三种事件都处理了，这一支是给引擎以后加的事件留的"
+                reason = "现在的事件都处理了，这一支是给引擎以后加的事件留的"
             )]
             _ => {}
+        }
+    }
+
+    /// 引擎说这一轮的话都给出来了：手里留着的最后一句不用等整轮想完，现在就能排进去。
+    ///
+    /// 换题时模型这之后还要写上一道题的概括，实测早 0.3 到 0.4 秒。引擎的新状态、现场生成的话
+    /// 登记成句子，还是等整轮想完在 [`finish_turn`] 里记。
+    async fn settle(&mut self, listen: Option<&Listen>, progress: EngineProgress) {
+        self.settled_ms
+            .get_or_insert(self.started.elapsed().as_millis());
+        let Some(mut beat) = self.held.take() else {
+            // 这一轮什么都没说，等整轮想完再看要不要把上一句重说一遍
+            return;
+        };
+        if self.stale {
+            return;
+        }
+        beat.answer = listen.map(|listen| window(self.deps, listen));
+        beat.progress = progress;
+        match enqueue(self.deps, self.interview_id, self.beat_seq, beat.clone()).await {
+            Ok(true) => {
+                self.released += 1;
+                self.tail_released = true;
+                self.deps.realtime.notify(self.interview_id);
+            }
+            Ok(false) => self.stale = true,
+            Err(err) => {
+                // 没排进去就还留在手里，整轮想完时和引擎的新状态一起写
+                tracing::warn!(interview_id = %self.interview_id, reason = %err, "实时对话的最后一句没能提前排进队列，等这一轮想完再排");
+                self.held = Some(beat);
+            }
         }
     }
 
@@ -891,7 +933,8 @@ async fn finish_turn(
     };
 
     let mut tail = speaker.held;
-    if let Some(listen) = &outcome.listen {
+    // 最后一句已经提前排进去的（带着听不听回答和进度），页面可能都播完了，这里不用再管
+    if let Some(listen) = outcome.listen.as_ref().filter(|_| !speaker.tail_released) {
         if tail.is_none() && state.queue.is_empty() {
             // 这一轮什么都没说却要接着听：把刚才那句再说一遍，不让页面干等
             if let RtStep::Say(asked) = &state.last {
@@ -910,6 +953,12 @@ async fn finish_turn(
         }
     }
     state.queue.extend(tail);
+    // 只有最后一句之后才听回答。引擎出错重来的那一轮，前面可能已经排进过一句带着听回答的
+    if let Some((_, earlier)) = state.queue.split_last_mut() {
+        for beat in earlier {
+            beat.answer = None;
+        }
+    }
     state.live = outcome.state;
     state.thinking = None;
     state.ending = outcome.finished;

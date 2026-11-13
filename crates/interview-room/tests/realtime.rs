@@ -2,12 +2,18 @@
 
 mod common;
 
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use common::{TestApp, interview_status, prepared};
+use futures_util::stream;
 use interview_llm::testing::ScriptedModel;
+use interview_llm::{
+    ChatModel, ChatRequest, ChatResponse, ChatStream, FinishReason, LlmError, StreamEvent, Usage,
+};
 use interview_platform::testing::{self, TestRequest, TestResponse};
 use interview_room::{
     AnswerTranscriber, AnswerTranscript, Deps, Language, LiveVoice, RoomConfig, SpokenAudio,
@@ -89,6 +95,60 @@ impl LiveVoice for FakeVoice {
             wav: format!("现场合成：{text}").into_bytes(),
             duration_ms: 1_200,
         })
+    }
+}
+
+/// 假模型：第一行（怎么接）马上给，后面的（这道题的概括）等放行了才写完。
+struct SlowWriter {
+    gate: Arc<Semaphore>,
+    replies: Mutex<VecDeque<(&'static str, &'static str)>>,
+    /// 写完了几个回答
+    finished: Arc<AtomicUsize>,
+}
+
+impl SlowWriter {
+    fn new(replies: &[(&'static str, &'static str)]) -> Self {
+        Self {
+            gate: Arc::new(Semaphore::new(0)),
+            replies: Mutex::new(replies.iter().copied().collect()),
+            finished: Arc::default(),
+        }
+    }
+}
+
+#[async_trait]
+impl ChatModel for SlowWriter {
+    async fn chat_stream(&self, _request: ChatRequest) -> Result<ChatStream, LlmError> {
+        let (head, rest) = self.replies.lock().unwrap().pop_front().ok_or_else(|| {
+            LlmError::Config("假模型的预设回答用完了，测试里多调用了一次".to_owned())
+        })?;
+        let (gate, finished) = (self.gate.clone(), self.finished.clone());
+        Ok(Box::pin(stream::unfold(0, move |step| {
+            let (gate, finished) = (gate.clone(), finished.clone());
+            async move {
+                let event = match step {
+                    0 => StreamEvent::Content(head.to_owned()),
+                    1 => {
+                        drop(gate.acquire().await.ok()?);
+                        StreamEvent::Content(rest.to_owned())
+                    }
+                    2 => {
+                        finished.fetch_add(1, Ordering::SeqCst);
+                        StreamEvent::Done(ChatResponse {
+                            content: format!("{head}{rest}"),
+                            reasoning_content: None,
+                            tool_calls: Vec::new(),
+                            finish_reason: FinishReason::Stop,
+                            usage: Usage::default(),
+                            model: "slow-writer".to_owned(),
+                            system_fingerprint: None,
+                        })
+                    }
+                    _ => return None,
+                };
+                Some((Ok(event), step + 1))
+            }
+        })))
     }
 }
 
@@ -476,6 +536,60 @@ async fn waits_for_the_interviewer_to_think(pool: PgPool) {
     let q2 = advance(&app, &token, &report(&next, 300, "silence")).await;
     assert_eq!((key(&q2), q2["expects_answer"] == true), ("q2", true));
     assert_eq!(q2["progress"]["index"], 2);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_next_question_does_not_wait_for_the_model_to_finish_writing(pool: PgPool) {
+    let model = Arc::new(SlowWriter::new(&[
+        ("next adequate\n", "负责库存服务。"),
+        ("next adequate\n", "二"),
+    ]));
+    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+        .with_llm(Some(model.clone()))
+        .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
+        .with_voice(Arc::new(FakeVoice::default()));
+    let app = common::app_from(deps).await;
+    let (interview_id, token) = prepared(&app, conversational()).await;
+
+    let opening = start(&app, &token).await;
+    let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
+    let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
+    assert_eq!(key(&ack), "ack.1");
+
+    // 模型定了往下走，第一道题的概括还没写完：第二题已经可以播了，带着听回答的设置和新的进度
+    let q2 = tokio::time::timeout(
+        Duration::from_secs(10),
+        advance(&app, &token, &report(&ack, 300, "silence")),
+    )
+    .await
+    .expect("下一题不该等模型把上一道题的概括写完");
+    assert_eq!((key(&q2), q2["expects_answer"] == true), ("q2", true));
+    assert_eq!(q2["answer"]["silence_sec"], 2);
+    assert_eq!(q2["progress"]["index"], 2);
+    assert_eq!(model.finished.load(Ordering::SeqCst), 0);
+
+    // 候选人连第二题都答完了，上一轮才想完：等它想完，再接着想这一段，两段回答各记一次
+    let answer = report(&q2, 400, "silence");
+    let answered = advance(&app, &token, &answer);
+    let release = async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(model.finished.load(Ordering::SeqCst), 0);
+        model.gate.add_permits(100);
+    };
+    let (next, ()) = tokio::join!(answered, release);
+    assert_eq!(key(&next), "ack.2");
+    let q3 = advance(&app, &token, &report(&next, 500, "silence")).await;
+    assert_eq!((key(&q3), q3["expects_answer"] == true), ("q3", true));
+    assert_eq!(q3["progress"]["index"], 3);
+    assert_eq!(model.finished.load(Ordering::SeqCst), 2);
+
+    let answers: Vec<Option<String>> = turns(&app, interview_id)
+        .await
+        .into_iter()
+        .filter(|(speaker, ..)| speaker == "candidate")
+        .map(|(_, key, _)| key)
+        .collect();
+    assert_eq!(answers, [Some("q1".to_owned()), Some("q2".to_owned())]);
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]

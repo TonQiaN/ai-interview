@@ -9,8 +9,10 @@ import {
   fileSize,
   foldEvents,
   rating,
+  ratingSpread,
   relativeTime,
   resumeQuote,
+  scoreRangeText,
   stageName,
   turnNote,
 } from "./format";
@@ -177,5 +179,26 @@ describe("报告里引用的简历原文", () => {
 
   it("正文里的井号和横线不动", () => {
     expect(resumeQuote("熟悉 C# 和 .NET，2018-2021 在职")).toBe("熟悉 C# 和 .NET，2018-2021 在职");
+  });
+});
+
+describe("打分的浮动", () => {
+  it("评分可以带半分", () => {
+    expect(rating(3.5)).toBe("3.5 分");
+  });
+
+  it("总分的浮动范围写成「79 到 85」，没有范围或只有一个数就不写", () => {
+    expect(scoreRangeText({ low: 79, high: 85 })).toBe("79 到 85");
+    expect(scoreRangeText({ low: 80, high: 80 })).toBeNull();
+    expect(scoreRangeText(null)).toBeNull();
+    expect(scoreRangeText(undefined)).toBeNull();
+  });
+
+  it("一道题几次评分不一样，说出每次的分数", () => {
+    expect(ratingSpread([3, 3.5, 3])).toBe("评了 3 次，分别是 3、3.5、3 分，回答介于两档之间");
+    expect(ratingSpread([4, 4, 4])).toBeNull();
+    expect(ratingSpread([4])).toBeNull();
+    expect(ratingSpread([])).toBeNull();
+    expect(ratingSpread(undefined)).toBeNull();
   });
 });
