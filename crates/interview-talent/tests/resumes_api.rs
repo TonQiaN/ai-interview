@@ -633,6 +633,50 @@ async fn reparsing_while_the_profile_is_being_written_runs_again(pool: PgPool) {
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_name_hr_typed_while_the_resume_was_being_read_is_kept(pool: PgPool) {
+    // 直接传简历建候选人：名字先用文件名占位，等解析完换成简历里的姓名
+    let app = app(pool).await;
+    let (content_type, body) =
+        multipart_file("file", Some("后端-简历.txt"), RESUME_TEXT.as_bytes());
+    let response = TestRequest::post("/api/v1/candidates/import")
+        .bytes(&content_type, body)
+        .send(&app.router)
+        .await;
+    assert_eq!(response.status, StatusCode::ACCEPTED, "{}", response.text());
+    let candidate_id = response.json()["candidate"]["id"]
+        .as_str()
+        .expect("有 id")
+        .to_owned();
+    assert_eq!(candidate(&app, &candidate_id).await["name"], "后端-简历");
+
+    // 大模型还在读简历的时候，HR 自己把名字填上了
+    let (router, uri) = (
+        app.router.clone(),
+        format!("/api/v1/candidates/{candidate_id}"),
+    );
+    let model = Interrupted::new(
+        ScriptedModel::new().reply(EXTRACTION).reply(PROFILE),
+        0,
+        move || {
+            let (router, uri) = (router.clone(), uri.clone());
+            async move {
+                let patched = TestRequest::patch(&uri)
+                    .json(&json!({"name": "周既白"}))
+                    .send(&router)
+                    .await;
+                assert_eq!(patched.status, StatusCode::OK, "{}", patched.text());
+            }
+        },
+    );
+    run_tasks(&app.ctx, Some(model)).await;
+
+    // HR 填的名字留着，别的信息照常从简历里补上
+    let after = candidate(&app, &candidate_id).await;
+    assert_eq!(after["name"], "周既白");
+    assert_eq!(after["current_title"], "高级后端工程师");
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn reparsing_replaces_a_placeholder_name_but_not_one_hr_typed(pool: PgPool) {
     // 没配大模型的时候上传两份简历建候选人：解析失败，名字还是文件名
     let offline = app(pool).await;
