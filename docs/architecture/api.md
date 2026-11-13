@@ -163,8 +163,8 @@ HR 侧：
 | --- | --- |
 | `GET /api/v1/interviews/{id}/invites`、`POST /api/v1/interviews/{id}/invites` ★ | 面试链接列表、生成（完整链接只在生成时返回一次）。面试要先准备好（`ready` 或 `invited`），生成后状态变成 `invited`。请求体 `{ "expires_in_hours": 168, "keep_existing": false }`，两个字段都可以不填 |
 | `DELETE /api/v1/interviews/{id}/invites/{invite_id}` | 撤销。没有别的可用链接、候选人也没开始时，面试退回 `ready` |
-| `GET /api/v1/interviews/{id}/recordings` ★ | 录制轨道列表 |
-| `GET /api/v1/recordings/{id}/media` ★ | 录像文件，支持 Range |
+| `GET /api/v1/interviews/{id}/recordings` ★ | 录制列表，按在面试时间轴上的先后排。合并好的带 `media_url` |
+| `GET /api/v1/recordings/{id}/media` ★ | 录像文件，支持 Range，可以直接当 `<video>` 的地址。还没合并好返回 409（`recording_not_ready`） |
 | `GET /api/v1/interviews/{id}/events` ★ | 过程事件 |
 
 候选人侧（`Authorization: Bearer <令牌>`）：
@@ -241,6 +241,21 @@ HR 侧：
 - 服务端把面试官的话和候选人的回答各记一行 `interview_turns`，调 `interview-engine` 的状态机决定下一步。逐题模式下候选人的文字在面试后由整段转写补上；如果配置允许逐题追问，服务端会先转写这一段再决定。
 - `advance` 是幂等的：同一个 `seq` 重复提交返回同样的下一步（断网重试用）；`seq` 不是当前这一句也不是上一句时返回 409。
 - 断点续面：`GET /room/session` 的 `resume` 是当前该播的那一句；页面重新检查设备后调 `start`，从这一句继续。录像从新的一段开始录。
+
+### 录制上传
+
+浏览器用 `MediaRecorder` 边录边切片（`session.recording.timeslice_ms`，默认 5 秒一片），切出一片传一片。
+
+1. 开始录之前 `PUT /room/recordings/{track}/{segment}` 登记这一段。`{track}` 是 `camera`（摄像头加麦克风）、`microphone`（只有声音）或 `screen`；`{segment}` 是浏览器生成的 UUID。请求体 `{ "content_type": "video/webm;codecs=vp8,opus", "start_ms": 1200 }`，`start_ms` 是这一段从面试时间轴的哪一毫秒开始。只接受 WebM 和 MP4。
+2. 每切出一片 `PUT …/chunks/{seq}`，`seq` 从 0 开始，请求体就是这一片的字节，最大 16 MB。`X-Chunk-Sha256` 带内容的 SHA-256（十六进制），服务端校验，对不上返回 422（`checksum_mismatch`）。同一个序号重复上传没有副作用。
+3. 断网或刷新之后，`GET …/chunks` 拿到已收到的序号，只补传缺的。没传完的分片页面存在 IndexedDB 里。
+4. 停止录制后 `POST …/complete`，带 `{ "total_chunks": 38 }`。缺片时返回 409（`chunks_missing`），`details.missing` 是缺的序号（最多列 100 个），补传后再调。一片都没录到就传 0，这一段记成失败。重复调用没有副作用。
+5. 服务端在后台把分片合并成一个文件（任务 `recording.assemble`），再用 ffmpeg 原样重新封装一遍补上时长（`MediaRecorder` 录出来的文件头里没有总时长，播放器拖不了进度条）。没装 ffmpeg 或处理失败时保留合并出来的文件，`error` 里有一句说明。
+
+- 刷新页面、设备断开重连之后开新的一段（新的 UUID），不接着旧的录。服务端给每条轨道的段从 0 开始排序号，HR 侧按 `start_ms` 把几段接起来看。
+- 面试开始之后才能登记和上传。面试结束后 24 小时内链接还能用来补传。
+- 还没登记的段返回 404（`segment_not_found`）；已经在合并的段不再收新分片（409）。
+- 一场面试最多 200 段、4 GB。
 
 ### 实时模式（WebSocket）
 

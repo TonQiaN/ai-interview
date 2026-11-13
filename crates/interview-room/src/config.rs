@@ -1,6 +1,6 @@
 //! 面试间自己的配置。
 
-use interview_platform::config::{env_flag, env_parse};
+use interview_platform::config::{env_flag, env_opt, env_parse};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -41,6 +41,10 @@ pub struct RoomConfig {
     /// 面试结束后，链接还能用多少小时来补传没传完的录像
     pub upload_grace_hours: u32,
     pub recording: RecordingSettings,
+    /// ffmpeg 的路径或命令名。合并录像后用它补上时长信息；没装也能用，只是录像拖不了进度条
+    pub ffmpeg: String,
+    /// ffprobe 的路径或命令名，读录像时长用
+    pub ffprobe: String,
 }
 
 impl RoomConfig {
@@ -66,9 +70,13 @@ impl RoomConfig {
                 tracing::warn!(reason = %err, "AI_INTERVIEW_ROOM_CAMERA_REQUIRED 写得不对，这次按必须开摄像头处理");
                 default.camera_required
             });
+        let ffmpeg = env_opt("AI_INTERVIEW_FFMPEG").unwrap_or(default.ffmpeg.clone());
+        let ffprobe = env_opt("AI_INTERVIEW_FFPROBE").unwrap_or(default.ffprobe.clone());
         Self {
             invite_ttl_hours,
             camera_required,
+            ffmpeg,
+            ffprobe,
             ..default
         }
     }
@@ -81,6 +89,8 @@ impl Default for RoomConfig {
             camera_required: true,
             upload_grace_hours: 24,
             recording: RecordingSettings::default(),
+            ffmpeg: "ffmpeg".to_owned(),
+            ffprobe: "ffprobe".to_owned(),
         }
     }
 }

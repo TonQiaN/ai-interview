@@ -5,6 +5,7 @@
 use axum::Router;
 use interview_platform::AppContext;
 use interview_platform::auth::AdminUser;
+use interview_platform::tasks::{TaskRegistry, TaskRunner};
 use interview_platform::testing::{self, TestRequest};
 use interview_room::{Deps, RoomConfig};
 use serde_json::{Value, json};
@@ -13,6 +14,7 @@ use uuid::Uuid;
 
 pub struct TestApp {
     pub ctx: AppContext,
+    pub deps: Deps,
     pub admin: AdminUser,
     /// 以管理员身份访问（HR 侧的接口）
     pub hr: Router,
@@ -25,15 +27,31 @@ pub async fn app(pool: PgPool) -> TestApp {
 }
 
 pub async fn app_with(pool: PgPool, config: RoomConfig) -> TestApp {
-    let ctx = testing::test_context(pool);
+    app_on(testing::test_context(pool), config).await
+}
+
+/// 用调用方给的 [`AppContext`]（比如文件存在磁盘上的）。
+pub async fn app_on(ctx: AppContext, config: RoomConfig) -> TestApp {
     let admin = testing::create_admin(&ctx).await;
-    let (router, _api) = interview_room::router(Deps::new(ctx.clone(), config)).split_for_parts();
+    let deps = Deps::new(ctx.clone(), config);
+    let (router, _api) = interview_room::router(deps.clone()).split_for_parts();
     TestApp {
         hr: testing::as_admin(router.clone(), admin.clone()),
         public: router,
         admin,
+        deps,
         ctx,
     }
+}
+
+/// 把队列里现在能跑的后台任务跑完，返回跑了几条。
+pub async fn run_tasks(app: &TestApp) -> usize {
+    let mut registry = TaskRegistry::new();
+    interview_room::register_tasks(&mut registry, app.deps.clone());
+    TaskRunner::new(app.ctx.db.clone(), registry)
+        .run_until_idle()
+        .await
+        .expect("跑后台任务失败")
 }
 
 /// 建一场面试（连同岗位和候选人），状态由调用方指定。
@@ -90,6 +108,17 @@ pub async fn create_invite(app: &TestApp, interview_id: Uuid) -> (Uuid, String) 
 pub async fn invited(app: &TestApp) -> (Uuid, String) {
     let interview_id = seed_interview(&app.ctx, "ready").await;
     let (_, token) = create_invite(app, interview_id).await;
+    (interview_id, token)
+}
+
+/// 一场正在进行的面试，返回 `(面试的 ID, 令牌)`。
+pub async fn started(app: &TestApp) -> (Uuid, String) {
+    let (interview_id, token) = invited(app).await;
+    sqlx::query("UPDATE interviews SET status = 'in_progress', started_at = now() WHERE id = $1")
+        .bind(interview_id)
+        .execute(&app.ctx.db)
+        .await
+        .expect("改面试状态失败");
     (interview_id, token)
 }
 
