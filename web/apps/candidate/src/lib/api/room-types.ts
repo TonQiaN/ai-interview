@@ -15,6 +15,8 @@ export type InterviewMode = Schemas["RoomMode"];
 export type ConsentItem = Schemas["ConsentItem"];
 export type RecordingSettings = Schemas["RecordingSettings"];
 export type AnswerSettings = Schemas["AnswerSettings"];
+/** 面试官说这一句的时候候选人可以插话（实时对话）：声音持续多久算插话、插话之后怎么听。 */
+export type BargeInSettings = Schemas["BargeInSettings"];
 
 /** 服务端告诉页面的「下一步」：说一句话，或者面试结束。 */
 export type NextStep = Schemas["NextStep"];
