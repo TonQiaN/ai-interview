@@ -10,12 +10,16 @@ use interview_flow::Deps;
 use interview_llm::ChatModel;
 use interview_llm::testing::ScriptedModel;
 use interview_platform::AppContext;
+use interview_platform::auth::AdminUser;
 use interview_platform::tasks::{TaskRegistry, TaskRunner};
 use interview_platform::testing::{self, TestRequest, TestResponse};
+use interview_stt::Transcriber;
 use interview_tts::{FakeBackend, Synthesizer};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
+
+mod after_interview;
 
 /// 一套测试环境：接口、后台任务、假的外部依赖。
 struct Harness {
@@ -25,6 +29,7 @@ struct Harness {
     tts: Arc<FakeBackend>,
     candidate_id: Uuid,
     position_id: Uuid,
+    admin: AdminUser,
 }
 
 impl Harness {
@@ -36,9 +41,10 @@ impl Harness {
             ctx: ctx.clone(),
             llm: llm.map(|model| Arc::new(model) as Arc<dyn ChatModel>),
             synth: Arc::new(Synthesizer::new(tts.clone())),
+            stt: None,
         };
         let (router, _api) = interview_flow::router(deps.clone()).split_for_parts();
-        let app = testing::as_admin(router, admin);
+        let app = testing::as_admin(router, admin.clone());
 
         let candidate_id: Uuid = sqlx::query_scalar(
             "INSERT INTO candidates (name, phone, email) \
@@ -74,6 +80,7 @@ impl Harness {
             tts,
             candidate_id,
             position_id,
+            admin,
         }
     }
 
@@ -84,14 +91,37 @@ impl Harness {
             ctx: self.ctx.clone(),
             llm: llm.map(|model| Arc::new(model) as Arc<dyn ChatModel>),
             synth: Arc::new(Synthesizer::new(tts.clone())),
+            stt: None,
         };
+        self.rebuilt(deps, tts)
+    }
+
+    /// 换面试后用的那两样：写报告的大模型和语音识别。
+    fn with_review(
+        &self,
+        llm: Option<Arc<dyn ChatModel>>,
+        stt: Option<Arc<dyn Transcriber>>,
+    ) -> Self {
+        let deps = Deps {
+            ctx: self.ctx.clone(),
+            llm,
+            synth: self.deps.synth.clone(),
+            stt,
+        };
+        self.rebuilt(deps, self.tts.clone())
+    }
+
+    /// 接口要重新建：handler 拿到的是建接口时的那份依赖。
+    fn rebuilt(&self, deps: Deps, tts: Arc<FakeBackend>) -> Self {
+        let (router, _api) = interview_flow::router(deps.clone()).split_for_parts();
         Self {
             ctx: self.ctx.clone(),
             deps,
-            app: self.app.clone(),
+            app: testing::as_admin(router, self.admin.clone()),
             tts,
             candidate_id: self.candidate_id,
             position_id: self.position_id,
+            admin: self.admin.clone(),
         }
     }
 
@@ -1004,14 +1034,19 @@ async fn endpoints_require_login(pool: PgPool) {
         ctx,
         llm: None,
         synth: Arc::new(Synthesizer::new(Arc::new(FakeBackend::new()))),
+        stt: None,
     };
     let (router, _api) = interview_flow::router(deps).split_for_parts();
+    let id = Uuid::now_v7();
     for uri in [
-        "/api/v1/interviews",
-        "/api/v1/interview-templates",
-        "/api/v1/interview-config/defaults",
+        "/api/v1/interviews".to_owned(),
+        "/api/v1/interview-templates".to_owned(),
+        "/api/v1/interview-config/defaults".to_owned(),
+        format!("/api/v1/interviews/{id}/transcript"),
+        format!("/api/v1/interviews/{id}/report"),
+        format!("/api/v1/interviews/{id}/reports"),
     ] {
-        let response = TestRequest::get(uri).send(&router).await;
+        let response = TestRequest::get(&uri).send(&router).await;
         assert_eq!(response.status, StatusCode::UNAUTHORIZED, "{uri}");
     }
 }

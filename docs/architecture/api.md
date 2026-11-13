@@ -117,19 +117,26 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `GET /api/v1/interviews/{id}/utterances` | 面试官的每句话和合成状态 |
 | `GET /api/v1/interviews/{id}/utterances/{key}/audio` | 试听 |
 | `GET /api/v1/interviews/{id}/transcript` ★ | 带时间戳的对话记录 |
-| `GET /api/v1/interviews/{id}/report` ★ | 最新的分析报告 |
+| `GET /api/v1/interviews/{id}/report` ★ | 最新一份写好的分析报告，带 `?version=` 看指定版本 |
+| `GET /api/v1/interviews/{id}/reports` | 报告的所有版本和各自的状态 |
 | `POST /api/v1/interviews/{id}/report/regenerate` | 重新生成报告 |
 | `PUT /api/v1/interviews/{id}/decision` | HR 的结论 |
 | `GET /api/v1/interview-templates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` | 配置模板 |
 | `GET /api/v1/interview-config/defaults` | 默认配置和各选项的取值范围，给配置表单用 |
 
-现在已经有的是 `transcript`、`report`、`decision` 之外的那些。几条前端要知道的规则：
+几条前端要知道的规则：
 
 - 只有 `draft`、`prepare_failed`、`ready` 三个状态能改配置、改题、点准备，其他状态返回 409，`code` 是 `interview_not_editable`。
 - `PATCH` 改了配置或简历，出好的题目作废，状态回到 `draft`；只换音色的话题目保留，状态也回到 `draft`，再点准备只重新合成语音。
 - `POST .../prepare` 返回 202 和面试详情（状态 `preparing`），之后轮询详情。失败是 `prepare_failed`，原因在 `prepare_error`；语音合成失败时题目会保留，再点一次只补失败的那几句。请求体可以不传；传 `{"regenerate_plan": true}` 会重新出题。没配大模型又需要出题时返回 503。
 - `GET .../plan` 在还没出题时返回 404，`code` 是 `plan_not_ready`。`PUT .../plan` 要传完整的计划，校验不过返回 422，`details` 按位置（比如 `questions[1].text`）列出原因；保存后状态先变 `preparing`，文字变了的那几句重新合成完回到 `ready`。
 - 配置校验不过返回 422，`details` 的键是配置里的字段路径（比如 `answer.max_sec`）。
+- `GET .../transcript` 返回 `items[]`，按顺序是面试官和候选人说的每一句：`speaker`、`text`、`start_ms`、`end_ms`（相对面试开始的毫秒，面试官的结束时间按合成音频的时长算，没有就是 `null`）、`utterance_key`（这句对应哪道题）、`words`（逐字时间戳 `{w, s, e}`，没有就是空数组）、`confidence`、`transcript_source`（`live` 是面试当时的识别结果，`final` 是面试后重新转写的）。面试还没开始时 `items` 是空的。
+- 面试结束后报告自动生成。面试详情里的 `report` 是最新一版的状态：`pending`、`running`、`done`、`failed`，失败原因在 `error`。前端轮询详情，`done` 了再取 `GET .../report`。
+- `GET .../report` 只给写好的报告（`status = done`），返回 `{id, version, generated_at, content}`，`content` 是 `interview_report::InterviewReport`。还没有写好的报告时返回 404，`code` 是 `report_not_ready`。
+- `POST .../report/regenerate` 只有面试结束后（`completed`、`abandoned`）才能点，否则 409，`code` 是 `interview_not_finished`。返回 202 和面试详情。每次重新生成加一个版本，旧版本留着；上一版还在生成时不会再加，直接返回当前状态。
+- 候选人一句都没答、或者没配大模型时，报告直接是 `failed`，`error` 里写了原因，不会一直转圈。
+- `PUT .../decision` 请求体 `{"decision": "advance" | "hold" | "reject" | "pending", "note": "…"}`，`note` 可以不传，最长 2000 字。返回面试详情。改回 `pending` 会清掉决定人和时间。
 
 ### ② 岗位和候选人（interview-talent、interview-raas）
 
