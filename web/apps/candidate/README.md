@@ -48,11 +48,11 @@ E2E_REAL=1 E2E_SPEECH_WAV=<一段有人说话的 WAV> pnpm e2e
 - 候选人停下来满静音时长后，过渡语马上开始播（0.3 秒以内）；过渡语播完到下一句开口是 0.1 到 1 秒。转写加模型判断一共一两秒，大部分藏在过渡语后面。
 - 识别出来的文字有个别同音字错误，没有影响模型的判断。
 
-`real.spec.ts` 里还有一条实时对话的测试（`pnpm e2e -g 实时对话` 只跑它）：面试配成实时对话，面试官现场接话，跑完打印候选人说完到面试官开口的中位数和 p95。加上 `AI_INTERVIEW_LOG=info` 能在输出里看到后端每一轮各段用了多久。实测的数字和说明在 `crates/interview-room/README.md` 的「实时对话」。云端没有真的语音合成，量出来的不含合成时间。
+`real.spec.ts` 里还有一条实时对话的测试（`pnpm e2e -g 实时对话` 只跑它）：面试配成实时对话，面试官现场接话，跑完打印候选人说完到面试官开口的中位数和 p95，以及停顿时问了服务端几次、各是什么结论。加上 `AI_INTERVIEW_LOG=info` 能在输出里看到后端每一轮各段用了多久。实测的数字和说明在 `crates/interview-room/README.md` 的「实时对话」。云端没有真的语音合成，量出来的不含合成时间。
 
 ## 目录
 
-- `src/lib/`：不依赖页面的逻辑，都有单元测试。`vad`（静音检测）、`turn`（一道题的状态机）、`interview`（逐题编排）、`recording` 和 `upload`（分片录制、断点续传）、`media`（采集、混音、屏幕常亮）、`events`（过程事件）、`api`（面试间接口，用 `@ai-interview/api-client` 生成的类型）、`flow`（链接、浏览器能力、上行测速）。
+- `src/lib/`：不依赖页面的逻辑，都有单元测试。`vad`（静音检测）、`turn`（一道题的状态机；静音从声音停下的那一刻算起，不含静音检测确认停止用的 0.4 秒；实时对话里服务端判断过这次停顿的，说完了就少等、没说完就多等）、`interview`（逐题编排；实时对话里候选人一停顿就先传一片录像、问服务端「说完了吗」）、`recording` 和 `upload`（分片录制、断点续传）、`media`（采集、混音、屏幕常亮）、`events`（过程事件）、`api`（面试间接口，用 `@ai-interview/api-client` 生成的类型）、`flow`（链接、浏览器能力、上行测速）。
 - `src/session/interview-session.ts`：把上面这些串成一场面试，页面只订阅它的状态。
 - `src/pages/`、`src/components/`：页面，用 `@ai-interview/ui` 的组件。
 - `e2e/`：端到端测试。后端的实现在 `crates/interview-room`。

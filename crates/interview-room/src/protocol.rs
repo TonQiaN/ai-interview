@@ -23,6 +23,55 @@ pub struct AnswerSettings {
     pub max_sec: u32,
     /// 至少听这么多秒才允许因为静音结束
     pub min_sec: u32,
+    /// 候选人一停顿，页面就先问一次服务端这段话说完没有（`POST /room/pause-check`），
+    /// 按结果提前接话或者多等一会儿。逐题模式和没开这个功能时没有这一项，只按 `silence_sec` 算
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_check: Option<PauseCheckSettings>,
+}
+
+/// 候选人停顿时怎么问、问完怎么用。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PauseCheckSettings {
+    /// 声音停下多少毫秒之后问
+    pub after_ms: u32,
+    /// 服务端说说完了的：声音停下满这么多毫秒就算答完，不用等到 `silence_sec`
+    pub done_silence_ms: u32,
+    /// 服务端说还没说完的：这次停顿要到这么多毫秒才算答完
+    pub wait_silence_ms: u32,
+    /// 一段回答里最多问几次
+    pub max_checks: u32,
+}
+
+/// 页面上报：候选人停顿了一下。时刻都是面试时间轴上的毫秒数，
+/// 和之后这段回答答完时 `POST /room/advance` 里带的是同一组。
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct PauseCheckRequest {
+    /// 候选人在回答哪一句（「下一步」里的 `seq`）
+    pub seq: u32,
+    pub utterance_key: String,
+    /// 这一句播完的时刻
+    pub playback_end_ms: Option<i64>,
+    /// 候选人开口的时刻
+    pub answer_start_ms: i64,
+    /// 候选人停下来的时刻
+    pub answer_end_ms: i64,
+}
+
+/// 候选人这段话说完没有。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PauseVerdict {
+    /// 说完了，可以接话了
+    Done,
+    /// 还没说完，多等一会儿
+    Wait,
+    /// 不知道（没开这个功能、已经不在听这一句、判断不出来）。页面照原来的静音时长算
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PauseCheckResponse {
+    pub verdict: PauseVerdict,
 }
 
 /// 面试官的一句话。

@@ -7,7 +7,7 @@ use crate::record::Segment;
 use crate::transcript::{QuestionGroup, segment_alias};
 
 /// 提示词版本。
-pub const PROMPT_VERSION: u32 = 4;
+pub const PROMPT_VERSION: u32 = 5;
 
 /// 所有步骤共用的系统提示。
 pub(crate) const SYSTEM: &str = r#"你是一位资深的招聘评估专家，正在帮企业的 HR 分析一场 AI 面试的记录。
@@ -179,6 +179,7 @@ pub(crate) const INTEGRITY_TASK: &str = r#"# 任务：找出作弊和诚信方�
 - 候选人能力弱、答不上来、中途离开：这是表现问题，不是诚信问题。
 - 画面里零星的情况：有人从身后路过、候选人起身离开了几秒、手机只是放在桌上。单独出现时在 summary 里交代一句就够了；持续得久、反复出现，或者正好和某道题的作答对得上，才列为迹象。
 - 面试页上的正常操作：重听题目（question_replayed）、在静音倒计时里表示还没说完（answer_continued）、设备检测（device_check）、面试中刷新后重新打开页面、设备个数的变化。
+- 网络和设备的状况：录像传不动又恢复（upload_stalled）、录像传完（upload_finished）、没拿到屏幕常亮（screen_wake_lock）、上行网速慢（device_report）。这些不是候选人的行为，不列进 signals，也不能用来加重别的迹象。网络差的时候断网、录制中断、面试官没听清请候选人再说一遍，都更可能是网络的原因。
 没有迹象就如实说没有，risk_level 填 none，signals 输出 []，不要凑。
 
 risk_level 按最强的那条迹象，加上几条迹象是否互相印证来定：
@@ -286,7 +287,7 @@ next_round 是写给下一轮人工面试官的：focus_areas 是建议重点考
     "focus_areas": ["建议重点考察的方向"],
     "questions": [{{"question": "建议问的问题", "purpose": "问这个是为了弄清什么"}}]
   }},
-  "limitations": ["这份报告的局限，例如面试太短、转写质量差、某些能力没考察到；没有就输出 []"]
+  "limitations": ["这份报告的局限，例如面试太短、转写质量差、某些能力没考察到、录像或转写因为网络缺了一截；没有就输出 []"]
 }}
 key_reasons 给 2 到 4 条，risks 有几条写几条，没有就输出 []。"#
     )

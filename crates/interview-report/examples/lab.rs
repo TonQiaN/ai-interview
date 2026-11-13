@@ -10,6 +10,9 @@
 //! # 给样例的转写加上更重的语音识别错误，再对照同一套预期，看分析受不受转写质量的影响
 //! cargo run -p interview-report --example lab -- noise --out /tmp/noisy
 //! cargo run -p interview-report --example lab -- evaluate --samples /tmp/noisy
+//! # 给样例加上网络差时面试间会报的过程事件，再对照同一套预期，看这些事件会不会被当成作弊迹象
+//! cargo run -p interview-report --example lab -- network --out /tmp/flaky
+//! cargo run -p interview-report --example lab -- evaluate --samples /tmp/flaky
 //! # 从一段录像里抽帧，让模型看画面里有几个人、有没有手机，打印整理出来的过程事件
 //! cargo run -p interview-report --example lab -- frames 录像.webm
 //! # 把这些事件加进一份面试记录再分析（--record 指定记录，报告打印到标准输出）
@@ -22,20 +25,25 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
+use async_trait::async_trait;
 use clap::{Parser, Subcommand, ValueEnum};
+use futures_util::StreamExt;
 use futures_util::future::join_all;
 use interview_llm::{
-    ChatModel, ChatRequest, DeepSeekClient, Effort, Message, Pricing, Thinking, chat_json_checked,
+    ChatModel, ChatRequest, ChatStream, DeepSeekClient, Effort, FinishReason, LlmError, Message,
+    Pricing, StreamEvent, Thinking, chat_json_checked,
 };
 use interview_report::frames::{FrameOptions, VideoSegment, observe_video};
 use interview_report::record::{
-    Candidate, InterviewConfig, InterviewRecord, Job, ProctorEvent, Question, Segment, Speaker,
+    Candidate, InterviewConfig, InterviewRecord, Job, ProctorEvent, Question, RawEvent, Segment,
+    Speaker,
 };
 use interview_report::report::{
     Credibility, Decision, InterviewReport, ReviewFlagCode, RiskLevel, SignalKind, Usage,
 };
 use interview_report::{AnalyzeOptions, analyze};
 use serde::Deserialize;
+use serde_json::json;
 
 #[derive(Parser)]
 #[command(about = "分析报告的试验台：造样例、跑分析、对照预期")]
@@ -88,6 +96,21 @@ enum Command {
         #[arg(long, default_value = "crates/interview-report/samples")]
         samples: PathBuf,
         /// 加了错误的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// 给样例加上网络差时面试间会报的过程事件，另存一份，用来检验这些事件会不会被当成作弊迹象。不调用模型
+    Network {
+        /// 只处理这几个场景（场景 id），不填就处理全部
+        only: Vec<String>,
+        /// 最后一次停顿不恢复，录像没有传完
+        #[arg(long)]
+        unrecovered: bool,
+        #[arg(long, default_value = "crates/interview-report/scenarios")]
+        scenarios: PathBuf,
+        #[arg(long, default_value = "crates/interview-report/samples")]
+        samples: PathBuf,
+        /// 加了事件的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
         #[arg(long)]
         out: PathBuf,
     },
@@ -175,8 +198,20 @@ struct Expectation {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let model = DeepSeekClient::from_env().context("需要设置环境变量 DEEPSEEK_API_KEY")?;
+    if let Command::Network {
+        only,
+        unrecovered,
+        scenarios,
+        samples,
+        out,
+    } = &cli.command
+    {
+        return network_all(scenarios, samples, out, only, *unrecovered);
+    }
+    let model =
+        ReportUnfinished(DeepSeekClient::from_env().context("需要设置环境变量 DEEPSEEK_API_KEY")?);
     match cli.command {
+        Command::Network { .. } => Ok(()),
         Command::Simulate {
             only,
             scenarios,
@@ -278,6 +313,42 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
+    }
+}
+
+/// 包在模型外面：输出没有正常结束，或者要的是 JSON 却解析不了时，把当时的情况打印出来。
+///
+/// 模型偶尔会交出一份不完整的 JSON，分析那边只看得到「JSON 的结构不对」（issue #114）。
+/// 这里把结束原因和正文的最后一段留下来，方便判断是输出被打断了还是模型自己少写了括号。
+/// 样例都是合成数据，打印正文不涉及个人信息。
+struct ReportUnfinished<M>(M);
+
+#[async_trait]
+impl<M: ChatModel> ChatModel for ReportUnfinished<M> {
+    async fn chat_stream(&self, request: ChatRequest) -> Result<ChatStream, LlmError> {
+        let wants_json = request.json_output;
+        let events = self.0.chat_stream(request).await?;
+        Ok(Box::pin(events.inspect(move |event| match event {
+            Ok(StreamEvent::Done(response)) => {
+                let broken = wants_json
+                    && !response.content.trim().is_empty()
+                    && serde_json::from_str::<serde_json::Value>(&response.content).is_err();
+                if response.finish_reason == FinishReason::Stop && !broken {
+                    return;
+                }
+                let chars: Vec<char> = response.content.chars().collect();
+                let tail: String = chars[chars.len().saturating_sub(160)..].iter().collect();
+                eprintln!(
+                    "模型的输出有问题：结束原因 {:?}，正文 {} 个字符，输出 {} token（其中思考 {}），正文结尾：{tail:?}",
+                    response.finish_reason,
+                    chars.len(),
+                    response.usage.completion_tokens,
+                    response.usage.reasoning_tokens
+                );
+            }
+            Err(error) => eprintln!("模型调用出错：{error}"),
+            _ => {}
+        })))
     }
 }
 
@@ -592,6 +663,131 @@ async fn noise_all(
         );
     }
     Ok(())
+}
+
+// ---------- 网络差的面试 ----------
+
+fn network_all(
+    scenarios: &Path,
+    samples: &Path,
+    out: &Path,
+    only: &[String],
+    unrecovered: bool,
+) -> Result<()> {
+    let scenarios = load_scenarios(scenarios, only)?;
+    std::fs::create_dir_all(out)?;
+    for scenario in &scenarios {
+        let mut record: InterviewRecord =
+            read_json(&samples.join(format!("{}.json", scenario.id)))?;
+        let added = add_network_events(&mut record, unrecovered);
+        let path = out.join(format!("{}.json", scenario.id));
+        std::fs::write(&path, serde_json::to_string_pretty(&record)? + "\n")?;
+        println!("{}：加了 {added} 条事件 → {}", scenario.id, path.display());
+    }
+    Ok(())
+}
+
+/// 加上一场网络差的面试里面试间会报的事件：上行网速慢、没拿到屏幕常亮、录像三次传不动
+/// （一次请求失败、一次断网、一次重试到放弃）。事件的写法和面试间上报的一样，
+/// 经过 [`ProctorEvent::from_raw`] 整理。`unrecovered` 为真时最后一次停顿发生在面试快结束时，
+/// 没有恢复，录像也没有传完。返回加了几条事件。
+fn add_network_events(record: &mut InterviewRecord, unrecovered: bool) -> usize {
+    let total = record.duration_ms;
+    let first = total * 22 / 100;
+    let second = total / 2;
+    let third = if unrecovered {
+        total.saturating_sub(45_000)
+    } else {
+        total * 78 / 100
+    };
+    let mut raw = vec![
+        (
+            "page_opened",
+            None,
+            json!({
+                "signals": {"visibility": true, "fullscreen": true, "device_change": true, "network": true, "clipboard": true},
+                "in_app_browser": null
+            }),
+        ),
+        ("device_check", None, json!({"result": "passed"})),
+        (
+            "device_report",
+            None,
+            json!({"camera": "ok", "microphone": "ok", "speaker": "ok", "uplink_kbps": 310, "recording_mime": "video/webm;codecs=vp8,opus"}),
+        ),
+        ("interview_started", Some(0), json!({})),
+        (
+            "screen_wake_lock",
+            Some(0),
+            json!({"supported": false, "held": false}),
+        ),
+        (
+            "upload_stalled",
+            Some(first),
+            json!({"cause": "retrying", "pending_chunks": 2}),
+        ),
+        (
+            "upload_recovered",
+            Some(first + 13_000),
+            json!({"stalled_ms": 13_000, "failures": 3, "pending_chunks": 4}),
+        ),
+        ("network_offline", Some(second), json!({})),
+        (
+            "upload_stalled",
+            Some(second + 200),
+            json!({"cause": "offline", "pending_chunks": 1}),
+        ),
+        (
+            "network_online",
+            Some(second + 7_000),
+            json!({"duration_ms": 7_000}),
+        ),
+        (
+            "upload_recovered",
+            Some(second + 9_200),
+            json!({"stalled_ms": 9_000, "failures": 1, "pending_chunks": 3}),
+        ),
+        (
+            "upload_stalled",
+            Some(third),
+            json!({"cause": "retrying", "pending_chunks": 3}),
+        ),
+        (
+            "upload_stalled",
+            Some(third + 20_000),
+            json!({"cause": "failed", "pending_chunks": 7}),
+        ),
+    ];
+    if !unrecovered {
+        raw.push((
+            "upload_recovered",
+            Some(third + 48_000),
+            json!({"stalled_ms": 48_000, "failures": 8, "pending_chunks": 12}),
+        ));
+        raw.push((
+            "upload_finished",
+            Some(total + 41_000),
+            json!({"uploaded_bytes": 58_000_000, "wait_ms": 41_000}),
+        ));
+    }
+    let raw = raw
+        .into_iter()
+        .enumerate()
+        .map(|(index, (kind, at_ms, payload))| RawEvent {
+            id: format!("n{}", index + 1),
+            kind: kind.to_owned(),
+            at_ms,
+            payload,
+        })
+        .collect();
+    let added = ProctorEvent::from_raw(raw);
+    let count = added.len();
+    record.events.extend(added);
+    // 面试开始前的事件排在最前面，其余按时间排；同一时刻的保持原来的先后
+    record
+        .events
+        .sort_by_key(|event| event.at_ms.map_or(0, |at| at + 1));
+    count
 }
 
 /// 让模型把候选人的话改写成带识别错误的样子。返回新的记录、改动的字数（编辑距离）和候选人的总字数。

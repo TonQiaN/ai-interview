@@ -13,6 +13,8 @@ import type {
   AnswerEndReason,
   AnswerSettings,
   NextStep,
+  PauseCheckRequest,
+  PauseCheckVerdict,
   Progress,
   SayStep,
   Utterance,
@@ -40,6 +42,8 @@ export interface AudioPlayer<B> {
 
 export interface RunnerApi {
   advance(request: AdvanceRequest): Promise<NextStep>;
+  /** 候选人停顿时问服务端「说完了吗」。没有这个方法就不问。 */
+  checkPause?(request: PauseCheckRequest): Promise<PauseCheckVerdict>;
   fetchAudio(audioUrl: string): Promise<ArrayBuffer>;
 }
 
@@ -61,6 +65,8 @@ export interface RunnerOptions<B> {
   onTurnEvent?: (event: TurnEvent, state: TurnState) => void;
   /** 候选人答完一题、还没上报之前调用。 */
   onAnswerEnded?: () => void;
+  /** 候选人停顿了、要去问服务端说完没有之前调用。 */
+  onAnswerPaused?: () => void;
 }
 
 export type RunnerPhase =
@@ -114,8 +120,20 @@ export function turnConfigFor(
   if (!answer) return base;
   const silenceMs = Math.max(1_000, Math.round(answer.silence_sec * 1000));
   const maxAnswerMs = Math.max(10_000, Math.round(answer.max_sec * 1000));
+  const check = answer.pause_check;
+  const config: TurnConfig = { ...base };
+  delete config.pauseCheck;
+  // 问得比静音时长还晚就没有意义了
+  if (check && check.max_checks > 0 && check.after_ms < silenceMs) {
+    config.pauseCheck = {
+      afterMs: check.after_ms,
+      doneSilenceMs: Math.min(silenceMs, Math.max(check.after_ms, check.done_silence_ms)),
+      waitSilenceMs: Math.max(silenceMs, check.wait_silence_ms),
+      maxChecks: check.max_checks,
+    };
+  }
   return {
-    ...base,
+    ...config,
     silenceMs,
     // 静音时间设得很短时，倒计时从一开始就显示
     countdownMs: Math.min(base.countdownMs, silenceMs),
@@ -151,6 +169,7 @@ export class InterviewRunner<B> {
   private readonly random: () => number;
   private readonly onTurnEvent: ((event: TurnEvent, state: TurnState) => void) | undefined;
   private readonly onAnswerEnded: (() => void) | undefined;
+  private readonly onAnswerPaused: (() => void) | undefined;
 
   private readonly listeners = new Set<(snapshot: RunnerSnapshot) => void>();
   private readonly audioCache = new Map<string, Promise<B | null>>();
@@ -164,6 +183,13 @@ export class InterviewRunner<B> {
   private finishReason: string | null = null;
   private error: RoomApiError | null = null;
   private snapshot: RunnerSnapshot;
+
+  /** 这一句播完的时刻。 */
+  private playbackEnd = 0;
+  /** 这一句的回答里已经问过几次「说完了吗」。 */
+  private pauseChecks = 0;
+  /** 最近问的是哪一次停顿（那次停顿开始的时刻）。同一次停顿只问一次。 */
+  private checkedSilenceSince: number | null = null;
 
   private playback: Playback | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
@@ -184,6 +210,7 @@ export class InterviewRunner<B> {
     this.random = options.random ?? Math.random;
     this.onTurnEvent = options.onTurnEvent;
     this.onAnswerEnded = options.onAnswerEnded;
+    this.onAnswerPaused = options.onAnswerPaused;
     this.snapshot = this.buildSnapshot();
   }
 
@@ -266,7 +293,7 @@ export class InterviewRunner<B> {
   handleLevel = (frame: LevelFrame): void => {
     const event = this.vad.process(frame.rms, frame.frameMs);
     if (!event || this.turn?.phase !== "listening" || this.turn.pausedAt !== null) return;
-    this.dispatch({ type: event.type, at: this.now() });
+    this.dispatch({ ...event, at: this.now() });
   };
 
   // ── 内部 ──
@@ -284,7 +311,9 @@ export class InterviewRunner<B> {
     this.hasAudio = buffer !== null;
 
     let playbackStart: number | null = null;
-    let playbackEnd = 0;
+    this.playbackEnd = 0;
+    this.pauseChecks = 0;
+    this.checkedSilenceSince = null;
     this.turn = startTurn(this.now());
 
     for (;;) {
@@ -295,8 +324,8 @@ export class InterviewRunner<B> {
         await this.playback.done;
         this.playback = null;
         this.checkAborted();
-        playbackEnd = this.now();
-        if (step.expects_answer) this.dispatch({ type: "question_ended", at: playbackEnd });
+        this.playbackEnd = this.now();
+        if (step.expects_answer) this.dispatch({ type: "question_ended", at: this.playbackEnd });
       } else {
         playbackStart ??= this.now();
         this.dispatch({ type: "question_failed", at: playbackStart });
@@ -307,7 +336,7 @@ export class InterviewRunner<B> {
           await this.sleep(readingTimeMs(step.utterance.text));
         }
         this.checkAborted();
-        playbackEnd = this.now();
+        this.playbackEnd = this.now();
       }
 
       if (!step.expects_answer) {
@@ -315,7 +344,7 @@ export class InterviewRunner<B> {
           seq: step.seq,
           utterance_key: step.utterance.key,
           playback_start_ms: playbackStart,
-          playback_end_ms: playbackEnd,
+          playback_end_ms: this.playbackEnd,
           answer_start_ms: null,
           answer_end_ms: null,
           end_reason: null,
@@ -339,7 +368,7 @@ export class InterviewRunner<B> {
         seq: step.seq,
         utterance_key: step.utterance.key,
         playback_start_ms: playbackStart,
-        playback_end_ms: playbackEnd,
+        playback_end_ms: this.playbackEnd,
         answer_start_ms: turn.firstSpeechAt,
         answer_end_ms: turn.lastSpeechEndAt,
         end_reason: END_REASON[turn.reason],
@@ -399,6 +428,44 @@ export class InterviewRunner<B> {
       this.turnWaiter = null;
       waiter.resolve();
     }
+    this.maybeCheckPause();
+  }
+
+  /**
+   * 候选人停顿了一小会儿：问服务端这段话说完没有。说完了就不用等满静音时长，没说完就多等一会儿。
+   * 同一次停顿只问一次；问不到（接口报错、超时、服务端说不知道）就还按原来的静音时长算。
+   */
+  private maybeCheckPause(): void {
+    const check = this.config.pauseCheck;
+    const checkPause = this.api.checkPause?.bind(this.api);
+    const step = this.step;
+    const turn = this.turn;
+    if (!check || !checkPause || !step || this.phase !== "listening") return;
+    if (turn?.phase !== "listening" || turn.pausedAt !== null || turn.speaking) return;
+    const { silenceSince, speechEndedAt, firstSpeechAt } = turn;
+    if (silenceSince === null || speechEndedAt === null || firstSpeechAt === null) return;
+    if (this.checkedSilenceSince === silenceSince || this.pauseChecks >= check.maxChecks) return;
+    if (this.now() - silenceSince < check.afterMs) return;
+
+    this.checkedSilenceSince = silenceSince;
+    this.pauseChecks += 1;
+    // 先把到这会儿的录像切一片传上去：服务端要拿这段声音转写
+    this.onAnswerPaused?.();
+    checkPause({
+      seq: step.seq,
+      utterance_key: step.utterance.key,
+      playback_end_ms: this.playbackEnd,
+      answer_start_ms: firstSpeechAt,
+      answer_end_ms: speechEndedAt,
+    }).then(
+      (verdict) => {
+        if (verdict === "unknown" || this.step !== step) return;
+        this.dispatch({ type: "pause_verdict", at: this.now(), verdict, silenceSince });
+      },
+      () => {
+        // 问不到就算了，按原来的静音时长
+      },
+    );
   }
 
   private waitForTurn(until: (state: TurnState) => boolean): Promise<void> {

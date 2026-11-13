@@ -285,6 +285,7 @@ export function sampleInterview(
     }),
     event("e0b", "device_check", null, at(-90_000), { result: "passed" }),
     event("e0c", "interview_started", 0, at(0), {}, "server"),
+    event("e0d", "screen_wake_lock", 0, at(200), { supported: true, held: true }),
   ];
   for (const e of record.events) {
     const back = RETURN_KIND[e.kind];
@@ -295,6 +296,20 @@ export function sampleInterview(
       events.push(
         event(`${e.id}b`, back, e.at_ms + gone, at(e.at_ms + gone), { duration_ms: gone }),
       );
+      // 断网的时候录像也传不上去，网络回来以后接着传
+      if (e.kind === "network_offline") {
+        events.push(
+          event(`${e.id}u`, "upload_stalled", e.at_ms + 400, at(e.at_ms + 400), {
+            cause: "offline",
+            pending_chunks: 1,
+          }),
+          event(`${e.id}v`, "upload_recovered", e.at_ms + gone + 1500, at(e.at_ms + gone + 1500), {
+            stalled_ms: gone + 1100,
+            failures: 0,
+            pending_chunks: 0,
+          }),
+        );
+      }
     } else if (e.kind === "paste" || e.kind === "copy") {
       events.push(event(e.id, e.kind, e.at_ms, at(e.at_ms), { chars: 180 }));
     } else if (e.kind === "face_count_changed") {
@@ -306,6 +321,12 @@ export function sampleInterview(
   }
   events.push(
     event("e9", "interview_finished", record.duration_ms, at(record.duration_ms), {}, "server"),
+  );
+  events.push(
+    event("e9u", "upload_finished", null, at(record.duration_ms + 4000), {
+      uploaded_bytes: Math.round(record.duration_ms * 101),
+      wait_ms: 4000,
+    }),
   );
   events.sort((a, b) => a.occurred_at.localeCompare(b.occurred_at));
 

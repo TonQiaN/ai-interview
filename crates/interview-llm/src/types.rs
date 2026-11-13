@@ -321,9 +321,22 @@ pub enum FinishReason {
     ToolCalls,
     /// 被内容过滤拦下。
     ContentFilter,
-    /// 其他原因，原样保留。
+    /// 其他原因，原样保留。负载高时 DeepSeek 会用 `insufficient_system_resource` 提前结束生成。
     #[serde(untagged)]
     Other(String),
+}
+
+impl FinishReason {
+    /// 接口里的写法，写日志和报错时用。
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Stop => "stop",
+            Self::Length => "length",
+            Self::ToolCalls => "tool_calls",
+            Self::ContentFilter => "content_filter",
+            Self::Other(name) => name,
+        }
+    }
 }
 
 /// token 用量。

@@ -48,6 +48,14 @@ pub enum LlmError {
     /// 输出到了上限被截断。
     #[error("大模型输出被截断，max_tokens 不够")]
     Truncated,
+
+    /// 要求 JSON 输出，重试之后输出仍然没写完就停了，而且不是因为到了输出上限。
+    /// 负载高时服务端会提前结束生成，`finish_reason` 是接口给的结束原因。
+    #[error("大模型的输出连续 {attempts} 次没写完就停了（finish_reason：{finish_reason}）")]
+    Incomplete {
+        attempts: u32,
+        finish_reason: String,
+    },
 }
 
 impl LlmError {
@@ -56,6 +64,8 @@ impl LlmError {
         match self {
             Self::RateLimited(_) | Self::Timeout(_) | Self::Transport(_) => true,
             Self::Api { status, .. } => *status >= 500,
+            // 多半是服务端一时忙不过来，过一会儿再试有用；被内容过滤拦下的再试也一样
+            Self::Incomplete { finish_reason, .. } => finish_reason != "content_filter",
             _ => false,
         }
     }

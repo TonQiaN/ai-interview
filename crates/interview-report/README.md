@@ -58,6 +58,7 @@ let events = ProctorEvent::from_raw(vec![
 它做三件事：
 
 - 面试间把「离开」和「回来」分两条报（`visibility_hidden` 和 `visibility_visible`、`window_blur` 和 `window_focus`、`network_offline` 和 `network_online`、`recording_gap` 和 `device_recovered`），离开了多久写在「回来」那条的 `duration_ms` 里。这里合成一条：保留「离开」，补上持续时间。报告里引用这条事件的证据，时间就是离开的那一段，HR 点一下能跳到录像的对应位置。
+- 录像上传的 `upload_stalled`（传不动了）和 `upload_recovered`（又传动了）也合成一条：保留 `upload_stalled`，持续时间是停了多久，说明里带上中间连续失败的次数 `failures`。同一次停顿里重试变成彻底失败时面试间会再报一条 `upload_stalled`，它并进前一条：`cause` 改成 `failed`，`gave_up_after_ms` 是重试了多久才放弃的。没有持续时间的 `upload_stalled` 表示到最后都没有恢复。
 - 面试开始之前的事件（打开页面、设备检测）`at_ms` 是空，照样保留，给模型看的时候写成「开始前」。
 - 其余事件带的数据转成一行文字放进 `detail`。
 
@@ -206,6 +207,26 @@ observed.add_to(&mut record); // 把事件加进记录并按时间排好，然�
 
 不依据口音、外貌、性别、年龄做任何评价，提示词里明确禁止了。
 
+### 网络和设备的状况
+
+面试间会上报候选人的设备和网络状况：面试前测出来的上行网速（`device_report` 的 `uplink_kbps`）、有没有拿到屏幕常亮（`screen_wake_lock`）、录像传不动和恢复（`upload_stalled`、`upload_recovered`）、录像最后有没有传完（`upload_finished`）。报告这样用它们：
+
+- 不算作弊迹象，也不拿来加重别的迹象。网络差的时候断网、录制中断、面试官请候选人再说一遍，都更可能是网络的原因。
+- 录像是边录边传的，面试中候选人说的话也是从传上来的录像里识别的。传不动又恢复了的，录像会补传，最后的录像和转写是完整的。一直没恢复、最后也没传完的，停顿之后的录像、转写和画面检查可能缺一截，报告会在局限说明里写出从什么时间起可能不完整。
+
+实测（2026-11-13，提示词第 5 版，high 档）：给 8 份样例各加一组网络事件（上行 310 kbps、没拿到屏幕常亮、三次上传停顿、其中一次伴随 7 秒断网），分「都恢复了」和「最后一次到结束也没恢复」两组，用 `lab network` 生成，和不加事件的原样例各跑一遍。
+
+| | 原样例 | 都恢复了 | 最后没恢复 |
+|---|---|---|---|
+| 38 条预期 | 全部符合 | 全部符合 | 全部符合 |
+| 诚信风险等级 | 无、中、无、高、高、高、无、无 | 8 份都和原样例一样 | 8 份都和原样例一样 |
+| 引用网络和设备事件的诚信迹象 | 0 条 | 0 条 | 0 条 |
+| 局限说明 | 不涉及 | 7 份提到网络，都写明已恢复、录像和转写完整 | 8 份都写出从什么时间起录像和转写可能不完整 |
+
+- 总分和原样例最多差 4 分，和同一份面试重复分析的浮动差不多。
+- 用提示词第 4 版（还不认识这些事件）跑「都恢复了」那一组做对照：也没有把它们当成作弊迹象，诚信风险等级同样不变。差别在局限说明，8 份里有 4 份把已经恢复的停顿写成了「转写可能不完整」。所以第 5 版的改进是说法更准，旧版在这组样例上也没有误判。
+- 这些是合成的事件，加在模拟面试上。真实的弱网面试里，转写本身会不会因为断网出错、候选人会不会因此重复回答，还没有测过（issue #46）。
+
 ### 打分的浮动
 
 同一份记录重新分析，结果不会一字不差。2026-11-13 实测：8 份样例记录、high 档，每份分析 4 遍，每道题前后一共评了 12 次。
@@ -267,7 +288,11 @@ observed.add_to(&mut record); // 把事件加进记录并按时间排好，然�
 
 提示词第 3 版（加入录像画面检查之后）在 high 档又跑了一遍，38 条预期全部符合，8 份报告一共约 1.1 元。这些样例没有录像，报告里会写明画面没有检查。
 
-提示词第 4 版（半分评分、每题评三次、各个等级写明标准、正文里用「第几题」不用题目 id）在 high 档跑了三遍（其中两遍是试等级标准时跑的），38 条预期都全部符合，8 份报告一共约 2 元。`samples/reports/` 里是第 4 版的结果。
+提示词第 4 版（半分评分、每题评三次、各个等级写明标准、正文里用「第几题」不用题目 id）在 high 档跑了三遍（其中两遍是试等级标准时跑的），38 条预期都全部符合，8 份报告一共约 2 元。
+
+提示词第 5 版（说明网络和设备类事件）在 high 档跑了一遍，38 条预期全部符合，8 份报告一共约 1.7 元。`samples/reports/` 里是第 5 版的结果。
+
+之后为了验证 issue #114 的修复又跑了两遍（原样例和加了网络事件的各一遍），76 条预期里 75 条符合。不符合的一条是 `backend-fabricated` 的简历可信度给了「中」，预期是「低」，复核提示 `resume_doubt` 照样出现了。简历可信度在相邻两档之间变是已知的，见上面「打分的浮动」。
 
 四档思考强度的比较（提示词第 1 版，8 份报告的平均，2026-11-13 实测，价格按空闲时段，高峰时段翻倍）：
 
@@ -302,6 +327,10 @@ cargo run -p interview-report --example lab -- frames 录像.webm --record 记�
 # 给样例加上语音识别那样的错字，再评估一遍
 cargo run -p interview-report --example lab -- noise --percent 8 --out /tmp/noisy
 cargo run -p interview-report --example lab -- evaluate --samples /tmp/noisy
+# 给样例加上网络差时面试间会报的事件（网速慢、没拿到屏幕常亮、录像三次传不动），再评估一遍。不调用模型
+cargo run -p interview-report --example lab -- network --out /tmp/flaky
+cargo run -p interview-report --example lab -- network --unrecovered --out /tmp/lost   # 最后一次没恢复，录像没传完
+cargo run -p interview-report --example lab -- evaluate --samples /tmp/flaky
 # 同一份记录分析几遍，看评分、总分和各个结论前后差多少（8 份各 4 遍约 7 元、13 分钟）
 cargo run --release -p interview-report --example stability -- --runs 4 --thinking high --out /tmp/stability
 ```
@@ -310,7 +339,7 @@ cargo run --release -p interview-report --example stability -- --runs 4 --thinki
 
 改了提示词要做两件事：把 `PROMPT_VERSION` 加一，跑一遍 `evaluate` 确认预期都还符合。改的是评分标准或者等级的定义，再跑一遍 `stability`：单看一遍评估看不出结论稳不稳。
 
-`stability` 同时发出的调用多了，偶尔会有一遍在综合建议那一步失败（模型的输出中途断掉，见 issue #114），工具会跳过这一遍接着跑。
+模型偶尔会交出读不出来的 JSON（后面多带了一段、少了收尾的括号），实测每一百次调用里有四到六次。以前连着三次都这样、又正好在综合建议那一步，整份报告就失败了，全量评估两三遍里会遇到一次。`interview-llm` 现在会直接读出来或者原样重发（issue #114），之后跑的两遍全量评估 16 份报告没有一步失败。`stability` 遇到失败的一遍仍然会跳过接着跑。
 
 ## 后续
 

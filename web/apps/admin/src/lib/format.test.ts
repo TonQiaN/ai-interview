@@ -6,6 +6,7 @@ import {
   eventNote,
   eventSeverity,
   eventText,
+  eventWhen,
   fileSize,
   foldEvents,
   rating,
@@ -200,5 +201,98 @@ describe("打分的浮动", () => {
     expect(ratingSpread([4])).toBeNull();
     expect(ratingSpread([])).toBeNull();
     expect(ratingSpread(undefined)).toBeNull();
+  });
+});
+
+describe("录像上传和屏幕常亮的事件", () => {
+  const text = (kind: string, payload: Record<string, unknown>) => eventText({ kind, payload });
+
+  it("屏幕常亮没拿到时提醒可能锁屏", () => {
+    expect(text("screen_wake_lock", { supported: true, held: true })).toBe("屏幕常亮（已开启）");
+    expect(text("screen_wake_lock", { supported: true, held: false })).toBe(
+      "屏幕常亮（没申请到，手机可能中途锁屏）",
+    );
+    expect(text("screen_wake_lock", { supported: false, held: false })).toBe(
+      "屏幕常亮（浏览器不支持，手机可能中途锁屏）",
+    );
+  });
+
+  it("录像传不上去时说出原因和还剩多少没传", () => {
+    expect(text("upload_stalled", { cause: "retrying", pending_chunks: 3 })).toBe(
+      "录像传不上去（请求失败，正在重试，还有 3 片没传）",
+    );
+    expect(text("upload_stalled", { cause: "offline", pending_chunks: 1 })).toBe(
+      "录像传不上去（断网了，还有 1 片没传）",
+    );
+    expect(text("upload_stalled", { cause: "failed", pending_chunks: 5 })).toBe(
+      "录像传不上去（重试也没用，还有 5 片没传）",
+    );
+  });
+
+  it("报告证据里的补充信息：连续失败几次、多久之后放弃重试", () => {
+    expect(
+      eventEvidenceText(
+        'upload_stalled：{"cause":"failed","pending_chunks":4,"failures":6,"gave_up_after_ms":42000}',
+      ),
+    ).toBe("录像传不上去（重试也没用，还有 4 片没传，连续失败 6 次，42 秒后放弃重试）");
+  });
+
+  it("录像恢复和传完", () => {
+    expect(text("upload_recovered", { stalled_ms: 12_000, failures: 2, pending_chunks: 0 })).toBe(
+      "录像又传上去了（停了 12 秒，中间失败 2 次）",
+    );
+    expect(text("upload_finished", { uploaded_bytes: 5 * 1024 * 1024, wait_ms: 9000 })).toBe(
+      "录像传完了（共 5.0 MB，面试结束后等了 9 秒）",
+    );
+    expect(text("upload_finished", { uploaded_bytes: 2048, wait_ms: null })).toBe(
+      "录像传完了（共 2 KB）",
+    );
+  });
+
+  it("一次停顿在时间轴上只有一个点，停了多久记在传不上去那条上", () => {
+    const folded = foldEvents([
+      { kind: "upload_stalled", payload: { cause: "retrying", pending_chunks: 2 } },
+      { kind: "upload_stalled", payload: { cause: "failed", pending_chunks: 4 } },
+      { kind: "upload_recovered", payload: { stalled_ms: 30_000, failures: 5, pending_chunks: 0 } },
+      { kind: "upload_stalled", payload: { cause: "offline", pending_chunks: 1 } },
+    ]);
+    expect(folded.map((e) => e.kind)).toEqual([
+      "upload_stalled",
+      "upload_stalled",
+      "upload_stalled",
+    ]);
+    expect(eventNote(folded[1] ?? { kind: "", payload: {} })).toBe(
+      "重试也没用，还有 4 片没传，连续失败 5 次，停了 30 秒",
+    );
+    // 到最后也没恢复的那次没有时长
+    expect(eventNote(folded[2] ?? { kind: "", payload: {} })).toBe("断网了，还有 1 片没传");
+  });
+
+  it("设备和网络的事不是候选人的行为，最多是提示", () => {
+    expect(eventSeverity("upload_stalled")).toBe("notice");
+    for (const kind of ["screen_wake_lock", "upload_recovered", "upload_finished"])
+      expect(eventSeverity(kind)).toBe("info");
+  });
+
+  it("没有时间轴位置的事件，按发生的时刻说是开始前、面试中还是结束后", () => {
+    const events = [
+      { kind: "page_opened", occurred_at: "2026-01-05T09:58:00Z" },
+      { kind: "interview_started", at_ms: 0, occurred_at: "2026-01-05T10:00:00Z" },
+      { kind: "ws_reconnected", occurred_at: "2026-01-05T10:03:00.500Z" },
+      { kind: "paste", at_ms: 756_000, occurred_at: "2026-01-05T10:12:36Z" },
+      { kind: "interview_finished", at_ms: 900_000, occurred_at: "2026-01-05T10:15:00Z" },
+      { kind: "upload_finished", occurred_at: "2026-01-05T10:15:04.200Z" },
+    ];
+    expect(events.map((e) => eventWhen(e, events))).toEqual([
+      "开始前",
+      "00:00",
+      "面试中",
+      "12:36",
+      "15:00",
+      "结束后",
+    ]);
+    // 没有开始那一条时不知道先后，照旧当成开始前
+    const lone = { kind: "device_check", occurred_at: "2026-01-05T09:59:00Z" };
+    expect(eventWhen(lone, [lone])).toBe("开始前");
   });
 });
