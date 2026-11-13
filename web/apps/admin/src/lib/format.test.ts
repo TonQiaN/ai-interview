@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clock,
   duration,
+  eventEvidenceText,
   eventNote,
   eventSeverity,
   eventText,
@@ -9,7 +10,9 @@ import {
   foldEvents,
   rating,
   relativeTime,
+  resumeQuote,
   stageName,
+  turnNote,
 } from "./format";
 
 describe("时间和大小", () => {
@@ -102,5 +105,77 @@ describe("报告和过程事件", () => {
     expect(folded[1]?.payload).toEqual({ duration_ms: 8000 });
     // 还没回来的那次离开没有时长
     expect(eventNote(folded[3] ?? { kind: "", payload: {} })).toBeNull();
+  });
+});
+
+describe("逐字稿里一句话的说明", () => {
+  it("面试官的话是照稿念的，不标转写", () => {
+    expect(
+      turnNote({ speaker: "interviewer", transcript_source: "live", text: "你好" }),
+    ).toBeNull();
+  });
+
+  it("候选人的话在面试后重新转写之前，标成实时转写", () => {
+    expect(turnNote({ speaker: "candidate", transcript_source: "live", text: "我做过" })).toBe(
+      "实时转写，还没校对",
+    );
+    expect(
+      turnNote({ speaker: "candidate", transcript_source: "final", text: "我做过" }),
+    ).toBeNull();
+  });
+
+  it("候选人这一段没识别出内容时说明白", () => {
+    expect(turnNote({ speaker: "candidate", transcript_source: "live", text: "  " })).toBe(
+      "没有识别出说话内容",
+    );
+    expect(turnNote({ speaker: "candidate", transcript_source: "final", text: "" })).toBe(
+      "没有识别出说话内容",
+    );
+  });
+});
+
+describe("报告里引用的过程记录", () => {
+  it("后端给的「种类：内容」换成给人看的话", () => {
+    expect(eventEvidenceText('interview_finished：{"reason":"poor_answers"}')).toBe(
+      "面试结束（回答持续不理想，面试官提前结束）",
+    );
+    expect(
+      eventEvidenceText('face_count_changed：{"frames":26,"note":"候选人离开了座位","people":0}'),
+    ).toBe("画面里的人数变了（没有人，共 26 帧，候选人离开了座位）");
+    expect(
+      eventEvidenceText(
+        'frames_checked：{"flagged":3,"frames":26,"interval_ms":5000,"unreadable":1}',
+      ),
+    ).toBe("抽查录像画面（抽了 26 帧，3 帧有情况，1 帧看不清）");
+  });
+
+  it("设备检测结果里带上浏览器，不把整串 UA 摆出来", () => {
+    const ua =
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36";
+    const text = eventEvidenceText(
+      `device_report：${JSON.stringify({ camera: "ok", microphone: "ok", speaker: "ok", uplink_kbps: null, user_agent: ua })}`,
+    );
+    expect(text).toBe("设备检测结果（浏览器是无头 Chrome，一般是自动化程序在用）");
+    expect(text).not.toContain("Mozilla");
+  });
+
+  it("只有种类、或者内容读不出来时，退回到种类的叫法或原文", () => {
+    expect(eventEvidenceText("paste")).toBe("粘贴");
+    expect(eventEvidenceText("paste：{坏的")).toBe("粘贴");
+    expect(eventEvidenceText("候选人切出页面两次")).toBe("候选人切出页面两次");
+  });
+});
+
+describe("报告里引用的简历原文", () => {
+  it("去掉简历整理成文本时带上的标题和列表记号", () => {
+    expect(resumeQuote("### 云帆数据 · 后端开发（2018-07 到 2021-02）")).toBe(
+      "云帆数据 · 后端开发（2018-07 到 2021-02）",
+    );
+    expect(resumeQuote("- 用 Go 写数据同步服务")).toBe("用 Go 写数据同步服务");
+    expect(resumeQuote("**技能**：Rust、Go")).toBe("技能：Rust、Go");
+  });
+
+  it("正文里的井号和横线不动", () => {
+    expect(resumeQuote("熟悉 C# 和 .NET，2018-2021 在职")).toBe("熟悉 C# 和 .NET，2018-2021 在职");
   });
 });

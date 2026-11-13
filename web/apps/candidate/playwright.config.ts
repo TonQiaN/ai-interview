@@ -107,6 +107,8 @@ export default defineConfig({
       // 没带令牌，返回 401 就说明服务起来了
       url: `http://127.0.0.1:${API_PORT}/api/v1/room/session`,
       env: backendEnv,
+      // 用真模型跑的时候把后端的日志也打出来（AI_INTERVIEW_LOG=info 能看到每一轮各段用了多久）
+      stdout: REAL ? "pipe" : "ignore",
       // 第一次要编译后端
       timeout: 15 * 60_000,
       reuseExistingServer: false,

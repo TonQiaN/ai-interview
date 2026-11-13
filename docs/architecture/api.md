@@ -70,7 +70,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 
 - 网页地址是 `{PUBLIC_URL}/i/#<令牌>`，令牌在 `#` 后面，所以不会出现在服务器和反向代理的访问日志里，也不会进 Referer。
 - 候选人侧的接口全部在 `/api/v1/room/` 下，令牌放在请求头 `Authorization: Bearer <令牌>`，路径和查询串里都不带令牌。
-- WebSocket 不能自定义请求头：先用令牌 `POST /api/v1/room/ws-ticket` 换一个 30 秒内有效的一次性票据，再用 `?ticket=` 连接。
+- 现在候选人侧没有 WebSocket。以后要加的话，WebSocket 不能自定义请求头：先用令牌换一个 30 秒内有效的一次性票据，再用 `?ticket=` 连接。
 - 令牌是随机串，库里只存 SHA-256。完整链接只在生成时返回一次，之后查不到；重新生成会让旧链接作废（除非请求里带 `keep_existing`）。
 - 令牌有问题时的返回：
 
@@ -205,15 +205,14 @@ HR 侧：
 | `POST /api/v1/room/consent` | 记录同意：`{ "consent_version", "agreed_keys" }`。必须同意的少勾了返回 422；版本和服务端当前的不一样返回 409（`consent_outdated`） |
 | `POST /api/v1/room/device-check` | 上报设备检测结果，记成一条 `device_report` 事件 |
 | `POST /api/v1/room/start` | 开始面试，返回第一句话。已经开始的面试再调一次，返回当前该播的那一句（刷新后续面用）；已经结束的返回 `finish`。还没同意返回 409（`consent_required`） |
-| `POST /api/v1/room/advance` | 逐题模式：每播完一句调一次，要听回答的那一句等候选人答完再调（带起止毫秒、结束原因），返回下一步 |
-| `GET /api/v1/room/utterances/{key}/audio` | 面试官语音，支持 Range。只能取当前这一句、`preload_audio_urls` 里的和已经播过的，别的返回 404 |
+| `POST /api/v1/room/advance` | 每播完一句调一次，要听回答的那一句等候选人答完再调（带起止毫秒、结束原因），返回下一步。逐题和实时对话都用它 |
+| `GET /api/v1/room/utterances/{key}/audio` | 面试官语音，支持 Range。只能取当前这一句、`preload_audio_urls` 里的和已经播过的，别的返回 404。实时对话里现场生成的话带 `?part=N`（第几句） |
 | `POST /api/v1/room/events` | 批量上报过程事件 |
 | `PUT /api/v1/room/recordings/{track}/{segment}` | 登记一段录制（幂等）。`{segment}` 是浏览器生成的 UUID，请求体是 `{ "content_type", "start_ms" }` |
 | `PUT /api/v1/room/recordings/{track}/{segment}/chunks/{seq}` | 上传一个录制分片（幂等），`X-Chunk-Sha256` 带内容的校验和 |
 | `GET /api/v1/room/recordings/{track}/{segment}/chunks` | 已收到的分片序号：`{ "received": [0, 1, 2] }` |
 | `POST /api/v1/room/recordings/{track}/{segment}/complete` | 这一段传完了：`{ "total_chunks": 38 }`，缺片时返回 409 |
 | `POST /api/v1/room/finish` | 候选人中途结束面试：`{ "reason": "candidate_left" }`。面试正常问完时服务端自己结束，页面不用调 |
-| `POST /api/v1/room/ws-ticket`、`GET /api/v1/room/ws?ticket=` | 实时模式的 WebSocket |
 
 ### ⑦ 分析报告
 
@@ -277,7 +276,7 @@ HR 侧：
 - 面试结束之后 `GET /room/session` 的 `stage` 是 `finished`，`end_reason` 是结束的原因（取值和 `finish` 的 `reason` 一样），页面据此决定结束页说「面试完成」还是「面试已结束」。还没结束时 `end_reason` 是 null。
 - 面试结束（不管哪种原因）时，服务端在同一个事务里排一个 `interview.finalize` 任务，转写和出报告从那里开始。
 - 页面超过 15 分钟（`AI_INTERVIEW_ROOM_ABANDON_MINUTES`）没有任何动静（不上报、不传录像），后台任务 `room.watchdog` 把面试按 `connection_lost` 结束，并记一条服务端事件 `interview_abandoned`。结束语已经发给页面的不算中途离开，记成正常结束。
-- 配置成实时对话（`conversational`）的面试，在实时通道接上之前按逐题进行，`session.mode` 是 `scripted`。
+- 配置成实时对话（`conversational`）的面试按下面的「实时对话」进行，`session.mode` 是 `realtime`。条件不够（没有大模型、语音识别用不了、没接语音合成）时按逐题进行，`session.mode` 是 `scripted`。
 
 ### 录制上传
 
@@ -294,40 +293,32 @@ HR 侧：
 - 还没登记的段返回 404（`segment_not_found`）；已经在合并的段不再收新分片（409）。
 - 一场面试最多 200 段、4 GB。
 
-### 实时模式（WebSocket）
+### 实时对话（同一套 HTTP 协议）
 
-连接：`GET /api/v1/room/ws?ticket=<票据>`。文本帧是 JSON 控制消息，二进制帧是音频。
+候选人说完一段，面试官现场接话：追问、回应候选人的反问，或者进入下一题。怎么接由 `interview-engine` 的 `live` 模块决定（见 `crates/interview-engine/docs/realtime.md`）。
 
-音频格式：上行是麦克风的 16 kHz 单声道 PCM16 小端，每帧 20 到 100 毫秒。下行是面试官语音，格式在 `speak_begin` 里说明。
+页面和服务端之间还是上面那套办法：`start` 和 `advance` 返回「下一步」，页面播完一句（要听回答的那一句等候选人答完）上报一次。录制上传、过程事件、断网重试、刷新续面都和逐题模式一样，页面不用分两套写。不一样的地方：
 
-候选人 → 服务器：
+- **哪种方式在开始时定下来**。`POST /room/start` 时配置是实时对话、大模型和语音合成都接上了、语音识别能用，这场面试就按实时对话进行到底；少一样就按逐题进行。`GET /room/session` 的 `mode` 在开始前是按当时的条件估的，开始后是实际用的。
+- **判断「说完了」更快**。`answer.silence_sec` 取配置值和 `AI_INTERVIEW_ROOM_REALTIME_SILENCE_SEC`（默认 2 秒）里小的那个，`min_sec` 最多 1 秒。判断仍然在页面上做。
+- **候选人答完之后没有固定的过渡语**。`advance` 会等到面试官的第一句准备好才返回，通常一到几秒：转写这段回答、模型决定怎么接、现场生成的话还要合成。最多等 30 秒，到时候返回 503（`answer_pending`），页面原样重试，后台接着准备。
+- **现场生成的话一句一拍**。模型的一段话（比如「明白。那个方案里你本人负责哪一块？」）按句子拆开，合成好一句发一句：短的接话先播，后面的问句在它播的时候合成。同一段话的几拍 `utterance.key` 相同（追问是 `<题目>.p<N>`，回应是 `<题目>.r<N>`），`utterance.text` 是各自那一句，`audio_url` 用 `?part=N` 区分，最后一拍 `expects_answer` 为真。`seq` 照常每拍加一。
+- **现场合成的语音只在轮到它时能取**（当前这一拍和 `preload_audio_urls` 里的）。合成失败或超过 20 秒的那一句 `audio_url` 是 null，页面显示文字。
+- **没有打断**。面试官说话时候选人插话不会让它停下来，要等这一句播完才开始听。
+- 候选人说了话但没转写出文字时，模型会被告知「这一段没有听清」，一般会请候选人再说一遍。一直没开口（`no_speech`）不调模型：提醒一次并重问，连着两道题没开口就结束面试。
+- 模型出错或者 20 秒没有结果，按顺序进入下一题，面试不会卡住。
 
-| 消息 | 含义 |
-| --- | --- |
-| `{"type":"hello","protocol":1,"resume":false}` | 握手 |
-| 二进制帧 | 麦克风音频 |
-| `{"type":"playback","utterance_key":"q3","state":"started","at_ms":398000}` | 面试官语音开始或结束播放（`state` 为 `started` 或 `ended`） |
-| `{"type":"answer_end","at_ms":471300,"reason":"button"}` | 候选人点了「答完了」 |
-| `{"type":"ping"}` | 保活 |
+记录：
 
-服务器 → 候选人：
+- `interview_turns`：面试官的每一拍一行，同一段话的几拍 `utterance_key` 相同。候选人的回答记在它回答的那一句下面：刚问的是题目或追问就是那一句的 key，刚说的是别的（回应、提醒）就记在正在问的那道题下面。时间轴的约定和逐题模式一样。
+- `interview_utterances`：现场生成的每段话登记一行（`source = 'live'`，`key` 是 `q3.p1` 这样，`text` 是整段话，`synth_status = 'skipped'`，没有 `audio_blob_key`）。面试后整理记录和出报告时按 key 找得到它问的是什么。现场合成的语音文件在 `interviews/{id}/utterances/{key}.s{N}.wav`，只供面试中播放；HR 回看时面试官的声音在候选人那边录不到（录的是麦克风），这几句只有文字。
+- `interviews.runtime_state`：实时对话的进度（引擎的状态、已经准备好还没发出去的句子）。结构是面试间内部的，别的模块不要读。
 
-| 消息 | 含义 |
-| --- | --- |
-| `{"type":"ready","protocol":1,"session":{…}}` | 握手完成 |
-| `{"type":"speak_begin","utterance_key":"q3.f1","kind":"follow_up","text":"…","audio":{"mode":"stream","content_type":"audio/pcm;rate=24000"}}` | 面试官要说话了。`mode` 是 `stream`（后面跟二进制帧）或 `url`（带 `url` 字段，自己去取） |
-| 二进制帧 | 面试官语音的音频块 |
-| `{"type":"speak_end","utterance_key":"q3.f1"}` | 这句话的音频发完了 |
-| `{"type":"listening","turn_seq":7,"silence_sec":5,"max_sec":180}` | 轮到候选人说 |
-| `{"type":"transcript","turn_seq":7,"text":"…","final":false}` | 候选人说话的实时转写 |
-| `{"type":"thinking"}` | 面试官在想下一句 |
-| `{"type":"interrupt","utterance_key":"q3.f1"}` | 停止播放（候选人插话时） |
-| `{"type":"progress","index":3,"total":10,"elapsed_ms":412000}` | 进度 |
-| `{"type":"finished","reason":"completed"}` | 面试结束 |
-| `{"type":"error","code":"…","message":"…","fatal":false}` | 出错 |
-| `{"type":"pong"}` | 保活 |
+进度每排进一句就写一次库。服务进程中途重启后，已经排好的句子还在，没想完的那一轮在页面重试时重新想一遍（候选人可能会听到重复的半句）。谁在等下一句、哪场面试正在想，记在进程内存里，所以一场面试要由同一个进程服务到底，和现场转写的要求一样。
 
-实时模式下谁说话、什么时候算答完由服务端判断（`interview-stt` 的流式识别给出说话开始、结束、静音时长）。录像上传和过程事件仍然走 HTTP。
+延迟的实测数字见 `crates/interview-room/README.md` 的「实时对话」。
+
+以后可以做的优化（都还没做）：用 WebSocket 上传麦克风的 PCM，由服务端判断说完了没有（`interview-stt` 的 `TurnListener`，可以省掉大部分静音等待）；候选人插话时打断面试官（`BargeInDetector`）；面试官的语音边合成边播。这几项怎么接见 `docs/speech/realtime.md`。
 
 ### 过程事件
 
