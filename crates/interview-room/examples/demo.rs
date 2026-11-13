@@ -271,9 +271,12 @@ async fn state(ctx: &AppContext, interview_id: Uuid) -> anyhow::Result<Value> {
         i64,
         Option<i64>,
         Option<String>,
+        bool,
+        Option<String>,
     );
+    // 只说有没有文字，不把文字打出来：对着真的库用时，那是候选人说的话
     let turns: Vec<TurnRow> = sqlx::query_as(
-        "SELECT seq, speaker, utterance_key, start_ms, end_ms, end_reason
+        "SELECT seq, speaker, utterance_key, start_ms, end_ms, end_reason, text <> '', stt_engine
            FROM interview_turns WHERE interview_id = $1 ORDER BY seq",
     )
     .bind(interview_id)
@@ -340,13 +343,15 @@ async fn state(ctx: &AppContext, interview_id: Uuid) -> anyhow::Result<Value> {
         "end_reason": end_reason,
         "turns": turns
             .into_iter()
-            .map(|(seq, speaker, utterance_key, start_ms, end_ms, end_reason)| json!({
+            .map(|(seq, speaker, utterance_key, start_ms, end_ms, end_reason, has_text, stt_engine)| json!({
                 "seq": seq,
                 "speaker": speaker,
                 "utterance_key": utterance_key,
                 "start_ms": start_ms,
                 "end_ms": end_ms,
                 "end_reason": end_reason,
+                "has_text": has_text,
+                "stt_engine": stt_engine,
             }))
             .collect::<Vec<_>>(),
         "events": events

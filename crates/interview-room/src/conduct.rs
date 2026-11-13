@@ -28,6 +28,7 @@ use interview_platform::http::{ErrorBody, Json, Path, serve_blob};
 use interview_platform::tasks::{NewTask, Task, TaskQueue, TaskRegistry, TaskResult};
 use interview_platform::usage::{self, LlmUsage};
 use interview_platform::{ApiError, ApiResult};
+use interview_stt::Transcript;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::PgConnection;
@@ -36,11 +37,11 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::Deps;
 use crate::access::RoomAccess;
 use crate::events::{self, EventSource, NewEvent};
 use crate::protocol::{AnswerSettings, NextStep, Progress, Utterance};
 use crate::session::{consent_agreed, parse_config};
+use crate::{AnswerTranscript, Deps};
 
 /// 候选人中途离开的面试由这个任务收掉。
 pub const WATCHDOG_TASK: &str = "room.watchdog";
@@ -611,7 +612,17 @@ async fn advance_once(
         Reported::Waiting { .. } => Advanced::Waiting,
     };
     tx.commit().await?;
+    if matches!(&outcome, Advanced::Step(RoomStep::Finish { .. })) {
+        release_live(deps, interview_id);
+    }
     Ok(outcome)
+}
+
+/// 面试结束了，现场转写不用再留着。
+fn release_live(deps: &Deps, interview_id: Uuid) {
+    if let Some(live) = &deps.live {
+        live.close_interview(interview_id);
+    }
 }
 
 /// 页面报上来的几个时刻，已经收进合理的范围：不早于 0，不晚于服务端认为的现在。
@@ -662,7 +673,7 @@ fn candidate_turn_seq(beat_seq: u32) -> i32 {
 
 /// 把刚播完的这一句和候选人的回答记进对话。重复上报不会记两遍。
 ///
-/// 候选人说了什么这时还不知道，文字先空着：要追问时由 [`settle_pending`] 填，
+/// 候选人说了什么这时还不知道，文字先空着：提问环节的回答由 [`settle_pending`] 填，
 /// 面试结束后整段重新转写时再补全。
 async fn record_turns(
     conn: &mut PgConnection,
@@ -766,11 +777,16 @@ async fn settle_pending(deps: &Deps, interview_id: Uuid) -> ApiResult<Option<Roo
     let wait = Duration::from_secs(u64::from(deps.config.settle_timeout_sec));
     let deadline = tokio::time::Instant::now() + wait;
 
-    let answer = match (&deps.llm, pending.wants_transcript) {
-        (Some(_), true) => transcribe_answer(deps, interview_id, deadline).await?,
-        _ => None,
+    // 文字先记下来，就算没配大模型、这一段不判断，对话记录里也有候选人说了什么
+    let answer = if pending.wants_transcript {
+        transcribe_answer(deps, interview_id, deadline).await?
+    } else {
+        None
     };
-    let transcript = answer.as_ref().map(|answer| answer.text.clone());
+    let transcript = match &deps.llm {
+        Some(_) => answer.as_ref().map(|answer| answer.text.clone()),
+        None => None,
+    };
     let model: Arc<dyn ChatModel> = deps.llm.clone().unwrap_or_else(|| Arc::new(NoModel));
 
     let judged = tokio::time::timeout_at(
@@ -804,13 +820,19 @@ async fn settle_pending(deps: &Deps, interview_id: Uuid) -> ApiResult<Option<Roo
     }
     save_state(&mut tx, interview_id, &settled.state).await?;
     if let Some(answer) = &answer {
+        let transcript = &answer.transcript.transcript;
         sqlx::query(
-            "UPDATE interview_turns SET text = $3, transcript_source = 'live'
+            "UPDATE interview_turns
+                SET text = $3, words = $4, confidence = $5, stt_engine = $6,
+                    transcript_source = 'live'
               WHERE interview_id = $1 AND seq = $2 AND speaker = 'candidate'",
         )
         .bind(interview_id)
         .bind(answer.turn_seq)
         .bind(&answer.text)
+        .bind(json!(transcript.words().collect::<Vec<_>>()))
+        .bind(confidence(transcript))
+        .bind(&answer.transcript.engine)
         .execute(&mut *tx)
         .await?;
     }
@@ -846,11 +868,15 @@ async fn settle_pending(deps: &Deps, interview_id: Uuid) -> ApiResult<Option<Roo
     Ok(settled.step)
 }
 
-/// 候选人刚答完的那一段的文字，以及它在对话记录里的序号。
+/// 候选人刚答完的那一段的转写，以及它在对话记录里的序号。
 struct AnswerText {
     turn_seq: i32,
     text: String,
+    transcript: AnswerTranscript,
 }
+
+/// 候选人开口比页面察觉到的要早一点。不知道面试官那句话什么时候播完时，往前多取这么多。
+const ANSWER_LEAD_MS: i64 = 1_000;
 
 /// 把候选人最近的一段回答转成文字。没接语音识别、这一段没有起止时刻、识别不出来，都是 `None`。
 async fn transcribe_answer(
@@ -861,27 +887,52 @@ async fn transcribe_answer(
     let Some(transcriber) = &deps.transcriber else {
         return Ok(None);
     };
-    let latest: Option<(i32, i64, Option<i64>)> = sqlx::query_as(
-        "SELECT seq, start_ms, end_ms FROM interview_turns
-          WHERE interview_id = $1 AND speaker = 'candidate'
-          ORDER BY seq DESC LIMIT 1",
+    // 连同面试官那句话播完的时刻一起取：候选人的话从那之后算起
+    let latest: Option<(i32, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
+        "SELECT c.seq, c.start_ms, c.end_ms, i.end_ms
+           FROM interview_turns c
+           LEFT JOIN interview_turns i
+                  ON i.interview_id = c.interview_id AND i.seq = c.seq - 1
+                 AND i.speaker = 'interviewer'
+          WHERE c.interview_id = $1 AND c.speaker = 'candidate'
+          ORDER BY c.seq DESC LIMIT 1",
     )
     .bind(interview_id)
     .fetch_optional(&deps.ctx.db)
     .await?;
-    let Some((turn_seq, start_ms, Some(end_ms))) = latest else {
+    let Some((turn_seq, start_ms, Some(end_ms), question_end_ms)) = latest else {
         return Ok(None);
     };
-    let text = tokio::time::timeout_at(
-        deadline,
-        transcriber.answer_text(interview_id, start_ms, end_ms),
-    )
-    .await
-    .ok()
-    .flatten()
-    .map(|text| text.trim().to_owned())
-    .filter(|text| !text.is_empty());
-    Ok(text.map(|text| AnswerText { turn_seq, text }))
+    // 记下来的开始时刻是页面听出有人说话的那一刻，头一两个字已经说出去了
+    let from_ms = question_end_ms
+        .map_or(start_ms - ANSWER_LEAD_MS, |played| played.min(start_ms))
+        .max(0);
+    let answer =
+        tokio::time::timeout_at(deadline, transcriber.answer(interview_id, from_ms, end_ms))
+            .await
+            .ok()
+            .flatten();
+    Ok(answer.and_then(|transcript| {
+        let text = transcript.transcript.text().trim().to_owned();
+        (!text.is_empty()).then_some(AnswerText {
+            turn_seq,
+            text,
+            transcript,
+        })
+    }))
+}
+
+/// 整段回答的置信度：各小段按时长加权平均。识别后端给不出来时是 `None`。
+fn confidence(transcript: &Transcript) -> Option<f32> {
+    let (mut sum, mut weight) = (0f32, 0f32);
+    for segment in &transcript.segments {
+        if let Some(confidence) = segment.confidence {
+            let duration = segment.end_ms.saturating_sub(segment.start_ms).max(1) as f32;
+            sum += confidence * duration;
+            weight += duration;
+        }
+    }
+    (weight > 0.0).then(|| sum / weight)
 }
 
 // ───────────────────────── 面试官语音 ─────────────────────────
@@ -1007,6 +1058,7 @@ async fn finish_interview(
         }
     }
     tx.commit().await?;
+    release_live(&deps, interview_id);
     tracing::info!(%interview_id, "候选人结束了面试");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1084,6 +1136,7 @@ async fn watchdog_task(deps: &Deps, task: Task) -> TaskResult {
     )
     .await?;
     tx.commit().await?;
+    release_live(deps, interview_id);
     tracing::info!(%interview_id, "候选人离开后没有回来，面试结束");
     Ok(Some(json!({ "outcome": "closed" })))
 }

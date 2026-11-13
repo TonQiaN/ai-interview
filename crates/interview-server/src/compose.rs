@@ -127,7 +127,8 @@ pub fn compose(ctx: &AppContext, shared: &Shared) -> Composed {
 
     // ── ⑤ 候选人面试间：interview-room ──
     let room = interview_room::Deps::new(ctx.clone(), interview_room::RoomConfig::from_env())
-        .with_llm(shared.llm.clone());
+        .with_llm(shared.llm.clone())
+        .with_stt(shared.stt.clone());
     api = api.merge(interview_room::router(room.clone()));
     interview_room::register_tasks(&mut tasks, room);
 

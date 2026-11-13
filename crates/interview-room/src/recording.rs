@@ -16,7 +16,7 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use chrono::{DateTime, Utc};
-use interview_core::status::{RecordingStatus, RecordingTrack};
+use interview_core::status::{InterviewStatus, RecordingStatus, RecordingTrack};
 use interview_core::{blob_key, task_kind};
 use interview_platform::auth::AdminUser;
 use interview_platform::http::{ErrorBody, Json, Path, serve_blob};
@@ -314,7 +314,7 @@ async fn put_chunk(
 
     let segment_no = u32::try_from(segment.segment).unwrap_or_default();
     let key = blob_key::recording_chunk(access.interview_id, track.as_str(), segment_no, seq);
-    deps.ctx.blobs.put(&key, body).await?;
+    deps.ctx.blobs.put(&key, body.clone()).await?;
     sqlx::query(
         "INSERT INTO interview_recording_chunks (recording_id, seq, blob_key, size_bytes, sha256)
          VALUES ($1, $2, $3, $4, $5)
@@ -327,6 +327,13 @@ async fn put_chunk(
     .bind(&digest)
     .execute(&deps.ctx.db)
     .await?;
+    // 面试还在进行时，顺手把这一块交给现场转写。结束之后传上来的是收尾的分片，不用再转
+    if let Some(live) = &deps.live
+        && access.status == InterviewStatus::InProgress
+    {
+        live.chunk_stored(access.interview_id, segment.id, track, seq, &body)
+            .await;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
