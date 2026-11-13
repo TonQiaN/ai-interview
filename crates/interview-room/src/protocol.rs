@@ -55,6 +55,9 @@ pub struct PauseCheckRequest {
     pub answer_start_ms: i64,
     /// 候选人停下来的时刻
     pub answer_end_ms: i64,
+    /// 候选人是插话打断了这一句开的口：断的时候这一句播了多少毫秒。和 `advance` 里的一样
+    #[serde(default)]
+    pub interrupted_played_ms: Option<i64>,
 }
 
 /// 候选人这段话说完没有。
@@ -72,6 +75,21 @@ pub enum PauseVerdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PauseCheckResponse {
     pub verdict: PauseVerdict,
+}
+
+/// 面试官说这一句的时候候选人可以插话（实时对话）。
+///
+/// 页面在播放时一听到候选人出声就先停下来；声音持续满 `confirm_ms` 才算插话，这时不再往下播，
+/// 改成听候选人说，说完用 `POST /room/advance` 报上来（带 `interrupted_played_ms`）。
+/// 不到 `confirm_ms` 就没声了（咳嗽、嗯一声），从停下的地方接着播。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BargeInSettings {
+    /// 候选人的声音持续多少毫秒才算插话
+    pub confirm_ms: u32,
+    /// 这一句里最多为疑似插话停下来几次，超过了就一口气播完
+    pub max_holds: u32,
+    /// 插话之后怎么听候选人说话
+    pub answer: AnswerSettings,
 }
 
 /// 面试官的一句话。
@@ -109,6 +127,9 @@ pub enum NextStep {
         progress: Progress,
         /// 接下来多半会用到的语音地址，页面可以提前取好
         preload_audio_urls: Vec<String>,
+        /// 有这一项表示这一句播放时候选人可以插话。逐题模式和没开这个功能时没有
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        barge_in: Option<BargeInSettings>,
     },
     /// 面试结束
     Finish {

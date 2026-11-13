@@ -62,6 +62,12 @@ pub struct RoomConfig {
     pub realtime_done_silence_ms: u32,
     /// 模型说还没说完的，这次停顿等到这么多毫秒才算说完
     pub realtime_wait_silence_ms: u32,
+    /// 实时对话里，面试官说话时一听到候选人出声页面就先停下来；之后候选人的声音再持续这么多毫秒
+    /// 才算插话，不到的（咳嗽、嗯一声）从停下的地方接着播。0 是不让插话，面试官每句话都说完
+    pub realtime_barge_in_ms: u32,
+    /// 实时对话的面试一开始，就把面试官现场开口最常说的头一句（「明白。」「好的。」）用这场的音色
+    /// 合成一遍。合成结果按音色和文字有缓存，之后现场说到这几句不用再等合成
+    pub realtime_warm_up: bool,
 }
 
 impl RoomConfig {
@@ -175,6 +181,27 @@ impl RoomConfig {
             );
             default.realtime_wait_silence_ms
         });
+        let realtime_barge_in_ms = env_parse(
+            "AI_INTERVIEW_ROOM_REALTIME_BARGE_IN_MS",
+            default.realtime_barge_in_ms,
+        )
+        .ok()
+        .filter(|ms| *ms == 0 || (200..=3_000).contains(ms))
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "AI_INTERVIEW_ROOM_REALTIME_BARGE_IN_MS 要么是 0（不开），要么在 200 到 3000 之间，这次用默认值 {}",
+                default.realtime_barge_in_ms
+            );
+            default.realtime_barge_in_ms
+        });
+        let realtime_warm_up = env_flag(
+            "AI_INTERVIEW_ROOM_REALTIME_WARM_UP",
+            default.realtime_warm_up,
+        )
+        .unwrap_or_else(|err| {
+            tracing::warn!(reason = %err, "AI_INTERVIEW_ROOM_REALTIME_WARM_UP 写得不对，这次按提前合成处理");
+            default.realtime_warm_up
+        });
         Self {
             invite_ttl_hours,
             camera_required,
@@ -186,6 +213,8 @@ impl RoomConfig {
             realtime_pause_check_ms,
             realtime_done_silence_ms,
             realtime_wait_silence_ms,
+            realtime_barge_in_ms,
+            realtime_warm_up,
             recording: RecordingSettings {
                 timeslice_ms,
                 ..default.recording.clone()
@@ -211,6 +240,8 @@ impl Default for RoomConfig {
             realtime_pause_check_ms: 500,
             realtime_done_silence_ms: 1_000,
             realtime_wait_silence_ms: 3_000,
+            realtime_barge_in_ms: 400,
+            realtime_warm_up: true,
         }
     }
 }

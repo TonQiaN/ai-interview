@@ -308,6 +308,7 @@ async fn decorate(deps: &Deps, interview_id: Uuid, step: &RoomStep) -> ApiResult
             .filter(|key| duration_of(key).is_some())
             .map(|key| audio_url(key))
             .collect(),
+        barge_in: None,
     })
 }
 
@@ -365,6 +366,7 @@ pub(crate) fn at_elapsed(step: NextStep, elapsed_ms: i64) -> NextStep {
             answer,
             progress,
             preload_audio_urls,
+            barge_in,
         } => NextStep::Say {
             seq,
             utterance,
@@ -375,6 +377,7 @@ pub(crate) fn at_elapsed(step: NextStep, elapsed_ms: i64) -> NextStep {
                 ..progress
             },
             preload_audio_urls,
+            barge_in,
         },
         finish @ NextStep::Finish { .. } => finish,
     }
@@ -421,6 +424,8 @@ async fn start_interview(
         };
     }
     let mut resumed_at = None;
+    // 刚开始的实时对话：用什么语言。提交之后拿它去把常说的接话提前合成好
+    let mut warm_up = None;
     let step = match (row.status, stored_state(interview_id, &row)?) {
         (InterviewStatus::InProgress, Some(state)) => {
             resumed_at = Some(row.elapsed_ms(Utc::now()));
@@ -432,6 +437,7 @@ async fn start_interview(
             let opened = if realtime::enabled(&deps, &config).await {
                 let state = realtime::open(&deps, &plan, &config)?;
                 realtime::save(&mut tx, interview_id, &state).await?;
+                warm_up = Some(config.language);
                 Opened::Realtime(Box::new(state))
             } else {
                 let (state, step) = room::open(&plan, &config).map_err(engine_error)?;
@@ -469,6 +475,9 @@ async fn start_interview(
         }
     };
     tx.commit().await?;
+    if let Some(language) = warm_up {
+        realtime::warm_up(&deps, interview_id, language);
+    }
     let step = match step {
         Opened::Scripted(step) => decorate(&deps, interview_id, &step).await?,
         Opened::Realtime(state) => realtime::current_step(&deps, interview_id, &state).await?,
@@ -540,6 +549,11 @@ pub struct AdvanceRequest {
     /// 候选人重听了几次
     #[serde(default)]
     pub replays: u32,
+    /// 候选人插话打断了这一句（实时对话，见「下一步」里的 `barge_in`）：断的时候这一句播了
+    /// 多少毫秒。带这一项时，不管这一句本来要不要听回答，都要带上候选人这段话的起止时刻和
+    /// `end_reason`；`playback_end_ms` 是停下不播的那一刻。没被打断是 null
+    #[serde(default)]
+    pub interrupted_played_ms: Option<i64>,
 }
 
 /// 一次推进的结果。
@@ -744,11 +758,17 @@ pub(crate) struct BeatTimes {
 impl BeatTimes {
     pub(crate) fn from_request(request: &AdvanceRequest, now_ms: i64) -> Self {
         let clamp = |value: Option<i64>| value.map(|ms| ms.clamp(0, now_ms + CLOCK_SLACK_MS));
+        // 插话的：页面是听出有人说话才停的播放，候选人其实更早一点就开口了
+        let lead_ms = if request.interrupted_played_ms.is_some() {
+            BARGE_IN_LEAD_MS
+        } else {
+            0
+        };
         Self {
             now_ms,
             playback_start_ms: clamp(request.playback_start_ms),
             playback_end_ms: clamp(request.playback_end_ms),
-            answer_start_ms: clamp(request.answer_start_ms),
+            answer_start_ms: clamp(request.answer_start_ms.map(|ms| ms - lead_ms)),
             answer_end_ms: clamp(request.answer_end_ms),
         }
     }
@@ -1077,6 +1097,10 @@ pub(crate) struct AnswerSpan {
 
 /// 候选人开口比页面察觉到的要早一点。不知道面试官那句话什么时候播完时，往前多取这么多。
 const ANSWER_LEAD_MS: i64 = 1_000;
+
+/// 候选人插话时，页面要听到一小段声音才察觉、才停下播放。这段话的开头按早这么多算，
+/// 转写时头一个字才不会丢。再往前就是面试官自己的声音了（录下来的音轨里两边的声音都有）。
+const BARGE_IN_LEAD_MS: i64 = 200;
 
 /// 一段回答从哪里开始转写。`start_ms` 是页面听出有人说话的那一刻，头一两个字已经说出去了，
 /// 所以从面试官那句话播完算起。
@@ -1419,6 +1443,7 @@ mod tests {
             answer_end_ms: end,
             end_reason: Some(AnswerEndReason::Silence),
             replays: 0,
+            interrupted_played_ms: None,
         }
     }
 

@@ -87,6 +87,9 @@ pub struct SpokenAudio {
 ///
 /// 面试间不关心用的是哪个引擎、哪个音色，只要求和这场面试提前合成的那些句子是同一个声音。
 /// 服务进程里的实现在 `interview-server` 的 `compose.rs`。
+///
+/// 同一个音色、同一句话再念一次应该马上就有（服务进程里的实现按音色和文字缓存）。面试间靠这一点
+/// 在面试一开始把常说的接话先念一遍，见 `RoomConfig::realtime_warm_up`。
 #[async_trait]
 pub trait LiveVoice: Send + Sync {
     /// 用这场面试的音色（`interviews.voice_id`，没指定是 `None`）把一句话合成出来。

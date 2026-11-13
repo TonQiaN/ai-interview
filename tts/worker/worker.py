@@ -422,7 +422,7 @@ def build_engines(names: list[str], args) -> dict:
         else:
             from engine_indextts import IndexTtsEngine
 
-            engines[name] = IndexTtsEngine(name, Path(args.models), args.memory_limit_gb)
+            engines[name] = IndexTtsEngine(name, Path(args.models), args.memory_limit_gb, args.cache_limit_gb)
     if not engines:
         raise SystemExit("--engines 至少要给一个引擎")
     return engines
@@ -438,6 +438,7 @@ def main() -> None:
     parser.add_argument("--models", default=str(repo / "models"), help="权重所在的目录")
     parser.add_argument("--state", default=str(repo / ".runtime" / "tts-worker"), help="放参考录音的目录")
     parser.add_argument("--memory-limit-gb", type=float, default=28, help="IndexTTS 的内存上限")
+    parser.add_argument("--cache-limit-gb", type=float, default=2, help="IndexTTS 用的 MLX 缓存上限")
     parser.add_argument("--preload", action="store_true", help="启动时就加载模型，不等第一条请求")
     args = parser.parse_args()
 

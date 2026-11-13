@@ -1,5 +1,8 @@
 /**
- * 逐题面试的编排：把「播一句 → 听回答 → 上报 → 拿下一句」这个循环跑起来。
+ * 面试的编排：把「播一句 → 听回答 → 上报 → 拿下一句」这个循环跑起来。逐题模式和实时对话都用它。
+ *
+ * 实时对话里服务端允许的话（「下一步」带 `barge_in`），面试官说话时候选人可以插话：
+ * 一听到候选人出声就先停下来，接着说就改成听候选人说，只是咳嗽一声就从停下的地方接着播。
  *
  * 它不直接碰浏览器接口：音频播放、接口调用、时钟都从外面传进来，所以能在 Node 里用假的实现测。
  * 画面通过 subscribe 拿快照，按钮点击调 done / continueAnswer / replay / ready。
@@ -37,7 +40,8 @@ import { EnergyVad } from "../vad/energy-vad";
 /** 播放面试官语音的东西。浏览器里是 AudioGraph。 */
 export interface AudioPlayer<B> {
   decode(data: ArrayBuffer): Promise<B>;
-  play(buffer: B): Playback;
+  /** `fromMs`：从这段音频的哪里开始播，不给就是从头。 */
+  play(buffer: B, fromMs?: number): Playback;
 }
 
 export interface RunnerApi {
@@ -155,6 +159,26 @@ export function levelFromDb(db: number): number {
   return Math.min(1, Math.max(0, (db + 60) / 50));
 }
 
+/** 疑似插话之后接着播，往回退这么多（毫秒），免得断掉的那个字听不全。 */
+const RESUME_REWIND_MS = 250;
+/** 确认是插话的那一刻，候选人的声音最多可以已经低下去这么久（毫秒）：字和字之间的空隙不算停。 */
+const BARGE_IN_GAP_MS = 150;
+/** 停下来之后麦克风一直没有动静可判断（设备被打断了），过了确认时间再等这么久就接着播（毫秒）。 */
+const HOLD_GIVE_UP_MS = 2_000;
+/**
+ * 连着这么多次停下来都不是插话（多半是扬声器的声音漏进了麦克风，或者环境太吵），
+ * 这场面试就不再为插话停了，免得面试官说话一卡一卡的。
+ */
+export const MAX_FALSE_HOLDS = 4;
+
+/** 面试官的一句话被候选人插话打断的地方。 */
+interface Cut {
+  /** 听出候选人开口、停下播放的时刻。 */
+  at: number;
+  /** 停下时这一句播了多少毫秒。 */
+  playedMs: number;
+}
+
 class Aborted extends Error {}
 
 export class InterviewRunner<B> {
@@ -190,6 +214,16 @@ export class InterviewRunner<B> {
   private pauseChecks = 0;
   /** 最近问的是哪一次停顿（那次停顿开始的时刻）。同一次停顿只问一次。 */
   private checkedSilenceSince: number | null = null;
+
+  /** 这一句是被候选人插话打断的：断的时候播了多少毫秒。没被打断是 null。 */
+  private cutPlayedMs: number | null = null;
+  /** 面试官正在说、候选人可以插话时：听出候选人开口就调它，把播放停下来。 */
+  private onBargeSpeech: (() => void) | null = null;
+  /** 为疑似插话停了下来，正在等候选人是不是接着说。 */
+  private hold: { at: number; confirmMs: number; settle: (confirmed: boolean) => void } | null =
+    null;
+  /** 连着几次停下来都不是插话。 */
+  private falseHolds = 0;
 
   private playback: Playback | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
@@ -292,7 +326,16 @@ export class InterviewRunner<B> {
   /** 麦克风的音量帧。AudioGraph 的 onLevel 直接接到这里。 */
   handleLevel = (frame: LevelFrame): void => {
     const event = this.vad.process(frame.rms, frame.frameMs);
-    if (!event || this.turn?.phase !== "listening" || this.turn.pausedAt !== null) return;
+    if (this.hold) {
+      this.judgeHold(event);
+      return;
+    }
+    if (!event) return;
+    if (this.onBargeSpeech) {
+      if (event.type === "speech_start") this.onBargeSpeech();
+      return;
+    }
+    if (this.turn?.phase !== "listening" || this.turn.pausedAt !== null) return;
     this.dispatch({ ...event, at: this.now() });
   };
 
@@ -311,6 +354,7 @@ export class InterviewRunner<B> {
     this.hasAudio = buffer !== null;
 
     let playbackStart: number | null = null;
+    this.cutPlayedMs = null;
     this.playbackEnd = 0;
     this.pauseChecks = 0;
     this.checkedSilenceSince = null;
@@ -320,12 +364,17 @@ export class InterviewRunner<B> {
       if (buffer) {
         playbackStart ??= this.now();
         this.setPhase("asking");
-        this.playback = this.audio.play(buffer);
-        await this.playback.done;
-        this.playback = null;
-        this.checkAborted();
-        this.playbackEnd = this.now();
-        if (step.expects_answer) this.dispatch({ type: "question_ended", at: this.playbackEnd });
+        const cut = await this.speak(buffer, step);
+        if (cut) {
+          // 候选人插话了：这一句到此为止，接着听候选人说（哪怕这一句本来不用听回答）
+          this.cutPlayedMs = cut.playedMs;
+          this.playbackEnd = cut.at;
+          this.config = turnConfigFor(step.barge_in?.answer);
+          this.dispatch({ type: "barge_in", at: this.now(), speechAt: cut.at });
+        } else {
+          this.playbackEnd = this.now();
+          if (step.expects_answer) this.dispatch({ type: "question_ended", at: this.playbackEnd });
+        }
       } else {
         playbackStart ??= this.now();
         this.dispatch({ type: "question_failed", at: playbackStart });
@@ -339,7 +388,7 @@ export class InterviewRunner<B> {
         this.playbackEnd = this.now();
       }
 
-      if (!step.expects_answer) {
+      if (!step.expects_answer && this.cutPlayedMs === null) {
         return {
           seq: step.seq,
           utterance_key: step.utterance.key,
@@ -352,8 +401,8 @@ export class InterviewRunner<B> {
         };
       }
 
-      // 面试官的声音刚停，之前的音量状态不能带进来
-      this.vad.reset();
+      // 面试官的声音刚停，之前的音量状态不能带进来。插话的不清：候选人正说着
+      if (this.cutPlayedMs === null) this.vad.reset();
       this.setPhase("listening");
       this.startTicking();
       await this.waitForTurn((state) => state.phase === "ended" || state.phase === "asking");
@@ -373,7 +422,93 @@ export class InterviewRunner<B> {
         answer_end_ms: turn.lastSpeechEndAt,
         end_reason: END_REASON[turn.reason],
         replays: turn.replaysUsed,
+        ...(this.cutPlayedMs === null ? {} : { interrupted_played_ms: this.cutPlayedMs }),
       };
+    }
+  }
+
+  /**
+   * 播面试官的一句话。播完了返回 null；候选人插话打断了，返回断在哪。
+   *
+   * 服务端允许插话的句子（`barge_in`），一听出候选人出声就先停下来；声音接着持续够久才算插话，
+   * 不然（咳嗽、嗯一声、扬声器漏进麦克风的声音）从停下的地方往回退一点接着播。
+   */
+  private async speak(buffer: B, step: SayStep): Promise<Cut | null> {
+    const bargeIn = step.barge_in ?? null;
+    let fromMs = 0;
+    let holds = 0;
+    for (;;) {
+      const armed =
+        bargeIn !== null && holds < bargeIn.max_holds && this.falseHolds < MAX_FALSE_HOLDS;
+      // 要开口的时候候选人正说着话：先不播，看是不是接着说
+      const held =
+        armed && this.vad.snapshot().speaking
+          ? { at: this.now(), playedMs: fromMs }
+          : await this.playUntilSpeech(buffer, fromMs, armed);
+      this.checkAborted();
+      if (held === null || bargeIn === null) return null;
+
+      holds += 1;
+      const confirmed = await this.waitForHold(held.at, bargeIn.confirm_ms);
+      this.checkAborted();
+      if (confirmed) {
+        this.falseHolds = 0;
+        return held;
+      }
+      this.falseHolds += 1;
+      fromMs = Math.max(0, held.playedMs - RESUME_REWIND_MS);
+    }
+  }
+
+  /** 从 `fromMs` 开始播。播完返回 null；`armed` 时听出候选人出声就停下，返回停在哪。 */
+  private async playUntilSpeech(buffer: B, fromMs: number, armed: boolean): Promise<Cut | null> {
+    const playback = this.audio.play(buffer, fromMs);
+    this.playback = playback;
+    let held: Cut | null = null;
+    if (armed) {
+      this.onBargeSpeech = () => {
+        this.onBargeSpeech = null;
+        held = { at: this.now(), playedMs: playback.positionMs() };
+        playback.stop();
+      };
+    }
+    await playback.done;
+    this.onBargeSpeech = null;
+    this.playback = null;
+    return held;
+  }
+
+  /** 为疑似插话停下来之后，等结果：候选人接着说了（真），还是没声了（假）。 */
+  private waitForHold(at: number, confirmMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const hold = {
+        at,
+        confirmMs,
+        settle: (confirmed: boolean) => {
+          if (this.hold !== hold) return;
+          this.hold = null;
+          resolve(confirmed);
+        },
+      };
+      this.hold = hold;
+      void this.sleep(confirmMs + HOLD_GIVE_UP_MS).then(() => {
+        if (this.hold !== hold) return;
+        // 这么久都没有音量帧来：之前「在说话」的状态已经不作数了
+        this.vad.reset();
+        hold.settle(false);
+      });
+    });
+  }
+
+  /** 停下来等的时候，每来一帧音量看一次。 */
+  private judgeHold(event: ReturnType<EnergyVad["process"]>): void {
+    const hold = this.hold;
+    if (!hold) return;
+    const vad = this.vad.snapshot();
+    if (event?.type === "speech_end" || !vad.speaking) {
+      hold.settle(false);
+    } else if (this.now() - hold.at >= hold.confirmMs && vad.quietMs <= BARGE_IN_GAP_MS) {
+      hold.settle(true);
     }
   }
 
@@ -457,6 +592,7 @@ export class InterviewRunner<B> {
       playback_end_ms: this.playbackEnd,
       answer_start_ms: firstSpeechAt,
       answer_end_ms: speechEndedAt,
+      ...(this.cutPlayedMs === null ? {} : { interrupted_played_ms: this.cutPlayedMs }),
     }).then(
       (verdict) => {
         if (verdict === "unknown" || this.step !== step) return;

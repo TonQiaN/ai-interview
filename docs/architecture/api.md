@@ -206,7 +206,7 @@ HR 侧：
 | `POST /api/v1/room/device-check` | 上报设备检测结果，记成一条 `device_report` 事件 |
 | `POST /api/v1/room/uplink-probe` | 测上行网速用：请求体是一段字节（最多 1 MiB），服务端收完就丢，什么都不存。页面按花了多久算出网速，随设备检测结果一起上报 |
 | `POST /api/v1/room/start` | 开始面试，返回第一句话。已经开始的面试再调一次，返回当前该播的那一句（刷新后续面用）；已经结束的返回 `finish`。还没同意返回 409（`consent_required`） |
-| `POST /api/v1/room/advance` | 每播完一句调一次，要听回答的那一句等候选人答完再调（带起止毫秒、结束原因），返回下一步。逐题和实时对话都用它 |
+| `POST /api/v1/room/advance` | 每播完一句调一次，要听回答的那一句等候选人答完再调（带起止毫秒、结束原因），返回下一步。逐题和实时对话都用它。实时对话里候选人插话打断了这一句的，等他说完再调，多带一项 `interrupted_played_ms` |
 | `POST /api/v1/room/pause-check` | 实时对话里，候选人停顿了一下、还没到算答完的时长时问一次：这段话说完没有。返回 `{ "verdict": "done" \| "wait" \| "unknown" }`，见下面的「实时对话」 |
 | `GET /api/v1/room/utterances/{key}/audio` | 面试官语音，支持 Range。只能取当前这一句、`preload_audio_urls` 里的和已经播过的，别的返回 404。实时对话里现场生成的话带 `?part=N`（第几句） |
 | `POST /api/v1/room/events` | 批量上报过程事件 |
@@ -312,7 +312,9 @@ HR 侧：
 - **候选人答完之后没有固定的过渡语**。`advance` 会等到面试官的第一句准备好才返回，通常一到几秒：转写这段回答、模型决定怎么接、现场生成的话还要合成。最多等 30 秒，到时候返回 503（`answer_pending`），页面原样重试，后台接着准备。
 - **现场生成的话一句一拍**。模型的一段话（比如「明白。那个方案里你本人负责哪一块？」）按句子拆开，合成好一句发一句：短的接话先播，后面的问句在它播的时候合成。同一段话的几拍 `utterance.key` 相同（追问是 `<题目>.p<N>`，回应是 `<题目>.r<N>`），`utterance.text` 是各自那一句，`audio_url` 用 `?part=N` 区分，最后一拍 `expects_answer` 为真。`seq` 照常每拍加一。
 - **现场合成的语音只在轮到它时能取**（当前这一拍和 `preload_audio_urls` 里的）。合成失败或超过 20 秒的那一句 `audio_url` 是 null，页面显示文字。
-- **没有打断**。面试官说话时候选人插话不会让它停下来，要等这一句播完才开始听。
+- **候选人可以插话**。面试官说的每一句（结束语除外）在「下一步」里多一项 `barge_in`：`{ "confirm_ms": 400, "max_holds": 2, "answer": { … } }`，`answer` 和上面的作答设置是同一种结构。页面播这一句的时候一听出候选人出声就先停下不播；声音接着持续满 `confirm_ms` 才算插话，这时不再往下播，按 `barge_in.answer` 听候选人说完（照样可以调 `pause-check`），然后调 `advance`，请求体里多一项 `interrupted_played_ms`（停下时这一句播了多少毫秒，接着播过的按这一句的开头算），`playback_end_ms` 是停下的时刻，`answer_start_ms`、`answer_end_ms`、`end_reason` 照常填，这一句本来不用听回答（`expects_answer` 为假）也一样。`pause-check` 的请求体同样带 `interrupted_played_ms`。不到 `confirm_ms` 就没声了的（咳嗽、嗯一声），页面从停下的地方往回退一点接着播，这一句照常上报；一句里最多这样停 `max_holds` 次。
+
+  服务端收到插话：后面排着还没播的句子都不发了，转写候选人的话，告诉模型面试官的话断在了哪、哪些没说出来，由模型决定回应、重问还是照常往下。没听出话来的（没转写出字、只有一个字、转写出来的就是面试官那一句里的字），当作没被打断：对话记录里不留这一段，被打断的那一句作为新的一拍（`seq` 加一）重新发一遍，后面排着的句子照旧。这样的事出了两回，这场面试之后的句子就不带 `barge_in` 了。没有 `barge_in` 的句子上报时带了 `interrupted_played_ms`，按这一句照常播完处理。逐题模式没有 `barge_in`。`AI_INTERVIEW_ROOM_REALTIME_BARGE_IN_MS` 设成 0 关掉这个功能。
 - 候选人说了话但没转写出文字时，模型会被告知「这一段没有听清」，一般会请候选人再说一遍。一直没开口（`no_speech`）不调模型：提醒一次并重问，连着两道题没开口就结束面试。
 - 模型出错或者 20 秒没有结果，按顺序进入下一题，面试不会卡住。
 
@@ -326,7 +328,7 @@ HR 侧：
 
 延迟的实测数字见 `crates/interview-room/README.md` 的「实时对话」。
 
-以后可以做的优化（都还没做）：用 WebSocket 上传麦克风的 PCM，由服务端听出说完了没有（`interview-stt` 的 `TurnListener`，现在是页面听出停顿、服务端让模型判断）；候选人插话时打断面试官（`BargeInDetector`）；面试官的语音边合成边播。这几项怎么接见 `docs/speech/realtime.md`。
+以后可以做的优化（都还没做）：用 WebSocket 上传麦克风的 PCM，由服务端听出说完了没有、有没有插话（`interview-stt` 的 `TurnListener` 和 `BargeInDetector`，现在是页面按音量听出停顿和插话、服务端让模型判断）；面试官的语音边合成边播。这几项怎么接见 `docs/speech/realtime.md`。
 
 ### 过程事件
 

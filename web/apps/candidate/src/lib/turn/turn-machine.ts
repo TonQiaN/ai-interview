@@ -7,6 +7,7 @@
  *
  * 流程：
  *   asking（播放题目）→ listening（听作答）→ ended（这道题结束，带原因）
+ * 实时对话里候选人可以插话：asking 时听出候选人开口并且接着说，直接进 listening。
  * 题目语音放不出来时走 reading（只显示文字，候选人点「开始回答」后进入 listening）。
  */
 
@@ -118,6 +119,11 @@ export type TurnEvent =
   | { type: "question_ended"; at: number }
   /** 题目语音放不出来，改为让候选人自己读。 */
   | { type: "question_failed"; at: number }
+  /**
+   * 面试官还在说，候选人插话了（实时对话）：不再往下播，直接听候选人说。
+   * `speechAt` 是听出候选人开口的时刻，这时候选人还在说。
+   */
+  | { type: "barge_in"; at: number; speechAt: number }
   /** reading 状态下候选人点了「开始回答」。 */
   | { type: "user_ready"; at: number }
   | { type: "speech_start"; at: number }
@@ -147,7 +153,7 @@ export function startTurn(at: number): TurnState {
   return { phase: "asking", replaysUsed: 0, askStartedAt: at };
 }
 
-function startListening(at: number, replaysUsed: number): TurnState {
+function startListening(at: number, replaysUsed: number): Listening {
   return {
     phase: "listening",
     replaysUsed,
@@ -221,6 +227,14 @@ export function reduceTurn(
     case "asking":
       if (event.type === "question_ended") return startListening(event.at, state.replaysUsed);
       if (event.type === "question_failed") return { ...state, phase: "reading" };
+      if (event.type === "barge_in") {
+        const speechAt = Math.min(event.speechAt, event.at);
+        return {
+          ...startListening(speechAt, state.replaysUsed),
+          firstSpeechAt: speechAt,
+          speaking: true,
+        };
+      }
       return state;
 
     case "reading":

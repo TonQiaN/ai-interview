@@ -36,6 +36,28 @@ INTERVAL_SILENCE_MS = 200
 BROKEN_REFERENCE_ENCODER = ("Failed to load semantic_codec weights", "Failed to load CAMPPlus")
 # 一段生成到上限还没结束时适配代码只给一个警告，这段音频的结尾是被截断的
 TRUNCATED = "exceeding max_mel_tokens"
+GB = 1024**3
+# MLX 在用的内存到了上限的这个比例就在日志里提醒：越过上限不报错，但合成会慢一倍
+MEMORY_WARN_RATIO = 0.8
+
+
+def _skip_compile() -> None:
+    """不让适配代码用 mx.compile 编译声码器和投影层。
+
+    编译结果按输入的形状缓存，而每段音频的长度都不一样，所以每生成一段就多留一份
+    （实测约 0.42 GB），算在 MLX「在用」的内存里，清缓存清不掉。一场面试合成三四十段，
+    两场左右就越过内存上限，之后合成慢一倍。不编译时输出逐字节相同，速度也一样
+    （形状几乎每段都是新的，编译本来就帮不上忙）。IndexTTS 2.5 的类继承同一个方法。
+    """
+    try:
+        from mlx_indextts.generate_v2 import IndexTTSv2
+    except ImportError as error:
+        log.warning("找不到适配代码里的 IndexTTSv2（%s），没法关掉编译，内存会随合成的段数一直涨", error)
+        return
+    if not callable(getattr(IndexTTSv2, "_compile_hotpaths", None)):
+        log.warning("适配代码里没有 _compile_hotpaths 了，没法关掉编译：留意内存会不会随合成的段数一直涨")
+        return
+    IndexTTSv2._compile_hotpaths = lambda self: None
 
 
 class BadRequest(ValueError):
@@ -55,13 +77,15 @@ class _Shared:
     broken: str | None = None
 
     @classmethod
-    def use(cls, name: str, model_dir: Path, memory_limit_gb: float):
+    def use(cls, name: str, model_dir: Path, memory_limit_gb: float, cache_limit_gb: float):
         """返回（运行时，模型对象），需要时先切换版本。"""
         with cls.lock:
             if cls.loaded != name:
+                import mlx.core as mx
                 from mlx_indextts.runtime import TTSRuntime
 
                 if cls.runtime is None:
+                    _skip_compile()
                     cls.runtime = TTSRuntime(memory_limit_gb=memory_limit_gb, quantize="8")
                 cls.loaded = None
                 cls.model = None
@@ -74,6 +98,9 @@ class _Shared:
                     preload = getattr(model, "_ensure_pytorch_modules", None)
                     if callable(preload):
                         preload()
+                # 适配代码每次加载都把 MLX 的缓存上限设成机器内存的四分之一（64 GB 的机器是 16 GB），
+                # 第一条请求就填满。这里改小：缓存小了不影响速度，进程少占十几 GB
+                mx.set_cache_limit(int(cache_limit_gb * GB))
                 cls.model = model
                 cls.loaded = name
                 cls.inspect(output.getvalue())
@@ -126,11 +153,12 @@ class _OneSegment:
 
 
 class IndexTtsEngine:
-    def __init__(self, name: str, models: Path, memory_limit_gb: float):
+    def __init__(self, name: str, models: Path, memory_limit_gb: float, cache_limit_gb: float):
         directory, self.max_text_tokens, self.max_tokens = VARIANTS[name]
         self.name = name
         self.model_dir = models / directory
         self.memory_limit_gb = memory_limit_gb
+        self.cache_limit_gb = cache_limit_gb
         self.sample_rate = SAMPLE_RATE
         # 模型只读本机文件，不联网
         os.environ.setdefault("HF_HOME", str(models / "hf"))
@@ -151,7 +179,7 @@ class IndexTtsEngine:
         return {"engine": self.name, "ready": ready, "loaded": loaded, "detail": detail}
 
     def load(self) -> None:
-        _Shared.use(self.name, self.model_dir, self.memory_limit_gb)
+        _Shared.use(self.name, self.model_dir, self.memory_limit_gb, self.cache_limit_gb)
 
     def synthesize(self, *, text, language, reference_path, emotion, emotion_strength, seed, **_ignored):
         if reference_path is None:
@@ -165,7 +193,7 @@ class IndexTtsEngine:
 
         from mlx_indextts.runtime import GenerateOptions
 
-        runtime, model = _Shared.use(self.name, self.model_dir, self.memory_limit_gb)
+        runtime, model = _Shared.use(self.name, self.model_dir, self.memory_limit_gb, self.cache_limit_gb)
         options = GenerateOptions(
             max_tokens=self.max_tokens,
             max_text_tokens=self.max_text_tokens,
@@ -183,11 +211,26 @@ class IndexTtsEngine:
         else:
             pieces = self._generate_segments(runtime, model, text, reference_path, options)
         produced = False
-        for piece in pieces:
-            produced = True
-            yield piece
+        try:
+            for piece in pieces:
+                produced = True
+                yield piece
+        finally:
+            self._watch_memory()
         if not produced:
             raise RuntimeError("IndexTTS 没有生成出音频")
+
+    def _watch_memory(self) -> None:
+        """MLX 在用的内存快到上限时提醒一声。正常是 3 GB 上下，不随合成的条数涨。"""
+        import mlx.core as mx
+
+        active_gb = mx.get_active_memory() / GB
+        if active_gb > self.memory_limit_gb * MEMORY_WARN_RATIO:
+            log.warning(
+                "MLX 在用的内存 %.1f GB，快到上限 %.0f GB 了，越过以后合成会慢一倍：重启这个 worker",
+                active_gb,
+                self.memory_limit_gb,
+            )
 
     def _stream_segments(self, runtime, text, reference_path, options):
         """IndexTTS 2.5：适配代码自带按段输出的入口，每段带着段后的静音。"""
