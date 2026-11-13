@@ -261,7 +261,6 @@ cargo run -p interview-report --example lab -- frames 录像.webm --record 记�
 
 ## 后续
 
-- 录像画面检查接进面试场次的报告任务（在架构线的 `interview-flow` 里调用）。
 - 转写质量差的片段（识别置信度低）在报告里标出来。
 - 用真实面试和人工标注校准评分和诚信迹象。
 - 同一岗位多位候选人的横向对比。

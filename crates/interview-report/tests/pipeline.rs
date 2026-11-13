@@ -774,3 +774,15 @@ async fn long_ids_are_shown_as_short_ones_and_mapped_back() {
     assert!(!cited.is_empty());
     assert!(cited.iter().all(|id| original.iter().any(|o| o == id)));
 }
+
+fn assert_send<T: Send>(_: &T) {}
+
+/// 报告任务在后台任务里跑，分析的 future 必须是 Send 的。只要能编译过就算通过。
+#[test]
+fn analyze_future_can_be_spawned() {
+    let model = full_model();
+    let model: &dyn ChatModel = &model;
+    let record = sample_record();
+    let options = AnalyzeOptions::default();
+    assert_send(&analyze(&record, model, &options));
+}

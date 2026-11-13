@@ -382,3 +382,17 @@ async fn a_missing_ffmpeg_is_reported() {
         "{result:?}"
     );
 }
+
+fn assert_send<T: Send>(_: &T) {}
+
+/// 报告任务在后台任务里跑，这里的 future 必须是 Send 的。只要能编译过就算通过。
+#[test]
+fn futures_can_be_spawned() {
+    let model = SceneModel::new();
+    let model: &dyn ChatModel = &model;
+    let options = options();
+    let segments: Vec<VideoSegment> = Vec::new();
+    assert_send(&observe_video(&segments, model, &options));
+    assert_send(&observe_frames(Vec::new(), model, &options));
+    assert_send(&extract_frames(&segments, &options));
+}
