@@ -49,6 +49,9 @@ pub struct RoomConfig {
     pub abandon_after_minutes: u32,
     /// 判断一段回答最多等多少秒。超过了就不等模型，按顺序问下一题
     pub settle_timeout_sec: u32,
+    /// 语音识别用的是假后端时，要不要也做现场转写。假后端出来的是固定的文字，不是候选人说的话，
+    /// 所以默认不做；联调和端到端测试想看整条链路通不通时打开
+    pub transcribe_with_fake: bool,
 }
 
 impl RoomConfig {
@@ -102,12 +105,21 @@ impl RoomConfig {
             );
             default.recording.timeslice_ms
         });
+        let transcribe_with_fake = env_flag(
+            "AI_INTERVIEW_ROOM_FAKE_TRANSCRIPT",
+            default.transcribe_with_fake,
+        )
+        .unwrap_or_else(|err| {
+            tracing::warn!(reason = %err, "AI_INTERVIEW_ROOM_FAKE_TRANSCRIPT 写得不对，这次按 false 处理");
+            default.transcribe_with_fake
+        });
         Self {
             invite_ttl_hours,
             camera_required,
             ffmpeg,
             ffprobe,
             abandon_after_minutes,
+            transcribe_with_fake,
             recording: RecordingSettings {
                 timeslice_ms,
                 ..default.recording.clone()
@@ -128,6 +140,7 @@ impl Default for RoomConfig {
             ffprobe: "ffprobe".to_owned(),
             abandon_after_minutes: 15,
             settle_timeout_sec: 20,
+            transcribe_with_fake: false,
         }
     }
 }

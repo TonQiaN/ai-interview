@@ -19,6 +19,10 @@ export interface RoomTurn {
   start_ms: number;
   end_ms: number | null;
   end_reason: string | null;
+  /** 这一句有没有文字。候选人的话要转写出来才有 */
+  has_text: boolean;
+  /** 候选人的话是哪个识别后端转写的 */
+  stt_engine: string | null;
 }
 
 export interface RoomRecording {

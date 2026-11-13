@@ -269,7 +269,7 @@ HR 侧：
 - 每一句都要上报，不只是要回答的那一句：不需要回答的话（开场白、过渡语、结束语）播完就调，`answer_*` 和 `end_reason` 留空。`utterance_key` 和服务端发出的那一句对不上返回 409（`seq_conflict`）；要听回答的那一句没带 `end_reason` 返回 422。
 - 时刻都是面试时间轴上的毫秒数。比服务端的时钟快 5 秒以上的，按服务端的算。
 
-- 服务端把面试官的话和候选人的回答各记一行 `interview_turns`（没开口的回答不记），调 `interview-engine` 的状态机决定下一步。逐题模式下候选人的文字在面试后由整段转写补上；如果配置允许逐题追问，服务端会先转写这一段再决定。
+- 服务端把面试官的话和候选人的回答各记一行 `interview_turns`（没开口的回答不记），调 `interview-engine` 的状态机决定下一步。提问环节的回答，服务端先从已经传上来的录像里转写出文字（记成 `transcript_source = live`）再决定要不要追问；拿不到文字时不判断，按顺序问下去。面试结束后整段重新转写时再补全。
 - 候选人答完之后，`advance` 马上返回一句过渡语，回答放到后台判断。页面报告过渡语播完时判断还没好，这次请求会等到判断完再返回；判断最多等 20 秒，等不到就按顺序问下一题。极少数情况下返回 503（`answer_pending`），页面过一会儿原样重试。
 - `advance` 是幂等的：同一个 `seq` 重复提交返回同样的下一步（断网重试用）；`seq` 不是当前这一句也不是上一句时返回 409（`seq_conflict`）。面试已经结束时返回 `finish`。
 - 断点续面：`GET /room/session` 的 `resume` 是当前该播的那一句；页面重新检查设备后调 `start`，从这一句继续。录像从新的一段开始录。续面时这一步里的 `progress.elapsed_ms` 是服务端现在的时间（面试开始到此刻过了多久），页面拿它当时间轴的起点，新的一段录像才不会和刷新前的那段叠在一起。
@@ -345,4 +345,4 @@ HR 侧：
 - `device_report` 是 `POST /room/device-check` 记下的：`camera`、`microphone`、`speaker`（`ok`、`failed`、`skipped`）、`uplink_kbps`、`recording_mime`、`user_agent`。
 - `kind` 只能用小写字母、数字和下划线；`payload` 是一个 JSON 对象，序列化后不超过 4096 字节；一次最多报 200 条。格式不对的单条事件会被丢掉，不影响同一批里的其他事件。
 
-`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`device_check`、`device_report`、`page_opened`、`interview_started`、`interview_finished`、`question_replayed`、`answer_continued`、`events_dropped`、`interview_abandoned`（服务端记的：候选人离开后一直没回来，面试被结束）、`face_count_changed`（⑦ 面试后从录像抽帧产出，浏览器不报）。
+`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`device_check`、`device_report`、`page_opened`、`interview_started`、`interview_finished`、`question_replayed`、`answer_continued`、`events_dropped`、`interview_abandoned`（服务端记的：候选人离开后一直没回来，面试被结束）、`face_count_changed`、`phone_visible`、`frames_checked`（这三种由 ⑦ 面试后从录像抽帧产出，浏览器不报，含义见 `crates/interview-report/README.md` 的「录像画面检查」）。

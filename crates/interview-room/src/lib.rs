@@ -8,6 +8,7 @@
 //! | [`conduct`] | 逐题面试的进行：开始、推进、面试官语音、结束 |
 //! | [`events`] | 过程事件：页面上报、HR 查看 |
 //! | [`recording`] | 录制：分片上传、合并、HR 回放 |
+//! | [`transcribe`] | 现场转写：从上传的录像分片里取候选人说了什么 |
 //! | [`protocol`] | 页面和服务端来回传的类型 |
 //!
 //! 协议的说明在 `docs/architecture/api.md` 的「面试间协议」；页面在 `web/apps/candidate`。
@@ -20,6 +21,7 @@ use async_trait::async_trait;
 use interview_llm::ChatModel;
 use interview_platform::AppContext;
 use interview_platform::tasks::TaskRegistry;
+use interview_stt::{Transcriber, Transcript};
 use utoipa_axum::router::OpenApiRouter;
 use uuid::Uuid;
 
@@ -32,17 +34,33 @@ pub mod invites;
 pub mod protocol;
 pub mod recording;
 pub mod session;
+pub mod transcribe;
 
 pub use config::RoomConfig;
+pub use transcribe::LiveTranscripts;
+
+/// 候选人一段回答的转写。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnswerTranscript {
+    /// 说了什么。时间在面试的时间轴上
+    pub transcript: Transcript,
+    /// 哪个识别后端转的，记在 `interview_turns.stt_engine` 里
+    pub engine: String,
+}
 
 /// 拿到候选人一段回答的文字。逐题模式下要不要追问、要不要提前结束，都看这段文字。
 ///
-/// 语音识别由语音线提供，面试间只在需要文字时来问一次。
+/// 面试间只在需要文字时来问一次。服务进程里用的是 [`LiveTranscripts`]。
 #[async_trait]
 pub trait AnswerTranscriber: Send + Sync {
     /// 面试时间轴上 `start_ms` 到 `end_ms` 这一段里候选人说了什么。拿不到返回 `None`，
     /// 面试照常往下走，只是这一段不做判断。
-    async fn answer_text(&self, interview_id: Uuid, start_ms: i64, end_ms: i64) -> Option<String>;
+    async fn answer(
+        &self,
+        interview_id: Uuid,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Option<AnswerTranscript>;
 }
 
 /// 同一场面试的回答一次只判断一段。按面试的 ID 分到这么多把锁上：两场面试偶尔分到同一把，
@@ -56,8 +74,10 @@ pub struct Deps {
     pub config: Arc<RoomConfig>,
     /// 大模型。没配时面试照常进行，只是不判断回答，也就不追问、不提前结束
     pub llm: Option<Arc<dyn ChatModel>>,
-    /// 语音识别。没接时同上
+    /// 语音识别。没接时同上，对话记录里候选人的话也要等面试结束后重新转写才有
     pub transcriber: Option<Arc<dyn AnswerTranscriber>>,
+    /// 现场转写。接了的话，录像分片存好后要喂给它
+    pub(crate) live: Option<Arc<LiveTranscripts>>,
     settle_locks: Arc<Vec<tokio::sync::Mutex<()>>>,
 }
 
@@ -68,6 +88,7 @@ impl Deps {
             config: Arc::new(config),
             llm: None,
             transcriber: None,
+            live: None,
             settle_locks: Arc::new(
                 (0..SETTLE_LOCKS)
                     .map(|_| tokio::sync::Mutex::new(()))
@@ -81,9 +102,25 @@ impl Deps {
         self
     }
 
+    /// 用别的办法拿回答的文字（测试里用假的）。
     pub fn with_transcriber(mut self, transcriber: Arc<dyn AnswerTranscriber>) -> Self {
         self.transcriber = Some(transcriber);
         self
+    }
+
+    /// 接上语音识别：面试中从上传的录像分片里现场转写候选人的回答。没有语音识别时什么都不做。
+    pub fn with_stt(mut self, stt: Option<Arc<dyn Transcriber>>) -> Self {
+        if let Some(stt) = stt {
+            let live = Arc::new(LiveTranscripts::new(self.ctx.clone(), stt, &self.config));
+            self.transcriber = Some(live.clone());
+            self.live = Some(live);
+        }
+        self
+    }
+
+    /// 现场转写，没接语音识别时是 `None`。
+    pub fn live_transcripts(&self) -> Option<&Arc<LiveTranscripts>> {
+        self.live.as_ref()
     }
 
     /// 这场面试判断回答时要拿的那把锁。

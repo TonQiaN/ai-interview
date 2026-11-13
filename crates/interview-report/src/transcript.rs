@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
+use crate::frames::KIND_FRAMES_CHECKED;
 use crate::record::{InterviewRecord, Question, Segment, Speaker};
 use crate::report::{QuestionTiming, TimingOverview};
 
@@ -308,10 +309,21 @@ pub(crate) fn render_context(
         "\n# 过程事件\n由候选人的面试网页采集。每行的格式：[事件 id | 开始时间 | 种类 | 持续时间] 说明\n\
          开始时间写「开始前」的，是面试开始之前的事件。page_opened 是打开面试页，说明里的 signals \
          是这个浏览器能采集哪几类信号，in_app_browser 是所在的内置浏览器（微信这一类，里面窗口失焦可能采不到）。\
-         某类信号采集不到时，没有记录不等于没有发生。\n",
+         某类信号采集不到时，没有记录不等于没有发生。\n\
+         frames_checked、face_count_changed、phone_visible 这三种不是网页采集的，\
+         是面试结束后从摄像头录像里每隔几秒抽一帧、由模型看图得到的。\n",
     );
     if record.events.is_empty() {
         out.push_str("（面试网页全程在采集，没有记录到切出页面、粘贴、退出全屏这类事件。）\n");
+    }
+    if !record
+        .events
+        .iter()
+        .any(|event| event.kind == KIND_FRAMES_CHECKED)
+    {
+        out.push_str(
+            "（这场面试的录像画面没有检查，画面里有没有其他人、有没有手机，从这份记录里看不出来。）\n",
+        );
     }
     for (index, event) in record.events.iter().enumerate() {
         let _ = writeln!(

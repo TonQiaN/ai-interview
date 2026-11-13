@@ -13,19 +13,13 @@ use std::process::Command;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum::Router;
 use axum::http::StatusCode;
 use bytes::Bytes;
 use interview_audio::{Audio, Ffmpeg};
 use interview_llm::testing::ScriptedModel;
 use interview_llm::{ChatModel, ChatRequest, ChatResponse, FinishReason, LlmError, Usage};
-use interview_platform::AppContext;
-use interview_platform::auth;
-use interview_platform::blob::LocalBlobStore;
-use interview_platform::config::PlatformConfig;
 use interview_platform::db::MIGRATOR;
-use interview_platform::tasks::TaskRunner;
-use interview_platform::testing::{TestRequest, TestResponse};
+use interview_platform::testing::TestRequest;
 use interview_server::Shared;
 use interview_stt::{
     FakeTranscriber, SttError, SttStatus, TranscribeOptions, TranscribeSession, Transcriber,
@@ -34,8 +28,10 @@ use interview_stt::{
 use interview_tts::{FakeBackend, Synthesizer};
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use tempfile::TempDir;
 use uuid::Uuid;
+
+mod common;
+use common::{World, ffmpeg};
 
 const RESUME_TEXT: &str =
     "# 周既白\n\n后端工程师，三年经验。\n\n做过订单系统重构，技能：Rust、PostgreSQL。";
@@ -197,19 +193,6 @@ impl Transcriber for ScriptedStt {
     }
 }
 
-/// 这台机器上能用的 ffmpeg。没装时返回 `None`（CI 里直接失败，不让这一段悄悄跳过）。
-async fn ffmpeg() -> Option<Ffmpeg> {
-    let ffmpeg = Ffmpeg::from_env();
-    match ffmpeg.version().await {
-        Ok(_) => Some(ffmpeg),
-        Err(error) if std::env::var_os("CI").is_some() => panic!("CI 里应该装了 ffmpeg：{error}"),
-        Err(error) => {
-            eprintln!("没有 ffmpeg，这次不传录像：{error}");
-            None
-        }
-    }
-}
-
 /// 候选人的录像，和浏览器 `MediaRecorder` 录出来的一样：VP8 加 Opus 的 WebM，边录边写，
 /// 文件头里没有总时长。全程有声音（一段测试音）。
 fn camera_recording(ffmpeg: &Ffmpeg, seconds: u32) -> Bytes {
@@ -247,174 +230,29 @@ fn camera_recording(ffmpeg: &Ffmpeg, seconds: u32) -> Bytes {
     Bytes::from(std::fs::read(path).unwrap())
 }
 
-/// 装好的整个应用。
-struct World {
-    ctx: AppContext,
-    router: Router,
-    runner: TaskRunner,
-    /// HR 登录后的 cookie
-    cookie: String,
-    /// 文件存在这个临时目录里，和线上一样是本机磁盘
-    _files: TempDir,
-}
-
-impl World {
-    async fn new(pool: PgPool) -> Self {
-        let web = tempfile::tempdir().unwrap();
-        let config = PlatformConfig {
-            web_dir: web.path().to_owned(),
-            ..PlatformConfig::for_tests()
-        };
-        let files = tempfile::tempdir().unwrap();
-        let blobs = LocalBlobStore::open(files.path()).await.unwrap();
-        let ctx = AppContext::new(pool, Arc::new(blobs), config);
-
-        let [brief, draft, review] = planning();
-        let mut llm = ScriptedModel::new()
-            .reply(EXTRACTION)
-            .reply(PROFILE)
-            .reply(brief)
-            .reply(draft)
-            .reply(review);
-        for _ in 0..REPORT_CALLS {
-            llm = llm.reply_fn(report_reply);
-        }
-        let stt = ScriptedStt(FakeTranscriber::with_script([ANSWER; 16]));
-        let shared = Shared {
-            llm: Some(Arc::new(llm) as Arc<dyn ChatModel>),
-            synth: Arc::new(Synthesizer::new(Arc::new(FakeBackend::new()))),
-            stt: Some(Arc::new(stt) as Arc<dyn Transcriber>),
-        };
-        let app = interview_server::build(&ctx, &shared);
-        let runner = TaskRunner::new(ctx.db.clone(), app.tasks);
-
-        auth::create_admin_user(
-            &ctx.db,
-            "hr@example.com",
-            "测试 HR",
-            "long-enough-password",
-            "admin",
-        )
-        .await
-        .unwrap();
-        let response = TestRequest::post("/api/v1/auth/login")
-            .json(&json!({ "email": "hr@example.com", "password": "long-enough-password" }))
-            .send(&app.router)
-            .await;
-        assert_eq!(response.status, StatusCode::OK, "{}", response.text());
-        let cookie = response
-            .header("set-cookie")
-            .expect("登录后要种 cookie")
-            .split(';')
-            .next()
-            .unwrap()
-            .to_owned();
-
-        Self {
-            ctx,
-            router: app.router,
-            runner,
-            cookie,
-            _files: files,
-        }
+/// 假的大模型、语音合成和语音识别。
+fn shared() -> Shared {
+    let [brief, draft, review] = planning();
+    let mut llm = ScriptedModel::new()
+        .reply(EXTRACTION)
+        .reply(PROFILE)
+        .reply(brief)
+        .reply(draft)
+        .reply(review);
+    for _ in 0..REPORT_CALLS {
+        llm = llm.reply_fn(report_reply);
     }
-
-    /// HR 的请求。
-    async fn hr(&self, request: TestRequest) -> TestResponse {
-        request
-            .header("cookie", &self.cookie)
-            .send(&self.router)
-            .await
+    let stt = ScriptedStt(FakeTranscriber::with_script([ANSWER; 16]));
+    Shared {
+        llm: Some(Arc::new(llm) as Arc<dyn ChatModel>),
+        synth: Arc::new(Synthesizer::new(Arc::new(FakeBackend::new()))),
+        stt: Some(Arc::new(stt) as Arc<dyn Transcriber>),
     }
-
-    async fn hr_get(&self, uri: &str) -> Value {
-        let response = self.hr(TestRequest::get(uri)).await;
-        assert_eq!(
-            response.status,
-            StatusCode::OK,
-            "{uri}：{}",
-            response.text()
-        );
-        response.json()
-    }
-
-    async fn hr_post(&self, uri: &str, body: Value, expected: StatusCode) -> Value {
-        let response = self.hr(TestRequest::post(uri).json(&body)).await;
-        assert_eq!(response.status, expected, "{uri}：{}", response.text());
-        response.json()
-    }
-
-    /// 候选人的请求：只带链接里的令牌，没有 cookie。
-    async fn room(&self, token: &str, path: &str, body: Value) -> TestResponse {
-        TestRequest::post(format!("/api/v1/room/{path}"))
-            .bearer(token)
-            .json(&body)
-            .send(&self.router)
-            .await
-    }
-
-    /// 候选人上传录像的请求。
-    async fn room_recording(&self, token: &str, request: TestRequest) {
-        let response = request.bearer(token).send(&self.router).await;
-        assert_eq!(
-            response.status,
-            StatusCode::NO_CONTENT,
-            "{}",
-            response.text()
-        );
-    }
-
-    async fn run_tasks(&self) -> usize {
-        self.runner.run_until_idle().await.expect("跑后台任务失败")
-    }
-
-    /// 把面试的开始时间往前拨。测试几秒钟就走完一场面试，候选人报上来的时刻却是按分钟算的；
-    /// 不拨的话，服务端会把这些时刻当成客户端时钟超前，改成自己的时间。
-    async fn started_minutes_ago(&self, interview_id: &str, minutes: i32) {
-        sqlx::query(
-            "UPDATE interviews SET started_at = now() - make_interval(mins => $2) WHERE id = $1::uuid",
-        )
-        .bind(interview_id)
-        .bind(minutes)
-        .execute(&self.ctx.db)
-        .await
-        .unwrap();
-    }
-
-    /// 让等着重试的任务现在就能跑。
-    async fn skip_retry_delay(&self) {
-        sqlx::query("UPDATE tasks SET run_at = now() WHERE status = 'queued'")
-            .execute(&self.ctx.db)
-            .await
-            .unwrap();
-    }
-
-    async fn task_kinds(&self, status: &str) -> Vec<String> {
-        sqlx::query_scalar("SELECT kind FROM tasks WHERE status = $1 ORDER BY kind")
-            .bind(status)
-            .fetch_all(&self.ctx.db)
-            .await
-            .unwrap()
-    }
-}
-
-fn multipart_file(file_name: &str, content: &[u8]) -> (String, Vec<u8>) {
-    const BOUNDARY: &str = "----e2e-test-boundary";
-    let mut body = Vec::new();
-    body.extend_from_slice(
-        format!(
-            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\n\r\n"
-        )
-        .as_bytes(),
-    );
-    body.extend_from_slice(content);
-    body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
-    (format!("multipart/form-data; boundary={BOUNDARY}"), body)
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn a_whole_interview_from_login_to_wrap_up(pool: PgPool) {
-    let w = World::new(pool).await;
+    let w = World::new(pool, shared()).await;
 
     // ── HR：建岗位和候选人，上传简历 ──
     let position = w
@@ -437,15 +275,9 @@ async fn a_whole_interview_from_login_to_wrap_up(pool: PgPool) {
         )
         .await;
     let candidate_id = candidate["id"].as_str().unwrap();
-    let (content_type, body) = multipart_file("resume.md", RESUME_TEXT.as_bytes());
-    let response = w
-        .hr(
-            TestRequest::post(format!("/api/v1/candidates/{candidate_id}/resumes"))
-                .bytes(&content_type, body),
-        )
+    let resume_id = w
+        .upload_resume(candidate_id, "resume.md", RESUME_TEXT.as_bytes())
         .await;
-    assert_eq!(response.status, StatusCode::ACCEPTED, "{}", response.text());
-    let resume_id = response.json()["id"].as_str().unwrap().to_owned();
     assert_eq!(w.run_tasks().await, 1, "简历解析");
     let resume = w.hr_get(&format!("/api/v1/resumes/{resume_id}")).await;
     assert_eq!(resume["parse_status"], "done", "{resume}");
@@ -490,53 +322,19 @@ async fn a_whole_interview_from_login_to_wrap_up(pool: PgPool) {
     assert!(audio.body.len() > 44, "应该是一段真的 WAV");
 
     // ── HR：生成链接 ──
-    let invite = w
-        .hr_post(&format!("{uri}/invites"), json!({}), StatusCode::CREATED)
-        .await;
-    let token = invite["url"]
-        .as_str()
-        .unwrap()
-        .split_once('#')
-        .expect("令牌在 # 后面")
-        .1
-        .to_owned();
+    let token = w.invite(&uri).await;
     assert_eq!(w.hr_get(&uri).await["status"], "invited");
 
     // ── 候选人：打开链接，同意，开始 ──
-    // 候选人的接口不认 HR 的 cookie，也不需要它
-    let response = TestRequest::get("/api/v1/room/session")
-        .bearer(&token)
-        .send(&w.router)
-        .await;
-    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
-    let session = response.json();
+    let session = w.open_and_consent(&token).await;
     assert_eq!(session["position_title"], "后端开发工程师");
-    assert_eq!(session["consent"]["agreed"], false);
-    let keys: Vec<&str> = session["consent"]["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|item| item["key"].as_str().unwrap())
-        .collect();
-    let response = w
-        .room(
-            &token,
-            "consent",
-            json!({ "consent_version": session["consent"]["version"], "agreed_keys": keys }),
-        )
-        .await;
-    assert_eq!(
-        response.status,
-        StatusCode::NO_CONTENT,
-        "{}",
-        response.text()
-    );
 
     let response = w.room(&token, "start", json!({})).await;
     assert_eq!(response.status, StatusCode::OK, "{}", response.text());
     let mut step = response.json();
     assert_eq!(w.hr_get(&uri).await["status"], "in_progress");
-    w.started_minutes_ago(&id, 5).await;
+    // 测试几秒钟就走完一场面试，候选人报上来的时刻却是按分钟算的
+    w.clock_at(&id, 5 * 60_000).await;
 
     // ── 候选人：从面试开始就在录像，录出一片传一片 ──
     let recording = ffmpeg().await.map(|ffmpeg| camera_recording(&ffmpeg, 120));

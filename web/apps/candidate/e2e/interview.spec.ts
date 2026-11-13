@@ -89,6 +89,9 @@ test("从打开链接到面试完成：逐题问答，静音自动进入下一�
     expect(answer?.end_reason, `${key} 的回答`).toBe("silence");
     expect(answer?.start_ms).toBeGreaterThanOrEqual(asked?.end_ms ?? Number.NaN);
     expect(answer?.end_ms).toBeGreaterThan(answer?.start_ms ?? Number.NaN);
+    // 服务端从传上来的录像分片里取出了这段回答的声音，转写的文字记进了对话
+    expect(answer?.has_text, `${key} 的回答应该有文字`).toBe(true);
+    expect(answer?.stt_engine).toBe("fake");
   }
 
   const kinds = eventKinds(state);

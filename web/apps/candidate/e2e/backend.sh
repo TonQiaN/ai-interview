@@ -19,5 +19,9 @@ cargo build -p interview-room --example demo
 export DEEPSEEK_API_KEY=""
 # 录像一秒切一片，断网补传这类情况几秒钟就能测出来
 export AI_INTERVIEW_ROOM_RECORDING_TIMESLICE_MS=1000
+# 语音识别是假后端（听到声音就给一句固定的话）。让它也做现场转写，
+# 这样能看到浏览器录出来的分片确实解得出声音、文字确实记进了对话
+export AI_INTERVIEW_STT_BACKEND=fake
+export AI_INTERVIEW_ROOM_FAKE_TRANSCRIPT=true
 export AI_INTERVIEW_LOG="${AI_INTERVIEW_LOG:-warn}"
 exec target/debug/interview-server serve

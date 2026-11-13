@@ -26,6 +26,7 @@ import type {
   Turn,
   Utterance,
   Voice,
+  VoiceSettings,
 } from "../types";
 import {
   planUtterances,
@@ -104,11 +105,13 @@ export const engines: SpeechEngine[] = [
     id: "index2",
     name: "IndexTTS 2",
     languages: ["zh", "en"],
-    capabilities: ["声音克隆", "8 类情绪与混合", "独立情绪参考", "长文分段"],
     requires_reference_audio: true,
     requires_reference_transcript: false,
     max_text_chars: null,
     non_commercial_only: false,
+    supports_voice_design: false,
+    supports_emotion: true,
+    supports_instruction: false,
     available: true,
     unavailable_reason: null,
     is_default: true,
@@ -117,11 +120,13 @@ export const engines: SpeechEngine[] = [
     id: "index25",
     name: "IndexTTS 2.5",
     languages: ["zh", "en", "ja", "es", "ar"],
-    capabilities: ["声音克隆", "情绪解耦", "5 种语言", "读音标注"],
     requires_reference_audio: true,
     requires_reference_transcript: false,
     max_text_chars: null,
     non_commercial_only: false,
+    supports_voice_design: false,
+    supports_emotion: true,
+    supports_instruction: false,
     available: true,
     unavailable_reason: null,
     is_default: false,
@@ -130,58 +135,91 @@ export const engines: SpeechEngine[] = [
     id: "breeze2",
     name: "BreezeTTS2",
     languages: ["zh", "en"],
-    capabilities: ["声音克隆", "文字描述设计音色", "单次最多 350 字"],
     requires_reference_audio: false,
     requires_reference_transcript: true,
     max_text_chars: 350,
     non_commercial_only: true,
-    available: false,
-    unavailable_reason: "TTS worker 没有加载这个引擎",
+    supports_voice_design: true,
+    supports_emotion: false,
+    supports_instruction: true,
+    available: true,
+    unavailable_reason: null,
     is_default: false,
   },
 ];
 
+export const defaultVoiceSettings = (): VoiceSettings => ({
+  language: "zh",
+  style: { emotion: null, emotion_strength: 0.65, instruction: null },
+  options: { seed: 42, segment_pause_ms: 200 },
+});
+
+/** 一个音色现在能不能用，和真后端的判断一样 */
+export function voiceNotReadyReason(
+  v: Pick<Voice, "kind" | "engine" | "description" | "has_reference" | "reference_transcript">,
+): string | null {
+  if (v.kind === "designed") return v.description?.trim() ? null : "还没填音色的文字描述";
+  if (!v.has_reference) return "还没上传参考录音";
+  const engine = engines.find((e) => e.id === v.engine);
+  if (engine?.requires_reference_transcript && !v.reference_transcript?.trim())
+    return `${engine.name} 克隆时要填参考录音的逐字稿`;
+  return null;
+}
+
 export function seedVoices(): Voice[] {
-  return [
-    {
+  const voice = (
+    v: Pick<Voice, "name" | "engine" | "kind"> & Partial<Voice>,
+    createdAgo: number,
+  ): Voice => {
+    const full = {
       id: newId(),
-      name: "默认面试官",
-      engine: "index2",
-      cloned: true,
-      has_reference: true,
-      reference_duration_ms: 11_400,
-      reference_transcript: null,
-      style_prompt: null,
-      language: "zh",
-      is_default: true,
-      created_at: iso(-20 * DAY),
-    },
-    {
-      id: newId(),
-      name: "温和女声",
-      engine: "index25",
-      cloned: true,
-      has_reference: true,
-      reference_duration_ms: 8_900,
-      reference_transcript: null,
-      style_prompt: null,
-      language: "zh",
-      is_default: false,
-      created_at: iso(-9 * DAY),
-    },
-    {
-      id: newId(),
-      name: "干练男声（设计）",
-      engine: "breeze2",
-      cloned: false,
-      has_reference: false,
+      description: null,
+      has_reference: v.kind === "cloned",
       reference_duration_ms: null,
       reference_transcript: null,
-      style_prompt: "三十多岁的男性，声音干净利落，语速偏快，像一位经验丰富的技术面试官。",
-      language: "zh",
+      settings: defaultVoiceSettings(),
       is_default: false,
-      created_at: iso(-3 * DAY),
-    },
+      created_at: iso(-createdAgo),
+      updated_at: iso(-createdAgo),
+      ...v,
+    };
+    const reason = voiceNotReadyReason(full);
+    return { ...full, ready: reason === null, not_ready_reason: reason };
+  };
+  return [
+    voice(
+      {
+        name: "默认面试官",
+        engine: "index2",
+        kind: "cloned",
+        reference_duration_ms: 11_400,
+        is_default: true,
+      },
+      20 * DAY,
+    ),
+    voice(
+      {
+        name: "温和女声",
+        engine: "index25",
+        kind: "cloned",
+        reference_duration_ms: 8_900,
+        settings: {
+          ...defaultVoiceSettings(),
+          style: { emotion: "calm", emotion_strength: 0.5, instruction: null },
+        },
+      },
+      9 * DAY,
+    ),
+    voice(
+      {
+        name: "干练男声",
+        engine: "breeze2",
+        kind: "designed",
+        description: "三十多岁的男性，声音干净利落，语速偏快，像一位经验丰富的技术面试官。",
+      },
+      3 * DAY,
+    ),
+    voice({ name: "新同事的声音", engine: "index2", kind: "cloned", has_reference: false }, HOUR),
   ];
 }
 export const emptyExtra: PositionExtra = {
