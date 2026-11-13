@@ -381,6 +381,35 @@ impl InterviewPlan {
         issues
     }
 
+    /// 让已经出好的计划跟上改过的配置，不调模型。返回计划有没有变。
+    ///
+    /// 配合 [`InterviewConfig::plan_still_valid`] 用：它说题目还能用的时候，对计划调这个函数，
+    /// 变了就把计划也存一下。做三件事：
+    ///
+    /// - 预期回答时间超过单题最长时间的，压到上限。
+    /// - 追问比上限多的，去掉后面几个。
+    /// - 重新算预计时长。
+    ///
+    /// 面试官要说的话只会变少，文字不会变：已经合成的语音都还能用，去掉的追问对应的那几句不再需要。
+    /// 在 `validate` 通过的计划上调完，`validate` 还是通过。
+    pub fn conform_to(&mut self, config: &InterviewConfig) -> bool {
+        let mut changed = false;
+        let limit = config.follow_ups.max_per_question as usize;
+        for question in &mut self.questions {
+            if question.expected_answer_sec > config.answer.max_sec {
+                question.expected_answer_sec = config.answer.max_sec;
+                changed = true;
+            }
+            if question.follow_ups.len() > limit {
+                question.follow_ups.truncate(limit);
+                changed = true;
+            }
+        }
+        let duration = self.expected_duration_sec;
+        self.recompute_expected_duration(config);
+        changed || self.expected_duration_sec != duration
+    }
+
     /// 重新计算按计划走完大约要多久。HR 改题后调用。
     pub fn recompute_expected_duration(&mut self, config: &InterviewConfig) {
         let budget = config.time_budget();
@@ -527,6 +556,72 @@ pub(crate) mod tests {
         let plan = sample_plan();
         let json = serde_json::to_string(&plan).unwrap();
         assert_eq!(serde_json::from_str::<InterviewPlan>(&json).unwrap(), plan);
+    }
+
+    #[test]
+    fn conform_to_leaves_a_fitting_plan_alone() {
+        let config = InterviewConfig::default();
+        let mut plan = sample_plan();
+        let before = plan.clone();
+        assert!(!plan.conform_to(&config));
+        assert_eq!(plan, before);
+    }
+
+    #[test]
+    fn conform_to_trims_the_plan_to_the_new_config() {
+        let mut old = InterviewConfig::default();
+        old.follow_ups.max_per_question = 2;
+        let mut plan = sample_plan();
+        plan.questions[0].follow_ups.push(FollowUp {
+            key: keys::follow_up("q1", 2),
+            text: "当时的结果是用什么数字衡量的？".to_owned(),
+            ask_when: "没有给出任何具体数字".to_owned(),
+        });
+        plan.questions[1].expected_answer_sec = 150;
+        plan.recompute_expected_duration(&old);
+        assert_eq!(plan.validate(&old), []);
+        let spoken_before = plan.utterances();
+
+        let mut new = old.clone();
+        new.follow_ups.max_per_question = 1;
+        new.answer.max_sec = 120;
+        new.answer.silence_sec = 8;
+        assert!(old.plan_still_valid(&new));
+        assert_ne!(plan.validate(&new), []);
+
+        assert!(plan.conform_to(&new));
+        assert_eq!(plan.validate(&new), []);
+        assert_eq!(plan.questions[0].follow_ups.len(), 1);
+        assert_eq!(plan.questions[0].follow_ups[0].key, "q1.f1");
+        assert_eq!(plan.questions[1].expected_answer_sec, 120);
+        assert_eq!(plan.questions[2].expected_answer_sec, 90);
+
+        // 面试官要说的话只少了被去掉的那句追问，其余一字不变
+        let spoken_after = plan.utterances();
+        assert_eq!(spoken_after.len(), spoken_before.len() - 1);
+        assert!(spoken_after.iter().all(|item| spoken_before.contains(item)));
+
+        // 预计时长按新配置重新算过；再调一次什么都不变
+        let mut again = plan.clone();
+        again.recompute_expected_duration(&new);
+        assert_eq!(again.expected_duration_sec, plan.expected_duration_sec);
+        assert!(!plan.conform_to(&new));
+    }
+
+    #[test]
+    fn conform_to_reports_a_change_when_only_the_duration_moves() {
+        let old = InterviewConfig::default();
+        let mut new = old.clone();
+        new.answer.silence_sec = 8;
+        assert!(old.plan_still_valid(&new));
+
+        let mut plan = sample_plan();
+        let questions = plan.questions.clone();
+        let before = plan.expected_duration_sec;
+        assert!(plan.conform_to(&new));
+        assert_eq!(plan.questions, questions);
+        // 三道主问题，每道多等 3 秒静音
+        assert_eq!(plan.expected_duration_sec, before + 9);
     }
 
     #[test]
