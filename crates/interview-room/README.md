@@ -13,6 +13,7 @@
 | `GET /api/v1/room/session` | 候选人打开链接后拿会话信息 |
 | `POST /api/v1/room/consent` | 候选人确认同意事项 |
 | `POST /api/v1/room/device-check` | 页面上报设备检测结果 |
+| `POST /api/v1/room/uplink-probe` | 页面测上行网速时往这里发一段字节，收完就丢 |
 | `POST /api/v1/room/start` | 开始面试（或者刷新后接着面），返回该播的那一句 |
 | `POST /api/v1/room/advance` | 页面每播完一句、候选人每答完一段调一次，返回下一步 |
 | `GET /api/v1/room/utterances/{key}/audio` | 面试官语音 |
