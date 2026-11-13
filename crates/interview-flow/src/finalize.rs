@@ -1,11 +1,14 @@
 //! 面试结束后的收尾：重新转写候选人的回答，然后开始生成分析报告。
 //!
+//! 回答的声音有两个来源，先用前一个：对话记录上挂着的单独录音（`audio_blob_key`）；
+//! 没有的话，按回答的起止时间从合并好的录像里取那一段（见 [`crate::answer_audio`]）。
+//!
 //! 面试间在面试结束（`completed`）或候选人中途离开（`abandoned`）时入队 `interview.finalize`。
 //! 这个任务重复执行是安全的：重新转写只是原地更新对话记录，已经有报告就不再生成新的。
 //!
 //! 转写失败不算任务失败：面试中实时转写的文字还在，报告照样能出。
 
-use interview_audio::decode_wav;
+use interview_audio::{Audio, decode_wav};
 use interview_core::{InterviewStatus, Speaker};
 use interview_platform::tasks::{Task, TaskError, TaskResult};
 use interview_stt::{SttError, TranscribeOptions, Transcript};
@@ -13,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::store::{self, FinalTranscript, InterviewRow};
+use crate::answer_audio::Recordings;
+use crate::store::{self, FinalTranscript, InterviewRow, TurnRow};
 use crate::{Deps, record, report};
 
 /// `interview.finalize` 的 payload。
@@ -65,7 +69,7 @@ pub(crate) fn is_finished(status: InterviewStatus) -> bool {
     )
 }
 
-/// 把候选人每一段回答的录音重新转写一遍，原地更新对话记录。返回做了什么。
+/// 把候选人每一段回答的声音重新转写一遍，原地更新对话记录。返回做了什么。
 async fn retranscribe(deps: &Deps, row: &InterviewRow) -> Result<Value, sqlx::Error> {
     let Some(stt) = deps.stt.as_deref() else {
         return Ok(json!({ "skipped": "语音识别没配置" }));
@@ -82,34 +86,29 @@ async fn retranscribe(deps: &Deps, row: &InterviewRow) -> Result<Value, sqlx::Er
     let options = TranscribeOptions {
         hotwords: record::hotwords(db, row).await,
     };
+    let mut recordings = Recordings::load(deps, row.id).await?;
 
-    let (mut updated, mut kept, mut failed) = (0u32, 0u32, 0u32);
+    let mut done = Counts::default();
     for turn in store::list_turns(db, row.id).await? {
-        let Some(key) = turn.audio_blob_key.as_deref() else {
-            continue;
-        };
         if turn.speaker != Speaker::Candidate {
             continue;
         }
-        let audio = match deps.ctx.blobs.get(key).await {
-            Ok(bytes) => decode_wav(&bytes),
-            Err(err) => {
-                tracing::warn!(interview_id = %row.id, seq = turn.seq, reason = %err, "读不到回答的录音");
-                failed += 1;
+        let audio = match answer_audio(deps, &mut recordings, &turn).await {
+            Ok(Some(audio)) => audio,
+            // 这段回答没有录到声音：保留面试中转写的文字
+            Ok(None) => {
+                done.no_audio += 1;
                 continue;
             }
-        };
-        let audio = match audio {
-            Ok(audio) => audio,
-            Err(err) => {
-                tracing::warn!(interview_id = %row.id, seq = turn.seq, reason = %err, "回答的录音解不开");
-                failed += 1;
+            Err(reason) => {
+                tracing::warn!(interview_id = %row.id, seq = turn.seq, %reason, "取不到这段回答的声音");
+                done.failed += 1;
                 continue;
             }
         };
         match stt.transcribe(&audio, &options).await {
             // 没听到人说话：保留面试中转写的文字
-            Ok(transcript) if transcript.is_empty() => kept += 1,
+            Ok(transcript) if transcript.is_empty() => done.kept += 1,
             Ok(transcript) => {
                 let transcript = transcript.shifted(u64::try_from(turn.start_ms).unwrap_or(0));
                 store::save_final_transcript(
@@ -123,22 +122,68 @@ async fn retranscribe(deps: &Deps, row: &InterviewRow) -> Result<Value, sqlx::Er
                     },
                 )
                 .await?;
-                updated += 1;
+                done.updated += 1;
             }
             Err(SttError::Unavailable(reason)) => {
                 tracing::warn!(interview_id = %row.id, %reason, "语音识别用不了，保留面试中转写的文字");
-                return Ok(json!({
-                    "updated": updated, "kept": kept, "failed": failed,
-                    "stopped": "语音识别用不了",
-                }));
+                return Ok(done.summary(&recordings, Some("语音识别用不了")));
             }
             Err(err) => {
                 tracing::warn!(interview_id = %row.id, seq = turn.seq, reason = %err, "这段回答转写失败");
-                failed += 1;
+                done.failed += 1;
             }
         }
     }
-    Ok(json!({ "updated": updated, "kept": kept, "failed": failed }))
+    Ok(done.summary(&recordings, None))
+}
+
+/// 一段回答的声音。先用对话记录上挂着的单独录音，没有就从录像里取。哪都没有时返回 `Ok(None)`。
+async fn answer_audio(
+    deps: &Deps,
+    recordings: &mut Recordings<'_>,
+    turn: &TurnRow,
+) -> Result<Option<Audio>, String> {
+    let Some(key) = turn.audio_blob_key.as_deref() else {
+        return recordings.audio(turn.start_ms, turn.end_ms).await;
+    };
+    let bytes = deps
+        .ctx
+        .blobs
+        .get(key)
+        .await
+        .map_err(|err| format!("读不到回答的录音：{err}"))?;
+    decode_wav(&bytes)
+        .map(Some)
+        .map_err(|err| format!("回答的录音解不开：{err}"))
+}
+
+/// 重新转写的结果，按回答计数。
+#[derive(Debug, Default)]
+struct Counts {
+    /// 换成了重新转写的文字
+    updated: u32,
+    /// 没听到人说话，保留面试中转写的文字
+    kept: u32,
+    /// 取声音或转写出错
+    failed: u32,
+    /// 这段回答没有录到声音
+    no_audio: u32,
+}
+
+impl Counts {
+    fn summary(&self, recordings: &Recordings<'_>, stopped: Option<&str>) -> Value {
+        let mut summary = json!({
+            "updated": self.updated, "kept": self.kept,
+            "failed": self.failed, "no_audio": self.no_audio,
+        });
+        if let Some(stopped) = stopped {
+            summary["stopped"] = json!(stopped);
+        }
+        if let Some(problem) = recordings.problem() {
+            summary["recordings"] = json!(problem);
+        }
+        summary
+    }
 }
 
 /// 整段回答的置信度：各小段按时长加权平均。

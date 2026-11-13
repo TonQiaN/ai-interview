@@ -1,28 +1,41 @@
 //! 端到端：整个应用装起来，从 HR 登录一路走到面试结束后的收尾。
 //!
 //! 只走对外的接口（HR 用 cookie，候选人用链接里的令牌），后台任务用装配出来的那一套。
-//! 外部依赖是假的：大模型按顺序回放，语音合成输出测试音。数据都是合成的。
+//! 外部依赖是假的：大模型回放写好的回答，语音合成输出测试音，语音识别按有没有声音铺上写好的文字。
+//! 数据都是合成的；候选人的录像是 ffmpeg 现场生成的测试音加测试图案。
 //!
-//! 这个测试看的是模块之间接得上：岗位和候选人（②）→ 出题和合成（①③④）→ 面试间（⑤）
-//! → 收尾和报告（①⑦）。每个模块自己的细节由各自的测试负责。
+//! 这个测试看的是模块之间接得上：岗位和候选人（②）→ 出题和合成（①③④）→ 面试间和录像（⑤）
+//! → 从录像里取回答重新转写（①④）→ 报告（①⑦）。每个模块自己的细节由各自的测试负责。
+//!
+//! 本机没装 ffmpeg 时不传录像，报告那一步断言的是「没有回答，评不了」；CI 里装了，没装会失败。
 
+use std::process::Command;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use axum::Router;
 use axum::http::StatusCode;
-use interview_llm::ChatModel;
+use bytes::Bytes;
+use interview_audio::{Audio, Ffmpeg};
 use interview_llm::testing::ScriptedModel;
+use interview_llm::{ChatModel, ChatRequest, ChatResponse, FinishReason, LlmError, Usage};
 use interview_platform::AppContext;
 use interview_platform::auth;
-use interview_platform::blob::MemoryBlobStore;
+use interview_platform::blob::LocalBlobStore;
 use interview_platform::config::PlatformConfig;
 use interview_platform::db::MIGRATOR;
 use interview_platform::tasks::TaskRunner;
 use interview_platform::testing::{TestRequest, TestResponse};
 use interview_server::Shared;
+use interview_stt::{
+    FakeTranscriber, SttError, SttStatus, TranscribeOptions, TranscribeSession, Transcriber,
+    Transcript,
+};
 use interview_tts::{FakeBackend, Synthesizer};
 use serde_json::{Value, json};
 use sqlx::PgPool;
+use tempfile::TempDir;
+use uuid::Uuid;
 
 const RESUME_TEXT: &str =
     "# 周既白\n\n后端工程师，三年经验。\n\n做过订单系统重构，技能：Rust、PostgreSQL。";
@@ -95,6 +108,145 @@ fn planning() -> [String; 3] {
     ]
 }
 
+/// 写报告时模型的回答。报告的几步是并发的，谁先调用不确定，所以按提示词里的任务标题来答。
+fn report_reply(request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+    // 重试时后面会追加消息，所以认任务只看第一条用户消息
+    let task = request
+        .messages
+        .get(1)
+        .map(|message| message.content.as_text())
+        .unwrap_or_default();
+    let replies = [
+        (
+            "# 任务：评价候选人对题目 ",
+            r#"{"answered": true, "answer_summary": "回答了问题。", "rating": 3,
+                "rating_reason": "中规中矩。", "strengths": [], "weaknesses": [], "follow_up": null}"#,
+        ),
+        (
+            "# 任务：核对候选人和岗位要求的匹配情况",
+            r#"{"match_level": "medium", "summary": "基本满足。", "items": []}"#,
+        ),
+        (
+            "# 任务：核验简历内容",
+            r#"{"credibility": "medium", "summary": "讲出了做法。", "claims": []}"#,
+        ),
+        (
+            "# 任务：找出作弊和诚信方面的迹象",
+            r#"{"risk_level": "low", "summary": "没有发现异常。", "signals": []}"#,
+        ),
+        (
+            "# 任务：评价沟通表达",
+            r#"{"summary": "表达清楚。", "aspects": [], "reliability_note": "只看了文字。"}"#,
+        ),
+        (
+            "# 任务：给出综合建议",
+            r#"{"recommendation": "advance", "confidence": "medium", "headline": "有实际经验",
+                "overview": "重构经历讲得具体。", "key_reasons": [], "risks": [], "competencies": [],
+                "focus_checks": [], "next_round": {"focus_areas": [], "questions": []},
+                "limitations": []}"#,
+        ),
+    ];
+    let content = replies
+        .iter()
+        .find(|(marker, _)| task.contains(marker))
+        .map(|(_, reply)| (*reply).to_owned())
+        .ok_or_else(|| LlmError::Config("测试没有给这一步准备回答".to_owned()))?;
+    Ok(ChatResponse {
+        content,
+        reasoning_content: None,
+        tool_calls: Vec::new(),
+        finish_reason: FinishReason::Stop,
+        usage: Usage::default(),
+        model: "scripted".to_owned(),
+        system_fingerprint: None,
+    })
+}
+
+/// 写报告最多会调用模型多少次：每道问到的题一次（含追问），另外五步各一次，留些余量。
+const REPORT_CALLS: usize = 24;
+
+/// 候选人每一段回答，语音识别转写出来的文字。
+const ANSWER: &str = "我负责订单拆分模块，把同步调用改成了消息队列。";
+
+/// 测试用的语音识别：音频里有声音就返回 [`ANSWER`]，没有声音返回空的转写。
+/// 对外报的后端名不是 `fake`：收尾任务不采用假后端的结果。
+struct ScriptedStt(FakeTranscriber);
+
+#[async_trait]
+impl Transcriber for ScriptedStt {
+    async fn status(&self) -> SttStatus {
+        SttStatus {
+            backend: "scripted".into(),
+            ..self.0.status().await
+        }
+    }
+
+    async fn start_session(
+        &self,
+        options: &TranscribeOptions,
+    ) -> Result<Box<dyn TranscribeSession>, SttError> {
+        self.0.start_session(options).await
+    }
+
+    async fn transcribe(
+        &self,
+        audio: &Audio,
+        options: &TranscribeOptions,
+    ) -> Result<Transcript, SttError> {
+        self.0.transcribe(audio, options).await
+    }
+}
+
+/// 这台机器上能用的 ffmpeg。没装时返回 `None`（CI 里直接失败，不让这一段悄悄跳过）。
+async fn ffmpeg() -> Option<Ffmpeg> {
+    let ffmpeg = Ffmpeg::from_env();
+    match ffmpeg.version().await {
+        Ok(_) => Some(ffmpeg),
+        Err(error) if std::env::var_os("CI").is_some() => panic!("CI 里应该装了 ffmpeg：{error}"),
+        Err(error) => {
+            eprintln!("没有 ffmpeg，这次不传录像：{error}");
+            None
+        }
+    }
+}
+
+/// 候选人的录像，和浏览器 `MediaRecorder` 录出来的一样：VP8 加 Opus 的 WebM，边录边写，
+/// 文件头里没有总时长。全程有声音（一段测试音）。
+fn camera_recording(ffmpeg: &Ffmpeg, seconds: u32) -> Bytes {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("recording.webm");
+    let status = Command::new(ffmpeg.program())
+        .args(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i"])
+        .arg(format!(
+            "sine=frequency=440:duration={seconds}:sample_rate=48000"
+        ))
+        .args(["-f", "lavfi", "-i"])
+        .arg(format!("testsrc=size=160x120:rate=10:duration={seconds}"))
+        .args([
+            "-c:a",
+            "libopus",
+            "-b:a",
+            "32k",
+            "-c:v",
+            "libvpx",
+            "-b:v",
+            "100k",
+            "-deadline",
+            "realtime",
+            "-cluster_time_limit",
+            "1000",
+            "-live",
+            "1",
+            "-f",
+            "webm",
+        ])
+        .arg(&path)
+        .status()
+        .expect("起不了 ffmpeg");
+    assert!(status.success(), "生成测试录像失败");
+    Bytes::from(std::fs::read(path).unwrap())
+}
+
 /// 装好的整个应用。
 struct World {
     ctx: AppContext,
@@ -102,6 +254,8 @@ struct World {
     runner: TaskRunner,
     /// HR 登录后的 cookie
     cookie: String,
+    /// 文件存在这个临时目录里，和线上一样是本机磁盘
+    _files: TempDir,
 }
 
 impl World {
@@ -111,19 +265,25 @@ impl World {
             web_dir: web.path().to_owned(),
             ..PlatformConfig::for_tests()
         };
-        let ctx = AppContext::new(pool, Arc::new(MemoryBlobStore::new()), config);
+        let files = tempfile::tempdir().unwrap();
+        let blobs = LocalBlobStore::open(files.path()).await.unwrap();
+        let ctx = AppContext::new(pool, Arc::new(blobs), config);
 
         let [brief, draft, review] = planning();
-        let llm = ScriptedModel::new()
+        let mut llm = ScriptedModel::new()
             .reply(EXTRACTION)
             .reply(PROFILE)
             .reply(brief)
             .reply(draft)
             .reply(review);
+        for _ in 0..REPORT_CALLS {
+            llm = llm.reply_fn(report_reply);
+        }
+        let stt = ScriptedStt(FakeTranscriber::with_script([ANSWER; 16]));
         let shared = Shared {
             llm: Some(Arc::new(llm) as Arc<dyn ChatModel>),
             synth: Arc::new(Synthesizer::new(Arc::new(FakeBackend::new()))),
-            stt: None,
+            stt: Some(Arc::new(stt) as Arc<dyn Transcriber>),
         };
         let app = interview_server::build(&ctx, &shared);
         let runner = TaskRunner::new(ctx.db.clone(), app.tasks);
@@ -155,6 +315,7 @@ impl World {
             router: app.router,
             runner,
             cookie,
+            _files: files,
         }
     }
 
@@ -192,8 +353,40 @@ impl World {
             .await
     }
 
+    /// 候选人上传录像的请求。
+    async fn room_recording(&self, token: &str, request: TestRequest) {
+        let response = request.bearer(token).send(&self.router).await;
+        assert_eq!(
+            response.status,
+            StatusCode::NO_CONTENT,
+            "{}",
+            response.text()
+        );
+    }
+
     async fn run_tasks(&self) -> usize {
         self.runner.run_until_idle().await.expect("跑后台任务失败")
+    }
+
+    /// 把面试的开始时间往前拨。测试几秒钟就走完一场面试，候选人报上来的时刻却是按分钟算的；
+    /// 不拨的话，服务端会把这些时刻当成客户端时钟超前，改成自己的时间。
+    async fn started_minutes_ago(&self, interview_id: &str, minutes: i32) {
+        sqlx::query(
+            "UPDATE interviews SET started_at = now() - make_interval(mins => $2) WHERE id = $1::uuid",
+        )
+        .bind(interview_id)
+        .bind(minutes)
+        .execute(&self.ctx.db)
+        .await
+        .unwrap();
+    }
+
+    /// 让等着重试的任务现在就能跑。
+    async fn skip_retry_delay(&self) {
+        sqlx::query("UPDATE tasks SET run_at = now() WHERE status = 'queued'")
+            .execute(&self.ctx.db)
+            .await
+            .unwrap();
     }
 
     async fn task_kinds(&self, status: &str) -> Vec<String> {
@@ -343,6 +536,29 @@ async fn a_whole_interview_from_login_to_wrap_up(pool: PgPool) {
     assert_eq!(response.status, StatusCode::OK, "{}", response.text());
     let mut step = response.json();
     assert_eq!(w.hr_get(&uri).await["status"], "in_progress");
+    w.started_minutes_ago(&id, 5).await;
+
+    // ── 候选人：从面试开始就在录像，录出一片传一片 ──
+    let recording = ffmpeg().await.map(|ffmpeg| camera_recording(&ffmpeg, 120));
+    let segment = format!("/api/v1/room/recordings/camera/{}", Uuid::now_v7());
+    let mut total_chunks = 0;
+    if let Some(recording) = &recording {
+        w.room_recording(
+            &token,
+            TestRequest::put(&segment)
+                .json(&json!({ "content_type": "video/webm;codecs=vp8,opus", "start_ms": 0 })),
+        )
+        .await;
+        for chunk in recording.chunks(recording.len() / 3 + 1) {
+            w.room_recording(
+                &token,
+                TestRequest::put(format!("{segment}/chunks/{total_chunks}"))
+                    .bytes("application/octet-stream", chunk.to_vec()),
+            )
+            .await;
+            total_chunks += 1;
+        }
+    }
 
     // ── 候选人：照着服务端给的每一步走完 ──
     let mut spoken = Vec::new();
@@ -366,12 +582,12 @@ async fn a_whole_interview_from_login_to_wrap_up(pool: PgPool) {
             "playback_start_ms": at_ms,
             "playback_end_ms": at_ms + 3_000,
             "answer_start_ms": answers.then_some(at_ms + 3_500),
-            "answer_end_ms": answers.then_some(at_ms + 30_000),
+            "answer_end_ms": answers.then_some(at_ms + 9_500),
             "end_reason": answers.then_some("silence"),
             "replays": 0,
         });
         spoken.push(key);
-        at_ms += 31_000;
+        at_ms += 10_000;
         let response = w.room(&token, "advance", report).await;
         assert_eq!(response.status, StatusCode::OK, "{}", response.text());
         step = response.json();
@@ -392,28 +608,91 @@ async fn a_whole_interview_from_login_to_wrap_up(pool: PgPool) {
             .contains(&"interview.finalize".to_owned()),
         "面试间结束时要入队收尾任务"
     );
+
+    // 页面停止录像，告诉服务端这一段传完了。面试已经结束，链接还能用来补传
+    if recording.is_some() {
+        w.room_recording(
+            &token,
+            TestRequest::post(format!("{segment}/complete"))
+                .json(&json!({ "total_chunks": total_chunks })),
+        )
+        .await;
+    }
+    // 收尾任务排在合并录像前面：它看到录像还没合并好，先让开，等会儿再来
+    w.run_tasks().await;
+    w.skip_retry_delay().await;
     w.run_tasks().await;
     assert_eq!(
         w.task_kinds("failed").await,
         Vec::<String>::new(),
         "后台任务不该有失败的"
     );
+    assert_eq!(w.task_kinds("queued").await, Vec::<String>::new());
 
     // HR 看得到对话记录：面试官的每句话和候选人的每段回答
     let transcript = w.hr_get(&format!("{uri}/transcript")).await;
     let turns = transcript["items"].as_array().expect("有对话记录");
-    let by = |speaker: &str| {
+    let by = |speaker: &str| -> Vec<&Value> {
         turns
             .iter()
             .filter(|turn| turn["speaker"] == speaker)
-            .count()
+            .collect()
     };
-    assert_eq!(by("interviewer"), spoken.len(), "{transcript}");
-    assert!(by("candidate") >= 3, "{transcript}");
+    assert_eq!(by("interviewer").len(), spoken.len(), "{transcript}");
+    let answers = by("candidate");
+    assert!(answers.len() >= 3, "{transcript}");
 
-    // 报告有一个版本。这场面试没有录音，也就没有回答的文字，报告如实说明评不了
     let reports = w.hr_get(&format!("{uri}/reports")).await;
     let reports = reports["items"].as_array().expect("报告列表");
     assert_eq!(reports.len(), 1, "{reports:?}");
-    assert_eq!(reports[0]["status"], "failed", "{reports:?}");
+
+    if recording.is_none() {
+        // 没有录像，也就没有回答的文字，报告如实说明评不了
+        assert_eq!(reports[0]["status"], "failed", "{reports:?}");
+        return;
+    }
+
+    // HR 看得到录像，能播放
+    let recordings = w.hr_get(&format!("{uri}/recordings")).await;
+    let recordings = recordings["items"].as_array().expect("录制列表");
+    assert_eq!(recordings.len(), 1, "{recordings:?}");
+    assert_eq!(recordings[0]["status"], "ready", "{recordings:?}");
+    let media = w
+        .hr(
+            TestRequest::get(recordings[0]["media_url"].as_str().unwrap())
+                .header("range", "bytes=0-1023"),
+        )
+        .await;
+    assert_eq!(media.status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(media.body.len(), 1024);
+
+    // 每段回答的文字是面试后从录像里那一段声音转写出来的，逐字时间落在这段回答里
+    for answer in &answers {
+        assert_eq!(answer["text"], ANSWER, "{answer}");
+        assert_eq!(answer["transcript_source"], "final", "{answer}");
+        let (start, end) = (
+            answer["start_ms"].as_i64().unwrap(),
+            answer["end_ms"].as_i64().unwrap(),
+        );
+        let words = answer["words"].as_array().unwrap();
+        assert!(!words.is_empty(), "{answer}");
+        for word in words {
+            let (s, e) = (word["s"].as_i64().unwrap(), word["e"].as_i64().unwrap());
+            assert!(start <= s && e <= end, "{word} 不在 {start} 到 {end} 之间");
+        }
+    }
+
+    // 有了回答的文字，报告就写得出来
+    assert_eq!(reports[0]["status"], "done", "{reports:?}");
+    let report = w.hr_get(&format!("{uri}/report")).await;
+    assert_eq!(report["content"]["recommendation"]["decision"], "advance");
+    let questions = report["content"]["questions"].as_array().unwrap();
+    assert!(
+        questions
+            .iter()
+            .filter(|question| question["asked"] == true)
+            .count()
+            >= 3,
+        "{questions:?}"
+    );
 }

@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use interview_audio::Ffmpeg;
 use interview_core::task_kind;
 use interview_llm::ChatModel;
 use interview_platform::AppContext;
@@ -22,6 +23,7 @@ use interview_stt::Transcriber;
 use interview_tts::Synthesizer;
 use utoipa_axum::router::OpenApiRouter;
 
+mod answer_audio;
 mod context;
 pub mod finalize;
 pub mod model;
@@ -45,6 +47,9 @@ pub struct Deps {
     pub synth: Arc<Synthesizer>,
     /// 语音识别。没有时是 `None`，面试后不重新转写，报告用面试中转写的文字。
     pub stt: Option<Arc<dyn Transcriber>>,
+    /// ffmpeg。面试后重新转写时，用它从录像里取每一段回答的声音。这台机器上没装也能建，
+    /// 用到时取不出声音，报告用面试中转写的文字。
+    pub ffmpeg: Ffmpeg,
 }
 
 /// 面试场次的全部接口。
