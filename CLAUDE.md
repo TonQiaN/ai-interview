@@ -24,6 +24,12 @@ cargo test -p interview-tts <测试名>   # 只跑一个测试
 cargo run -p interview-cli -- tts engines
 cargo run -p interview-server -- openapi   # 打印 OpenAPI 文档，不用数据库
 scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息不进 Git
+
+pnpm -C web install                    # 装前端依赖（Node 22 以上，pnpm 10）
+pnpm -C web check                      # 前端全量检查：lint、类型检查、测试、构建
+pnpm -C web gen:api                    # 由后端的 OpenAPI 文档生成 TypeScript 类型（typecheck 和 build 会自己先跑）
+pnpm -C web --filter <包名> test       # 只测一个包，比如 @ai-interview/api-client
+pnpm -C web format                     # 用 Biome 格式化并整理 import
 ```
 
 需要真模型、真 TTS 或真 RAAS 的测试标 `#[ignore]`，用 `cargo test -- --ignored` 手动跑。CI 不跑这些。
@@ -75,6 +81,7 @@ cargo run -p interview-engine --example simulate -- crates/interview-engine/fixt
 - JSON 字段用 `snake_case`；接口出错返回统一的错误结构（见 `docs/architecture/api.md`）。
 - 数据库查询用 sqlx 的运行时接口（`query_as` 等），不用要离线缓存的 `query!` 宏；要数据库的测试用 `#[sqlx::test]`。
 - 候选人的简历、录像、声音是个人信息：不进日志，不进测试数据，发给大模型的内容只带任务需要的部分。
+- 前端调后端只用 `@ai-interview/api-client`（`createApiClient()` 给 HR 后台，`createRoomClient(token)` 给面试间），类型由 OpenAPI 生成，不手写接口类型。生成结果在 `web/packages/api-client/src/generated/`，不进 Git。
 - 改了引擎清单或能力限制，`tts/engines.json`、`crates/interview-tts` 和 `tts/README.md` 要一起改，有测试检查前两个对不对得上。
 - 一个 PR 一件事。修 bug 先写一个会失败的测试，再修。
 - 改了约定、命令或目录结构，同一个 PR 里更新这个文件。

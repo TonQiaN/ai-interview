@@ -7,6 +7,14 @@
 .env.*
 !.env.example
 
+# 前端
+node_modules/
+/web/dist
+/web/packages/api-client/src/generated
+*.tsbuildinfo
+/web/**/test-results
+/web/**/playwright-report
+
 # 系统和编辑器
 .DS_Store
 .idea/

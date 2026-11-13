@@ -22,6 +22,7 @@ AI 面试：开源的 AI 面试系统。主体语言是 Rust；面试官的语�
 - `crates/interview-talent`：简历解析（PDF 转成图片让大模型读，带水印和扫描件也行）、候选人画像、岗位描述整理。接口和数据库部分还没接。
 - `crates/interview-cli`：命令行入口 `ai-interview`，现在只能列出引擎和当前选中的那个。
 - `web/apps/candidate`：候选人面试页的核心逻辑（静音检测、逐题状态机、录制分片上传）。
+- `web/packages/api-client`：前端调后端用的客户端，类型由后端的 OpenAPI 文档生成。
 - `migrations/`：数据库表结构。
 - `tts/`：三个引擎的版本锁定、调用方式、实测数据和已知的坑。
 - CI、issue 和 PR 模板、开发流程约定。
@@ -40,6 +41,14 @@ scripts/dev.sh        # 一键启动：起开发数据库、跑迁移、启动�
 - 健康检查：<http://127.0.0.1:8080/healthz>
 - HR 后台：<http://127.0.0.1:8080/admin/>（要先构建前端）
 - 第一次启动会建一个本机用的管理员账号，邮箱和密码打印在终端里。
+
+前端要 Node 22 以上和 pnpm 10：
+
+```bash
+pnpm -C web install   # 装依赖
+pnpm -C web build     # 构建到 web/dist，后端会托管它
+pnpm -C web check     # 前端全量检查：lint、类型检查、测试、构建
+```
 
 想改配置（端口、数据目录、大模型密钥等），把 `.env.example` 复制成 `.env` 再改。
 

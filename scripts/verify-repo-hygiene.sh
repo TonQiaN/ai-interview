@@ -17,7 +17,7 @@ report() {
 # 依赖锁和权重清单里全是哈希，不做内容扫描，也不限大小
 is_lock_or_pin() {
   case "$1" in
-    Cargo.lock | tts/locks/* | tts/artifacts/*) return 0 ;;
+    Cargo.lock | web/pnpm-lock.yaml | tts/locks/* | tts/artifacts/*) return 0 ;;
   esac
   return 1
 }

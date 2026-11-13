@@ -52,6 +52,41 @@ jobs:
         # 需要真模型、真 TTS 的测试标了 #[ignore]，这里不跑
         run: cargo test --workspace
 
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      # 前端的接口类型由后端的 OpenAPI 文档生成，所以这里也要编译后端
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 生成 OpenAPI 文档
+        working-directory: .
+        run: |
+          cargo run --quiet -p interview-server -- openapi > "$RUNNER_TEMP/openapi.json"
+          echo "OPENAPI_JSON=$RUNNER_TEMP/openapi.json" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: lint
+        run: pnpm lint
+      - name: 类型检查
+        run: pnpm typecheck
+      - name: 测试
+        run: pnpm test
+      - name: 构建
+        run: pnpm build
+
   hygiene:
     name: hygiene
     runs-on: ubuntu-latest
@@ -67,7 +102,7 @@ jobs:
   all-checks-passed:
     name: all-checks-passed
     if: always()
-    needs: [rust, hygiene]
+    needs: [rust, web, hygiene]
     runs-on: ubuntu-latest
     steps:
       - name: 上面的 job 都要通过
