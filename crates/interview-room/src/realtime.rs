@@ -781,6 +781,12 @@ impl Speaker<'_> {
                     progress: self.progress,
                 });
             }
+            // 引擎会加新的事件（#123），面试间不认识的先不管，免得它一加这里就编译不过
+            #[allow(
+                unreachable_patterns,
+                reason = "现在三种事件都处理了，这一支是给引擎以后加的事件留的"
+            )]
+            _ => {}
         }
     }
 
