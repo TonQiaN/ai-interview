@@ -1,0 +1,11 @@
+/*
+ * 油画风格设计系统的入口。使用方只需要：
+ *   import "@ai-interview/ui/styles.css";
+ * 只要令牌（不要组件样式）时：import "@ai-interview/ui/tokens.css";
+ */
+@layer oil;
+@import "./fonts.css";
+@import "./tokens.css";
+@import "./base.css";
+@import "./components.css";
+@import "./interview.css";

@@ -1,0 +1,45 @@
+{
+  "name": "@ai-interview/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "description": "油画风格设计系统：设计令牌、质感、组件。HR 后台和候选人面试页共用。",
+  "sideEffects": ["**/*.css"],
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles/index.css",
+    "./tokens.css": "./src/styles/tokens.css",
+    "./fonts.css": "./src/styles/fonts.css",
+    "./assets/*": "./src/assets/*"
+  },
+  "scripts": {
+    "dev": "vite --config gallery/vite.config.ts",
+    "build": "vite build --config gallery/vite.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "paint": "node scripts/paint.mjs"
+  },
+  "dependencies": {
+    "@fontsource/noto-serif-sc": "^5.3.1",
+    "@fontsource/playfair-display": "^5.3.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.72.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "jsdom": "^31.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
+}

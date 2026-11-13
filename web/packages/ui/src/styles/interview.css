@@ -1,0 +1,553 @@
+/*
+ * 候选人面试页用的组件。手机优先：单列、大触控区、留出安全区。
+ * 面试进行中浏览器在编码视频，这里的动效只动 transform 和 opacity（合成层上跑，不触发重排重绘），
+ * 没有滤镜动画、没有 WebGL。prefers-reduced-motion 下全部停掉（见 base.css）。
+ */
+
+@layer oil {
+  /* 页面外壳：窄栏、满屏高 */
+  .oil-stage {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+    padding: calc(var(--oil-space-4) + env(safe-area-inset-top, 0px))
+      calc(var(--oil-space-4) + env(safe-area-inset-right, 0px))
+      calc(var(--oil-space-5) + env(safe-area-inset-bottom, 0px))
+      calc(var(--oil-space-4) + env(safe-area-inset-left, 0px));
+    font-size: var(--oil-text-lg);
+  }
+  .oil-stage__col {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    gap: var(--oil-space-5);
+    width: 100%;
+    max-width: 520px;
+    margin: 0 auto;
+  }
+  .oil-stage__col--wide {
+    max-width: 960px;
+  }
+  .oil-stage__head {
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-3);
+    min-height: var(--oil-touch);
+  }
+  .oil-stage__foot {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--oil-space-3);
+  }
+  /* 面试进行中用深色舞台，候选人的注意力留给面试官和题目 */
+  .oil-stage--night {
+    color: var(--oil-on-night);
+    background-color: var(--oil-night);
+    background-image: linear-gradient(rgb(16 12 9 / 0.55), rgb(16 12 9 / 0.82)), url("../assets/paintings/palette.webp");
+    background-size: cover;
+    background-position: center;
+    background-attachment: scroll;
+  }
+
+  /* 设备检查卡片 */
+  .oil-device {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 4px var(--oil-space-3);
+    align-items: center;
+    padding: var(--oil-space-4);
+    border: 1px solid var(--oil-line);
+    border-radius: var(--oil-radius-lg);
+    background-color: var(--oil-canvas);
+    background-image: url("../assets/texture/weave.webp");
+    background-size: 128px;
+    box-shadow: var(--oil-shadow-1);
+  }
+  .oil-device__icon {
+    grid-row: span 2;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--oil-neutral-soft);
+    color: var(--oil-ink-2);
+  }
+  .oil-device__icon svg {
+    width: 22px;
+    height: 22px;
+  }
+  .oil-device__title {
+    font-weight: 600;
+    line-height: 1.35;
+  }
+  .oil-device__desc {
+    grid-column: 2;
+    font-size: var(--oil-text-md);
+    color: var(--oil-ink-2);
+    line-height: 1.5;
+  }
+  .oil-device__state {
+    grid-row: span 2;
+    display: grid;
+    place-items: center;
+    min-width: 28px;
+  }
+  .oil-device__state svg {
+    width: 24px;
+    height: 24px;
+  }
+  .oil-device__extra {
+    grid-column: 1 / -1;
+    margin-top: var(--oil-space-3);
+  }
+  .oil-device[data-state="checking"] .oil-device__icon {
+    background: var(--oil-info-soft);
+    color: var(--oil-info-ink);
+  }
+  .oil-device[data-state="passed"] {
+    border-color: color-mix(in srgb, var(--oil-success) 45%, var(--oil-line));
+  }
+  .oil-device[data-state="passed"] .oil-device__icon {
+    background: var(--oil-success-soft);
+    color: var(--oil-success-ink);
+  }
+  .oil-device[data-state="passed"] .oil-device__state {
+    color: var(--oil-success);
+  }
+  .oil-device[data-state="failed"] {
+    border-color: color-mix(in srgb, var(--oil-danger) 55%, var(--oil-line));
+  }
+  .oil-device[data-state="failed"] .oil-device__icon {
+    background: var(--oil-danger-soft);
+    color: var(--oil-danger-ink);
+  }
+  .oil-device[data-state="failed"] .oil-device__state {
+    color: var(--oil-danger);
+  }
+
+  /* 同意事项 */
+  .oil-consent {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--oil-line);
+    border-radius: var(--oil-radius-lg);
+    background-color: var(--oil-canvas);
+    background-image: url("../assets/texture/weave.webp");
+    background-size: 128px;
+    box-shadow: var(--oil-shadow-1);
+  }
+  .oil-consent__item + .oil-consent__item {
+    border-top: 1px solid var(--oil-line);
+  }
+  .oil-consent__row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--oil-space-3);
+    padding: var(--oil-space-4);
+  }
+  .oil-consent__row .oil-check {
+    flex: 1 1 0;
+    min-height: var(--oil-touch);
+    align-items: center;
+  }
+  .oil-consent__row .oil-check input {
+    width: 24px;
+    height: 24px;
+    margin: 0;
+  }
+  .oil-consent__more {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--oil-touch);
+    height: var(--oil-touch);
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: var(--oil-ink-3);
+    cursor: pointer;
+  }
+  .oil-consent__more svg {
+    width: 20px;
+    height: 20px;
+    transition: transform var(--oil-fast) var(--oil-ease);
+  }
+  .oil-consent__more[aria-expanded="true"] svg {
+    transform: rotate(180deg);
+  }
+  .oil-consent__detail {
+    padding: 0 var(--oil-space-4) var(--oil-space-4) calc(var(--oil-space-4) + 24px + var(--oil-space-3));
+    font-size: var(--oil-text-md);
+    color: var(--oil-ink-2);
+    line-height: 1.65;
+  }
+
+  /* 面试官形象 */
+  .oil-presence {
+    --_size: min(46vw, 220px);
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: var(--_size);
+    height: var(--_size);
+    /* 外圈和状态标签伸出头像之外，上下留出位置，不压到相邻内容 */
+    margin: calc(var(--_size) * 0.1) auto calc(var(--_size) * 0.12);
+    isolation: isolate;
+  }
+  .oil-presence__portrait {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: var(--oil-gilt);
+    box-shadow:
+      inset 0 0 0 1px rgb(255 240 190 / 0.5),
+      0 10px 30px -10px rgb(0 0 0 / 0.8);
+  }
+  .oil-presence__portrait img {
+    position: absolute;
+    inset: 5px;
+    width: calc(100% - 10px);
+    height: calc(100% - 10px);
+    border-radius: 50%;
+    object-fit: cover;
+    object-position: 50% 28%;
+    box-shadow: inset 0 0 0 1px rgb(40 26 8 / 0.9);
+  }
+  /* 状态用外圈表达：只动 transform 和 opacity */
+  .oil-presence__halo {
+    position: absolute;
+    inset: -7%;
+    z-index: -1;
+    border-radius: 50%;
+    border: 2px solid var(--oil-pigment-naples);
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+  .oil-presence[data-state="speaking"] .oil-presence__halo {
+    animation: oil-speak 1.5s var(--oil-ease) infinite;
+  }
+  .oil-presence[data-state="speaking"] .oil-presence__halo:nth-child(2) {
+    animation-delay: 0.5s;
+  }
+  .oil-presence[data-state="speaking"] .oil-presence__halo:nth-child(3) {
+    animation-delay: 1s;
+  }
+  .oil-presence[data-state="listening"] .oil-presence__halo:first-child {
+    border-color: var(--oil-pigment-cerulean);
+    opacity: 0.85;
+    animation: oil-listen 2.4s ease-in-out infinite alternate;
+  }
+  .oil-presence[data-state="thinking"] .oil-presence__halo:first-child {
+    border-style: dashed;
+    border-color: var(--oil-on-night-2);
+    opacity: 0.7;
+    animation: oil-spin 9s linear infinite;
+  }
+  .oil-presence__label {
+    position: absolute;
+    bottom: -4%;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: var(--oil-radius-pill);
+    background: rgb(20 15 11 / 0.86);
+    border: 1px solid var(--oil-night-line);
+    color: var(--oil-on-night);
+    font-size: var(--oil-text-sm);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .oil-presence__label::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--oil-on-night-2);
+  }
+  .oil-presence[data-state="speaking"] .oil-presence__label::before {
+    background: var(--oil-pigment-naples);
+  }
+  .oil-presence[data-state="listening"] .oil-presence__label::before {
+    background: var(--oil-pigment-cerulean);
+  }
+  @keyframes oil-speak {
+    from {
+      transform: scale(0.94);
+      opacity: 0.9;
+    }
+    to {
+      transform: scale(1.22);
+      opacity: 0;
+    }
+  }
+  @keyframes oil-listen {
+    from {
+      transform: scale(0.98);
+    }
+    to {
+      transform: scale(1.05);
+    }
+  }
+
+  /* 题目字幕卡 */
+  .oil-caption {
+    padding: var(--oil-space-5);
+    border-radius: var(--oil-radius-lg);
+    border: 1px solid var(--oil-night-line);
+    background: rgb(250 245 234 / 0.07);
+    color: var(--oil-on-night);
+  }
+  .oil-caption__meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--oil-space-3);
+    margin-bottom: var(--oil-space-3);
+    font-size: var(--oil-text-sm);
+    color: var(--oil-on-night-2);
+    letter-spacing: 0.06em;
+  }
+  .oil-caption__text {
+    font-family: var(--oil-font-display);
+    font-size: clamp(1.125rem, 4.6vw, 1.5rem);
+    font-weight: 700;
+    line-height: 1.55;
+  }
+  /* 浅色页面上也能用 */
+  .oil-caption--paper {
+    border-color: var(--oil-line);
+    background-color: var(--oil-canvas);
+    background-image: url("../assets/texture/weave.webp");
+    background-size: 128px;
+    color: var(--oil-ink);
+    box-shadow: var(--oil-shadow-1);
+  }
+  .oil-caption--paper .oil-caption__meta {
+    color: var(--oil-ink-3);
+  }
+
+  /* 题号进度：一格一题 */
+  .oil-qprogress {
+    display: flex;
+    gap: 4px;
+  }
+  .oil-qprogress span {
+    flex: 1 1 0;
+    height: 5px;
+    border-radius: 3px;
+    background: rgb(240 231 214 / 0.2);
+  }
+  .oil-qprogress span[data-state="done"] {
+    background: var(--oil-pigment-viridian);
+  }
+  .oil-qprogress span[data-state="current"] {
+    background: var(--oil-pigment-naples);
+  }
+  .oil-qprogress--paper span {
+    background: var(--oil-line-strong);
+  }
+
+  /* 计时和录制指示 */
+  .oil-timer {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--oil-font-mono);
+    font-size: var(--oil-text-md);
+    font-variant-numeric: tabular-nums;
+  }
+  .oil-timer svg {
+    width: 15px;
+    height: 15px;
+    opacity: 0.75;
+  }
+  .oil-rec {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 11px 4px 9px;
+    border-radius: var(--oil-radius-pill);
+    background: rgb(194 69 45 / 0.2);
+    border: 1px solid rgb(226 110 86 / 0.55);
+    color: #ffd9cf;
+    font-size: var(--oil-text-sm);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .oil-rec::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #f0563a;
+    animation: oil-blink 1.6s ease-in-out infinite;
+  }
+  .oil-rec--paper {
+    background: var(--oil-danger-soft);
+    border-color: color-mix(in srgb, var(--oil-danger) 45%, transparent);
+    color: var(--oil-danger-ink);
+  }
+  @keyframes oil-blink {
+    50% {
+      opacity: 0.25;
+    }
+  }
+
+  /* 静音倒计时环：候选人停下来以后，环走完就进下一题 */
+  .oil-silence {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    color: var(--oil-on-night);
+  }
+  .oil-silence svg {
+    transform: rotate(-90deg);
+  }
+  .oil-silence__track {
+    fill: none;
+    stroke: rgb(240 231 214 / 0.18);
+  }
+  .oil-silence__value {
+    fill: none;
+    stroke: var(--oil-pigment-naples);
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.2s linear;
+  }
+  .oil-silence__label {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.1;
+  }
+  .oil-silence__num {
+    font-family: var(--oil-font-display);
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .oil-silence__unit {
+    font-size: 11px;
+    color: var(--oil-on-night-2);
+  }
+
+  /*
+   * 音量条的样式：一排小竖条。逻辑由使用方做，每根条的高度写 --_h（0 到 1），
+   * 或者直接用 canvas 画，颜色从 --oil-meter-on / --oil-meter-off 取。
+   */
+  :root {
+    --oil-meter-on: var(--oil-pigment-viridian);
+    --oil-meter-peak: var(--oil-pigment-vermilion);
+    --oil-meter-off: rgb(120 105 90 / 0.3);
+  }
+  .oil-meter {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 28px;
+  }
+  .oil-meter span {
+    flex: 0 1 auto;
+    width: 5px;
+    min-width: 2px;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--oil-meter-on);
+    transform: scaleY(max(0.12, var(--_h, 0)));
+    transition: transform 80ms linear;
+    will-change: transform;
+  }
+  .oil-meter span[data-off="true"] {
+    background: var(--oil-meter-off);
+  }
+
+  /* 包住 video 的画框里的小角标 */
+  .oil-video {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    background: #120e0a;
+  }
+  .oil-video--portrait {
+    aspect-ratio: 3 / 4;
+  }
+  .oil-video--wide {
+    aspect-ratio: 16 / 9;
+  }
+  .oil-video video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .oil-video--mirror video {
+    transform: scaleX(-1);
+  }
+  .oil-video__placeholder {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: rgb(240 231 214 / 0.6);
+    font-size: var(--oil-text-md);
+    text-align: center;
+    padding: var(--oil-space-4);
+  }
+  .oil-video__corner {
+    position: absolute;
+    z-index: 2;
+    display: flex;
+    gap: var(--oil-space-2);
+  }
+  .oil-video__corner--tl {
+    top: var(--oil-space-2);
+    left: var(--oil-space-2);
+  }
+  .oil-video__corner--tr {
+    top: var(--oil-space-2);
+    right: var(--oil-space-2);
+  }
+  .oil-video__corner--bl {
+    bottom: var(--oil-space-2);
+    left: var(--oil-space-2);
+  }
+
+  /* 整页状态：已过期、已完成、不支持、感谢 */
+  .oil-status {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 auto;
+    gap: var(--oil-space-4);
+    padding: var(--oil-space-8) 0;
+    text-align: center;
+  }
+  .oil-status .oil-frame {
+    width: min(72vw, 300px);
+    margin-bottom: var(--oil-space-3);
+  }
+  .oil-status__title {
+    font-size: var(--oil-title-md);
+  }
+  .oil-status__desc {
+    max-width: 34ch;
+    color: var(--oil-ink-2);
+    line-height: 1.7;
+  }
+  .oil-status__actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--oil-space-3);
+    width: 100%;
+    max-width: 320px;
+    margin-top: var(--oil-space-3);
+  }
+}

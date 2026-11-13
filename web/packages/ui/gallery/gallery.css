@@ -1,0 +1,136 @@
+/* 展示页自己的排版，不属于设计系统 */
+.g-page {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 28px 28px 80px;
+}
+.g-hero .oil-hero__body {
+  padding: 56px 48px;
+}
+.g-section {
+  margin-top: 56px;
+}
+.g-section__head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.g-two {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  align-items: start;
+}
+.g-stats {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+.g-swatches {
+  display: grid;
+  gap: 18px 12px;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+}
+.g-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+  font-size: 13px;
+}
+.g-swatch code {
+  font-size: 11px;
+  color: var(--oil-ink-3);
+}
+.g-swatch__dab {
+  width: 76px;
+  height: 76px;
+  margin-bottom: 6px;
+  -webkit-mask: url("../src/assets/brush/dab.webp") center / 100% 100% no-repeat;
+  mask: url("../src/assets/brush/dab.webp") center / 100% 100% no-repeat;
+}
+.g-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+.g-chipcolor {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 6px;
+  border: 1px solid var(--oil-line);
+  border-radius: 999px;
+  background: var(--oil-canvas);
+  font-size: 13px;
+}
+.g-chipcolor span {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--oil-line-strong);
+}
+.g-paintings {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  align-items: end;
+}
+.g-paintings figure {
+  margin: 0;
+}
+.g-paintings figure:first-child {
+  grid-column: span 2;
+}
+.g-paintings figcaption {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 12px;
+}
+.g-shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  border: 1px solid var(--oil-line);
+  border-radius: var(--oil-radius-lg);
+  overflow: hidden;
+  box-shadow: var(--oil-shadow-2);
+  background: var(--oil-linen);
+}
+.g-phones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+.g-phone {
+  width: 375px;
+  max-width: 100%;
+  border: 1px solid var(--oil-line-strong);
+  border-radius: 28px;
+  overflow: hidden;
+  box-shadow: var(--oil-shadow-3);
+  background-color: var(--oil-linen);
+  background-image: url("../src/assets/texture/weave.webp");
+  background-size: 128px;
+  display: flex;
+}
+.g-phone .oil-stage {
+  flex: 1;
+  min-height: 760px;
+}
+@media (max-width: 720px) {
+  .g-page {
+    padding: 16px 16px 60px;
+  }
+  .g-hero .oil-hero__body {
+    padding: 32px 24px;
+  }
+  .g-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .g-paintings figure:first-child {
+    grid-column: auto;
+  }
+}
