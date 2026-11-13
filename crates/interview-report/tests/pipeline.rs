@@ -9,7 +9,8 @@ use interview_llm::{
     Usage, stream_from_response,
 };
 use interview_report::record::{
-    Candidate, InterviewConfig, InterviewRecord, Job, ProctorEvent, Question, Segment, Speaker,
+    Candidate, InterviewConfig, InterviewRecord, Job, ProctorEvent, Question, RawEvent, Segment,
+    Speaker,
 };
 use interview_report::report::{
     Decision, EvidenceSource, QuoteMatch, ReviewFlagCode, RiskLevel, SignalKind,
@@ -205,7 +206,7 @@ fn sample_record() -> InterviewRecord {
         ],
         events: vec![ProctorEvent {
             id: "e1".to_owned(),
-            at_ms: 119_000,
+            at_ms: Some(119_000),
             kind: "visibility_hidden".to_owned(),
             duration_ms: Some(5000),
             detail: None,
@@ -682,4 +683,50 @@ async fn follow_up_answers_join_their_question_without_being_listed() {
         .await
         .unwrap();
     assert_eq!(report.questions[0].segment_ids, ["s2", "s3", "s4", "s5"]);
+}
+
+#[tokio::test]
+async fn raw_room_events_are_merged_and_shown_to_the_model() {
+    // 面试间上报的原始事件：打开页面（面试开始前，没有时间）、离开和回来各一条
+    let mut record = sample_record();
+    record.events = ProctorEvent::from_raw(vec![
+        RawEvent {
+            id: "e0".to_owned(),
+            kind: "page_opened".to_owned(),
+            at_ms: None,
+            payload: serde_json::json!({"in_app_browser": "wechat"}),
+        },
+        RawEvent {
+            id: "e1".to_owned(),
+            kind: "visibility_hidden".to_owned(),
+            at_ms: Some(119_000),
+            payload: serde_json::json!({}),
+        },
+        RawEvent {
+            id: "e2".to_owned(),
+            kind: "visibility_visible".to_owned(),
+            at_ms: Some(124_000),
+            payload: serde_json::json!({"duration_ms": 5000}),
+        },
+    ]);
+    let model = full_model();
+    let report = analyze(&record, &model, &AnalyzeOptions::default())
+        .await
+        .unwrap();
+
+    let prompt = model.requests()[0].1.messages[1].content.as_text();
+    assert!(prompt.contains(r#"[e0 | 开始前 | page_opened | -] {"in_app_browser":"wechat"}"#));
+    assert!(prompt.contains("[e1 | 01:59 | visibility_hidden | 5.0秒]"));
+    assert!(!prompt.contains("visibility_visible |"));
+
+    // 引用这条事件的证据对到离开的那一段时间
+    let integrity = report.integrity.unwrap();
+    let event = integrity
+        .signals
+        .iter()
+        .flat_map(|signal| &signal.evidence)
+        .find(|evidence| evidence.source == EvidenceSource::Event)
+        .unwrap();
+    assert_eq!(event.start_ms, Some(119_000));
+    assert_eq!(event.end_ms, Some(124_000));
 }

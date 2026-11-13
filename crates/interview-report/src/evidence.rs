@@ -176,8 +176,10 @@ impl<'a> EvidenceIndex<'a> {
             segment_id: None,
             event_id: Some(event.id.clone()),
             quote,
-            start_ms: Some(event.at_ms),
-            end_ms: Some(event.at_ms + event.duration_ms.unwrap_or(0)),
+            start_ms: event.at_ms,
+            end_ms: event
+                .at_ms
+                .map(|at| at.saturating_add(event.duration_ms.unwrap_or(0))),
             speaker: None,
             quote_match: QuoteMatch::Exact,
         })
@@ -396,7 +398,7 @@ mod tests {
             ],
             events: vec![ProctorEvent {
                 id: "e1".to_owned(),
-                at_ms: 6_000,
+                at_ms: Some(6_000),
                 kind: "tab_hidden".to_owned(),
                 duration_ms: Some(2_500),
                 detail: None,

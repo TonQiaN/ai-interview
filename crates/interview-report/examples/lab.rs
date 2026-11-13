@@ -402,7 +402,7 @@ fn build_record(scenario: &Scenario, script: Script) -> InterviewRecord {
         .enumerate()
         .map(|(index, (at_ms, event))| ProctorEvent {
             id: format!("e{}", index + 1),
-            at_ms,
+            at_ms: Some(at_ms),
             kind: event.kind.clone(),
             duration_ms: event.duration_ms,
             detail: event.detail.clone(),
