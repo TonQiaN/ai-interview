@@ -355,9 +355,14 @@ def build_engines(names: list[str], args) -> dict:
             from engine_fake import FakeEngine
 
             engines[name] = FakeEngine(name)
+        elif name == "breeze2":
+            from engine_breeze import BreezeEngine
+
+            engines[name] = BreezeEngine(Path(args.models))
         else:
-            # 三个真引擎的适配（engine_indextts.py、engine_breeze.py）要先在 Mac 上验证，还没合入
-            raise SystemExit("真引擎的适配还没合入，现在只能带 --fake 跑")
+            from engine_indextts import IndexTtsEngine
+
+            engines[name] = IndexTtsEngine(name, Path(args.models), args.memory_limit_gb)
     if not engines:
         raise SystemExit("--engines 至少要给一个引擎")
     return engines
