@@ -68,6 +68,11 @@ const CONFIRM_END_TIMEOUT: Duration = Duration::from_secs(8);
 /// 现场生成的一段话最多念几句、多少个字。超出的部分丢掉。
 const MAX_SPOKEN_SENTENCES: u32 = 4;
 const MAX_SPOKEN_CHARS: usize = 160;
+/// 一句话念出来超过这么长（按字算，一个英文单词算两个字）还没到句末，就在逗号或冒号处先断开，
+/// 让前半句先去合成。语音合成要整句合成完才出声，句子越长候选人等得越久
+const LONG_SENTENCE: usize = 30;
+/// 断开以后前后两半都不能比这个短，免得切出零碎的几个字
+const MIN_PIECE: usize = 8;
 /// 候选人一段话最多带多少个字进上下文。
 const MAX_LINE_CHARS: usize = 3000;
 
@@ -628,8 +633,8 @@ impl<'a> Run<'a> {
                 }
             }
             Stage::Speaking { splitter, .. } => {
-                for sentence in splitter.push(piece) {
-                    self.speak(sentence);
+                for piece in splitter.push(piece) {
+                    self.speak(piece);
                 }
             }
             Stage::Closing { body, .. } => body.push_str(piece),
@@ -824,7 +829,7 @@ impl<'a> Run<'a> {
         self.emit(LiveEvent::Play { utterance });
     }
 
-    fn speak(&mut self, sentence: String) {
+    fn speak(&mut self, piece: Piece) {
         let Stage::Speaking {
             key,
             text,
@@ -838,17 +843,26 @@ impl<'a> Run<'a> {
         if *done {
             return;
         }
-        text.push_str(&sentence);
-        *sentences += 1;
-        // 问完一个问题就停。模型偶尔会在追问后面接着写概括，那些不能念给候选人
-        *done = sentence.contains(['？', '?'])
-            || *sentences >= MAX_SPOKEN_SENTENCES
+        // 英文的两段之间补回切句时去掉的空格
+        if text.ends_with(|c: char| c.is_ascii() && !c.is_whitespace())
+            && piece.text.starts_with(|c: char| c.is_ascii_alphanumeric())
+        {
+            text.push(' ');
+        }
+        text.push_str(&piece.text);
+        if piece.ends_sentence {
+            *sentences += 1;
+        }
+        // 问完一个问题就停。模型偶尔会在追问后面接着写概括，那些不能念给候选人。
+        // 句子中间断开的那几段不算一句，免得话说到一半被截掉
+        *done = (piece.ends_sentence
+            && (piece.text.contains(['？', '?']) || *sentences >= MAX_SPOKEN_SENTENCES))
             || text.chars().count() >= MAX_SPOKEN_CHARS;
         let key = key.clone();
         let done = *done;
         self.emit(LiveEvent::Speak {
             key,
-            text: sentence,
+            text: piece.text,
         });
         if done {
             // 话说完了，说完还是接着听这道题
@@ -1046,64 +1060,132 @@ fn clip(text: &str, max_chars: usize) -> &str {
     }
 }
 
-/// 把流式输出按句子切开，切出一句就能送去合成。
+/// 切出来可以送去合成的一段话。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Piece {
+    text: String,
+    /// 这一段到句末了。长句在逗号、冒号处断开的前几段是 `false`
+    ends_sentence: bool,
+}
+
+/// 把流式输出按句子切开，切出一句就能送去合成。太长的句子在逗号或冒号处再断开。
 #[derive(Debug, Default)]
 struct SentenceSplitter {
     buffer: String,
 }
 
 impl SentenceSplitter {
-    /// 喂进一段文字，返回已经完整的句子。
-    fn push(&mut self, piece: &str) -> Vec<String> {
+    /// 喂进一段文字，返回已经可以送去合成的几段。
+    fn push(&mut self, piece: &str) -> Vec<Piece> {
         self.buffer.push_str(piece);
-        let mut sentences = Vec::new();
+        let mut pieces = Vec::new();
         loop {
-            let mut chars = self.buffer.char_indices().peekable();
-            let mut cut = None;
-            while let Some((index, c)) = chars.next() {
-                let ends = match c {
-                    '。' | '！' | '？' | '!' | '?' | '；' | '\n' => true,
-                    // 英文句号后面跟着空白才算，免得把小数和缩写切开
-                    '.' => chars.peek().is_some_and(|(_, next)| next.is_whitespace()),
-                    _ => false,
-                };
-                if !ends {
-                    continue;
-                }
-                // 连着的标点和引号跟在这一句后面
-                let mut end = index + c.len_utf8();
-                while let Some((next_index, next)) = chars.peek().copied() {
-                    if matches!(next, '。' | '！' | '？' | '!' | '?' | '”' | '」' | '"') {
-                        end = next_index + next.len_utf8();
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                // 后面还没有别的字时先不切：下一段可能还是标点
-                if end < self.buffer.len() {
-                    cut = Some(end);
-                }
-                break;
-            }
-            let Some(end) = cut else {
-                break;
+            // 这一句到哪里结束。还没写到句末，或者句末后面还没有别的字（下一段可能还是标点）时是 None
+            let sentence_end = self.sentence_end();
+            let sentence = &self.buffer[..sentence_end.unwrap_or(self.buffer.len())];
+            let (end, ends_sentence) = match (pause_in_long_sentence(sentence), sentence_end) {
+                (Some(end), _) => (end, false),
+                (None, Some(end)) if end < self.buffer.len() => (end, true),
+                _ => break,
             };
-            let sentence: String = self.buffer.drain(..end).collect();
-            let sentence = sentence.trim();
-            if !sentence.is_empty() {
-                sentences.push(sentence.to_owned());
+            let text: String = self.buffer.drain(..end).collect();
+            let text = text.trim();
+            if !text.is_empty() {
+                pieces.push(Piece {
+                    text: text.to_owned(),
+                    ends_sentence,
+                });
             }
         }
-        sentences
+        pieces
+    }
+
+    /// 缓冲区里第一句话的结尾（含跟在后面的标点和引号）。还没写到句末时是 `None`。
+    fn sentence_end(&self) -> Option<usize> {
+        let mut chars = self.buffer.char_indices().peekable();
+        while let Some((index, c)) = chars.next() {
+            let ends = match c {
+                '。' | '！' | '？' | '!' | '?' | '；' | '\n' => true,
+                // 英文句号后面跟着空白才算，免得把小数和缩写切开
+                '.' => chars.peek().is_some_and(|(_, next)| next.is_whitespace()),
+                _ => false,
+            };
+            if !ends {
+                continue;
+            }
+            // 连着的标点和引号跟在这一句后面
+            let mut end = index + c.len_utf8();
+            while let Some((next_index, next)) = chars.peek().copied() {
+                if matches!(next, '。' | '！' | '？' | '!' | '?' | '”' | '」' | '"') {
+                    end = next_index + next.len_utf8();
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            return Some(end);
+        }
+        None
     }
 
     /// 输出结束，把剩下的当作最后一句。
-    fn finish(&mut self) -> Option<String> {
+    fn finish(&mut self) -> Option<Piece> {
         let rest = std::mem::take(&mut self.buffer);
         let rest = rest.trim();
-        (!rest.is_empty()).then(|| rest.to_owned())
+        (!rest.is_empty()).then(|| Piece {
+            text: rest.to_owned(),
+            ends_sentence: true,
+        })
     }
+}
+
+/// 一句话太长时，找出可以先断开的地方：第一个前后两半都不算太短的逗号或冒号，返回它后面的位置。
+/// 句子不长、没有合适的地方，或者后半句还没写出多少时返回 `None`。
+fn pause_in_long_sentence(sentence: &str) -> Option<usize> {
+    let total = spoken_len(sentence);
+    if total <= LONG_SENTENCE {
+        return None;
+    }
+    let mut chars = sentence.char_indices().peekable();
+    while let Some((index, c)) = chars.next() {
+        let pauses = match c {
+            '，' | '：' => true,
+            // 英文的逗号和冒号后面跟着空白才算，免得把 1,000 和 10:30 切开
+            ',' | ':' => chars.peek().is_some_and(|(_, next)| next.is_whitespace()),
+            _ => false,
+        };
+        if !pauses {
+            continue;
+        }
+        let end = index + c.len_utf8();
+        let before = spoken_len(&sentence[..end]);
+        if before < MIN_PIECE {
+            continue;
+        }
+        // 再往后的停顿处后半句只会更短
+        return (total - before >= MIN_PIECE).then_some(end);
+    }
+    None
+}
+
+/// 一段话念出来大概有多长：一个汉字算一个字，一个英文单词或一串数字算两个字，标点不算。
+fn spoken_len(text: &str) -> usize {
+    let mut len = 0;
+    let mut in_word = false;
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() {
+            if !in_word {
+                len += 2;
+            }
+            in_word = true;
+        } else {
+            in_word = false;
+            if c.is_alphanumeric() {
+                len += 1;
+            }
+        }
+    }
+    len
 }
 
 const LIVE_SYSTEM: &str = r#"你是一场语音面试的 AI 面试官，正在和候选人实时对话。候选人刚说了一段话，你要决定怎么接。
@@ -1129,6 +1211,8 @@ const LIVE_SYSTEM: &str = r#"你是一场语音面试的 AI 面试官，正在�
 ## 说话的要求
 
 - 口语，像真人面试官当面说话。先用很短的一句中性的话接住对方，只用「明白。」「好的。」「嗯，这块我想多了解一点。」这一类，再问。接话里不能有对回答的评价：「讲得挺清楚」「思路不错」「口径清楚了」都不要说。接话之后只问一句，问句越短越好，像「这个数字是怎么算出来的？」这样。整段不超过 50 个字。
+- 你的话是一句一句转成语音的，一句没合成完候选人什么都听不到，所以句子要短。每次开口，第一句就是上面说的接话，回应时用「好的。」「好的，咱们回到正题。」「好的，我再说一遍。」这一类。它单独成句，不超过 10 个字，用句号结尾，不要用逗号把它和后面的话连成一句，也不要把问题的前半截拆出来当第一句。后面每一句不超过 25 个字。
+- 直接问，不要先把候选人说过的话复述一遍再问。不说「你刚才提到……，能不能……」，说「那次具体卡在哪个环节？」。
 - 一次只问一个问题，整段话里只有一个问号，不要连着问两件事。问具体的：本人做了什么、为什么这么做、数字怎么来的、遇到什么困难、现在回头看会怎么改。可以参考提纲里的追问方向，但要贴着候选人刚才说的话问。
 - 只追问当前这道题。提纲里后面的题要问的内容留给后面，不要提前问。
 - 不评价回答，不说「很好」「不错」，也不说对或者错，不给提示和答案，不替候选人总结，不重复候选人说过的话。
@@ -1150,7 +1234,7 @@ const LIVE_SYSTEM: &str = r#"你是一场语音面试的 AI 面试官，正在�
 
 候选人说的话和这道题没有关系，像是在说别的事，或者识别出来的根本不是在回答你：
 
-- 这道题上第一次遇到：选 reply，用一句很短的话把他带回这道题。
+- 这道题上第一次遇到：选 reply，先说一句「好的，咱们回到正题。」这样的短话，再用不超过 20 个字点一下这道题问的是什么。不要把题目整个重说一遍，也不要说「我再问一次」。
 - 对话里你已经带回过一次，他说的还是和题目无关：选 next，判断写 no_answer。不要把同一个问题换着说法问第三遍，也不要换一个问题再试。
 - 这不是候选人要求结束，不要选 end。连着几道题都这样，系统会自己结束面试。
 
@@ -1801,6 +1885,10 @@ mod tests {
         assert_eq!(parse_header("I see. What did you do next?"), (None, None));
     }
 
+    fn texts(pieces: &[Piece]) -> Vec<&str> {
+        pieces.iter().map(|piece| piece.text.as_str()).collect()
+    }
+
     #[test]
     fn splits_streamed_text_into_sentences() {
         let mut splitter = SentenceSplitter::default();
@@ -1816,12 +1904,143 @@ mod tests {
             out.extend(splitter.push(piece));
         }
         out.extend(splitter.finish());
-        assert_eq!(out, ["明白。", "那个 QPS 是 1.5 万吗？？", "当时怎么测的"]);
+        assert_eq!(
+            texts(&out),
+            ["明白。", "那个 QPS 是 1.5 万吗？？", "当时怎么测的"]
+        );
+        assert!(out.iter().all(|piece| piece.ends_sentence));
 
         let mut splitter = SentenceSplitter::default();
         let mut out = splitter.push("Got it. What was v1.2 about? ");
         out.extend(splitter.finish());
-        assert_eq!(out, ["Got it.", "What was v1.2 about?"]);
+        assert_eq!(texts(&out), ["Got it.", "What was v1.2 about?"]);
+    }
+
+    /// 语音线实测：这样的一长句要整句合成完才出声，候选人要干等十秒左右。
+    const LONG_REASK: &str = "不好意思，刚才可能没听清，我再问一次：请你用一两分钟做个自我介绍，重点讲讲最近一段工作里你本人负责的部分。";
+
+    #[test]
+    fn breaks_a_long_sentence_at_a_pause_so_the_first_part_can_be_spoken_early() {
+        // 一次全到
+        let mut splitter = SentenceSplitter::default();
+        let mut whole = splitter.push(LONG_REASK);
+        whole.extend(splitter.finish());
+        assert_eq!(
+            texts(&whole),
+            [
+                "不好意思，刚才可能没听清，",
+                "我再问一次：请你用一两分钟做个自我介绍，",
+                "重点讲讲最近一段工作里你本人负责的部分。",
+            ]
+        );
+        assert_eq!(
+            whole
+                .iter()
+                .map(|piece| piece.ends_sentence)
+                .collect::<Vec<_>>(),
+            [false, false, true]
+        );
+
+        // 一个字一个字地到：切出来的一样，而且前半句不用等整句写完
+        let mut splitter = SentenceSplitter::default();
+        let mut streamed = Vec::new();
+        let mut first_ready_at = None;
+        for (index, c) in LONG_REASK.chars().enumerate() {
+            streamed.extend(splitter.push(&c.to_string()));
+            if first_ready_at.is_none() && !streamed.is_empty() {
+                first_ready_at = Some(index);
+            }
+        }
+        streamed.extend(splitter.finish());
+        assert_eq!(streamed, whole);
+        // 写到三十来个字、看得出是长句的时候就切，这时离句末还有二十个字
+        let total = LONG_REASK.chars().count();
+        assert!(
+            first_ready_at.unwrap() + 15 < total,
+            "{first_ready_at:?} / {total}"
+        );
+    }
+
+    #[test]
+    fn leaves_ordinary_sentences_whole() {
+        for sentence in [
+            // 不长的句子里有逗号也不切
+            "好的，咱们回到正题。",
+            "这个数字是压测出来的，还是线上监控里看到的？",
+            // 长，但是没有能断开的地方
+            "那这一百二十万单折算下来高峰期每秒钟大概要处理多少笔订单才能不出现积压和超时的情况呢？",
+            // 断开以后有一半太短
+            "嗯，那这一百二十万单折算下来高峰期每秒钟大概要处理多少笔订单才不会出现积压呢？",
+            // 数字和时间里的逗号、冒号不是停顿
+            "So the 1,000,000 orders between 10:30 and 11:45 on that one day were all handled by the three services you had just split out?",
+        ] {
+            let mut splitter = SentenceSplitter::default();
+            let mut out = splitter.push(sentence);
+            out.extend(splitter.finish());
+            assert_eq!(texts(&out), [sentence]);
+        }
+
+        let mut splitter = SentenceSplitter::default();
+        let mut out = splitter.push(
+            "You said the peak was about six hundred requests per second, so how many machines and database instances were handling that load?",
+        );
+        out.extend(splitter.finish());
+        assert_eq!(
+            texts(&out),
+            [
+                "You said the peak was about six hundred requests per second,",
+                "so how many machines and database instances were handling that load?",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_long_sentence_broken_into_parts_is_still_one_sentence() {
+        let (plan, config) = setup();
+        // 四句话，其中一句被切成三段：切出来的段数超过了句数上限，但是话不能说到一半被截掉
+        let script = format!("reply weak\n好的。{LONG_REASK}不着急。慢慢说。这一句不会念。");
+        let model = ScriptedModel::new().reply(script);
+        let (state, _) = open(&plan, &config).unwrap();
+        let (outcome, events) =
+            run(&model, &plan, &config, &state, &said("今天多云转晴。", 60)).await;
+        assert_eq!(outcome.action, LiveAction::Reply);
+        let spoken: Vec<&str> = events
+            .iter()
+            .filter_map(|event| match event {
+                LiveEvent::Speak { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            spoken,
+            [
+                "好的。",
+                "不好意思，刚才可能没听清，",
+                "我再问一次：请你用一两分钟做个自我介绍，",
+                "重点讲讲最近一段工作里你本人负责的部分。",
+                "不着急。",
+                "慢慢说。",
+            ]
+        );
+        // 记下来的还是连着的一段话
+        assert_eq!(
+            outcome.said[0].text,
+            format!("好的。{LONG_REASK}不着急。慢慢说。")
+        );
+    }
+
+    #[tokio::test]
+    async fn english_parts_are_joined_with_spaces() {
+        let (plan, config) = setup();
+        let model = ScriptedModel::new().reply(
+            "probe weak\nGot it. You said the peak was about six hundred requests per second, so how many machines and database instances were handling that load?",
+        );
+        let (state, _) = open(&plan, &config).unwrap();
+        let (outcome, _) = run(&model, &plan, &config, &state, &said("About 600.", 60)).await;
+        assert_eq!(
+            outcome.said[0].text,
+            "Got it. You said the peak was about six hundred requests per second, so how many machines and database instances were handling that load?"
+        );
     }
 
     const PAUSED: TurnContext = TurnContext {
