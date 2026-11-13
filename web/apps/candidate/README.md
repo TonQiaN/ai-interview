@@ -27,6 +27,25 @@ pnpm e2e              # 浏览器端到端测试，自己起后端和开发服�
 
 后端由 `e2e/backend.sh` 起：用开发数据库实例上单独的一个库 `ai_interview_e2e`（每次清空重建），数据放在临时目录，不碰平时开发用的库。需要本机有 Rust 工具链、PostgreSQL 和 Playwright 的 Chromium（`pnpm exec playwright install chromium`）；第一次跑要先编译后端。不调大模型，不花钱。
 
+### 用真的语音识别和真的大模型跑
+
+平时语音识别是假后端、大模型不调。想看真的效果（候选人说的话有没有被听对、模型会不会追问、等多久）：
+
+```bash
+eval "$(crates/interview-stt/scripts/fetch-sherpa-lib.sh --extract)"   # 只有云端容器需要
+crates/interview-stt/scripts/download-models.sh
+export AI_INTERVIEW_STT_MODEL_DIR=~/.cache/ai-interview/stt-models
+E2E_REAL=1 E2E_SPEECH_WAV=<一段有人说话的 WAV> pnpm e2e
+```
+
+这时只跑 `e2e/real.spec.ts`：假麦克风循环放那段 WAV（后面自动补 7 秒安静），后端带着 `sherpa` 特性编译，读环境里的 `DEEPSEEK_API_KEY`。一场三道题的面试模型费用在几分钱以内，CI 不跑。跑完会打印每一句的起止时间、回答有没有文字、候选人答完多久面试官开口。录音自己准备，不放进仓库：识别模型的包里有几段示例（`test_wavs/`），想让回答切题可以用任何本地的语音合成工具现做一段。
+
+2026-11-13 在云端容器里实测（Chromium 录的声音，X-ASR 识别，deepseek-flash 判断）：
+
+- 第一题只讲「我们团队做了什么」，模型判为偏弱并追问「你自己做了什么」；接着讲了本人负责的部分和具体数字，模型判为好，进入下一题。答非所问的回答被判为差，连着三题都这样时面试提前结束。
+- 候选人停下来满静音时长后，过渡语马上开始播（0.3 秒以内）；过渡语播完到下一句开口是 0.1 到 1 秒。转写加模型判断一共一两秒，大部分藏在过渡语后面。
+- 识别出来的文字有个别同音字错误，没有影响模型的判断。
+
 ## 目录
 
 - `src/lib/`：不依赖页面的逻辑，都有单元测试。`vad`（静音检测）、`turn`（一道题的状态机）、`interview`（逐题编排）、`recording` 和 `upload`（分片录制、断点续传）、`media`（采集、混音）、`events`（过程事件）、`api`（面试间接口，用 `@ai-interview/api-client` 生成的类型）、`flow`（链接和浏览器能力）。

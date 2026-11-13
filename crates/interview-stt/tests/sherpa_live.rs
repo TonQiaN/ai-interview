@@ -11,12 +11,13 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use interview_audio::{Audio, Ffmpeg, decode_wav, encode_wav};
 use interview_stt::{
-    ASR_MODEL_DIR_NAME, MODEL_DIR_ENV_VAR, RecordingTranscript, SherpaConfig, SherpaTranscriber,
-    SttError, TranscribeOptions, Transcriber, Transcript,
+    ASR_MODEL_DIR_NAME, BargeInConfig, BargeInDetector, BargeInEvent, MODEL_DIR_ENV_VAR,
+    RecordingTranscript, SherpaConfig, SherpaTranscriber, SttError, TranscribeOptions, Transcriber,
+    Transcript, TurnConfig, TurnEnd, TurnEvent, TurnListener,
 };
 
 fn model_dir() -> PathBuf {
@@ -265,6 +266,272 @@ async fn a_recording_uploaded_in_chunks_is_transcribed_answer_by_answer() {
     let whole = recording.finish().await.unwrap();
     assert_well_formed(&whole);
     assert!(whole.audio_duration_ms.abs_diff(audio.duration_ms()) <= 100);
+}
+
+/// 实时对话的一轮：说一段、停 1.2 秒、接着说一段、说完。返回音频和整段转写的结果。
+async fn a_turn_with_a_pause(stt: &SherpaTranscriber) -> (Audio, Transcript) {
+    let clips = sample_wavs();
+    let mut audio = Audio::silence(16_000, 500).unwrap();
+    audio.append(&clips[0]).unwrap();
+    audio
+        .append(&Audio::silence(16_000, 1_200).unwrap())
+        .unwrap();
+    audio.append(&clips[clips.len() - 1]).unwrap();
+    audio
+        .append(&Audio::silence(16_000, 4_500).unwrap())
+        .unwrap();
+    let whole = stt
+        .transcribe(&audio, &TranscribeOptions::default())
+        .await
+        .unwrap();
+    (audio, whole)
+}
+
+/// 一轮跑下来看到的东西。时间是事件发出时已经喂了多少毫秒的音频。
+struct TurnRun {
+    events: Vec<(u64, TurnEvent)>,
+    /// 处理一帧（20 毫秒音频）最慢用了多久。
+    slowest_push: Duration,
+    took: Duration,
+}
+
+impl TurnRun {
+    fn ended(&self) -> (u64, TurnEnd, &Transcript) {
+        match self.events.last() {
+            Some((
+                at_ms,
+                TurnEvent::Ended {
+                    reason, transcript, ..
+                },
+            )) => (*at_ms, *reason, transcript),
+            other => panic!("最后一个事件不是结束：{other:?}"),
+        }
+    }
+
+    fn judges(&self) -> Vec<u64> {
+        self.events
+            .iter()
+            .filter(|(_, event)| matches!(event, TurnEvent::JudgeWanted { .. }))
+            .map(|(at_ms, _)| *at_ms)
+            .collect()
+    }
+}
+
+/// 像浏览器那样 20 毫秒一帧地喂。`answer` 是对「说完没有」的回答，`None` 表示不回答。
+async fn run_turn(
+    stt: &SherpaTranscriber,
+    audio: &Audio,
+    config: TurnConfig,
+    answer: Option<bool>,
+) -> TurnRun {
+    let mut listener = TurnListener::start(stt, &TranscribeOptions::default(), config)
+        .await
+        .unwrap();
+    let mut run = TurnRun {
+        events: Vec::new(),
+        slowest_push: Duration::ZERO,
+        took: Duration::ZERO,
+    };
+    let started = Instant::now();
+    let mut at_ms = 0;
+    while at_ms < audio.duration_ms() && listener.ended().is_none() {
+        let frame = audio.slice_ms(at_ms, at_ms + 20);
+        at_ms += 20;
+        let before = Instant::now();
+        let events = listener.push(&frame).await.unwrap();
+        run.slowest_push = run.slowest_push.max(before.elapsed());
+        for event in events {
+            if let (TurnEvent::JudgeWanted { revision, .. }, Some(complete)) = (&event, answer) {
+                listener.verdict(*revision, complete);
+            }
+            run.events.push((at_ms, event));
+        }
+    }
+    run.took = started.elapsed();
+    run
+}
+
+#[tokio::test]
+#[ignore = "需要真模型"]
+async fn a_live_turn_gives_captions_then_settled_text_and_knows_when_it_ends() {
+    let stt = load().await;
+    let (audio, whole) = a_turn_with_a_pause(&stt).await;
+    let speech_end_ms = whole.speech_end_ms().unwrap();
+    let run = run_turn(&stt, &audio, TurnConfig::default(), None).await;
+
+    // 先开口，字幕一版一版出来，然后这一段才定下来
+    assert!(
+        matches!(run.events[0].1, TurnEvent::SpeechStarted { .. }),
+        "第一个事件不是开口"
+    );
+    let first_segment = run
+        .events
+        .iter()
+        .position(|(_, event)| matches!(event, TurnEvent::Segment(_)))
+        .expect("没有定下来的段");
+    let captions: Vec<&str> = run.events[..first_segment]
+        .iter()
+        .filter_map(|(_, event)| match event {
+            TurnEvent::Partial { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        captions.len() >= 3,
+        "第一段定下来之前只有 {} 版字幕",
+        captions.len()
+    );
+    let TurnEvent::Segment(first) = &run.events[first_segment].1 else {
+        unreachable!()
+    };
+    // 最后一版字幕和定下来的文字基本一样
+    let last_caption = letters(captions[captions.len() - 1]);
+    assert!(
+        overlap(&last_caption, &letters(&first.text)) >= 0.8,
+        "{} 个字的字幕和 {} 个字的定稿差得太多",
+        last_caption.len(),
+        first.text.chars().count()
+    );
+
+    // 每停顿一次问一次「说完没有」（示例录音自己句子之间也有停顿），没人回答就接着听
+    let judges = run.judges();
+    assert!(judges.len() >= 2, "{judges:?}");
+    let spoke = run
+        .events
+        .iter()
+        .filter(|(_, event)| matches!(event, TurnEvent::SpeechStarted { .. }))
+        .count();
+    assert_eq!(spoke, judges.len());
+
+    // 话音落下的时刻报得准，结束在安静满 3 秒的时候
+    let paused_ms = run
+        .events
+        .iter()
+        .rev()
+        .find_map(|(_, event)| match event {
+            TurnEvent::SpeechPaused { at_ms } => Some(*at_ms),
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        paused_ms.abs_diff(speech_end_ms) <= 400,
+        "{paused_ms} {speech_end_ms}"
+    );
+    let (ended_ms, reason, transcript) = run.ended();
+    assert_eq!(reason, TurnEnd::Silence);
+    assert!(
+        ended_ms.abs_diff(speech_end_ms + 3_000) <= 500,
+        "{ended_ms} {speech_end_ms}"
+    );
+    assert_well_formed(transcript);
+    assert_eq!(letters(&transcript.text()), letters(&whole.text()));
+
+    println!(
+        "{} 秒的音频，处理用了 {:.2} 秒，最慢的一帧 {} 毫秒；话音在第 {speech_end_ms} 毫秒落下，\
+         第 {} 毫秒发出「说完没有」，第 {ended_ms} 毫秒结束",
+        audio.duration_ms() / 1_000,
+        run.took.as_secs_f32(),
+        run.slowest_push.as_millis(),
+        judges[judges.len() - 1],
+    );
+}
+
+#[tokio::test]
+#[ignore = "需要真模型"]
+async fn a_complete_answer_ends_the_turn_early_and_a_shorter_pause_notices_sooner() {
+    let stt = load().await;
+    let (audio, whole) = a_turn_with_a_pause(&stt).await;
+    let speech_end_ms = whole.speech_end_ms().unwrap();
+
+    // 每次问都答「说完了」：第一次停顿（1.2 秒）安静满 0.8 秒就结束，后半段没有听
+    let run = run_turn(&stt, &audio, TurnConfig::default(), Some(true)).await;
+    let (ended_ms, reason, transcript) = run.ended();
+    assert_eq!(reason, TurnEnd::Complete);
+    assert!(ended_ms < speech_end_ms, "{ended_ms} {speech_end_ms}");
+    assert!(!transcript.is_empty());
+    let asked_ms = run.judges()[0];
+
+    // 把「停顿多久算一小段说完」从 600 毫秒调到 300 毫秒：更早发现停顿，更早结束
+    let quick = TurnConfig {
+        min_silence_ms: Some(300),
+        judge_after_ms: 300,
+        confirmed_end_silence_ms: Some(500),
+        ..TurnConfig::default()
+    };
+    let run = run_turn(&stt, &audio, quick, Some(true)).await;
+    let (quick_ended_ms, reason, _) = run.ended();
+    assert_eq!(reason, TurnEnd::Complete);
+    let quick_asked_ms = run.judges()[0];
+    assert!(
+        quick_asked_ms + 200 <= asked_ms,
+        "{quick_asked_ms} {asked_ms}"
+    );
+    assert!(quick_ended_ms < ended_ms, "{quick_ended_ms} {ended_ms}");
+    println!(
+        "发出「说完没有」：停顿 600 毫秒时在第 {asked_ms} 毫秒，停顿 300 毫秒时在第 {quick_asked_ms} 毫秒；\
+         结束：第 {ended_ms} 毫秒和第 {quick_ended_ms} 毫秒"
+    );
+}
+
+#[tokio::test]
+#[ignore = "需要真模型"]
+async fn speaking_over_the_interviewer_is_noticed_within_a_second_and_a_half() {
+    let stt = load().await;
+    let clips = sample_wavs();
+    let mut audio = Audio::silence(16_000, 2_000).unwrap();
+    audio.append(&clips[0]).unwrap();
+    let whole = stt
+        .transcribe(&audio, &TranscribeOptions::default())
+        .await
+        .unwrap();
+    let first_word_ms = whole.speech_start_ms().unwrap();
+
+    let mut detector = BargeInDetector::start(
+        &stt,
+        &TranscribeOptions::default(),
+        BargeInConfig::default(),
+    )
+    .await
+    .unwrap();
+    detector.interviewer_says("请你介绍一下最近做的项目里最有挑战的一个。");
+    let mut noticed = None;
+    let mut at_ms = 0;
+    while at_ms < audio.duration_ms() && noticed.is_none() {
+        let events = detector
+            .push(&audio.slice_ms(at_ms, at_ms + 20))
+            .await
+            .unwrap();
+        at_ms += 20;
+        noticed = events.into_iter().find_map(|event| match event {
+            BargeInEvent::Detected {
+                at_ms: spoke_ms,
+                text,
+            } => Some((spoke_ms, text)),
+            BargeInEvent::Ignored { .. } => None,
+        });
+    }
+    let (spoke_ms, text) = noticed.expect("没有发现打断");
+    assert!(
+        spoke_ms.abs_diff(first_word_ms) <= 500,
+        "{spoke_ms} {first_word_ms}"
+    );
+    assert!(letters(&text).len() >= 2);
+    assert!(at_ms <= first_word_ms + 1_500, "{at_ms} {first_word_ms}");
+    println!(
+        "候选人在第 {first_word_ms} 毫秒开口，第 {at_ms} 毫秒发现打断（晚 {} 毫秒）",
+        at_ms.saturating_sub(first_word_ms)
+    );
+
+    // 接着听完这一轮，打断时说的字都在
+    let mut listener = detector.into_turn(TurnConfig::silence_only(2_000));
+    let mut rest = audio.slice_ms(at_ms, audio.duration_ms());
+    rest.append(&Audio::silence(16_000, 3_000).unwrap())
+        .unwrap();
+    let events = listener.push(&rest).await.unwrap();
+    let Some(TurnEvent::Ended { transcript, .. }) = events.last() else {
+        panic!("这一轮没有结束")
+    };
+    assert_eq!(letters(&transcript.text()), letters(&whole.text()));
 }
 
 // 这一条不需要模型，带 sherpa 特性的 CI 会跑

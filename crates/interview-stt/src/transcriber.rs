@@ -12,6 +12,17 @@ pub struct TranscribeOptions {
     pub hotwords: Vec<String>,
 }
 
+/// 实时对话用的会话选项，给 [`Transcriber::start_streaming_session`]。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StreamingOptions {
+    /// 要不要中间结果：一句话还没说完时，先给出到现在听起来是什么（[`TranscribeSession::partial`]）。
+    /// 中间结果要反复识别还没说完的那一段，比较费 CPU，所以默认不开。
+    pub partials: bool,
+    /// 停顿多久算一段话说完。不填用后端的默认值（600 毫秒）。
+    /// 调小了一段话定下来得更快，但说话人换气的停顿也会把一句话切开。
+    pub min_silence_ms: Option<u64>,
+}
+
 /// 转写失败的原因。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SttError {
@@ -71,6 +82,16 @@ pub trait Transcriber: Send + Sync {
         options: &TranscribeOptions,
     ) -> Result<Box<dyn TranscribeSession>, SttError>;
 
+    /// 开一个实时对话用的会话：可以要中间结果，可以调停顿多久算一段话说完。
+    /// 后端不支持的选项会被忽略，默认实现和 [`Transcriber::start_session`] 一样。
+    async fn start_streaming_session(
+        &self,
+        options: &TranscribeOptions,
+        _streaming: &StreamingOptions,
+    ) -> Result<Box<dyn TranscribeSession>, SttError> {
+        self.start_session(options).await
+    }
+
     /// 整段转写。返回的时间相对这段音频的开头。
     async fn transcribe(
         &self,
@@ -100,6 +121,13 @@ pub trait TranscribeSession: Send {
 
     /// 到现在已经定下来的文字。还没说完的那一小段不在里面。
     fn transcript(&self) -> Transcript;
+
+    /// 还没定下来的那一小段，到现在听起来是什么。只给实时字幕和判断「说完了没有」用：
+    /// 它会随着后面的音频变，没有时间戳，定下来以后以 [`push`](Self::push) 返回的段为准。
+    /// 会话没开中间结果（[`StreamingOptions::partials`]）、后端不支持、或者现在没人说话时是 `None`。
+    fn partial(&self) -> Option<String> {
+        None
+    }
 
     /// 音频到此为止：把剩下的转完，返回整段的结果（包含之前 `push` 返回过的所有段）。
     async fn finish(self: Box<Self>) -> Result<Transcript, SttError>;

@@ -10,6 +10,7 @@
 //! 报告的设计依据、各部分的可靠性说明、实测结果见这个 crate 的 `README.md`。
 
 mod evidence;
+pub mod frames;
 mod pipeline;
 mod prompts;
 pub mod record;

@@ -375,6 +375,8 @@ pub enum SignalKind {
     PageEvent,
     /// 有第三个人在场或提示的迹象。
     ThirdParty,
+    /// 录像画面里看到的情况：候选人不在画面里、画面被遮住、看得到手机。画面里多出人归 `third_party`。
+    VideoFrame,
     /// 面试的人可能不是简历上的人。
     Identity,
     /// 试图对 AI 下指令来影响评价。

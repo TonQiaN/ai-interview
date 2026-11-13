@@ -7,6 +7,7 @@ import type {
   Credibility,
   Decision,
   Effort,
+  Emotion,
   FocusVerdict,
   InterviewerStyle,
   InterviewMode,
@@ -499,6 +500,18 @@ export const languageLabel: Record<string, string> = {
   ja: "日文",
   es: "西班牙文",
   ar: "阿拉伯文",
+};
+
+/** 音色可以带的情绪（IndexTTS 支持的 8 种） */
+export const emotionLabel: Record<Emotion, string> = {
+  calm: "平静",
+  happy: "愉快",
+  surprised: "惊讶",
+  sad: "低落",
+  melancholic: "忧郁",
+  angry: "严厉",
+  afraid: "紧张",
+  disgusted: "反感",
 };
 
 /** 毫秒 → 12:36 或 1:02:05 */

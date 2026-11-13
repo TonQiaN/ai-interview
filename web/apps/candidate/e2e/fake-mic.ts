@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 /** 假麦克风一个循环多长（毫秒）。 */
@@ -42,5 +43,33 @@ export function writeFakeMic(path: string): string {
   header.write("data", 36);
   header.writeUInt32LE(pcm.length, 40);
   writeFileSync(path, Buffer.concat([header, pcm]));
+  return path;
+}
+
+/**
+ * 用一段真的有人说话的 WAV 做假麦克风：说完之后接一段安静，浏览器循环播放。
+ * 只在用真的语音识别模型跑的时候用（E2E_REAL=1），这段录音由跑测试的人指定，不放在仓库里。
+ * 要装 ffmpeg。
+ */
+export function writeSpeechMic(path: string, speechWav: string, silenceSec = 7): string {
+  execFileSync(
+    "ffmpeg",
+    [
+      "-v",
+      "error",
+      "-y",
+      "-i",
+      speechWav,
+      // 统一成 48 kHz 单声道，后面补一段安静，让静音检测能判断「答完了」
+      "-af",
+      `aresample=48000,apad=pad_dur=${silenceSec}`,
+      "-ac",
+      "1",
+      "-c:a",
+      "pcm_s16le",
+      path,
+    ],
+    { stdio: ["ignore", "ignore", "inherit"] },
+  );
   return path;
 }

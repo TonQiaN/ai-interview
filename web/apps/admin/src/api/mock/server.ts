@@ -13,6 +13,7 @@ import type {
   CandidateInput,
   CandidateListItem,
   CreatedInvite,
+  CreateVoice,
   Decision,
   DuplicateHint,
   Interview,
@@ -27,6 +28,7 @@ import type {
   Position,
   PositionDraft,
   PositionInput,
+  PreviewRequest,
   RaasCandidateImportItem,
   RaasPositionImportItem,
   ReportEnvelope,
@@ -34,15 +36,16 @@ import type {
   ResumeDetail,
   SystemStatus,
   TemplateInput,
+  UpdateVoice,
   Utterance,
   Voice,
-  VoiceInput,
 } from "../types";
 import { planUtterances, samplePlan, sampleReport } from "./samples";
 import {
   buildSeed,
   configDefaults,
   defaultConfig,
+  defaultVoiceSettings,
   emptyExtra,
   emptyProfile,
   engines,
@@ -56,6 +59,7 @@ import {
   type Seed,
   type SeedProfile,
   sampleForPosition,
+  voiceNotReadyReason,
 } from "./seed";
 
 /** 新上传的简历「读」出来的内容。假后端不看文件，每份都是这一套 */
@@ -95,6 +99,41 @@ class HttpError extends Error {
     super(message);
   }
 }
+
+/** 一段很轻的提示音（16 位单声道 WAV），代替演示数据里没有的真人声 */
+function testTone(ms: number): Uint8Array<ArrayBuffer> {
+  const rate = 16_000;
+  const n = Math.floor((rate * ms) / 1000);
+  const bytes = new Uint8Array(44 + n * 2);
+  const view = new DataView(bytes.buffer);
+  const ascii = (at: number, text: string) => {
+    for (let i = 0; i < text.length; i += 1) view.setUint8(at + i, text.charCodeAt(i));
+  };
+  ascii(0, "RIFF");
+  view.setUint32(4, 36 + n * 2, true);
+  ascii(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  ascii(36, "data");
+  view.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i += 1) {
+    const t = i / rate;
+    // 每 0.6 秒一个音，淡入淡出，不刺耳
+    const beat = (t % 0.6) / 0.6;
+    const envelope = Math.sin(Math.PI * beat) ** 2;
+    const pitch = Math.floor(t / 0.6) % 2 === 0 ? 440 : 554;
+    view.setInt16(44 + i * 2, Math.sin(2 * Math.PI * pitch * t) * envelope * 0.18 * 32767, true);
+  }
+  return bytes;
+}
+
+const wavResponse = (wav: Uint8Array<ArrayBuffer>, headers: Record<string, string>) =>
+  new Response(wav, { status: 200, headers: { "content-type": "audio/wav", ...headers } });
 
 const notFound = (what: string) => new HttpError(404, "not_found", `${what}不存在`);
 const conflict = (message: string) => new HttpError(409, "conflict", message);
@@ -840,51 +879,139 @@ export function createMockServer(options: MockOptions = {}) {
   });
 
   // ───────── 语音 ─────────
-  on("GET", "/speech/engines", () => ({ items: engines }));
-  on("GET", "/speech/voices", () => ({ items: [...db.voices].sort(byNewest) }));
-  on("POST", "/speech/voices", ({ body }) => {
-    const input = body as VoiceInput;
-    if (!input.name?.trim())
+  on("GET", "/speech/engines", () => ({ items: engines, backend: "fake", simulated: true }));
+  on("GET", "/speech/voices", ({ query }) => {
+    const q = (query.get("q") ?? "").trim().toLowerCase();
+    return paginate(
+      db.voices.filter((v) => !q || v.name.toLowerCase().includes(q)).sort(byNewest),
+      query,
+    );
+  });
+
+  /** 按现在的内容重新算能不能用 */
+  function refreshVoice(v: Voice): Voice {
+    v.not_ready_reason = voiceNotReadyReason(v);
+    v.ready = v.not_ready_reason === null;
+    return v;
+  }
+  function checkVoice(v: Pick<Voice, "name" | "engine" | "kind">) {
+    if (!v.name.trim())
       throw new HttpError(422, "validation_failed", "音色名称不能为空", { name: "不能为空" });
-    const v: Voice = {
-      ...input,
+    if (v.kind === "designed" && !engines.find((e) => e.id === v.engine)?.supports_voice_design)
+      throw new HttpError(422, "validation_failed", "只有 BreezeTTS2 能用文字描述设计音色", {
+        engine: "只有 BreezeTTS2 能用文字描述设计音色",
+      });
+  }
+  const voiceNotReady = (reason: string) =>
+    new HttpError(422, "voice_not_ready", `这个音色现在还不能用：${reason}`);
+
+  on("POST", "/speech/voices", ({ body }) => {
+    const input = body as CreateVoice;
+    checkVoice({ ...input, name: input.name ?? "" });
+    const v = refreshVoice({
       id: newId(),
+      name: input.name.trim(),
+      engine: input.engine,
+      kind: input.kind,
+      description: input.kind === "designed" ? (input.description?.trim() ?? null) : null,
       has_reference: false,
       reference_duration_ms: null,
+      reference_transcript: input.reference_transcript?.trim() || null,
+      settings: input.settings ?? defaultVoiceSettings(),
       is_default: false,
+      ready: false,
+      not_ready_reason: null,
       created_at: iso(0),
-    };
+      updated_at: iso(0),
+    });
+    if (input.is_default) {
+      if (v.not_ready_reason) throw voiceNotReady(v.not_ready_reason);
+      for (const other of db.voices) other.is_default = false;
+      v.is_default = true;
+    }
     db.voices.push(v);
     return v;
   });
+  on("GET", "/speech/voices/:id", ({ params }) => find.voice(params[0]));
   on("PATCH", "/speech/voices/:id", ({ params, body }) => {
     const v = find.voice(params[0]);
-    const patch = body as Partial<VoiceInput> & { is_default?: boolean };
-    if (patch.is_default) for (const other of db.voices) other.is_default = false;
-    return Object.assign(v, patch);
+    const patch = body as UpdateVoice;
+    const next: Voice = structuredClone(v);
+    if (patch.name != null) next.name = patch.name.trim();
+    if (patch.engine != null) next.engine = patch.engine;
+    if (patch.description != null && next.kind === "designed")
+      next.description = patch.description.trim() || null;
+    if (patch.reference_transcript != null)
+      next.reference_transcript = patch.reference_transcript.trim() || null;
+    if (patch.settings != null) next.settings = patch.settings;
+    if (patch.is_default != null) next.is_default = patch.is_default;
+    checkVoice(next);
+    refreshVoice(next);
+    if (next.is_default && next.not_ready_reason) throw voiceNotReady(next.not_ready_reason);
+    if (next.is_default) for (const other of db.voices) other.is_default = false;
+    next.updated_at = iso(0);
+    return Object.assign(v, next);
   });
   on("DELETE", "/speech/voices/:id", ({ params }) => {
     const v = find.voice(params[0]);
-    if (v.is_default) throw conflict("默认音色不能删除，先把别的音色设为默认");
+    if (v.is_default)
+      throw new HttpError(409, "voice_is_default", "默认音色不能删除，先把别的音色设为默认");
     db.voices = db.voices.filter((x) => x !== v);
     return null;
   });
   on("PUT", "/speech/voices/:id/reference", ({ params, raw }) => {
     const v = find.voice(params[0]);
+    if (v.kind === "designed") throw conflict("用文字描述设计的音色不需要参考录音");
     const size = raw instanceof Blob ? raw.size : 0;
+    if (size === 0) throw new HttpError(422, "empty_file", "这个文件是空的");
     if (size > 20 * 1024 * 1024)
       throw new HttpError(413, "payload_too_large", "参考录音不能超过 20MB");
     v.has_reference = true;
-    v.cloned = true;
     v.reference_duration_ms = 9_600;
-    return v;
+    v.updated_at = iso(0);
+    return refreshVoice(v);
   });
-  on("POST", "/speech/preview", () => {
-    throw new HttpError(
-      503,
-      "tts_engine_unavailable",
-      "演示数据没有接语音合成，接上真后端后可以试听",
-    );
+  on("GET", "/speech/voices/:id/reference", ({ params }) => {
+    const v = find.voice(params[0]);
+    if (!v.has_reference) throw notFound("参考录音");
+    return wavResponse(testTone(1_200), {});
+  });
+  on("POST", "/speech/preview", ({ body }) => {
+    const input = body as PreviewRequest;
+    const text = (input.text ?? "").trim();
+    if (!text)
+      throw new HttpError(422, "validation_failed", "要填一句试听的话", {
+        text: "要填一句试听的话",
+      });
+    if ([...text].length > 300)
+      throw new HttpError(422, "validation_failed", "试听的话最多 300 个字", {
+        text: "试听的话最多 300 个字",
+      });
+    const description = input.description?.trim();
+    if (input.voice_id && description)
+      throw new HttpError(422, "validation_failed", "音色和音色描述只能填一个", {
+        description: "已经选了音色，就不用再填音色描述了，两个只能填一个",
+      });
+    let engine: string = "breeze2";
+    if (!description) {
+      const v = input.voice_id ? find.voice(input.voice_id) : db.voices.find((x) => x.is_default);
+      if (!v)
+        throw new HttpError(
+          422,
+          "no_default_voice",
+          "还没有默认音色。请选一个音色，或者填一句音色描述",
+        );
+      if (v.not_ready_reason) throw voiceNotReady(v.not_ready_reason);
+      engine = v.engine;
+    }
+    // 演示数据没有接语音合成，和真后端没连 Mac 时一样，回一段测试音
+    const ms = Math.min(6_000, 600 + [...text].length * 90);
+    return wavResponse(testTone(ms), {
+      "x-audio-duration-ms": String(ms),
+      "x-tts-engine": input.engine ?? engine,
+      "x-tts-backend": "fake",
+      "x-tts-from-cache": "false",
+    });
   });
 
   // ───────── 面试配置 ─────────
@@ -962,6 +1089,8 @@ export function createMockServer(options: MockOptions = {}) {
       ? db.templates.find((t) => t.id === input.template_id)
       : null;
     if (input.template_id && !fromTemplate) details.template_id = "这个模板不存在";
+    if (input.voice_id && !db.voices.some((v) => v.id === input.voice_id))
+      details.voice_id = "这个音色不存在";
     if (!c || !p || Object.keys(details).length > 0)
       throw new HttpError(422, "validation_failed", "请检查填写的内容", details);
     // 和后端一样的先后顺序：请求里的设置、模板的设置、默认设置
@@ -1227,6 +1356,7 @@ export function createMockServer(options: MockOptions = {}) {
           body,
           raw,
         });
+        if (result instanceof Response) return result;
         return result === null || result === undefined
           ? json(204, null)
           : json(200, structuredClone(result));

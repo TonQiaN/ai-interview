@@ -77,44 +77,27 @@ export interface ImportedCandidate {
 
 // ───────── 语音 ─────────
 
-export type EngineId = "index2" | "index25" | "breeze2";
+export type EngineId = Schemas["EngineId"];
+export type SpeechEngine = Schemas["EngineInfo"];
+export type EngineList = Schemas["EngineList"];
+export type VoiceKind = Schemas["VoiceKind"];
+export type Voice = Schemas["VoiceView"];
+export type VoiceSettings = Schemas["VoiceSettings"];
+export type VoiceStyle = Schemas["Style"];
+export type Emotion = Schemas["Emotion"];
+export type VoiceLanguage = Schemas["Language"];
+export type CreateVoice = Schemas["CreateVoice"];
+export type UpdateVoice = Schemas["UpdateVoice"];
+export type PreviewRequest = Schemas["PreviewRequest"];
 
-export interface SpeechEngine {
-  id: EngineId;
-  name: string;
-  languages: string[];
-  capabilities: string[];
-  requires_reference_audio: boolean;
-  requires_reference_transcript: boolean;
-  max_text_chars: number | null;
-  non_commercial_only: boolean;
-  available: boolean;
-  unavailable_reason: string | null;
-  is_default: boolean;
-}
-
-export interface Voice {
-  id: string;
-  name: string;
-  engine: EngineId;
-  /** 克隆的音色有参考录音；没有参考录音的是用文字描述设计出来的 */
-  cloned: boolean;
-  has_reference: boolean;
-  reference_duration_ms: number | null;
-  reference_transcript: string | null;
-  style_prompt: string | null;
-  language: string;
-  is_default: boolean;
-  created_at: string;
-}
-
-export interface VoiceInput {
-  name: string;
-  engine: EngineId;
-  cloned: boolean;
-  reference_transcript: string | null;
-  style_prompt: string | null;
-  language: string;
+/** 试听的结果：一段可以直接放的声音，和后端在响应头里说的几件事 */
+export interface PreviewResult {
+  blob: Blob;
+  duration_ms: number | null;
+  engine: string | null;
+  /** fake 是测试音，worker 是真模型 */
+  backend: string | null;
+  from_cache: boolean;
 }
 
 // ───────── 面试配置 ─────────

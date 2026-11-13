@@ -7,6 +7,10 @@
 //! cargo run -p interview-report --example lab -- analyze crates/interview-report/samples/backend-strong.json
 //! # 把全部样例分析一遍，对照场景里写的预期，报告存到 samples/reports/
 //! cargo run -p interview-report --example lab -- evaluate --thinking high
+//! # 从一段录像里抽帧，让模型看画面里有几个人、有没有手机，打印整理出来的过程事件
+//! cargo run -p interview-report --example lab -- frames 录像.webm
+//! # 把这些事件加进一份面试记录再分析（--record 指定记录，报告打印到标准输出）
+//! cargo run -p interview-report --example lab -- frames 录像.webm --record 记录.json
 //! ```
 //!
 //! 场景文件里的人设（候选人的真实情况）只给模拟用，分析时看不到，所以能用来检验分析的结论。
@@ -20,6 +24,7 @@ use futures_util::future::join_all;
 use interview_llm::{
     ChatModel, ChatRequest, DeepSeekClient, Effort, Message, Pricing, Thinking, chat_json_checked,
 };
+use interview_report::frames::{FrameOptions, VideoSegment, observe_video};
 use interview_report::record::{
     Candidate, InterviewConfig, InterviewRecord, Job, ProctorEvent, Question, Segment, Speaker,
 };
@@ -67,6 +72,25 @@ enum Command {
         /// 报告存到哪个目录。不填就不存
         #[arg(long)]
         out: Option<PathBuf>,
+    },
+    /// 从录像里抽帧，让模型看画面，打印整理出来的过程事件和每一帧的结果
+    Frames {
+        /// 摄像头录像文件（WebM 或 MP4）
+        video: PathBuf,
+        /// 这段录像从面试时间轴的哪一毫秒开始
+        #[arg(long, default_value_t = 0)]
+        start_ms: u64,
+        /// 每隔多久抽一帧（毫秒）
+        #[arg(long, default_value_t = 5000)]
+        interval_ms: u64,
+        /// 不正常的帧存到这个目录，文件名是时间（毫秒）
+        #[arg(long)]
+        save_flagged: Option<PathBuf>,
+        /// 把画面事件加进这份面试记录再分析，报告打印到标准输出
+        #[arg(long)]
+        record: Option<PathBuf>,
+        #[arg(long, value_enum, default_value = "high")]
+        thinking: ThinkingArg,
     },
 }
 
@@ -167,6 +191,67 @@ async fn main() -> Result<()> {
                 &only,
             )
             .await
+        }
+        Command::Frames {
+            video,
+            start_ms,
+            interval_ms,
+            save_flagged,
+            record,
+            thinking,
+        } => {
+            let options = FrameOptions {
+                ffmpeg: std::env::var("AI_INTERVIEW_FFMPEG")
+                    .unwrap_or_else(|_| "ffmpeg".to_owned()),
+                interval_ms,
+                ..FrameOptions::default()
+            };
+            let segments = [VideoSegment {
+                path: video,
+                start_ms,
+            }];
+            let started = Instant::now();
+            let observed = observe_video(&segments, &model, &options).await?;
+            eprintln!(
+                "看了 {} 帧，没看成 {} 帧，不正常 {} 帧，用时 {:.1} 秒；{}",
+                observed.findings.len(),
+                observed.unreadable,
+                observed.flagged.len(),
+                started.elapsed().as_secs_f64(),
+                usage_line(&observed.usage)
+            );
+            for event in &observed.events {
+                eprintln!(
+                    "  {:>7.1}秒 {:<20} 持续 {:>5.1}秒 {}",
+                    event.at_ms.unwrap_or(0) as f64 / 1000.0,
+                    event.kind,
+                    event.duration_ms.unwrap_or(0) as f64 / 1000.0,
+                    event.detail.as_deref().unwrap_or("")
+                );
+            }
+            if let Some(dir) = save_flagged {
+                std::fs::create_dir_all(&dir)?;
+                for frame in &observed.flagged {
+                    std::fs::write(dir.join(format!("{}.jpg", frame.at_ms)), &frame.jpeg)?;
+                }
+            }
+            let Some(path) = record else {
+                // 不分析时把每一帧的结果打印出来，方便对照
+                println!("{}", serde_json::to_string_pretty(&observed.findings)?);
+                return Ok(());
+            };
+            {
+                let mut record: InterviewRecord = read_json(&path)?;
+                observed.add_to(&mut record);
+                let options = AnalyzeOptions {
+                    thinking: Some(thinking.thinking()),
+                    ..Default::default()
+                };
+                let report = analyze(&record, &model, &options).await?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                eprintln!("{}", cost_line(&report));
+            }
+            Ok(())
         }
     }
 }
