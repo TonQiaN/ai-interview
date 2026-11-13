@@ -298,6 +298,7 @@ export class InterviewRunner<B> {
 
       if (!step.expects_answer) {
         return {
+          seq: step.seq,
           utterance_key: step.utterance.key,
           playback_start_ms: playbackStart,
           playback_end_ms: playbackEnd,
@@ -320,6 +321,7 @@ export class InterviewRunner<B> {
       if (turn.phase !== "ended") continue; // 重听题目
 
       return {
+        seq: step.seq,
         utterance_key: step.utterance.key,
         playback_start_ms: playbackStart,
         playback_end_ms: playbackEnd,

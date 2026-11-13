@@ -29,10 +29,14 @@ class FakeAudio {
   };
 }
 
+let nextSeq = 0;
+
 function say(key: string, options: { expectsAnswer?: boolean; audioMs?: number | null; index?: number } = {}): NextStep {
   const { expectsAnswer = true, audioMs = 2_000, index = 1 } = options;
+  nextSeq += 1;
   return {
     action: "say",
+    seq: nextSeq,
     utterance: {
       key,
       kind: expectsAnswer ? "question" : "opening",
@@ -149,12 +153,29 @@ describe("逐题面试编排", () => {
     ]);
   });
 
+  it("同一句话说两次时，各自带回服务端给的序号", async () => {
+    // 比如没听到回答，服务端让页面把同一题再问一遍
+    const again = say("nudge", { expectsAnswer: false, audioMs: 1_000 });
+    const { api, runner } = setup([again, finish]);
+    const first = say("nudge", { expectsAnswer: false, audioMs: 1_000 });
+    const result = runner.run(first);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await result).toBe("completed");
+    expect(api.requests.map((request) => request.utterance_key)).toEqual(["nudge", "nudge"]);
+    expect(api.requests.map((request) => request.seq)).toEqual([
+      (first as { seq: number }).seq,
+      (again as { seq: number }).seq,
+    ]);
+    expect(api.requests[0]?.seq).not.toBe(api.requests[1]?.seq);
+  });
+
   it("不需要回答的话播完就直接进下一步", async () => {
     const { api, runner } = setup([finish]);
     const result = runner.run(say("opening", { expectsAnswer: false, audioMs: 3_000 }));
     await vi.advanceTimersByTimeAsync(3_000);
     expect(await result).toBe("completed");
     expect(api.requests[0]).toEqual({
+      seq: expect.any(Number),
       utterance_key: "opening",
       playback_start_ms: 0,
       playback_end_ms: 3_000,
