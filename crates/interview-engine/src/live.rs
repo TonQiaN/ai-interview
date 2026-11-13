@@ -168,6 +168,15 @@ pub enum LiveEvent {
     Speak { key: String, text: String },
     /// 播放一句提前合成好的话。
     Play { utterance: Utterance },
+    /// 这一轮要说的话都给出来了，后面不会再有 [`LiveEvent::Speak`] 和 [`LiveEvent::Play`]。
+    /// 每一轮只发一次，内容和最后返回的 [`LiveOutcome`] 里同名的字段一样，发出以后不会再变。
+    /// 模型这时可能还在写这道题的概括，调用方不用等它，可以先把最后一句放出去。
+    Done {
+        /// 说完之后怎么听候选人回答。面试结束时是空的。
+        listen: Option<Listen>,
+        finished: Option<FinishReason>,
+        progress: Progress,
+    },
 }
 
 /// 一轮各个时间点，从调用 [`respond`] 开始算。
@@ -313,8 +322,9 @@ fn heard_chars(total_chars: usize, cut: &Interruption, language: Language) -> us
 
 /// 候选人说完了一段，决定面试官怎么接。
 ///
-/// 事件通过 `sink` 陆续给出：先是动作，然后是要说的话。调用方拿到 [`LiveEvent::Speak`] 就可以
-/// 送去合成，不用等这个函数返回。模型出错或者超时不会让面试停下来，会按顺序进入下一题。
+/// 事件通过 `sink` 陆续给出：先是动作，然后是要说的话，最后是 [`LiveEvent::Done`]。调用方拿到
+/// [`LiveEvent::Speak`] 就可以送去合成，拿到 [`LiveEvent::Done`] 就知道这一轮之后是接着听还是
+/// 面试结束，都不用等这个函数返回。模型出错或者超时不会让面试停下来，会按顺序进入下一题。
 ///
 /// 候选人只是停了一下、或者是打断面试官开的口，用 [`respond_with`]。
 pub async fn respond(
@@ -354,10 +364,12 @@ pub async fn respond_with(
             run.emit(LiveEvent::Action {
                 action: LiveAction::Wait,
             });
+            run.settle();
             return Ok(run.waiting(state, Usage::default()));
         }
         // 没开口：和逐题模式一样，提醒一次再重问，还是没有就往下走
         run.advance(AnswerEnd::NoSpeech, None)?;
+        run.settle();
         return Ok(run.outcome(LiveAction::Next, Usage::default()));
     }
     if let Some(cut) = &context.interrupted {
@@ -464,6 +476,8 @@ struct Run<'a> {
     note: Option<AnswerNote>,
     decision_ms: u64,
     first_speech_ms: Option<u64>,
+    /// [`LiveEvent::Done`] 已经发过了。
+    settled: bool,
 }
 
 impl<'a> Run<'a> {
@@ -493,6 +507,7 @@ impl<'a> Run<'a> {
             note: None,
             decision_ms: 0,
             first_speech_ms: None,
+            settled: false,
         }
     }
 
@@ -501,10 +516,29 @@ impl<'a> Run<'a> {
     }
 
     fn emit(&mut self, event: LiveEvent) {
-        if !matches!(event, LiveEvent::Action { .. }) && self.first_speech_ms.is_none() {
+        if matches!(event, LiveEvent::Speak { .. } | LiveEvent::Play { .. })
+            && self.first_speech_ms.is_none()
+        {
             self.first_speech_ms = Some(self.elapsed_ms());
         }
         (self.sink)(event);
+    }
+
+    /// 这一轮要说的话都给出来了：告诉调用方之后是接着听还是结束。只发一次。
+    ///
+    /// 调用的时候状态必须已经定下来，后面只能再补这道题的概括，不能再改去向。
+    fn settle(&mut self) {
+        if self.settled {
+            return;
+        }
+        self.settled = true;
+        let current = &self.state.session.current;
+        let event = LiveEvent::Done {
+            listen: current.listen.clone(),
+            finished: current.finished,
+            progress: current.progress,
+        };
+        self.emit(event);
     }
 
     /// 模型又吐出来一段。
@@ -590,7 +624,10 @@ impl<'a> Run<'a> {
                     self.feed("\n")?;
                 }
             }
-            LiveAction::Wait => self.stage = Stage::Settled,
+            LiveAction::Wait => {
+                self.stage = Stage::Settled;
+                self.settle();
+            }
             LiveAction::Repeat => {
                 let note = AnswerNote {
                     quality: quality.unwrap_or(AnswerQuality::NoAnswer),
@@ -601,6 +638,7 @@ impl<'a> Run<'a> {
                 };
                 self.advance(AnswerEnd::Silence, Some(note))?;
                 self.stage = Stage::Settled;
+                self.settle();
             }
             LiveAction::Next | LiveAction::End => {
                 let note = AnswerNote {
@@ -620,6 +658,8 @@ impl<'a> Run<'a> {
                     seq,
                     body: String::new(),
                 };
+                // 去向已经定了，后面模型写的只是这道题的概括
+                self.settle();
             }
         }
         Ok(())
@@ -689,14 +729,25 @@ impl<'a> Run<'a> {
             || *sentences >= MAX_SPOKEN_SENTENCES
             || text.chars().count() >= MAX_SPOKEN_CHARS;
         let key = key.clone();
+        let done = *done;
         self.emit(LiveEvent::Speak {
             key,
             text: sentence,
         });
+        if done {
+            // 话说完了，说完还是接着听这道题
+            self.settle();
+        }
     }
 
     /// 模型说完了（或者中途断了）：收尾，返回这一轮实际的动作。
     fn finish(&mut self) -> Result<LiveAction, EngineError> {
+        let action = self.close()?;
+        self.settle();
+        Ok(action)
+    }
+
+    fn close(&mut self) -> Result<LiveAction, EngineError> {
         if let Stage::Header(buffer) = &self.stage {
             // 只有一行、没有换行；或者什么都没收到
             let line = buffer.clone();
@@ -1234,7 +1285,27 @@ mod tests {
         })
         .await
         .unwrap();
+        take_done(&outcome, &mut events);
         (outcome, events)
+    }
+
+    /// 每一轮最后一个事件都是 Done，而且和返回的结果对得上。检查完把它拿掉，方便后面比较别的事件。
+    fn take_done(outcome: &LiveOutcome, events: &mut Vec<LiveEvent>) {
+        let done = events.pop().expect("至少有一个事件");
+        assert_eq!(
+            done,
+            LiveEvent::Done {
+                listen: outcome.listen.clone(),
+                finished: outcome.finished,
+                progress: outcome.progress,
+            }
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, LiveEvent::Done { .. })),
+            "Done 只发一次"
+        );
     }
 
     fn keys_of(outcome: &LiveOutcome) -> Vec<&str> {
@@ -1469,6 +1540,7 @@ mod tests {
         let outcome = run.outcome(LiveAction::Probe, Usage::default());
         assert_eq!(outcome.said[0].text, "明白。那你本人做");
         assert_eq!(outcome.state.probes_asked, 1);
+        take_done(&outcome, &mut events);
         assert_eq!(
             events,
             [
@@ -1575,7 +1647,72 @@ mod tests {
         })
         .await
         .unwrap();
+        take_done(&outcome, &mut events);
         (outcome, events)
+    }
+
+    fn done_events(events: &[LiveEvent]) -> usize {
+        events
+            .iter()
+            .filter(|event| matches!(event, LiveEvent::Done { .. }))
+            .count()
+    }
+
+    #[test]
+    fn says_where_the_turn_goes_before_the_model_finishes_writing() {
+        use std::sync::{Arc, Mutex};
+
+        let (plan, config) = setup();
+        let (state, _) = open(&plan, &config).unwrap();
+        let turn = said("库存那部分是我写的。", 60);
+
+        // 下一题：第一行一到就知道接下来听哪道题，概括还没开始写
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&events);
+        let mut sink = move |event| seen.lock().unwrap().push(event);
+        let mut run = Run::new(&plan, &config, state.clone(), &turn, false, &mut sink);
+        run.feed("next adequate\n").unwrap();
+        let early = events.lock().unwrap().clone();
+        let Some(LiveEvent::Done {
+            listen: Some(listen),
+            finished: None,
+            ..
+        }) = early.last()
+        else {
+            panic!("第一行读完就该发 Done：{early:?}");
+        };
+        assert_eq!(listen.utterance_key, "q2");
+        // 模型后面断了，结果和已经发出去的一样
+        assert_eq!(run.finish().unwrap(), LiveAction::Next);
+        let outcome = run.outcome(LiveAction::Next, Usage::default());
+        let mut all = events.lock().unwrap().clone();
+        assert_eq!(all.len(), early.len(), "收尾时没有再发事件");
+        take_done(&outcome, &mut all);
+
+        // 追问：问句一出来就知道说完还是听这道题，不用等模型停笔
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&events);
+        let mut sink = move |event| seen.lock().unwrap().push(event);
+        let mut run = Run::new(&plan, &config, state, &turn, false, &mut sink);
+        run.can_probe = true;
+        run.feed("probe weak\n明白。").unwrap();
+        assert_eq!(done_events(&events.lock().unwrap()), 0, "话还没说完");
+        run.feed("具体是哪一块？\n概括：").unwrap();
+        let early = events.lock().unwrap().clone();
+        let Some(LiveEvent::Done {
+            listen: Some(listen),
+            ..
+        }) = early.last()
+        else {
+            panic!("问句出来就该发 Done：{early:?}");
+        };
+        assert_eq!(listen.utterance_key, "q1");
+        run.feed("候选人说不清。").unwrap();
+        assert_eq!(run.finish().unwrap(), LiveAction::Probe);
+        let outcome = run.outcome(LiveAction::Probe, Usage::default());
+        let mut all = events.lock().unwrap().clone();
+        assert_eq!(all.len(), early.len());
+        take_done(&outcome, &mut all);
     }
 
     #[tokio::test]
