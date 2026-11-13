@@ -16,7 +16,13 @@ export interface TabsProps<T extends string> {
   className?: string;
 }
 
-export function Tabs<T extends string>({ value, items, onChange, className, ...rest }: TabsProps<T>) {
+export function Tabs<T extends string>({
+  value,
+  items,
+  onChange,
+  className,
+  ...rest
+}: TabsProps<T>) {
   const base = useId();
   return (
     <div className={clsx("oil-tabs", className)} role="tablist" aria-label={rest["aria-label"]}>
@@ -33,7 +39,8 @@ export function Tabs<T extends string>({ value, items, onChange, className, ...r
           onKeyDown={(e) => {
             if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
             const i = items.findIndex((x) => x.value === value);
-            const next = items[(i + (e.key === "ArrowRight" ? 1 : items.length - 1)) % items.length];
+            const next =
+              items[(i + (e.key === "ArrowRight" ? 1 : items.length - 1)) % items.length];
             if (next) {
               onChange(next.value);
               document.getElementById(`${base}-${next.value}`)?.focus();
@@ -65,9 +72,21 @@ export function Steps({ steps, current, compact, className }: StepsProps) {
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: 步骤是固定顺序的静态列表
           <Fragment key={i}>
-            {i > 0 && <li className="oil-step__line" data-done={i <= current || undefined} aria-hidden="true" />}
-            <li className="oil-step" data-state={state} aria-current={state === "current" ? "step" : undefined}>
-              <span className="oil-step__dot">{state === "done" ? <Check aria-label="已完成" /> : i + 1}</span>
+            {i > 0 && (
+              <li
+                className="oil-step__line"
+                data-done={i <= current || undefined}
+                aria-hidden="true"
+              />
+            )}
+            <li
+              className="oil-step"
+              data-state={state}
+              aria-current={state === "current" ? "step" : undefined}
+            >
+              <span className="oil-step__dot">
+                {state === "done" ? <Check aria-label="已完成" /> : i + 1}
+              </span>
               <span className="oil-step__text">{label}</span>
             </li>
           </Fragment>

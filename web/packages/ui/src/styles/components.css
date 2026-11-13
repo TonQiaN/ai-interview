@@ -411,6 +411,10 @@
     box-shadow: var(--oil-inset);
     max-width: 100%;
   }
+  /* 放在竖排的表单项里时不要被拉成一整行 */
+  .oil-field > .oil-segmented {
+    align-self: flex-start;
+  }
   .oil-segmented button {
     min-height: 30px;
     padding: 0 14px;
@@ -1094,6 +1098,12 @@
     font-weight: 700;
     font-variant-numeric: tabular-nums;
   }
+  .oil-score__value small {
+    font-family: var(--oil-font-body);
+    font-size: var(--oil-text-xs);
+    font-weight: 400;
+    color: var(--oil-ink-3);
+  }
   .oil-score__track {
     grid-column: 1 / -1;
     position: relative;
@@ -1108,8 +1118,9 @@
     inset: 0 auto 0 0;
     width: var(--_v, 0%);
     background: var(--_c);
-    -webkit-mask: url("../assets/brush/stroke.webp") left center / 100% 190% no-repeat;
-    mask: url("../assets/brush/stroke.webp") left center / 100% 190% no-repeat;
+    /* 笔触图两头各留了约 5% 的空白，放大到 110% 再居中，颜色才会从轨道的最左边开始 */
+    -webkit-mask: url("../assets/brush/stroke.webp") center / 110% 190% no-repeat;
+    mask: url("../assets/brush/stroke.webp") center / 110% 190% no-repeat;
     transition: width var(--oil-slow) var(--oil-ease);
   }
 

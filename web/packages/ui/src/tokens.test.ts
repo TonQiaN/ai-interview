@@ -73,7 +73,15 @@ describe.each([
 describe("夜画", () => {
   it("把所有语义色都重新定义了一遍", () => {
     const darkOnly = parse(block(".oil-stage--night"));
-    for (const name of ["--oil-linen", "--oil-canvas", "--oil-raised", "--oil-ink", "--oil-primary", "--oil-accent", "--oil-danger"]) {
+    for (const name of [
+      "--oil-linen",
+      "--oil-canvas",
+      "--oil-raised",
+      "--oil-ink",
+      "--oil-primary",
+      "--oil-accent",
+      "--oil-danger",
+    ]) {
       expect(darkOnly.has(name), name).toBe(true);
     }
   });

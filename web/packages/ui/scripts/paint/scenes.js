@@ -86,8 +86,20 @@ export function dusk(ctx, w, h, r) {
     const y = h * (0.06 + r() * 0.4);
     const warm = x / w + (y / horizon) * 0.5;
     const color =
-      warm > 1.05 ? "rgba(236,150,96,0.78)" : warm > 0.72 ? "rgba(203,116,96,0.6)" : "rgba(88,110,150,0.6)";
-    ellipse(ctx, x, y, w * (0.05 + r() * 0.1), h * (0.014 + r() * 0.026), color, (r() - 0.5) * 0.12);
+      warm > 1.05
+        ? "rgba(236,150,96,0.78)"
+        : warm > 0.72
+          ? "rgba(203,116,96,0.6)"
+          : "rgba(88,110,150,0.6)";
+    ellipse(
+      ctx,
+      x,
+      y,
+      w * (0.05 + r() * 0.1),
+      h * (0.014 + r() * 0.026),
+      color,
+      (r() - 0.5) * 0.12,
+    );
   }
   ctx.filter = "none";
 
@@ -104,7 +116,14 @@ export function dusk(ctx, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(0, h);
   ctx.lineTo(0, horizon + h * 0.11);
-  ctx.bezierCurveTo(w * 0.3, horizon + h * 0.07, w * 0.6, horizon + h * 0.13, w, horizon + h * 0.09);
+  ctx.bezierCurveTo(
+    w * 0.3,
+    horizon + h * 0.07,
+    w * 0.6,
+    horizon + h * 0.13,
+    w,
+    horizon + h * 0.09,
+  );
   ctx.lineTo(w, h);
   ctx.closePath();
   ctx.fill();
@@ -114,7 +133,12 @@ export function dusk(ctx, w, h, r) {
     ctx.lineWidth = h * (0.012 + f * 0.022);
     ctx.beginPath();
     ctx.moveTo(w * (0.68 + (f - 0.5) * 0.1), horizon + h * 0.1);
-    ctx.quadraticCurveTo(w * (0.6 + (f - 0.5) * 0.9), horizon + h * 0.22, w * (0.5 + (f - 0.5) * 2.4), h * 1.02);
+    ctx.quadraticCurveTo(
+      w * (0.6 + (f - 0.5) * 0.9),
+      horizon + h * 0.22,
+      w * (0.5 + (f - 0.5) * 2.4),
+      h * 1.02,
+    );
     ctx.stroke();
   }
   // 河：映着天光
@@ -143,7 +167,15 @@ export function dusk(ctx, w, h, r) {
     ctx.fill();
     ctx.fillStyle = "rgba(92,128,84,0.75)";
     ctx.beginPath();
-    ctx.ellipse(x + h * fh * 0.06, base - h * fh * 0.5, h * fh * 0.035, h * fh * 0.3, 0.05, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + h * fh * 0.06,
+      base - h * fh * 0.5,
+      h * fh * 0.035,
+      h * fh * 0.3,
+      0.05,
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
   }
 }
@@ -228,10 +260,38 @@ export function sitter(ctx, w, h, _r) {
   ]);
   ctx.beginPath();
   ctx.moveTo(cx - w * 0.175, hy - h * 0.02);
-  ctx.bezierCurveTo(cx - w * 0.21, hy - h * 0.27, cx + w * 0.02, hy - h * 0.31, cx + w * 0.12, hy - h * 0.23);
-  ctx.bezierCurveTo(cx + w * 0.22, hy - h * 0.17, cx + w * 0.2, hy + h * 0.02, cx + w * 0.172, hy + h * 0.08);
-  ctx.bezierCurveTo(cx + w * 0.17, hy - h * 0.06, cx + w * 0.12, hy - h * 0.12, cx + w * 0.03, hy - h * 0.13);
-  ctx.bezierCurveTo(cx - w * 0.06, hy - h * 0.14, cx - w * 0.14, hy - h * 0.11, cx - w * 0.175, hy - h * 0.02);
+  ctx.bezierCurveTo(
+    cx - w * 0.21,
+    hy - h * 0.27,
+    cx + w * 0.02,
+    hy - h * 0.31,
+    cx + w * 0.12,
+    hy - h * 0.23,
+  );
+  ctx.bezierCurveTo(
+    cx + w * 0.22,
+    hy - h * 0.17,
+    cx + w * 0.2,
+    hy + h * 0.02,
+    cx + w * 0.172,
+    hy + h * 0.08,
+  );
+  ctx.bezierCurveTo(
+    cx + w * 0.17,
+    hy - h * 0.06,
+    cx + w * 0.12,
+    hy - h * 0.12,
+    cx + w * 0.03,
+    hy - h * 0.13,
+  );
+  ctx.bezierCurveTo(
+    cx - w * 0.06,
+    hy - h * 0.14,
+    cx - w * 0.14,
+    hy - h * 0.11,
+    cx - w * 0.175,
+    hy - h * 0.02,
+  );
   ctx.closePath();
   ctx.fill();
 }
@@ -348,7 +408,14 @@ export function nocturne(ctx, w, h, r) {
   ctx.fillStyle = "#0b1320";
   ctx.beginPath();
   ctx.moveTo(0, horizon + h * 0.03);
-  ctx.bezierCurveTo(w * 0.12, horizon - h * 0.12, w * 0.26, horizon - h * 0.07, w * 0.4, horizon + h * 0.02);
+  ctx.bezierCurveTo(
+    w * 0.12,
+    horizon - h * 0.12,
+    w * 0.26,
+    horizon - h * 0.07,
+    w * 0.4,
+    horizon + h * 0.02,
+  );
   ctx.lineTo(0, horizon + h * 0.1);
   ctx.closePath();
   ctx.fill();

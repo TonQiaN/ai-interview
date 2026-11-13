@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import { Copy, Check as CheckIcon, UploadCloud } from "lucide-react";
+import { Check as CheckIcon, Copy, UploadCloud } from "lucide-react";
 import {
   type ChangeEvent,
   type CSSProperties,
@@ -105,7 +105,8 @@ export function Switch({ label, className, ...rest }: SwitchProps) {
   );
 }
 
-export interface SliderProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "value" | "onChange"> {
+export interface SliderProps
+  extends Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "value" | "onChange"> {
   value: number;
   min: number;
   max: number;
@@ -115,7 +116,16 @@ export interface SliderProps extends Omit<InputHTMLAttributes<HTMLInputElement>,
   format?: (value: number) => ReactNode;
 }
 
-export function Slider({ value, min, max, step = 1, onChange, format, className, ...rest }: SliderProps) {
+export function Slider({
+  value,
+  min,
+  max,
+  step = 1,
+  onChange,
+  format,
+  className,
+  ...rest
+}: SliderProps) {
   const pct = max > min ? ((value - min) / (max - min)) * 100 : 0;
   const input = (
     <input
@@ -153,12 +163,28 @@ export interface SegmentedProps<T extends string> {
 }
 
 /** 几个互斥的选项排成一行，比如思考强度 低 / 高 / 最高。 */
-export function Segmented<T extends string>({ value, options, onChange, className, ...rest }: SegmentedProps<T>) {
+export function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  className,
+  ...rest
+}: SegmentedProps<T>) {
   return (
-    <div className={clsx("oil-segmented", className)} role="radiogroup" aria-label={rest["aria-label"]}>
+    <div
+      className={clsx("oil-segmented", className)}
+      role="radiogroup"
+      aria-label={rest["aria-label"]}
+    >
       {options.map((o) => (
         // biome-ignore lint/a11y/useSemanticElements: 分段选择用按钮实现单选组，键盘和读屏都按 radio 语义走
-        <button key={o.value} type="button" role="radio" aria-checked={o.value === value} onClick={() => onChange(o.value)}>
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={o.value === value}
+          onClick={() => onChange(o.value)}
+        >
           {o.label}
         </button>
       ))}
@@ -177,7 +203,15 @@ export interface DropzoneProps {
 }
 
 /** 点一下选文件，或者把文件拖进来。 */
-export function Dropzone({ onFiles, accept, multiple, title, hint, icon, className }: DropzoneProps) {
+export function Dropzone({
+  onFiles,
+  accept,
+  multiple,
+  title,
+  hint,
+  icon,
+  className,
+}: DropzoneProps) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const take = (list: FileList | null) => {

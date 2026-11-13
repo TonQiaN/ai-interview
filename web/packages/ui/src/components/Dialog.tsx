@@ -17,7 +17,16 @@ export interface DialogProps {
 }
 
 /** 基于原生 dialog：焦点圈定、Esc 关闭、遮罩都由浏览器负责。 */
-export function Dialog({ open, onClose, title, children, footer, wide, modalOnly, className }: DialogProps) {
+export function Dialog({
+  open,
+  onClose,
+  title,
+  children,
+  footer,
+  wide,
+  modalOnly,
+  className,
+}: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
 

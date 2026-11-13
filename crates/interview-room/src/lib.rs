@@ -6,6 +6,7 @@
 //! | [`access`] | 候选人的身份：校验链接里的令牌 |
 //! | [`session`] | 会话信息、同意事项、设备检测结果 |
 //! | [`events`] | 过程事件：页面上报、HR 查看 |
+//! | [`recording`] | 录制：分片上传、合并、HR 回放 |
 //! | [`protocol`] | 页面和服务端来回传的类型 |
 //!
 //! 协议的说明在 `docs/architecture/api.md` 的「面试间协议」；页面在 `web/apps/candidate`。
@@ -24,6 +25,7 @@ pub mod consent;
 pub mod events;
 pub mod invites;
 pub mod protocol;
+pub mod recording;
 pub mod session;
 
 pub use config::RoomConfig;
@@ -50,8 +52,11 @@ pub fn router(deps: Deps) -> OpenApiRouter {
         .merge(invites::router())
         .merge(session::router())
         .merge(events::router())
+        .merge(recording::router())
         .with_state(deps)
 }
 
-/// 面试间的后台任务。现在还没有，录制合并接上之后在这里登记。
-pub fn register_tasks(_registry: &mut TaskRegistry, _deps: Deps) {}
+/// 面试间的后台任务：合并录像。
+pub fn register_tasks(registry: &mut TaskRegistry, deps: Deps) {
+    recording::register_tasks(registry, deps);
+}

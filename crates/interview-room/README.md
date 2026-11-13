@@ -9,12 +9,14 @@
 | `GET`、`POST /api/v1/interviews/{id}/invites` | HR 查看、生成面试链接 |
 | `DELETE /api/v1/interviews/{id}/invites/{invite_id}` | HR 撤销链接 |
 | `GET /api/v1/interviews/{id}/events` | HR 查看过程事件 |
+| `GET /api/v1/interviews/{id}/recordings`、`GET /api/v1/recordings/{id}/media` | HR 看录制列表、回放 |
 | `GET /api/v1/room/session` | 候选人打开链接后拿会话信息 |
 | `POST /api/v1/room/consent` | 候选人确认同意事项 |
 | `POST /api/v1/room/device-check` | 页面上报设备检测结果 |
 | `POST /api/v1/room/events` | 页面批量上报过程事件 |
+| `PUT /api/v1/room/recordings/{track}/{segment}` 和它下面的 `chunks`、`complete` | 页面分片上传录像 |
 
-录制上传、开始和推进面试还没接上，正在做。
+开始和推进面试还没接上，正在做。
 
 ## 面试链接
 
@@ -24,6 +26,15 @@
 - 重新生成会让旧链接作废，保证同一时间只有一条能用；请求里带 `keep_existing` 可以保留旧的。
 - 有效期只管「能不能开始」：面试已经开始的不会因为到期被赶出去；结束后 24 小时内链接还能用来补传没传完的录像。
 - 候选人侧的 handler 参数里写一个 `RoomAccess`，令牌校验就做完了，里面有面试的 ID 和当前状态。
+
+## 录制
+
+- 页面边录边传，一片一个请求；分片存在 `interviews/{面试}/recordings/{轨道}/{第几段}/chunks/{序号}`。
+- 一段传完后排一个后台任务 `recording.assemble`：按序号把分片接成 `recording.webm`（或 `.mp4`），用 ffmpeg 原样重新封装补上时长，读出时长写进 `interview_recordings.duration_ms`，然后删掉分片。
+- ffmpeg 是可选的（`AI_INTERVIEW_FFMPEG`、`AI_INTERVIEW_FFPROBE`，默认从 PATH 里找）。没装时录像照样能从头播放，只是拖不了进度条，`error` 里会写一句说明。
+- 合并失败会重试，三次都不行就标成 `failed`，分片留在磁盘上。
+- 一段录制的身份是浏览器生成的 UUID（`client_segment_id`），所以登记、上传、完成都可以放心重试。
+- 协议的细节在 `docs/architecture/api.md` 的「录制上传」。
 
 ## 同意事项
 
@@ -53,4 +64,6 @@ curl -X PUT http://127.0.0.1:8080/api/v1/settings/room.display \
 DATABASE_URL=$(scripts/dev-db.sh url) cargo test -p interview-room
 ```
 
-测试数据都是合成的。
+测试数据都是合成的。录制的测试里有一条会用 ffmpeg 现做一段两秒的测试视频再走一遍上传和合并，机器上没装 ffmpeg 时自动跳过。
+
+新加了迁移文件之后如果测试报 500 或者说列不存在，是 `interview-platform` 里嵌进去的迁移没有重新编译，`touch crates/interview-platform/src/db.rs` 再跑。
