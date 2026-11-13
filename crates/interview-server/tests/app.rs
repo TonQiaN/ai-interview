@@ -70,7 +70,7 @@ async fn health_docs_and_default_deny(pool: PgPool) {
     assert_eq!(response.status, StatusCode::NOT_FOUND);
     assert_eq!(response.json()["error"]["code"], "not_found");
 
-    // 系统状态里有数据库和大模型
+    // 系统状态里有数据库、大模型、语音合成、语音识别和 ffmpeg
     let response = TestRequest::get("/api/v1/system/status")
         .send(&authed)
         .await;
@@ -86,9 +86,22 @@ async fn health_docs_and_default_deny(pool: PgPool) {
             )
         })
         .collect();
+    // ffmpeg 装没装看机器，其余的在测试里是固定的
+    let (ffmpeg, others): (Vec<String>, Vec<String>) = names
+        .into_iter()
+        .partition(|name| name.starts_with("ffmpeg="));
     assert_eq!(
-        names,
-        ["database=ok", "llm=not_configured", "tts=not_configured"]
+        others,
+        [
+            "database=ok",
+            "llm=not_configured",
+            "tts=not_configured",
+            "stt=not_configured"
+        ]
+    );
+    assert!(
+        ffmpeg == ["ffmpeg=ok"] || ffmpeg == ["ffmpeg=down"],
+        "{ffmpeg:?}"
     );
 
     // 首页跳到 HR 后台
@@ -192,5 +205,32 @@ async fn openapi_enum_values_are_the_json_spelling() {
     assert!(
         checked > 20,
         "接口文档里应该有不少枚举，只看到 {checked} 个取值"
+    );
+}
+
+/// 前端生成类型时用 operationId 当函数名，重名会让 `pnpm gen:api` 失败。operationId 默认是
+/// handler 的函数名，两个模块各有一个 `list` 这样的函数就会撞上。在这里拦住，不用等到前端构建。
+#[tokio::test]
+async fn openapi_operation_ids_are_unique() {
+    let json = interview_server::serve::openapi_json().unwrap();
+    let spec: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for (path, item) in spec["paths"].as_object().unwrap() {
+        for (method, operation) in item.as_object().unwrap() {
+            let Some(id) = operation.get("operationId").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let here = format!("{} {path}", method.to_uppercase());
+            if let Some(other) = seen.insert(id.to_owned(), here.clone()) {
+                panic!(
+                    "operationId「{id}」重复了：{other} 和 {here}。给其中一个 handler 换个函数名"
+                );
+            }
+        }
+    }
+    assert!(
+        seen.len() > 30,
+        "接口文档里应该有不少接口，只看到 {} 个",
+        seen.len()
     );
 }

@@ -27,6 +27,8 @@ pub struct Resume {
     pub parse_status: ParseStatus,
     /// 解析失败的原因，给 HR 看的
     pub parse_error: Option<String>,
+    /// 解析成功、但需要 HR 留意的情况，比如 PDF 页数太多，后面的页没有读
+    pub parse_warning: Option<String>,
     pub parsed_at: Option<DateTime<Utc>>,
     /// 是不是这位候选人的主简历。出题和生成画像默认用主简历
     pub is_primary: bool,
@@ -81,7 +83,7 @@ pub struct NewResume {
 }
 
 const COLUMNS: &str = "id, candidate_id, file_name, content_type, size_bytes, \
-                       (blob_key IS NOT NULL) AS has_file, parse_status, parse_error, parsed_at, \
+                       (blob_key IS NOT NULL) AS has_file, parse_status, parse_error, parse_warning, parsed_at, \
                        is_primary, created_at, updated_at";
 
 /// 新建一份简历，并把它设成主简历（原来的主简历让位）。
@@ -186,23 +188,28 @@ pub async fn find_by_sha256(
 
 /// 开始解析。
 pub async fn mark_running(db: &PgPool, id: Uuid) -> sqlx::Result<()> {
-    sqlx::query("UPDATE resumes SET parse_status = 'running', parse_error = NULL WHERE id = $1")
-        .bind(id)
-        .execute(db)
-        .await?;
+    sqlx::query(
+        "UPDATE resumes
+         SET parse_status = 'running', parse_error = NULL, parse_warning = NULL
+         WHERE id = $1",
+    )
+    .bind(id)
+    .execute(db)
+    .await?;
     Ok(())
 }
 
-/// 解析好了：存全文和结构化结果。
+/// 解析好了：存全文和结构化结果。`warning` 是要提醒 HR 的话，没有就传 `None`。
 pub async fn mark_done(
     db: &PgPool,
     id: Uuid,
     text: &str,
     parsed: &ParsedResume,
+    warning: Option<&str>,
 ) -> sqlx::Result<()> {
     sqlx::query(
         "UPDATE resumes
-         SET parse_status = 'done', parse_error = NULL, parsed_at = now(),
+         SET parse_status = 'done', parse_error = NULL, parse_warning = $5, parsed_at = now(),
              text_content = $2, parsed = $3, interview_text = $4
          WHERE id = $1",
     )
@@ -210,6 +217,7 @@ pub async fn mark_done(
     .bind(text)
     .bind(Json(parsed))
     .bind(parsed.to_interview_text())
+    .bind(warning)
     .execute(db)
     .await?;
     Ok(())
@@ -217,18 +225,22 @@ pub async fn mark_done(
 
 /// 解析失败。`reason` 会显示给 HR。
 pub async fn mark_failed(db: &PgPool, id: Uuid, reason: &str) -> sqlx::Result<()> {
-    sqlx::query("UPDATE resumes SET parse_status = 'failed', parse_error = $2 WHERE id = $1")
-        .bind(id)
-        .bind(reason)
-        .execute(db)
-        .await?;
+    sqlx::query(
+        "UPDATE resumes
+         SET parse_status = 'failed', parse_error = $2, parse_warning = NULL
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(reason)
+    .execute(db)
+    .await?;
     Ok(())
 }
 
 /// 解析没跑完就停了（任务用完了重试次数）：还停在「解析中」的改成失败。
 pub async fn fail_if_unfinished(db: &PgPool, id: Uuid, reason: &str) -> sqlx::Result<()> {
     sqlx::query(
-        "UPDATE resumes SET parse_status = 'failed', parse_error = $2
+        "UPDATE resumes SET parse_status = 'failed', parse_error = $2, parse_warning = NULL
          WHERE id = $1 AND parse_status IN ('pending', 'running')",
     )
     .bind(id)
@@ -252,8 +264,8 @@ pub async fn is_pending(db: &PgPool, id: Uuid) -> sqlx::Result<bool> {
 pub async fn reset_for_parse(conn: &mut PgConnection, id: Uuid) -> sqlx::Result<bool> {
     let done = sqlx::query(
         "UPDATE resumes
-         SET parse_status = 'pending', parse_error = NULL, parsed = NULL, parsed_at = NULL,
-             interview_text = NULL
+         SET parse_status = 'pending', parse_error = NULL, parse_warning = NULL,
+             parsed = NULL, parsed_at = NULL, interview_text = NULL
          WHERE id = $1",
     )
     .bind(id)

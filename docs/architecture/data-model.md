@@ -22,8 +22,8 @@
 | `llm_usage` | ① | 大模型调用的用量和费用 |
 | `positions` | ② | 岗位。`description` 和 `requirements` 是全文，`extra` 放结构化补充 |
 | `candidates` | ② | 候选人。`profile` 是画像 |
-| `resumes` | ② | 简历。原件在 BlobStore，`text_content` 是全文（给 HR 看），`parsed` 是结构化结果，`interview_text` 是去掉联系方式、给大模型出题和写报告用的文字 |
-| `voices` | ④ | 面试官音色 |
+| `resumes` | ② | 简历。原件在 BlobStore，`text_content` 是全文（给 HR 看），`parsed` 是结构化结果，`interview_text` 是去掉联系方式、给大模型出题和写报告用的文字。解析失败的原因在 `parse_error`；解析成功但要提醒 HR 的事（PDF 页数超过上限、后面没读）在 `parse_warning` |
+| `voices` | ④ | 面试官音色。克隆用的参考录音在 BlobStore，表里记它的时长和哈希 |
 | `interview_templates` | ① | 面试配置模板 |
 | `interviews` | ① | 一场面试。`config`、`plan`、`runtime_state` 三个 JSONB 的结构归 ③ |
 | `interview_utterances` | ①（④ 回填音频字段，⑤ 在实时模式下追加） | 面试官要说的每一句话和它的音频 |

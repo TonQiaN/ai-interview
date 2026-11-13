@@ -7,29 +7,31 @@
 ## 怎么跑
 
 ```bash
+scripts/dev.sh                                                # 仓库根目录：起开发数据库和后端（127.0.0.1:8080）
+DATABASE_URL=$(scripts/dev-db.sh url) cargo run -p interview-room --example demo -- seed   # 造一场面试，打印链接
 pnpm install          # 在 web/ 下
-pnpm mock             # 没有后端时：起一个面试间接口的模拟服务（127.0.0.1:8080）
-pnpm dev              # http://localhost:5174/i/#mock-interview-token-000001
+pnpm dev              # http://localhost:5174/i/#<上面打印的令牌>
 ```
 
-`pnpm dev` 把 `/api` 转给 `AI_INTERVIEW_API_URL`（默认 `http://127.0.0.1:8080`）。模拟服务认识的几个假令牌和可调的行为写在 `dev/mock-room-server.mjs` 开头。
+`pnpm dev` 把 `/api` 转给 `AI_INTERVIEW_API_URL`（默认 `http://127.0.0.1:8080`）。`demo seed` 造的面试用合成的题目和提示音，不用先走出题和语音合成，详见 `crates/interview-room/README.md` 的「本地联调」。
 
 ## 检查
 
 ```bash
 pnpm typecheck
 pnpm test             # 单元测试：静音检测、答题状态机、上传队列、接口客户端、面试编排、过程事件
-pnpm e2e              # 浏览器端到端测试，自己起模拟服务和开发服务器
+pnpm e2e              # 浏览器端到端测试，自己起后端和开发服务器
 ```
 
-端到端测试用真的 Chromium 加假的摄像头和麦克风（合成的正弦波，不含真人录音），覆盖：完整走完一场、链接过期和撤销、拒绝权限、手动结束、答题中刷新后续面、断网后补传、接口重试、过程事件。装了 ffprobe 时还会检查录出来的文件有画面有声音、时长盖住整场面试。
+端到端测试用真的 Chromium 加假的摄像头和麦克风（合成的正弦波，不含真人录音），对着真的后端跑，覆盖：完整走完一场、链接过期和撤销、拒绝权限、手动结束、答题中刷新后续面、断网后补传、接口重试、过程事件。每个测试用 `demo seed` 造一场自己的面试，跑完用 `demo state` 到库里看对话记录、过程事件和录像。装了 ffprobe 时还会检查录出来的文件有画面有声音、时长盖住整场面试。
+
+后端由 `e2e/backend.sh` 起：用开发数据库实例上单独的一个库 `ai_interview_e2e`（每次清空重建），数据放在临时目录，不碰平时开发用的库。需要本机有 Rust 工具链、PostgreSQL 和 Playwright 的 Chromium（`pnpm exec playwright install chromium`）；第一次跑要先编译后端。不调大模型，不花钱。
 
 ## 目录
 
-- `src/lib/`：不依赖页面的逻辑，都有单元测试。`vad`（静音检测）、`turn`（一道题的状态机）、`interview`（逐题编排）、`recording` 和 `upload`（分片录制、断点续传）、`media`（采集、混音）、`events`（过程事件）、`api`（面试间接口）、`flow`（链接和浏览器能力）。
+- `src/lib/`：不依赖页面的逻辑，都有单元测试。`vad`（静音检测）、`turn`（一道题的状态机）、`interview`（逐题编排）、`recording` 和 `upload`（分片录制、断点续传）、`media`（采集、混音）、`events`（过程事件）、`api`（面试间接口，用 `@ai-interview/api-client` 生成的类型）、`flow`（链接和浏览器能力）。
 - `src/session/interview-session.ts`：把上面这些串成一场面试，页面只订阅它的状态。
 - `src/pages/`、`src/components/`：页面，用 `@ai-interview/ui` 的组件。
-- `dev/mock-room-server.mjs`：模拟服务。正式的实现在 `crates/interview-room`。
-- `e2e/`：端到端测试。
+- `e2e/`：端到端测试。后端的实现在 `crates/interview-room`。
 
 接口约定见 `docs/architecture/api.md` 的「面试间协议」。

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use interview_audio::decode_wav;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use utoipa::ToSchema;
 
 use crate::engine::{EngineId, EngineSpec, Language};
 
@@ -75,7 +76,7 @@ pub enum Voice {
 }
 
 /// IndexTTS 支持的 8 种情绪。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Emotion {
     Happy,
@@ -131,7 +132,7 @@ impl Emotion {
 
 /// 说话的风格。两个字段各对应一类引擎，另一类引擎会按 [`Style::instruction_for`] 的规则转换或忽略，
 /// 所以同一份风格设置换引擎后还能用。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(default)]
 pub struct Style {
     /// 情绪。不填是自然语气。IndexTTS 直接支持；Breeze 会转成一句导演指令。
@@ -178,7 +179,7 @@ impl Style {
 }
 
 /// 和音质无关的生成选项。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(default)]
 pub struct SynthesisOptions {
     /// 随机种子。同样的请求加同样的种子，结果可以复现。
@@ -203,7 +204,7 @@ impl Default for SynthesisOptions {
 /// 一个音色除了参考录音以外的设置，存在 `voices.settings`（JSONB）里。
 ///
 /// 字段都有默认值，以后加字段时旧数据照样能读。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(default)]
 pub struct VoiceSettings {
     /// 这个音色说什么语言。

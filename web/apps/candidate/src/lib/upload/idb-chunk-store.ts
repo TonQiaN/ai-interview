@@ -67,7 +67,9 @@ export class IndexedDbChunkStore implements ChunkStore {
   async listSegments(sessionKey: string): Promise<SegmentMeta[]> {
     const transaction = this.db.transaction(SEGMENTS, "readonly");
     const range = IDBKeyRange.bound([sessionKey, ""], [sessionKey, "￿"]);
-    const rows = (await requestToPromise(transaction.objectStore(SEGMENTS).getAll(range))) as SegmentMeta[];
+    const rows = (await requestToPromise(
+      transaction.objectStore(SEGMENTS).getAll(range),
+    )) as SegmentMeta[];
     return rows.sort((a, b) => a.startMs - b.startMs);
   }
 
@@ -91,10 +93,13 @@ export class IndexedDbChunkStore implements ChunkStore {
 
   async listChunks(sessionKey: string, segmentId: string): Promise<ChunkInfo[]> {
     const transaction = this.db.transaction(CHUNK_INDEX, "readonly");
-    const range = IDBKeyRange.bound([sessionKey, segmentId, 0], [sessionKey, segmentId, Number.MAX_SAFE_INTEGER]);
-    const rows = (await requestToPromise(transaction.objectStore(CHUNK_INDEX).getAll(range))) as Array<
-      ChunkKey & { size: number }
-    >;
+    const range = IDBKeyRange.bound(
+      [sessionKey, segmentId, 0],
+      [sessionKey, segmentId, Number.MAX_SAFE_INTEGER],
+    );
+    const rows = (await requestToPromise(
+      transaction.objectStore(CHUNK_INDEX).getAll(range),
+    )) as Array<ChunkKey & { size: number }>;
     return rows.map((row) => ({ seq: row.seq, size: row.size })).sort((a, b) => a.seq - b.seq);
   }
 

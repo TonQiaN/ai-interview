@@ -16,7 +16,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api/http";
 import { useDeletePosition, useInterviews, usePosition, useSavePosition } from "../api/queries";
 import type { Position, PositionExtra } from "../api/types";
-import { Confirm, Person, QueryView, RecommendationBadge, StatusBadge } from "../components/common";
+import { Confirm, DecisionBadge, Person, QueryView, StatusBadge } from "../components/common";
 import { fullTime, positionStatusLabel, positionStatusTone, relativeTime } from "../lib/format";
 import { PositionFields, type PositionForm } from "./Positions";
 
@@ -247,15 +247,12 @@ function Detail({ position }: { position: Position }) {
                         <li key={i.id} className="adm-item">
                           <div className="adm-item__main">
                             <Person
-                              name={i.candidate.name}
+                              name={i.candidate_name}
                               sub={relativeTime(i.updated_at)}
                               to={`/interviews/${i.id}`}
                             />
                           </div>
-                          {i.overall_score !== null && (
-                            <strong className="oil-num">{i.overall_score}</strong>
-                          )}
-                          <RecommendationBadge value={i.recommendation} />
+                          <DecisionBadge value={i.decision} />
                           <StatusBadge status={i.status} />
                         </li>
                       ))}

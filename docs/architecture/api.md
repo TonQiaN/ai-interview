@@ -148,7 +148,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `POST /api/v1/positions/draft` | 粘贴一段岗位描述，让大模型整理成岗位草稿（不保存，给新建岗位的表单预填） |
 | `GET /api/v1/candidates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 候选人 |
 | `GET /api/v1/candidates/{id}/resumes`、`POST /api/v1/candidates/{id}/resumes` | 简历列表、上传 |
-| `GET /api/v1/resumes/{id}`、`GET /api/v1/resumes/{id}/file`、`POST /api/v1/resumes/{id}/parse`、`DELETE /api/v1/resumes/{id}` | 简历详情、原件、重新解析、删除（连原件一起删） |
+| `GET /api/v1/resumes/{id}`、`GET /api/v1/resumes/{id}/file`、`POST /api/v1/resumes/{id}/parse`、`DELETE /api/v1/resumes/{id}` | 简历详情、原件、重新解析、删除（连原件一起删）。`parse_status` 是 `failed` 时原因在 `parse_error`；是 `done` 但 `parse_warning` 有值时，要把这句话显示给 HR（比如 PDF 页数太多，只读了前 8 页） |
 | `POST /api/v1/candidates/import` | 直接传一份简历，自动建候选人 |
 | `POST /api/v1/candidates/{id}/profile/regenerate` | 重新生成画像 |
 | `GET /api/v1/raas/status` | RAAS 是否连得上 |
@@ -169,8 +169,20 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | --- | --- |
 | `GET /api/v1/speech/engines` ★ | 三个 TTS 引擎、各自的能力和当前是否可用 |
 | `GET /api/v1/speech/voices`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 音色 |
-| `PUT /api/v1/speech/voices/{id}/reference` | 上传克隆用的参考录音 |
+| `PUT /api/v1/speech/voices/{id}/reference`、`GET` | 上传克隆用的参考录音、听存下来的录音 |
 | `POST /api/v1/speech/preview` | 试听：给文本、音色、引擎和选项，返回音频 |
+
+几条前端要知道的规则：
+
+- 引擎列表返回 `{items, backend, simulated}`。`items[]` 里每个引擎有 `id`（`index2`、`index25`、`breeze2`）、`name`、`languages`、`requires_reference_audio`、`requires_reference_transcript`、`max_text_chars`、`non_commercial_only`、`supports_voice_design`、`supports_emotion`、`supports_instruction`、`available`、`unavailable_reason`、`is_default`。`simulated` 为真表示现在合成出来的是测试音（没连 Mac 上的真模型），页面上要提示。
+- 音色有两种（`kind`，建好以后不能改）：`cloned` 克隆一段参考录音，三个引擎都行；`designed` 用一句文字描述（`description`），只有 BreezeTTS2 行，选别的引擎返回 422。
+- 音色的 `ready` 表示现在能不能用，不能用的原因在 `not_ready_reason`：克隆音色要先上传参考录音；用 BreezeTTS2 克隆还要填 `reference_transcript`（录音的逐字稿）。同一段参考录音可以 `PATCH` 换引擎。
+- `settings` 是 `{language, style: {emotion, emotion_strength, instruction}, options: {seed, segment_pause_ms}}`，都有默认值，可以不传。`emotion` 只有 IndexTTS 支持（八种，见 OpenAPI），`instruction`（一句话指导语气）只有 BreezeTTS2 支持；换到不支持的引擎不报错，按能用的部分生效。
+- 默认音色只有一个：`is_default` 设成 `true` 时原来的自动取消。`ready` 为假的音色不能设成默认，默认音色也不能改成用不了的样子，都是 422，`code` 是 `voice_not_ready`。面试没指定音色时用默认音色；没有默认音色时用 BreezeTTS2 设计的一个通用女声。
+- `DELETE` 连参考录音一起删，返回 204。默认音色不能删，返回 409，`code` 是 `voice_is_default`。已经合成好语音的面试不受影响。
+- 上传参考录音：请求体就是文件本身（`Content-Type: application/octet-stream`，不是表单），最大 20 MB，超了是 413。要 2 到 30 秒、只有一个人说话的清晰录音。WAV、MP3、M4A 等常见格式都收，存的时候统一转成单声道 WAV。读不出声音或者是静音返回 422（`unreadable_file`），时长不对返回 422（`invalid_reference_duration`），设计音色不收录音返回 409。成功返回音色，带 `has_reference` 和 `reference_duration_ms`。
+- 试听：请求体 `{text, voice_id, description, engine, language, style, options}`，只有 `text` 必填（最多 300 字）。用哪个声音三选一：`voice_id` 指定音色；`description` 临时用一句描述设计一个（不用先建音色）；都不填用默认音色，没有默认音色返回 422（`no_default_voice`）。`engine`、`language`、`style`、`options` 填了就盖过音色自己的设置，可以在保存前先听效果。
+- 试听成功直接返回 `audio/wav`（不是 JSON），前端按二进制读出来播放。响应头里有 `x-audio-duration-ms`、`x-tts-engine`、`x-tts-backend`、`x-tts-from-cache`。真模型合成一句话要几秒到十几秒，要有等待提示。引擎没开返回 503（`tts_engine_unavailable`），合成出错返回 502（`tts_error`）。
 
 ### ⑤ 面试间（interview-room）
 
@@ -257,10 +269,11 @@ HR 侧：
 - 每一句都要上报，不只是要回答的那一句：不需要回答的话（开场白、过渡语、结束语）播完就调，`answer_*` 和 `end_reason` 留空。`utterance_key` 和服务端发出的那一句对不上返回 409（`seq_conflict`）；要听回答的那一句没带 `end_reason` 返回 422。
 - 时刻都是面试时间轴上的毫秒数。比服务端的时钟快 5 秒以上的，按服务端的算。
 
-- 服务端把面试官的话和候选人的回答各记一行 `interview_turns`（没开口的回答不记），调 `interview-engine` 的状态机决定下一步。逐题模式下候选人的文字在面试后由整段转写补上；如果配置允许逐题追问，服务端会先转写这一段再决定。
+- 服务端把面试官的话和候选人的回答各记一行 `interview_turns`（没开口的回答不记），调 `interview-engine` 的状态机决定下一步。提问环节的回答，服务端先从已经传上来的录像里转写出文字（记成 `transcript_source = live`）再决定要不要追问；拿不到文字时不判断，按顺序问下去。面试结束后整段重新转写时再补全。
 - 候选人答完之后，`advance` 马上返回一句过渡语，回答放到后台判断。页面报告过渡语播完时判断还没好，这次请求会等到判断完再返回；判断最多等 20 秒，等不到就按顺序问下一题。极少数情况下返回 503（`answer_pending`），页面过一会儿原样重试。
 - `advance` 是幂等的：同一个 `seq` 重复提交返回同样的下一步（断网重试用）；`seq` 不是当前这一句也不是上一句时返回 409（`seq_conflict`）。面试已经结束时返回 `finish`。
-- 断点续面：`GET /room/session` 的 `resume` 是当前该播的那一句；页面重新检查设备后调 `start`，从这一句继续。录像从新的一段开始录。
+- 断点续面：`GET /room/session` 的 `resume` 是当前该播的那一句；页面重新检查设备后调 `start`，从这一句继续。录像从新的一段开始录。续面时这一步里的 `progress.elapsed_ms` 是服务端现在的时间（面试开始到此刻过了多久），页面拿它当时间轴的起点，新的一段录像才不会和刷新前的那段叠在一起。
+- 面试结束之后 `GET /room/session` 的 `stage` 是 `finished`，`end_reason` 是结束的原因（取值和 `finish` 的 `reason` 一样），页面据此决定结束页说「面试完成」还是「面试已结束」。还没结束时 `end_reason` 是 null。
 - 面试结束（不管哪种原因）时，服务端在同一个事务里排一个 `interview.finalize` 任务，转写和出报告从那里开始。
 - 页面超过 15 分钟（`AI_INTERVIEW_ROOM_ABANDON_MINUTES`）没有任何动静（不上报、不传录像），后台任务 `room.watchdog` 把面试按 `connection_lost` 结束，并记一条服务端事件 `interview_abandoned`。结束语已经发给页面的不算中途离开，记成正常结束。
 - 配置成实时对话（`conversational`）的面试，在实时通道接上之前按逐题进行，`session.mode` 是 `scripted`。

@@ -13,7 +13,7 @@ import {
   PageHeader,
   useToast,
 } from "@ai-interview/ui";
-import { FileText, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { FileText, Pencil, Plus, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage, isMock } from "../api/http";
@@ -37,7 +37,7 @@ import type {
   ParsedResume,
   Resume,
 } from "../api/types";
-import { Confirm, QueryView, RecommendationBadge, StatusBadge } from "../components/common";
+import { Confirm, DecisionBadge, QueryView, StatusBadge } from "../components/common";
 import {
   fileSize,
   parseStatusLabel,
@@ -347,6 +347,11 @@ function ResumeRow({ resume, candidateId }: { resume: Resume; candidateId: strin
             .join(" · ")}
         </div>
         {resume.parse_error && <div className="adm-item__sub">{resume.parse_error}</div>}
+        {resume.parse_status === "done" && resume.parse_warning && (
+          <div className="adm-item__sub adm-item__sub--warn">
+            <TriangleAlert aria-hidden="true" size={14} /> {resume.parse_warning}
+          </div>
+        )}
         <div className="oil-row oil-row--wrap adm-row-actions">
           {resume.has_file && !isMock && (
             <a
@@ -642,14 +647,11 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
                         <li key={i.id} className="adm-item">
                           <div className="adm-item__main">
                             <Link to={`/interviews/${i.id}`} className="adm-link">
-                              {i.position.title}
+                              {i.position_title}
                             </Link>
                             <div className="adm-item__sub">{relativeTime(i.updated_at)}</div>
                           </div>
-                          {i.overall_score !== null && (
-                            <strong className="oil-num">{i.overall_score}</strong>
-                          )}
-                          <RecommendationBadge value={i.recommendation} />
+                          <DecisionBadge value={i.decision} />
                           <StatusBadge status={i.status} />
                         </li>
                       ))}

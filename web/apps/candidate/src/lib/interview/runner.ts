@@ -8,7 +8,15 @@
  * 只有链接失效、面试被取消这类重试没用的错误才会让 run 失败。
  */
 import { RoomApiError } from "../api/room-api";
-import type { AdvanceRequest, AnswerEndReason, AnswerSettings, NextStep, Progress, Utterance } from "../api/room-types";
+import type {
+  AdvanceRequest,
+  AnswerEndReason,
+  AnswerSettings,
+  NextStep,
+  Progress,
+  SayStep,
+  Utterance,
+} from "../api/room-types";
 import type { LevelFrame, Playback } from "../media/audio-graph";
 import {
   DEFAULT_TURN_CONFIG,
@@ -51,6 +59,8 @@ export interface RunnerOptions<B> {
   random?: () => number;
   /** 每次状态机发生有意义的变化时调用，用来记过程事件。 */
   onTurnEvent?: (event: TurnEvent, state: TurnState) => void;
+  /** 候选人答完一题、还没上报之前调用。 */
+  onAnswerEnded?: () => void;
 }
 
 export type RunnerPhase =
@@ -89,8 +99,6 @@ export interface RunnerSnapshot {
   error: RoomApiError | null;
 }
 
-type SayStep = Extract<NextStep, { action: "say" }>;
-
 const END_REASON: Record<TurnEndReason, AnswerEndReason> = {
   silence: "silence",
   manual: "button",
@@ -99,7 +107,10 @@ const END_REASON: Record<TurnEndReason, AnswerEndReason> = {
 };
 
 /** 把服务端给的作答设置换成状态机的配置。 */
-export function turnConfigFor(answer: AnswerSettings | null, base: TurnConfig = DEFAULT_TURN_CONFIG): TurnConfig {
+export function turnConfigFor(
+  answer: AnswerSettings | null | undefined,
+  base: TurnConfig = DEFAULT_TURN_CONFIG,
+): TurnConfig {
   if (!answer) return base;
   const silenceMs = Math.max(1_000, Math.round(answer.silence_sec * 1000));
   const maxAnswerMs = Math.max(10_000, Math.round(answer.max_sec * 1000));
@@ -139,6 +150,7 @@ export class InterviewRunner<B> {
   private readonly retryMaxMs: number;
   private readonly random: () => number;
   private readonly onTurnEvent: ((event: TurnEvent, state: TurnState) => void) | undefined;
+  private readonly onAnswerEnded: (() => void) | undefined;
 
   private readonly listeners = new Set<(snapshot: RunnerSnapshot) => void>();
   private readonly audioCache = new Map<string, Promise<B | null>>();
@@ -171,6 +183,7 @@ export class InterviewRunner<B> {
     this.retryMaxMs = options.retryMaxMs ?? 10_000;
     this.random = options.random ?? Math.random;
     this.onTurnEvent = options.onTurnEvent;
+    this.onAnswerEnded = options.onAnswerEnded;
     this.snapshot = this.buildSnapshot();
   }
 
@@ -197,7 +210,8 @@ export class InterviewRunner<B> {
       return step.reason;
     } catch (error) {
       if (error instanceof Aborted) return null;
-      this.error = error instanceof RoomApiError ? error : new RoomApiError("rejected", String(error));
+      this.error =
+        error instanceof RoomApiError ? error : new RoomApiError("rejected", String(error));
       this.setPhase("failed");
       throw this.error;
     } finally {
@@ -263,7 +277,7 @@ export class InterviewRunner<B> {
     this.turn = null;
     this.hasAudio = false;
     this.setPhase("preparing");
-    for (const url of step.preload_audio_urls ?? []) void this.loadAudio(url);
+    for (const url of step.preload_audio_urls) void this.loadAudio(url);
 
     const buffer = step.utterance.audio_url ? await this.loadAudio(step.utterance.audio_url) : null;
     this.checkAborted();
@@ -320,6 +334,7 @@ export class InterviewRunner<B> {
       const turn = this.turn as TurnState;
       if (turn.phase !== "ended") continue; // 重听题目
 
+      this.onAnswerEnded?.();
       return {
         seq: step.seq,
         utterance_key: step.utterance.key,
@@ -347,7 +362,9 @@ export class InterviewRunner<B> {
         if (error instanceof RoomApiError && !error.retryable) throw error;
         this.submitFailures += 1;
         this.emit();
-        await this.sleep(retryDelayMs(this.submitFailures, this.retryBaseMs, this.retryMaxMs, this.random()));
+        await this.sleep(
+          retryDelayMs(this.submitFailures, this.retryBaseMs, this.retryMaxMs, this.random()),
+        );
         this.checkAborted();
       }
     }
@@ -429,7 +446,8 @@ export class InterviewRunner<B> {
   }
 
   private buildSnapshot(): RunnerSnapshot {
-    const listening = this.phase === "listening" && this.turn?.phase === "listening" ? this.turn : null;
+    const listening =
+      this.phase === "listening" && this.turn?.phase === "listening" ? this.turn : null;
     const view = listening ? viewTurn(listening, this.now(), this.config) : null;
     const vad = this.vad.snapshot();
     return {

@@ -12,10 +12,12 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 chrono = { workspace = true }
+interview-audio = { workspace = true }
 interview-core = { workspace = true, features = ["sqlx"] }
 interview-engine = { workspace = true }
 interview-llm = { workspace = true }
 interview-platform = { workspace = true }
+interview-stt = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

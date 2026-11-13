@@ -1375,7 +1375,9 @@ name = "interview-audio"
 version = "0.1.0"
 dependencies = [
  "hound",
+ "tempfile",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1434,6 +1436,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "tempfile",
  "tokio",
  "tracing",
  "utoipa",
@@ -1525,10 +1528,12 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
+ "interview-audio",
  "interview-core",
  "interview-engine",
  "interview-llm",
  "interview-platform",
+ "interview-stt",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -1548,7 +1553,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "bytes",
  "clap",
+ "interview-audio",
  "interview-flow",
  "interview-llm",
  "interview-platform",
@@ -1568,6 +1575,7 @@ dependencies = [
  "utoipa",
  "utoipa-axum",
  "utoipa-scalar",
+ "uuid",
 ]
 
 [[package]]
@@ -1580,6 +1588,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sherpa-onnx",
+ "tempfile",
  "thiserror",
  "tokio",
 ]
@@ -1618,16 +1627,26 @@ name = "interview-tts"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
+ "bytes",
+ "chrono",
  "futures-util",
+ "hound",
  "interview-audio",
+ "interview-core",
+ "interview-platform",
  "reqwest",
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "sqlx",
  "tempfile",
  "thiserror",
  "tokio",
  "tracing",
+ "utoipa",
+ "utoipa-axum",
+ "uuid",
 ]
 
 [[package]]

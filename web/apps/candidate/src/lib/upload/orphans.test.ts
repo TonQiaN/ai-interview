@@ -5,7 +5,14 @@ import { closeOrphanSegments } from "./orphans";
 const sessionKey = "s";
 
 function segment(segmentId: string, totalChunks: number | null = null): SegmentMeta {
-  return { sessionKey, track: "camera", segmentId, mimeType: "video/webm", startMs: 0, totalChunks };
+  return {
+    sessionKey,
+    track: "camera",
+    segmentId,
+    mimeType: "video/webm",
+    startMs: 0,
+    totalChunks,
+  };
 }
 
 async function addChunk(store: MemoryChunkStore, segmentId: string, seq: number) {

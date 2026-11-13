@@ -197,8 +197,9 @@ HR 可以在 `ready` 之后看题、改题；改过的话术重新合成。
 interview.finalize（interview-flow）
   → 等录像合并完成（等不到也往下走，不卡住报告）
   → 调 interview-stt 重新转写候选人的回答，更新 interview_turns（带逐字时间戳）
-    现在只转写有单独答题录音的轮次（interview_turns.audio_blob_key）；
-    从整段录像里按时间切出回答再转写，等语音线的解码函数合进来之后接
+    回答的声音按起止时间从合并好的录像里取（用 ffmpeg，优先单独的麦克风那一路，没有就用摄像头那一路；
+    一个回答跨了两段录像会拼起来）。对话记录上挂了单独录音的（interview_turns.audio_blob_key）用那份录音。
+    没装 ffmpeg、没有录像、没听到人说话时，保留面试中转写的文字
   → 入队 report.generate
 report.generate（interview-flow）
   → 组装面试记录（岗位、简历、配置、plan、turns、events）
@@ -217,6 +218,7 @@ HR 在后台看录像、文字记录、报告，写结论（interviews.decision�
 | `interview.prepare` | ① | 出题加预合成语音 |
 | `interview.synthesize` | ① | 重新合成一场面试里改过的话术 |
 | `recording.assemble` | ⑤ | 把分片合并成完整录像 |
+| `room.watchdog` | ⑤ | 面试开始后定时看候选人还在不在，太久没动静就结束面试（`abandoned`，原因 `connection_lost`） |
 | `interview.finalize` | ① | 面试结束后的转写 |
 | `report.generate` | ① | 生成分析报告 |
 

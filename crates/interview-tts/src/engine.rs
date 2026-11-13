@@ -2,12 +2,13 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// 选择 TTS 引擎的环境变量名，取值见 [`EngineId::as_str`]。
 pub const ENGINE_ENV_VAR: &str = "AI_INTERVIEW_TTS_ENGINE";
 
 /// AI 面试可以用的 TTS 引擎。取值和 `tts/engines.json` 里的 `id` 一致。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EngineId {
     Index2,
@@ -68,7 +69,7 @@ impl FromStr for EngineId {
 }
 
 /// 合成文本的语言。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
     Zh,

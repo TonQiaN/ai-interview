@@ -4,35 +4,45 @@
  * 它接的是 fetch 这一层：页面和数据请求的代码不知道后面是真是假。
  * 真后端的接口就绪后，把 VITE_API_MOCK 设成 0 就走真接口，这个目录只留给演示和测试用。
  */
+
+import { estimateBudget } from "../../lib/budget";
 import type {
   AdminUser,
   Candidate,
   CandidateDetail,
   CandidateInput,
   CandidateListItem,
+  CreatedInvite,
+  Decision,
   DuplicateHint,
   Interview,
+  InterviewConfig,
   InterviewInput,
+  InterviewPatch,
+  InterviewPlan,
   InterviewStatus,
   InterviewSummary,
-  Invite,
+  InterviewTemplate,
   Page,
   Position,
   PositionDraft,
   PositionInput,
   RaasCandidateImportItem,
   RaasPositionImportItem,
+  ReportEnvelope,
   Resume,
   ResumeDetail,
   SystemStatus,
+  TemplateInput,
   Utterance,
   Voice,
   VoiceInput,
 } from "../types";
-import { sampleReport, sampleUtterances } from "./samples";
+import { planUtterances, samplePlan, sampleReport } from "./samples";
 import {
   buildSeed,
   configDefaults,
+  defaultConfig,
   emptyExtra,
   emptyProfile,
   engines,
@@ -40,6 +50,7 @@ import {
   newId,
   parsedFrom,
   profileFrom,
+  type ReportVersion,
   raasCandidates,
   raasPositions,
   type Seed,
@@ -125,15 +136,46 @@ function byNewest<T extends { created_at: string }>(a: T, b: T): number {
 }
 
 function summary(i: Interview): InterviewSummary {
-  const {
-    config: _c,
-    prepare_error: _e,
-    prepare_progress: _p,
-    decision_note: _n,
-    decided_at: _d,
-    ...rest
-  } = i;
-  return rest;
+  return {
+    id: i.id,
+    candidate_id: i.candidate.id,
+    candidate_name: i.candidate.name,
+    position_id: i.position.id,
+    position_title: i.position.title,
+    status: i.status,
+    decision: i.decision,
+    report_status: i.report?.status ?? null,
+    started_at: i.started_at ?? null,
+    ended_at: i.ended_at ?? null,
+    created_at: i.created_at,
+    updated_at: i.updated_at,
+  };
+}
+
+/** 只有这几个状态能改设置、改题目、重新准备 */
+const EDITABLE: InterviewStatus[] = ["draft", "prepare_failed", "ready"];
+const ENDED: InterviewStatus[] = ["completed", "abandoned", "expired", "cancelled"];
+
+/** 和后端一样的范围检查，只查页面上能填错的那几项 */
+function configIssues(config: InterviewConfig): Record<string, string> | null {
+  const { limits } = configDefaults;
+  const issues: Record<string, string> = {};
+  const check = (path: string, value: number, range: { min: number; max: number }) => {
+    if (value < range.min || value > range.max)
+      issues[path] = `要在 ${range.min} 到 ${range.max} 之间`;
+  };
+  check("target_duration_minutes", config.target_duration_minutes, limits.target_duration_minutes);
+  if (config.question_count !== null)
+    check("question_count", config.question_count, limits.question_count);
+  check("answer.silence_sec", config.answer.silence_sec, limits.silence_sec);
+  check("answer.max_sec", config.answer.max_sec, limits.max_sec);
+  check("answer.min_sec", config.answer.min_sec, limits.min_sec);
+  if (config.answer.min_sec >= config.answer.max_sec)
+    issues["answer.min_sec"] = "要比最长回答时间短";
+  config.competencies.forEach((c, index) => {
+    if (!c.name.trim()) issues[`competencies[${index}].name`] = "不能为空";
+  });
+  return Object.keys(issues).length > 0 ? issues : null;
 }
 
 const SESSION_KEY = "ai-interview-mock-session";
@@ -230,6 +272,7 @@ export function createMockServer(options: MockOptions = {}) {
       is_primary: true,
       parse_status: "pending",
       parse_error: null,
+      parse_warning: null,
       parsed_at: null,
       created_at: iso(0),
       updated_at: iso(0),
@@ -275,46 +318,97 @@ export function createMockServer(options: MockOptions = {}) {
     return picked;
   }
 
-  /** 生成报告：过一会儿变成 done，报告内容取自样例 */
-  function generateReport(i: Interview, delay = jobMs) {
-    i.report_status = "running";
-    i.report_error = null;
+  /** 生成一版新报告：过一会儿变成 done，内容取自样例 */
+  function generateReport(i: Interview, delay = jobMs, existing?: ReportVersion) {
+    const versions = db.reports.get(i.id) ?? [];
+    const version: ReportVersion = existing ?? {
+      brief: {
+        id: newId(),
+        version: (versions[0]?.brief.version ?? 0) + 1,
+        status: "running",
+        error: null,
+        generated_at: null,
+      },
+      content: null,
+    };
+    if (!existing) {
+      versions.unshift(version);
+      db.reports.set(i.id, versions);
+    }
+    i.report = version.brief;
     later(delay, () => {
       if ((db.turns.get(i.id)?.length ?? 0) < 4) {
-        i.report_status = "failed";
-        i.report_error = "回答内容太少，不足以生成报告。";
-        touch(i);
-        return;
+        version.brief.status = "failed";
+        version.brief.error = "回答内容太少，不足以生成报告。";
+      } else {
+        version.content = sampleReport(sampleFor(i), i.id, Date.now());
+        version.brief.status = "done";
+        version.brief.generated_at = iso(0);
       }
-      const report = sampleReport(sampleFor(i), i.id, Date.now());
-      db.reports.set(i.id, report);
-      i.report_status = "done";
-      i.overall_score = report.overall_score;
-      i.recommendation = report.recommendation.decision;
       touch(i);
     });
   }
 
-  /** 准备面试：一句一句合成，进度往前走，最后变成 ready */
-  function prepare(i: Interview) {
-    const planned = sampleUtterances(sampleFor(i), true).map(
-      (u): Utterance => ({ ...u, synth_status: "pending", audio_duration_ms: null }),
-    );
-    db.utterances.set(i.id, planned);
+  function countSynth(i: Interview) {
+    const lines = db.utterances.get(i.id) ?? [];
+    i.synth = {
+      total: lines.length,
+      done: lines.filter((u) => u.synth_status === "done").length,
+      failed: lines.filter((u) => u.synth_status === "failed").length,
+    };
+  }
+
+  /** 把计划里的句子和已经合成好的对一遍：文字没变的留着，变了的和新增的重新合成 */
+  function syncUtterances(i: Interview, plan: InterviewPlan) {
+    const old = new Map((db.utterances.get(i.id) ?? []).map((u) => [u.key, u]));
+    const lines = planUtterances(plan, false).map((u): Utterance => {
+      const prev = old.get(u.key);
+      return prev && prev.text === u.text && prev.synth_status === "done"
+        ? { ...prev, seq: u.seq }
+        : u;
+    });
+    db.utterances.set(i.id, lines);
+    countSynth(i);
+  }
+
+  /** 准备面试：先出题，再一句一句合成，进度往前走，最后变成 ready */
+  function prepare(i: Interview, regeneratePlan = false) {
     i.prepare_error = null;
-    i.prepare_progress = { done: 0, total: planned.length };
     touch(i, "preparing");
-    const step = Math.max(40, Math.round(jobMs / (planned.length + 2)));
-    planned.forEach((u, index) => {
-      later(step * (index + 2), () => {
-        if (i.status !== "preparing") return;
-        u.synth_status = "done";
-        u.audio_duration_ms = u.text.length * 260;
-        i.prepare_progress = { done: index + 1, total: planned.length };
-        if (index === planned.length - 1) {
-          i.prepare_progress = null;
-          touch(i, "ready");
-        }
+    const needPlan = regeneratePlan || !db.plans.has(i.id);
+    if (needPlan) {
+      db.plans.delete(i.id);
+      db.utterances.delete(i.id);
+      i.has_plan = false;
+      countSynth(i);
+    }
+    const planMs = needPlan ? Math.round(jobMs / 3) : 0;
+    later(planMs, () => {
+      if (i.status !== "preparing") return;
+      let plan = db.plans.get(i.id);
+      if (!plan) {
+        plan = samplePlan(sampleFor(i), i.config);
+        db.plans.set(i.id, plan);
+        i.has_plan = true;
+      }
+      syncUtterances(i, plan);
+      const todo = (db.utterances.get(i.id) ?? []).filter((u) => u.synth_status !== "done");
+      if (todo.length === 0) {
+        touch(i, "ready");
+        return;
+      }
+      const step = Math.max(30, Math.round(jobMs / (todo.length + 2)));
+      todo.forEach((u, index) => {
+        later(step * (index + 1), () => {
+          if (i.status !== "preparing" || !db.utterances.get(i.id)?.includes(u)) return;
+          u.synth_status = "done";
+          u.synth_error = null;
+          u.has_audio = true;
+          u.audio_duration_ms = u.text.length * 260;
+          u.tts_engine = "index2";
+          countSynth(i);
+          if (index === todo.length - 1) touch(i, "ready");
+        });
       });
     });
   }
@@ -324,6 +418,17 @@ export function createMockServer(options: MockOptions = {}) {
     const hasActive = list.some((x) => x.status === "active");
     if (i.status === "ready" && hasActive) touch(i, "invited");
     if (i.status === "invited" && !hasActive) touch(i, "ready");
+  }
+
+  function ensureEditable(i: Interview) {
+    if (EDITABLE.includes(i.status)) return;
+    throw new HttpError(
+      409,
+      "interview_not_editable",
+      i.status === "preparing"
+        ? "正在准备，等它结束再改"
+        : "链接已经发出或者面试已经开始，不能再改了",
+    );
   }
 
   const me: AdminUser = {
@@ -689,7 +794,12 @@ export function createMockServer(options: MockOptions = {}) {
     const c = Object.assign(find.candidate(params[0]), patch, { updated_at: iso(0) });
     for (const i of db.interviews)
       if (i.candidate.id === c.id)
-        i.candidate = { id: c.id, name: c.name, current_title: c.current_title ?? null };
+        i.candidate = {
+          id: c.id,
+          name: c.name,
+          current_title: c.current_title ?? null,
+          current_company: c.current_company ?? null,
+        };
     return detail(c);
   });
   on("DELETE", "/candidates/:id", ({ params }) => {
@@ -779,77 +889,112 @@ export function createMockServer(options: MockOptions = {}) {
 
   // ───────── 面试配置 ─────────
   on("GET", "/interview-config/defaults", () => configDefaults);
-  on("GET", "/interview-templates", () => ({ items: [...db.templates].sort(byNewest) }));
-  on("POST", "/interview-templates", ({ body }) => {
-    const input = body as { name: string; description: string | null; config: Interview["config"] };
-    if (!input.name?.trim())
+
+  function checkTemplate(name: string | null | undefined, config?: InterviewConfig | null) {
+    if (name !== undefined && !name?.trim())
       throw new HttpError(422, "validation_failed", "模板名称不能为空", { name: "不能为空" });
-    const t = { ...input, id: newId(), is_default: false, created_at: iso(0), updated_at: iso(0) };
+    const issues = config ? configIssues(config) : null;
+    if (issues) throw new HttpError(422, "validation_failed", "面试设置不合要求", issues);
+  }
+
+  on("GET", "/interview-templates", ({ query }) =>
+    paginate(
+      db.templates.filter((t) => matches(query.get("q"), t.name, t.description)).sort(byNewest),
+      query,
+    ),
+  );
+  on("POST", "/interview-templates", ({ body }) => {
+    const input = body as TemplateInput;
+    checkTemplate(input.name, input.config);
+    const t: InterviewTemplate = {
+      id: newId(),
+      name: input.name.trim(),
+      description: input.description ?? null,
+      config: input.config,
+      created_at: iso(0),
+      updated_at: iso(0),
+    };
     db.templates.push(t);
     return t;
   });
-  on("GET", "/interview-templates/:id", ({ params }) => {
-    const t = db.templates.find((x) => x.id === params[0]);
+  const template = (id: string | undefined) => {
+    const t = db.templates.find((x) => x.id === id);
     if (!t) throw notFound("模板");
     return t;
-  });
+  };
+  on("GET", "/interview-templates/:id", ({ params }) => template(params[0]));
   on("PATCH", "/interview-templates/:id", ({ params, body }) => {
-    const t = db.templates.find((x) => x.id === params[0]);
-    if (!t) throw notFound("模板");
-    const patch = body as Partial<typeof t>;
-    if (patch.is_default) for (const other of db.templates) other.is_default = false;
-    return Object.assign(t, patch, { updated_at: iso(0) });
+    const t = template(params[0]);
+    const patch = body as Partial<TemplateInput>;
+    checkTemplate(patch.name, patch.config);
+    if (patch.name) t.name = patch.name.trim();
+    if (patch.description !== undefined) t.description = patch.description;
+    if (patch.config) t.config = patch.config;
+    t.updated_at = iso(0);
+    return t;
   });
   on("DELETE", "/interview-templates/:id", ({ params }) => {
-    const t = db.templates.find((x) => x.id === params[0]);
-    if (!t) throw notFound("模板");
-    if (t.is_default) throw conflict("默认模板不能删除，先把别的模板设为默认");
+    const t = template(params[0]);
     db.templates = db.templates.filter((x) => x !== t);
     return null;
   });
 
   // ───────── 面试 ─────────
   on("GET", "/interviews", ({ query }) => {
-    const statuses = query.get("status")?.split(",").filter(Boolean);
+    const status = query.get("status");
     const list = db.interviews
-      .filter(
-        (i) =>
-          (!statuses?.length || statuses.includes(i.status)) &&
-          (!query.get("candidate_id") || i.candidate.id === query.get("candidate_id")) &&
-          (!query.get("position_id") || i.position.id === query.get("position_id")) &&
-          matches(query.get("q"), i.candidate.name, i.position.title),
-      )
+      .filter((i) => !status || i.status === status)
+      .filter((i) => !query.get("candidate_id") || i.candidate.id === query.get("candidate_id"))
+      .filter((i) => !query.get("position_id") || i.position.id === query.get("position_id"))
+      .filter((i) => matches(query.get("q"), i.candidate.name, i.position.title))
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
       .map(summary);
     return paginate(list, query);
   });
   on("POST", "/interviews", ({ body }) => {
     const input = body as InterviewInput;
-    const c = find.candidate(input.candidate_id);
-    const p = find.position(input.position_id);
+    const details: Record<string, string> = {};
+    const c = db.candidates.find((x) => x.id === input.candidate_id);
+    const p = db.positions.find((x) => x.id === input.position_id);
+    if (!c) details.candidate_id = "这个候选人不存在";
+    if (!p) details.position_id = "这个岗位不存在";
+    const fromTemplate = input.template_id
+      ? db.templates.find((t) => t.id === input.template_id)
+      : null;
+    if (input.template_id && !fromTemplate) details.template_id = "这个模板不存在";
+    if (!c || !p || Object.keys(details).length > 0)
+      throw new HttpError(422, "validation_failed", "请检查填写的内容", details);
+    // 和后端一样的先后顺序：请求里的设置、模板的设置、默认设置
+    const config = input.config ?? fromTemplate?.config ?? defaultConfig;
+    const issues = configIssues(config);
+    if (issues) throw new HttpError(422, "validation_failed", "面试设置不合要求", issues);
     const i: Interview = {
       id: newId(),
       status: "draft",
-      candidate: { id: c.id, name: c.name, current_title: c.current_title ?? null },
+      candidate: {
+        id: c.id,
+        name: c.name,
+        current_title: c.current_title ?? null,
+        current_company: c.current_company ?? null,
+      },
       position: { id: p.id, title: p.title, department: p.department ?? null },
-      mode: input.config.mode,
-      expected_duration_min: input.config.expected_duration_min,
-      started_at: null,
-      ended_at: null,
-      duration_ms: null,
-      end_reason: null,
-      report_status: null,
-      overall_score: null,
-      recommendation: null,
-      decision: "undecided",
-      created_at: iso(0),
-      updated_at: iso(0),
-      config: input.config,
+      config,
+      time_budget: estimateBudget(config),
+      has_plan: false,
+      synth: { done: 0, failed: 0, total: 0 },
       prepare_error: null,
-      prepare_progress: null,
-      report_error: null,
+      report: null,
+      resume_id: input.resume_id ?? primaryResume(c.id)?.id ?? null,
+      template_id: input.template_id ?? null,
+      voice_id: input.voice_id ?? null,
+      decision: "pending",
       decision_note: null,
       decided_at: null,
+      started_at: null,
+      ended_at: null,
+      end_reason: null,
+      created_at: iso(0),
+      updated_at: iso(0),
     };
     db.interviews.push(i);
     return i;
@@ -857,135 +1002,189 @@ export function createMockServer(options: MockOptions = {}) {
   on("GET", "/interviews/:id", ({ params }) => find.interview(params[0]));
   on("PATCH", "/interviews/:id", ({ params, body }) => {
     const i = find.interview(params[0]);
-    if (!["draft", "prepare_failed", "ready"].includes(i.status))
-      throw conflict("面试已经发出或开始，不能再改设置");
-    const { config } = body as { config: Interview["config"] };
+    ensureEditable(i);
+    const patch = body as InterviewPatch;
+    const config = patch.config ?? i.config;
+    const issues = configIssues(config);
+    if (issues) throw new HttpError(422, "validation_failed", "面试设置不合要求", issues);
+    const resumeId = patch.resume_id ?? i.resume_id ?? null;
+    const voiceId = patch.voice_id ?? i.voice_id ?? null;
+    const contentChanged =
+      JSON.stringify(config) !== JSON.stringify(i.config) || resumeId !== (i.resume_id ?? null);
+    const voiceChanged = voiceId !== (i.voice_id ?? null);
     i.config = config;
-    i.mode = config.mode;
-    i.expected_duration_min = config.expected_duration_min;
-    // 改了设置，原来准备好的题目作废
-    if (i.status === "ready") {
+    i.time_budget = estimateBudget(config);
+    i.resume_id = resumeId;
+    i.voice_id = voiceId;
+    if (contentChanged) {
+      // 设置或简历变了，原来的题目作废
+      db.plans.delete(i.id);
       db.utterances.delete(i.id);
-      touch(i, "draft");
-    } else touch(i);
+      i.has_plan = false;
+    } else if (voiceChanged) {
+      // 只换了声音：题目留着，语音要重新合成
+      for (const u of db.utterances.get(i.id) ?? []) {
+        u.synth_status = "pending";
+        u.has_audio = false;
+        u.audio_duration_ms = null;
+      }
+    }
+    countSynth(i);
+    i.prepare_error = null;
+    touch(i, contentChanged || voiceChanged ? "draft" : undefined);
     return i;
   });
   on("DELETE", "/interviews/:id", ({ params }) => {
     const i = find.interview(params[0]);
+    if (i.status === "preparing" || i.status === "in_progress")
+      throw conflict("面试正在准备或者进行中，等它结束再删");
     db.interviews = db.interviews.filter((x) => x !== i);
     return null;
   });
-  on("POST", "/interviews/:id/prepare", ({ params }) => {
+  on("POST", "/interviews/:id/prepare", ({ params, body }) => {
     const i = find.interview(params[0]);
-    if (!["draft", "prepare_failed"].includes(i.status))
-      throw conflict("只有草稿或准备失败的面试可以生成题目");
-    prepare(i);
+    ensureEditable(i);
+    prepare(i, Boolean((body as { regenerate_plan?: boolean } | null)?.regenerate_plan));
     return i;
   });
   on("POST", "/interviews/:id/cancel", ({ params }) => {
     const i = find.interview(params[0]);
-    if (["completed", "abandoned", "expired", "cancelled"].includes(i.status))
-      throw conflict("面试已经结束，不能取消");
+    if (ENDED.includes(i.status)) throw conflict("这场面试已经结束了");
     for (const invite of db.invites.get(i.id) ?? [])
-      if (invite.status === "active") invite.status = "revoked";
+      if (invite.status === "active") {
+        invite.status = "revoked";
+        invite.revoked_at = iso(0);
+      }
     touch(i, "cancelled");
     return i;
   });
-  on("GET", "/interviews/:id/utterances", ({ params }) => {
-    find.interview(params[0]);
-    return { items: db.utterances.get(params[0] ?? "") ?? [] };
-  });
+  const planOf = (i: Interview) => {
+    const plan = db.plans.get(i.id);
+    if (!plan) throw new HttpError(404, "plan_not_ready", "题目还没有生成");
+    return plan;
+  };
+  on("GET", "/interviews/:id/plan", ({ params }) => planOf(find.interview(params[0])));
   on("PUT", "/interviews/:id/plan", ({ params, body }) => {
     const i = find.interview(params[0]);
-    if (i.status !== "ready") throw conflict("只有题目准备好、还没发出链接的面试可以改题");
-    const edits = (body as { items: { key: string; text: string }[] }).items;
-    const list = db.utterances.get(i.id) ?? [];
-    for (const edit of edits) {
-      const u = list.find((x) => x.key === edit.key);
-      if (!u || u.text === edit.text) continue;
-      u.text = edit.text;
-      u.synth_status = "running";
-      u.audio_duration_ms = null;
-      later(jobMs / 2, () => {
-        u.synth_status = "done";
-        u.audio_duration_ms = u.text.length * 260;
+    ensureEditable(i);
+    planOf(i);
+    const plan = body as InterviewPlan;
+    const details: Record<string, string> = {};
+    if (plan.questions.length === 0) details.questions = "至少要有一道题";
+    plan.questions.forEach((q, index) => {
+      if (!q.text.trim()) details[`questions[${index}].text`] = "不能为空";
+      (q.follow_ups ?? []).forEach((f, n) => {
+        if (!f.text.trim()) details[`questions[${index}].follow_ups[${n}].text`] = "不能为空";
       });
-    }
-    touch(i);
-    return { items: list };
+    });
+    for (const key of ["opening", "closing"] as const)
+      if (!plan.phrases[key].trim()) details[`phrases.${key}`] = "不能为空";
+    if (Object.keys(details).length > 0)
+      throw new HttpError(422, "validation_failed", "题目里有没填的内容", details);
+    db.plans.set(i.id, plan);
+    // 改过的句子重新合成，没改的不动
+    prepare(i);
+    return plan;
+  });
+  on("GET", "/interviews/:id/utterances", ({ params }) => {
+    find.interview(params[0]);
+    return db.utterances.get(params[0] ?? "") ?? [];
   });
   on("GET", "/interviews/:id/utterances/:key/audio", () => {
-    throw new HttpError(503, "unavailable", "演示数据没有语音文件");
+    throw new HttpError(404, "not_found", "演示数据里没有合成好的语音");
   });
   on("GET", "/interviews/:id/transcript", ({ params }) => {
     const i = find.interview(params[0]);
-    const turns = db.turns.get(i.id) ?? [];
-    return { turns, duration_ms: i.duration_ms ?? turns.at(-1)?.end_ms ?? 0 };
+    return { items: db.turns.get(i.id) ?? [] };
   });
-  on("GET", "/interviews/:id/report", ({ params }) => {
+  on("GET", "/interviews/:id/reports", ({ params }) => {
     const i = find.interview(params[0]);
-    const r = db.reports.get(i.id);
-    // 生成中、失败时都还没有报告，进度看面试详情里的 report_status
-    if (!r || i.report_status !== "done") throw notFound("报告");
-    return r;
+    return { items: (db.reports.get(i.id) ?? []).map((v) => v.brief) };
+  });
+  on("GET", "/interviews/:id/report", ({ params, query }): ReportEnvelope => {
+    const i = find.interview(params[0]);
+    const wanted = query.get("version");
+    const version = (db.reports.get(i.id) ?? []).find((v) =>
+      wanted ? String(v.brief.version) === wanted : v.brief.status === "done",
+    );
+    if (!version?.content) throw new HttpError(404, "report_not_ready", "报告还没有生成好");
+    return {
+      id: version.brief.id,
+      version: version.brief.version,
+      generated_at: version.brief.generated_at ?? null,
+      content: version.content,
+    };
   });
   on("POST", "/interviews/:id/report/regenerate", ({ params }) => {
     const i = find.interview(params[0]);
-    if (!["completed", "abandoned"].includes(i.status)) throw conflict("面试结束后才能生成报告");
-    if (i.report_status === "running" || i.report_status === "pending")
-      throw conflict("报告正在生成");
+    if (i.status !== "completed" && i.status !== "abandoned")
+      throw new HttpError(409, "interview_not_finished", "面试结束之后才能生成报告");
+    if (i.report?.status === "running" || i.report?.status === "pending")
+      throw conflict("报告正在生成，等它结束再试");
     generateReport(i);
+    touch(i);
     return i;
   });
   on("PUT", "/interviews/:id/decision", ({ params, body }) => {
     const i = find.interview(params[0]);
-    const { decision, note } = body as { decision: Interview["decision"]; note: string | null };
-    i.decision = decision;
-    i.decision_note = note?.trim() || null;
-    i.decided_at = decision === "undecided" ? null : iso(0);
+    const input = body as { decision: Decision; note?: string | null };
+    if ((input.note ?? "").length > 2000)
+      throw new HttpError(422, "validation_failed", "备注太长了", { note: "最多 2000 个字" });
+    i.decision = input.decision;
+    i.decision_note = input.decision === "pending" ? null : input.note?.trim() || null;
+    i.decided_at = input.decision === "pending" ? null : iso(0);
     touch(i);
     return i;
   });
-
   on("GET", "/interviews/:id/invites", ({ params }) => {
     find.interview(params[0]);
-    // 完整链接只在生成的那一次返回
-    return {
-      items: (db.invites.get(params[0] ?? "") ?? [])
-        .map((x) => ({ ...x, url: null }))
-        .sort(byNewest),
-    };
+    const list = db.invites.get(params[0] ?? "") ?? [];
+    for (const invite of list)
+      if (invite.status === "active" && invite.expires_at < iso(0)) invite.status = "expired";
+    return { items: list };
   });
-  on("POST", "/interviews/:id/invites", ({ params, body }) => {
+  on("POST", "/interviews/:id/invites", ({ params, body }): CreatedInvite => {
     const i = find.interview(params[0]);
-    if (!["ready", "invited"].includes(i.status))
+    if (i.status !== "ready" && i.status !== "invited")
       throw conflict("题目和语音准备好之后才能生成链接");
-    const days = Math.min(
-      30,
-      Math.max(1, Number((body as { expires_in_days?: number })?.expires_in_days ?? 7)),
-    );
-    const token = Array.from(
-      crypto.getRandomValues(new Uint8Array(18)),
-      (b) => "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"[b % 57],
-    ).join("");
-    const invite: Invite = {
+    const input = (body ?? {}) as { expires_in_hours?: number | null; keep_existing?: boolean };
+    const hours = input.expires_in_hours ?? 7 * 24;
+    if (hours < 1 || hours > 30 * 24)
+      throw new HttpError(422, "validation_failed", "有效期不合要求", {
+        expires_in_hours: "要在 1 到 720 之间",
+      });
+    const list = db.invites.get(i.id) ?? [];
+    if (!input.keep_existing)
+      for (const old of list)
+        if (old.status === "active") {
+          old.status = "revoked";
+          old.revoked_at = iso(0);
+        }
+    const invite = {
       id: newId(),
-      status: "active",
-      url: `${location.origin}/i/#${token}`,
-      token_hint: `…${token.slice(-4)}`,
-      expires_at: iso(days * 86_400_000),
+      interview_id: i.id,
+      status: "active" as const,
+      expires_at: iso(hours * 3_600_000),
+      revoked_at: null,
       first_opened_at: null,
+      last_opened_at: null,
+      open_count: 0,
       created_at: iso(0),
     };
-    db.invites.set(i.id, [...(db.invites.get(i.id) ?? []), invite]);
+    list.unshift(invite);
+    db.invites.set(i.id, list);
     refreshInviteState(i);
-    return invite;
+    const token = `demo${invite.id.slice(-10)}${Math.random().toString(36).slice(2, 12)}`;
+    return { invite, url: `${location.origin}/i/#${token}` };
   });
   on("DELETE", "/interviews/:id/invites/:invite_id", ({ params }) => {
     const i = find.interview(params[0]);
     const invite = (db.invites.get(i.id) ?? []).find((x) => x.id === params[1]);
     if (!invite) throw notFound("链接");
-    if (invite.status === "active") invite.status = "revoked";
+    if (invite.status === "active") {
+      invite.status = "revoked";
+      invite.revoked_at = iso(0);
+    }
     refreshInviteState(i);
     return null;
   });
@@ -993,9 +1192,11 @@ export function createMockServer(options: MockOptions = {}) {
     find.interview(params[0]);
     return { items: db.recordings.get(params[0] ?? "") ?? [] };
   });
-  on("GET", "/interviews/:id/events", ({ params }) => {
+  on("GET", "/interviews/:id/events", ({ params, query }) => {
     find.interview(params[0]);
-    return { items: db.events.get(params[0] ?? "") ?? [] };
+    const kind = query.get("kind");
+    const list = (db.events.get(params[0] ?? "") ?? []).filter((e) => !kind || e.kind === kind);
+    return paginate(list, query);
   });
 
   async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -1040,7 +1241,10 @@ export function createMockServer(options: MockOptions = {}) {
   }
 
   // 演示数据里「报告生成中」的那一场，过一会儿真的生成出来
-  for (const i of db.interviews) if (i.report_status === "running") generateReport(i, jobMs * 6);
+  for (const i of db.interviews) {
+    const running = (db.reports.get(i.id) ?? []).find((v) => v.brief.status === "running");
+    if (running) generateReport(i, jobMs * 6, running);
+  }
 
   return { fetch: handle, db };
 }

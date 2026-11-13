@@ -53,9 +53,16 @@ function SessionView({ session }: { session: InterviewSession }) {
     );
   }
   if (stage === "finishing") {
-    return <FinishingPage upload={snapshot.upload} error={snapshot.actionError} onRetry={() => void session.retryUpload()} />;
+    return (
+      <FinishingPage
+        upload={snapshot.upload}
+        error={snapshot.actionError}
+        onRetry={() => void session.retryUpload()}
+      />
+    );
   }
-  if (stage === "done") return <DonePage reason={snapshot.finishReason} problem={snapshot.problem} />;
+  if (stage === "done")
+    return <DonePage reason={snapshot.finishReason} problem={snapshot.problem} />;
   if (stage === "loading" || !room) return <Loading />;
 
   switch (stage) {
@@ -91,7 +98,14 @@ function SessionView({ session }: { session: InterviewSession }) {
         />
       );
     case "ready":
-      return <ReadyPage room={room} busy={snapshot.busy} error={snapshot.actionError} onBegin={() => void session.begin()} />;
+      return (
+        <ReadyPage
+          room={room}
+          busy={snapshot.busy}
+          error={snapshot.actionError}
+          onBegin={() => void session.begin()}
+        />
+      );
     case "interview":
       if (!snapshot.runner) return <Loading />;
       return (

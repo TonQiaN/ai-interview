@@ -50,7 +50,12 @@ export class EventCollector {
   }
 
   record(kind: string, payload: Record<string, unknown> = {}): void {
-    this.buffer.push({ kind, at_ms: this.timelineNow(), occurred_at: this.wallNow().toISOString(), payload });
+    this.buffer.push({
+      kind,
+      at_ms: this.timelineNow(),
+      occurred_at: this.wallNow().toISOString(),
+      payload,
+    });
     if (this.buffer.length > this.maxBuffered) {
       const overflow = this.buffer.length - this.maxBuffered;
       this.buffer.splice(0, overflow);
@@ -109,10 +114,16 @@ export class EventCollector {
 
 /** bindPageEvents 需要的浏览器对象。测试时可以传假的。 */
 export interface PageTargets {
-  document: Pick<Document, "addEventListener" | "removeEventListener" | "visibilityState" | "fullscreenElement"> &
+  document: Pick<
+    Document,
+    "addEventListener" | "removeEventListener" | "visibilityState" | "fullscreenElement"
+  > &
     Partial<Pick<Document, "getSelection" | "fullscreenEnabled">>;
   window: Pick<Window, "addEventListener" | "removeEventListener">;
-  mediaDevices?: (Pick<MediaDevices, "addEventListener" | "removeEventListener"> & Partial<Pick<MediaDevices, "enumerateDevices">>) | undefined;
+  mediaDevices?:
+    | (Pick<MediaDevices, "addEventListener" | "removeEventListener"> &
+        Partial<Pick<MediaDevices, "enumerateDevices">>)
+    | undefined;
   /** 单调时钟（毫秒），用来算「离开了多久」。默认 performance.now。 */
   now?: () => number;
 }
@@ -140,11 +151,14 @@ const DEVICE_KIND: Record<MediaDeviceKind, keyof DeviceCounts> = {
   audiooutput: "speaker",
 };
 
-async function countDevices(mediaDevices: PageTargets["mediaDevices"]): Promise<DeviceCounts | null> {
+async function countDevices(
+  mediaDevices: PageTargets["mediaDevices"],
+): Promise<DeviceCounts | null> {
   if (!mediaDevices?.enumerateDevices) return null;
   try {
     const counts: DeviceCounts = { camera: 0, microphone: 0, speaker: 0 };
-    for (const device of await mediaDevices.enumerateDevices()) counts[DEVICE_KIND[device.kind]] += 1;
+    for (const device of await mediaDevices.enumerateDevices())
+      counts[DEVICE_KIND[device.kind]] += 1;
     return counts;
   } catch {
     return null;
@@ -158,11 +172,16 @@ async function countDevices(mediaDevices: PageTargets["mediaDevices"]): Promise<
  * 失焦（window_blur）没法事先探测：有些应用内置的浏览器就是不触发，所以这里不列，
  * 报告要结合 page_opened 里的 in_app_browser 来判断。
  */
-export function collectableSignals(targets: PageTargets, navigatorLike: { onLine?: boolean } = {}): Record<string, boolean> {
+export function collectableSignals(
+  targets: PageTargets,
+  navigatorLike: { onLine?: boolean } = {},
+): Record<string, boolean> {
   return {
     visibility: typeof targets.document.visibilityState === "string",
     fullscreen: targets.document.fullscreenEnabled === true,
-    device_change: Boolean(targets.mediaDevices?.enumerateDevices) && "ondevicechange" in (targets.mediaDevices ?? {}),
+    device_change:
+      Boolean(targets.mediaDevices?.enumerateDevices) &&
+      "ondevicechange" in (targets.mediaDevices ?? {}),
     network: typeof navigatorLike.onLine === "boolean",
     clipboard: true,
   };
@@ -179,7 +198,12 @@ export function bindPageEvents(collector: EventCollector, targets: PageTargets):
   const now = targets.now ?? (() => performance.now());
   const unbind: Array<() => void> = [];
   const listen = (
-    target: { addEventListener: EventTarget["addEventListener"]; removeEventListener: EventTarget["removeEventListener"] } | undefined,
+    target:
+      | {
+          addEventListener: EventTarget["addEventListener"];
+          removeEventListener: EventTarget["removeEventListener"];
+        }
+      | undefined,
     type: string,
     handler: (event: Event) => void,
   ) => {
@@ -197,7 +221,10 @@ export function bindPageEvents(collector: EventCollector, targets: PageTargets):
   const comeBack = (pair: string, kind: string) => {
     const since = leftAt.get(pair);
     leftAt.delete(pair);
-    collector.record(kind, since === undefined ? {} : { duration_ms: Math.max(0, Math.round(now() - since)) });
+    collector.record(
+      kind,
+      since === undefined ? {} : { duration_ms: Math.max(0, Math.round(now() - since)) },
+    );
   };
 
   listen(doc, "visibilitychange", () => {
@@ -239,7 +266,9 @@ export function bindPageEvents(collector: EventCollector, targets: PageTargets):
     void countDevices(mediaDevices).then((after) => {
       devices = after;
       if (!before || !after) return collector.record("device_changed");
-      const kinds = (Object.keys(after) as Array<keyof DeviceCounts>).filter((kind) => after[kind] !== before[kind]);
+      const kinds = (Object.keys(after) as Array<keyof DeviceCounts>).filter(
+        (kind) => after[kind] !== before[kind],
+      );
       collector.record("device_changed", { kinds, before, after });
     });
   });

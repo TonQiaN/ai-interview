@@ -496,6 +496,33 @@ pub(crate) async fn open_recordings(db: &PgPool, interview_id: Uuid) -> Result<i
     .await
 }
 
+/// 一段合并好、带声音的录像。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub(crate) struct RecordingRow {
+    pub track: String,
+    pub blob_key: String,
+    /// 这一段从面试时间轴的哪一毫秒开始
+    pub start_ms: i64,
+    /// 探不出时长的是 `None`
+    pub duration_ms: Option<i64>,
+}
+
+/// 合并好的、带候选人声音的录像（摄像头那一路和单独的麦克风），按在时间轴上的先后排。
+pub(crate) async fn audio_recordings(
+    db: &PgPool,
+    interview_id: Uuid,
+) -> Result<Vec<RecordingRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT track, blob_key, start_ms, duration_ms FROM interview_recordings \
+         WHERE interview_id = $1 AND status = 'ready' AND blob_key IS NOT NULL \
+           AND track IN ('camera', 'microphone') \
+         ORDER BY start_ms, segment",
+    )
+    .bind(interview_id)
+    .fetch_all(db)
+    .await
+}
+
 /// `interview_reports` 的一行。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub(crate) struct ReportRow {
