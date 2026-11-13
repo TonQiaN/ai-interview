@@ -119,6 +119,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | 方法和路径 | 做什么 |
 | --- | --- |
 | `GET /api/v1/positions`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 岗位 |
+| `POST /api/v1/positions/draft` | 粘贴一段岗位描述，让大模型整理成岗位草稿（不保存，给新建岗位的表单预填） |
 | `GET /api/v1/candidates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 候选人 |
 | `GET /api/v1/candidates/{id}/resumes`、`POST /api/v1/candidates/{id}/resumes` | 简历列表、上传 |
 | `GET /api/v1/resumes/{id}`、`GET /api/v1/resumes/{id}/file`、`POST /api/v1/resumes/{id}/parse` | 简历详情、原件、重新解析 |
