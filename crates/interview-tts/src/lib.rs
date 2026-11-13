@@ -13,6 +13,8 @@
 //! 3. 后端实现 [`TtsBackend`]，用 [`TtsConfig`] 从环境变量选。三个引擎的推理只能在 Apple Silicon 的 Mac 上跑：
 //!    [`WorkerBackend`] 通过 HTTP 调 Mac 上常驻的 worker（`tts/worker/`），云端和 CI 用 [`FakeBackend`]（输出测试音）。
 //!
+//! HR 后台用的接口（引擎列表、音色管理、参考录音上传、试听）在 [`http`] 模块里。
+//!
 //! 参考录音是真人的声音：[`ReferenceAudio`] 的调试输出不带音频内容，日志里只出现它的哈希。
 
 mod backend;
@@ -20,6 +22,7 @@ mod cache;
 mod config;
 mod engine;
 mod fake;
+pub mod http;
 mod request;
 mod segment;
 mod synthesizer;
