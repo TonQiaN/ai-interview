@@ -71,7 +71,16 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 - 网页地址是 `{PUBLIC_URL}/i/#<令牌>`，令牌在 `#` 后面，所以不会出现在服务器和反向代理的访问日志里，也不会进 Referer。
 - 候选人侧的接口全部在 `/api/v1/room/` 下，令牌放在请求头 `Authorization: Bearer <令牌>`，路径和查询串里都不带令牌。
 - WebSocket 不能自定义请求头：先用令牌 `POST /api/v1/room/ws-ticket` 换一个 30 秒内有效的一次性票据，再用 `?ticket=` 连接。
-- 令牌是随机串，库里只存 SHA-256。过期或被撤销的返回 410。
+- 令牌是随机串，库里只存 SHA-256。完整链接只在生成时返回一次，之后查不到；重新生成会让旧链接作废（除非请求里带 `keep_existing`）。
+- 令牌有问题时的返回：
+
+| HTTP | code | 什么时候 |
+| --- | --- | --- |
+| 401 | `invite_invalid` | 没带令牌，或令牌不存在 |
+| 410 | `invite_expired` | 过了有效期。面试已经开始的不受有效期限制；结束后 24 小时内还能用来补传录像 |
+| 410 | `invite_revoked` | HR 撤销了这条链接，或重新生成了一条 |
+| 410 | `interview_cancelled` | 面试被取消或归档 |
+| 409 | `interview_not_ready` | 链接发出后 HR 又回去改题，面试还没重新准备好 |
 
 ### 取文件
 
@@ -152,8 +161,8 @@ HR 侧：
 
 | 方法和路径 | 做什么 |
 | --- | --- |
-| `GET /api/v1/interviews/{id}/invites`、`POST /api/v1/interviews/{id}/invites` ★ | 面试链接列表、生成（完整链接只在生成时返回一次） |
-| `DELETE /api/v1/interviews/{id}/invites/{invite_id}` | 撤销 |
+| `GET /api/v1/interviews/{id}/invites`、`POST /api/v1/interviews/{id}/invites` ★ | 面试链接列表、生成（完整链接只在生成时返回一次）。面试要先准备好（`ready` 或 `invited`），生成后状态变成 `invited`。请求体 `{ "expires_in_hours": 168, "keep_existing": false }`，两个字段都可以不填 |
+| `DELETE /api/v1/interviews/{id}/invites/{invite_id}` | 撤销。没有别的可用链接、候选人也没开始时，面试退回 `ready` |
 | `GET /api/v1/interviews/{id}/recordings` ★ | 录制轨道列表 |
 | `GET /api/v1/recordings/{id}/media` ★ | 录像文件，支持 Range |
 | `GET /api/v1/interviews/{id}/events` ★ | 过程事件 |
@@ -163,8 +172,8 @@ HR 侧：
 | 方法和路径 | 做什么 |
 | --- | --- |
 | `GET /api/v1/room/session` | 会话信息：状态、岗位和公司的展示名、预期时长、模式、同意事项、静音秒数、断点位置 |
-| `POST /api/v1/room/consent` | 记录同意 |
-| `POST /api/v1/room/device-check` | 上报设备检测结果 |
+| `POST /api/v1/room/consent` | 记录同意：`{ "consent_version", "agreed_keys" }`。必须同意的少勾了返回 422；版本和服务端当前的不一样返回 409（`consent_outdated`） |
+| `POST /api/v1/room/device-check` | 上报设备检测结果，记成一条 `device_report` 事件 |
 | `POST /api/v1/room/start` | 开始面试，返回第一句话。已经开始的面试再调一次，返回当前该播的那一句（刷新后续面用） |
 | `POST /api/v1/room/advance` | 逐题模式：上报刚答完的这一段（起止毫秒、结束原因），返回下一步 |
 | `GET /api/v1/room/utterances/{key}/audio` | 面试官语音 |
@@ -282,5 +291,7 @@ HR 侧：
 - `device_changed` 带 `kinds`（`camera`、`microphone`、`speaker` 里变了的那几类）和变化前后每类的个数 `before`、`after`，不带设备名称。
 - `page_opened` 带 `signals`：这个浏览器里哪几类事件采得到（`visibility`、`fullscreen`、`device_change`、`network`、`clipboard`），以及 `in_app_browser`（微信等内置浏览器的名字，可能不触发失焦事件）。报告据此区分「没发生」和「采不到」。
 - `device_check` 带 `result`（`passed` 或 `failed`）；失败时带 `error`（`permission_denied`、`device_not_found` 等）。
+- `device_report` 是 `POST /room/device-check` 记下的：`camera`、`microphone`、`speaker`（`ok`、`failed`、`skipped`）、`uplink_kbps`、`recording_mime`、`user_agent`。
+- `kind` 只能用小写字母、数字和下划线；`payload` 是一个 JSON 对象，序列化后不超过 4096 字节；一次最多报 200 条。格式不对的单条事件会被丢掉，不影响同一批里的其他事件。
 
-`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`device_check`、`page_opened`、`interview_started`、`interview_finished`、`question_replayed`、`answer_continued`、`events_dropped`、`face_count_changed`（⑦ 面试后从录像抽帧产出，浏览器不报）。
+`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`device_check`、`device_report`、`page_opened`、`interview_started`、`interview_finished`、`question_replayed`、`answer_continued`、`events_dropped`、`face_count_changed`（⑦ 面试后从录像抽帧产出，浏览器不报）。

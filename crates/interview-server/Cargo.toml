@@ -15,6 +15,7 @@ clap = { workspace = true }
 interview-flow = { workspace = true }
 interview-llm = { workspace = true }
 interview-platform = { workspace = true }
+interview-room = { workspace = true }
 interview-talent = { workspace = true }
 interview-tts = { workspace = true }
 serde = { workspace = true }
