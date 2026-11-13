@@ -12,6 +12,7 @@ publish = false
 [workspace.dependencies]
 # 内部 crate
 interview-llm = { path = "crates/interview-llm" }
+interview-raas = { path = "crates/interview-raas" }
 interview-tts = { path = "crates/interview-tts" }
 
 # 通用
@@ -21,7 +22,7 @@ bytes = "1"
 clap = { version = "4", features = ["derive", "env"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # 默认的 rustls 走系统证书校验，云端容器的代理证书也能认
-reqwest = { version = "0.13", features = ["json", "stream"] }
+reqwest = { version = "0.13", features = ["form", "json", "query", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

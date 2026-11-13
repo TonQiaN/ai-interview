@@ -23,7 +23,7 @@ cargo run -p interview-cli -- tts engines
 scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息不进 Git
 ```
 
-需要真模型或真 TTS 的测试标 `#[ignore]`，用 `cargo test -- --ignored` 手动跑。CI 不跑这些。
+需要真模型、真 TTS 或真 RAAS 的测试标 `#[ignore]`，用 `cargo test -- --ignored` 手动跑。CI 不跑这些。
 
 真模型测试读 `DEEPSEEK_API_KEY`，会产生少量费用，云端容器里可以直接跑：`cargo test -p interview-llm --test live -- --ignored --nocapture`。
 
@@ -71,5 +71,6 @@ scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息
 - 模型权重、上游适配代码（`vendor/`）、生成结果（`data/`）。
 - 密钥、`.env`、账号、手机号、邮箱、候选人和同事的真实信息。测试数据用合成的：手机号 `1380000xxxx`，邮箱 `@example.com`。
 - 密钥只从环境变量读，变量名写进 `.env.example`。
+- RAAS 里是真实候选人。对 RAAS 只读（`interview-raas` 除登录外只发 GET）；测试夹具用合成数据，不从线上响应里复制；日志、报错、issue 和 PR 里不带候选人的姓名、手机、邮箱。
 
 `scripts/verify-repo-hygiene.sh` 会拦住大部分情况，但它不认识文字里的真人信息，写文档和测试时自己留意。
