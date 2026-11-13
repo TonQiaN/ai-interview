@@ -6,7 +6,7 @@ AI 面试的语音只在这三个引擎里选，运行时要能切换。这里�
 
 - 偏向 **IndexTTS 2**（代码里的 `index2`）克隆 **R001** 音色，这是默认引擎。
 - 切换引擎：环境变量 `AI_INTERVIEW_TTS_ENGINE`，或命令行 `--tts-engine`，取值 `index2`、`index25`、`breeze2`。`cargo run -p interview-cli -- tts engines` 会列出三个引擎并标出当前选中的。
-- Rust 这边（`crates/interview-tts`）已经有：引擎清单、统一的合成请求（克隆或文字设计音色、情绪或导演指令）、合成缓存、长文分段、批量合成和流式合成的入口。后端有两个：输出测试音的假后端（云端和 CI 用），和通过 HTTP 调 Mac 上常驻 worker 的 `WorkerBackend`（`AI_INTERVIEW_TTS_BACKEND=worker`）。音色管理和试听的 HTTP 接口也在这个 crate 里（`interview_tts::http`，约定见 `docs/architecture/api.md`），参考录音存在 BlobStore 的 `voices/{音色 ID}/reference.wav`。worker 的协议和启动方式见 [worker/README.md](worker/README.md)；worker 里三个真引擎的适配还在 Mac 上验证，没有合入。
+- Rust 这边（`crates/interview-tts`）已经有：引擎清单、统一的合成请求（克隆或文字设计音色、情绪或导演指令）、合成缓存、长文分段、批量合成和流式合成的入口。后端有两个：输出测试音的假后端（云端和 CI 用），和通过 HTTP 调 Mac 上常驻 worker 的 `WorkerBackend`（`AI_INTERVIEW_TTS_BACKEND=worker`）。音色管理和试听的 HTTP 接口也在这个 crate 里（`interview_tts::http`，约定见 `docs/architecture/api.md`），参考录音存在 BlobStore 的 `voices/{音色 ID}/reference.wav`。worker 的协议、启动方式、三个真引擎的首包延迟实测见 [worker/README.md](worker/README.md)。
 
 ## 三个引擎
 
@@ -118,6 +118,7 @@ runtime = BreezeMLXRuntime(model_dir, audio_device="auto", seed=42,
 item = {"id": request_id, "text": text, "speaker": "S0",
         "ref_audio_path": reference_wav, "ref_text": reference_transcript}
 # 带导演指令时加 item["instruction"]，模板换成 ref_edit_tata，guidance_scale 用 4
+# 没有参考录音、用文字设计音色时只给 item["instruction"]，模板是 tts_instruction，guidance_scale 用 4
 inputs = prepare_inputs(runtime.tokenizer, runtime.audio_tokenizer, runtime, [item],
     get_template("ref_clone_tata"), guidance_scale=1, guidance_scale_ref=None, guidance_scale_ins=None)
 for chunk in runtime.iter_audio_chunks(inputs, request_id=request_id):
@@ -128,7 +129,9 @@ for chunk in runtime.iter_audio_chunks(inputs, request_id=request_id):
 
 完整的常驻批处理脚本是旧研究仓库里的 `scripts/batch_worker.py`。
 
-还没验证过、接入时可以看的入口：IndexTTS 适配代码里有 `TTSRuntime.stream()`（分段流式）、`TTSRuntime.save_speaker()`（缓存参考音色的编码）和 `mlx_indextts/api_server.py`（HTTP 服务）。
+分段输出：IndexTTS 2.5 的模型有 `TTSRuntime.stream()`，每生成完一段给一段；IndexTTS 2 的模型没有这个入口，worker 是先用它的分词器切好段再逐段调 `generate()`。两个版本段内都不是流式。
+
+还没验证过、以后可以看的入口：`TTSRuntime.save_speaker()`（缓存参考音色的编码，也许能减掉 IndexTTS 每条请求约 1.4 秒的固定开销）和 `mlx_indextts/api_server.py`（HTTP 服务）。
 
 ## 实测数据
 
@@ -145,7 +148,9 @@ for chunk in runtime.iter_audio_chunks(inputs, request_id=request_id):
 
 以上 330 条全部生成成功。每次冷启动一个进程时，一句 6 秒左右的话要 9 到 13 秒（RTF 1.5 到 2.0）。
 
-没有测过的：首包延迟（从发出请求到听到第一个音的时间）、并发、流式输出的音质。面试对话最关心首包延迟，接入时要先测。
+首包延迟（从发出请求到收到第一块音频）2026-11-13 通过 worker 测过，完整的表在 [worker/README.md](worker/README.md)。一句 6 秒左右的追问：IndexTTS 2 约 4.0 秒，IndexTTS 2.5 约 3.3 秒，BreezeTTS2 约 0.2 秒。IndexTTS 只能一段一段出，BreezeTTS2 是真流式。
+
+没有测过的：并发、多人对流式输出音质的评价。
 
 没有做过多人主观评分，「IndexTTS 2 克隆 R001 还可以」是 Ryan 自己试听的结论。
 
@@ -156,7 +161,10 @@ for chunk in runtime.iter_audio_chunks(inputs, request_id=request_id):
 - **参考编码器加载失败不会报错退出**：生成日志里出现 `Failed to load semantic_codec weights` 或 `Failed to load CAMPPlus` 时，输出可能是随机权重生成的，要当作失败丢弃。
 - **参考音色**：2 到 30 秒的单人清晰人声，建议 5 到 15 秒，统一转成 24 kHz 单声道 WAV。研究时关掉了参考降噪（`--no-denoise-ref`）。
 - **逐字稿要保留口头语和重复**：给 Breeze 的参考逐字稿必须和录音逐字对应，不能用自动转写的「整理版」。
-- **内存**：IndexTTS 的 `memory_limit` 设的是 28 GB。研究时一次只常驻一个模型，没有试过三个模型同时常驻。
+- **内存**：IndexTTS 的 `memory_limit` 设的是 28 GB，实测 worker 稳定占 22 GB、峰值 29 GB。BreezeTTS2 的 worker 占 7 到 8 GB。IndexTTS（一次留一个版本）和 BreezeTTS2 两个 worker 同时常驻约 30 GB。
+- **输出采样率不一样**：IndexTTS 两个版本输出 22.05 kHz，BreezeTTS2 输出 24 kHz。播放和拼接的代码不能写死采样率。
+- **MLX 的计算流跟着线程走**：模型在一个线程里加载，换一个线程调用会报 `There is no Stream(...) in current thread`。常驻服务里所有碰模型的操作要放在同一个线程。
+- **Breeze 的四个提示模板**：`tts_plain`、`tts_instruction`（文字设计音色）、`ref_clone_tata`（克隆）、`ref_edit_tata`（克隆加导演指令）。带指令的两个要把引导强度设成 4，纯克隆必须是 1。
 
 ## R001 音色
 
