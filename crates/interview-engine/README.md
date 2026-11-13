@@ -100,7 +100,7 @@ let outcome = live::respond(&model, &plan, &config, &state, &turn, &mut sink).aw
 
 候选人只是停了一下时也可以来问，用 `live::respond_with` 多传一个 `TurnContext`：`paused` 表示只是停了一下，模型觉得话没说完就回答「接着听」，说完了就照常给出怎么接，不用另外调一次模型判断；`interrupted` 表示候选人打断了面试官、断在哪里，引擎算出候选人实际听到了哪一部分，没听全题目就重念。
 
-实测模型大约 1 秒做出决定，一场面试的模型费用两三分钱；停顿和打断的 29 个例子各跑 3 遍，87 次里判对 86 到 87 次。做法、实测数字、整条链路的延迟预算和还没解决的问题见 [docs/realtime.md](docs/realtime.md)。
+实测模型大约 1 秒做出决定，一场面试的模型费用两三分钱；停顿和打断的 31 个例子各跑 3 遍，93 次全部判对。做法、实测数字、整条链路的延迟预算和还没解决的问题见 [docs/realtime.md](docs/realtime.md)。
 
 ## 用真模型试
 
@@ -122,6 +122,7 @@ cargo run -p interview-engine --example turn_taking -- crates/interview-engine/f
 | 判断一段回答 | 中位 1.1 到 1.3 秒，最慢 1.9 秒 |
 | 一场面试里全部回答判断的费用 | 不到 0.02 元 |
 | `lost` 人设 | 第 4 题后提前结束 |
-| `quitter` 人设 | 说不想面了之后立即结束 |
+| `quitter` 人设 | 说不想面了之后立即结束，结束原因是候选人要求结束 |
+| `offtopic` 人设（只有 `converse` 有） | 一直说和面试无关的话：每道题带回一次，再无关就下一题，三道题后因为答不上来提前结束，不会记成候选人要求结束 |
 | `vague` 人设 | 问完全部正式题，中间触发了追问 |
 | `strong` 人设 | 答得快，备用题也问完了 |
