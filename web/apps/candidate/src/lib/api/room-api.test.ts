@@ -73,6 +73,22 @@ describe("候选人侧接口客户端", () => {
     expect(JSON.parse(call.body)).toMatchObject({ utterance_key: "q1", end_reason: "silence" });
   });
 
+  it("停顿时问说完没有，只要结论", async () => {
+    const { api, calls } = setup(() => json({ verdict: "done" }));
+    const verdict = await api.checkPause({
+      seq: 2,
+      utterance_key: "q1",
+      playback_end_ms: 2_000,
+      answer_start_ms: 2_500,
+      answer_end_ms: 9_000,
+    });
+    expect(verdict).toBe("done");
+    expect(calls[0]?.path).toBe("/api/v1/room/pause-check");
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.headers.get("Authorization")).toBe(`Bearer ${token}`);
+    expect(JSON.parse((calls[0] as Call).body)).toMatchObject({ seq: 2, answer_end_ms: 9_000 });
+  });
+
   it("取语音时也带令牌", async () => {
     const { api, calls } = setup(() => new Response(new Uint8Array([1, 2, 3])));
     const bytes = await api.fetchAudio("/api/v1/room/utterances/q1/audio");
