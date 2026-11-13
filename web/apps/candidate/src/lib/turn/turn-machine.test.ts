@@ -33,6 +33,19 @@ describe("逐题状态机", () => {
     expect(state.phase).toBe("asking");
   });
 
+  it("没到最短作答时间时，静音够久也不结束", () => {
+    const short: TurnConfig = { ...config, silenceMs: 1_000, minAnswerMs: 4_000 };
+    let state = listening();
+    state = reduceTurn(state, { type: "speech_start", at: 10_200 }, short);
+    state = reduceTurn(state, { type: "speech_end", at: 10_600 }, short);
+    state = reduceTurn(state, { type: "tick", at: 12_000 }, short);
+    expect(state.phase).toBe("listening");
+    // 倒计时显示的是离真正结束还有多久，不是离静音阈值还有多久
+    expect(viewTurn(state, 12_000, short).silenceRemainingMs).toBe(2_000);
+    state = reduceTurn(state, { type: "tick", at: 14_000 }, short);
+    expect(state).toMatchObject({ phase: "ended", reason: "silence" });
+  });
+
   it("开口后连续静音达到设定时长算答完", () => {
     const state = run(
       [
