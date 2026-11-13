@@ -8,13 +8,12 @@
 //!
 //! 这里不写任何版式规则或正则：简历的版式千奇百怪，交给大模型读。
 
-use interview_llm::{
-    ChatModel, ChatRequest, ContentPart, FinishReason, LlmError, Message, Usage, chat_json,
-};
+use interview_llm::{ChatModel, ChatRequest, ContentPart, FinishReason, LlmError, Message, Usage};
 use serde::Deserialize;
 
 use crate::document::ResumeContent;
 use crate::error::TalentError;
+use crate::json::chat_json_private;
 use crate::lenient;
 use crate::model::ParsedResume;
 use crate::settings::TalentAiSettings;
@@ -273,8 +272,17 @@ is_resume 填 false，reason 用一句话说明原因，resume 填 null。\n\n\
     .with_max_tokens(MAX_OUTPUT_TOKENS)
     .with_temperature(0.0);
 
-    let reply = chat_json::<Extraction>(model, request).await?;
-    let extraction = reply.value;
+    let (extraction, usage) = chat_json_private::<Extraction, _>(model, request, |extraction| {
+        // 说是简历，却什么都没整理出来：让模型重来，不能当成一份空的简历收下
+        if extraction.is_resume && extraction.resume == ParsedResume::default() {
+            Err("resume 里什么都没有。请按格式把简历的内容整理进 resume；\
+如果这段文字确实不是简历，is_resume 填 false，并在 reason 里说明原因"
+                .to_owned())
+        } else {
+            Ok(())
+        }
+    })
+    .await?;
     if !extraction.is_resume {
         return Err(TalentError::NotAResume(
             extraction
@@ -286,7 +294,7 @@ is_resume 填 false，reason 用一句话说明原因，resume 填 null。\n\n\
     let mut parsed = extraction.resume;
     parsed.phone = parsed.phone.as_deref().and_then(normalize_phone);
     parsed.email = parsed.email.map(|email| email.to_lowercase());
-    Ok((parsed, reply.usage))
+    Ok((parsed, usage))
 }
 
 /// 手机号统一成一种写法，方便认出同一个人：去掉空格和横线，大陆手机号去掉 +86。
@@ -442,6 +450,55 @@ mod tests {
             matches!(error, TalentError::Llm(LlmError::Truncated)),
             "{error}"
         );
+    }
+
+    #[tokio::test]
+    async fn format_errors_do_not_repeat_resume_content() {
+        // 模型把工作经历写成了一段话，不是列表。报错里不能把这段话带出来：
+        // 报错会进日志，重试用完之后还会写进任务的失败原因里
+        const WRONG: &str =
+            r#"{"is_resume": true, "resume": {"work_experience": "在杭州示例云负责订单结算服务"}}"#;
+        let model = ScriptedModel::new().reply(WRONG).reply(WRONG).reply(WRONG);
+        let content = ResumeContent::Text("林知夏\n高级后端工程师".to_owned());
+        let error = read_resume(&model, &content, &TalentAiSettings::default())
+            .await
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(matches!(error, TalentError::Llm(_)), "{message}");
+        assert!(!message.contains("订单结算"), "{message}");
+        assert!(!message.contains("杭州"), "{message}");
+
+        // 让模型修改的那句话里也不带，但要说清楚是哪种错
+        let requests = model.requests();
+        assert_eq!(requests.len(), 3);
+        let feedback = requests[1]
+            .messages
+            .last()
+            .expect("有反馈")
+            .content
+            .as_text();
+        assert!(!feedback.contains("订单结算"), "{feedback}");
+        assert!(feedback.contains("expected a sequence"), "{feedback}");
+    }
+
+    #[tokio::test]
+    async fn an_empty_result_is_sent_back_instead_of_accepted() {
+        // 模型什么都没整理出来：不能当成一份空的简历收下
+        let model = ScriptedModel::new().reply("{}").reply(EXTRACTION);
+        let content = ResumeContent::Text("林知夏\n高级后端工程师".to_owned());
+        let reading = read_resume(&model, &content, &TalentAiSettings::default())
+            .await
+            .expect("第二次整理出来了");
+        assert_eq!(reading.parsed.name.as_deref(), Some("林知夏"));
+        assert_eq!(model.requests().len(), 2);
+
+        // 一直是空的：报错，不存一份空结果
+        const EMPTY: &str = r#"{"is_resume": true, "resume": null}"#;
+        let model = ScriptedModel::new().reply(EMPTY).reply(EMPTY).reply(EMPTY);
+        let error = read_resume(&model, &content, &TalentAiSettings::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(error, TalentError::Llm(_)), "{error}");
     }
 
     #[test]
