@@ -13,13 +13,14 @@ AI 面试：开源的 AI 面试系统。主体语言是 Rust；面试官的语�
 - `crates/interview-llm`：DeepSeek 客户端。思考开关和 low / high / max 三档强度、流式输出、JSON 输出、工具调用、重试和用量统计。
 - `crates/interview-tts`：三个 TTS 引擎的清单、能力限制和请求检查。真正调用模型的后端还没接。
 - `crates/interview-raas`：RAAS 招聘平台的只读客户端，取岗位、岗位需求、候选人和简历。
+- `crates/interview-talent`：简历解析（PDF 转成图片让大模型读，带水印和扫描件也行）、候选人画像、岗位描述整理。接口和数据库部分还没接。
 - `crates/interview-cli`：命令行入口 `ai-interview`，现在只能列出引擎和当前选中的那个。
 - `tts/`：三个引擎的版本锁定、调用方式、实测数据和已知的坑。
 - CI、issue 和 PR 模板、开发流程约定。
 
 ## 开始
 
-需要 Rust 1.90 以上（`rust-toolchain.toml` 会让 rustup 自动装 stable）。
+需要 Rust 1.90 以上（`rust-toolchain.toml` 会让 rustup 自动装 stable）。解析 PDF 简历要用 poppler 的 `pdftoppm`：Debian/Ubuntu 装 `poppler-utils`，macOS 用 `brew install poppler`。
 
 ```bash
 cargo run -p interview-cli -- tts engines                      # 列出三个引擎，* 是当前选中的
