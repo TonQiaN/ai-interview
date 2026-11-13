@@ -17,7 +17,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use interview_engine::live::{open, respond};
 use interview_engine::{
-    CandidateTurn, InterviewPlan, LiveAction, LiveEvent, PlanInput, plan_interview,
+    CandidateTurn, InterviewPlan, Language, LiveAction, LiveEvent, PlanInput, plan_interview,
 };
 use interview_llm::{
     ChatModel, ChatRequest, DeepSeekClient, Effort, Message, Pricing, Thinking, Usage,
@@ -62,8 +62,12 @@ async fn candidate_reply(
     history: &[(String, String)],
     asked: &str,
 ) -> Result<(String, Usage)> {
+    let language = match input.config.language {
+        Language::Zh => "说中文",
+        Language::En => "这是一场英文面试，说英语",
+    };
     let system = format!(
-        "你在扮演一位正在参加语音面试的候选人，用来测试面试系统。\n\n你的简历：\n{}\n\n你的人设：{}\n\n要求：只输出你口头回答的话，像真人说话一样，不要加括号、动作描写或解释。不要替面试官说话。",
+        "你在扮演一位正在参加语音面试的候选人，用来测试面试系统。\n\n你的简历：\n{}\n\n你的人设：{}\n\n要求：{language}。只输出你口头回答的话，像真人说话一样，不要加括号、动作描写或解释。不要替面试官说话。",
         input.candidate.resume_text, persona
     );
     let mut messages = vec![Message::system(system)];
