@@ -188,6 +188,12 @@ describe("逐题状态机", () => {
     });
   });
 
+  it("最长作答时间和没开口的等待时间一样长：一直没开口算没出声，不算答满了时间", () => {
+    const short = { ...config, maxAnswerMs: 10_000, noSpeechTimeoutMs: 10_000 };
+    const state = reduceTurn(listening(), { type: "tick", at: 20_000 }, short);
+    expect(state).toMatchObject({ phase: "ended", reason: "no_speech", firstSpeechAt: null });
+  });
+
   it("提示之后开口，提示消失，不再按没开口处理", () => {
     const state = run(
       [
