@@ -325,7 +325,10 @@ pub(crate) fn render_context(
          page_taken_over 是候选人在另一个页面（另一台设备，或者另一个标签页）打开同一条面试链接接着面，\
          原来的页面停了下来。它旁边会有一条 interview_started（resumed 为 true），是新的页面接上了面试：\
          面试从停下的地方继续，录像换成新的一段接着录，中间不是候选人离开。\
-         interview_started 的 resumed 为 true、旁边却没有 page_taken_over 的，是在同一个页面上刷新之后接着面。\n",
+         interview_started 的 resumed 为 true、旁边却没有 page_taken_over 的，是在同一个页面上刷新之后接着面。\n\
+         interview_started 的 video_kbps 是这一段录像的画面实际用的码率（千比特每秒）。video_reduced 为 true \
+         表示候选人的上行网速装不下平时的码率，面试页把画面的码率降了下来，好让声音及时传到：\
+         这一段录像的画面比平时糊，是页面有意降的，和候选人做了什么无关，也不是摄像头有问题；声音和转写不受影响。\n",
     );
     if record.events.is_empty() {
         out.push_str("（面试网页全程在采集，没有记录到切出页面、粘贴、退出全屏这类事件。）\n");

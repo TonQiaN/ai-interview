@@ -13,6 +13,9 @@
 //! # 给样例加上网络差时面试间会报的过程事件，再对照同一套预期，看这些事件会不会被当成作弊迹象
 //! cargo run -p interview-report --example lab -- network --out /tmp/flaky
 //! cargo run -p interview-report --example lab -- evaluate --samples /tmp/flaky
+//! # 给样例加上「上行网速慢，画面的码率降了下来，画面检查在糊的画面上看错了一两帧」的过程事件
+//! cargo run -p interview-report --example lab -- reduced --out /tmp/reduced
+//! cargo run -p interview-report --example lab -- evaluate --samples /tmp/reduced
 //! # 从一段录像里抽帧，让模型看画面里有几个人、有没有手机，打印整理出来的过程事件
 //! cargo run -p interview-report --example lab -- frames 录像.webm
 //! # 把这些事件加进一份面试记录再分析（--record 指定记录，报告打印到标准输出）
@@ -116,6 +119,19 @@ enum Command {
     },
     /// 给样例加上候选人中途换到另一个页面接着面的过程事件，另存一份，用来检验报告怎么写这件事。不调用模型
     Takeover {
+        /// 只处理这几个场景（场景 id），不填就处理全部
+        only: Vec<String>,
+        #[arg(long, default_value = "crates/interview-report/scenarios")]
+        scenarios: PathBuf,
+        #[arg(long, default_value = "crates/interview-report/samples")]
+        samples: PathBuf,
+        /// 加了事件的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// 给样例加上「上行网速慢，页面把录像画面的码率降了下来」时会有的过程事件，另存一份，
+    /// 用来检验报告怎么对待糊的画面上看错的那一两帧。不调用模型
+    Reduced {
         /// 只处理这几个场景（场景 id），不填就处理全部
         only: Vec<String>,
         #[arg(long, default_value = "crates/interview-report/scenarios")]
@@ -245,10 +261,19 @@ async fn main() -> Result<()> {
     {
         return takeover_all(scenarios, samples, out, only);
     }
+    if let Command::Reduced {
+        only,
+        scenarios,
+        samples,
+        out,
+    } = &cli.command
+    {
+        return reduced_all(scenarios, samples, out, only);
+    }
     let model =
         ReportUnfinished(DeepSeekClient::from_env().context("需要设置环境变量 DEEPSEEK_API_KEY")?);
     match cli.command {
-        Command::Network { .. } | Command::Takeover { .. } => Ok(()),
+        Command::Network { .. } | Command::Takeover { .. } | Command::Reduced { .. } => Ok(()),
         Command::Simulate {
             only,
             scenarios,
@@ -892,6 +917,96 @@ fn add_takeover_events(record: &mut InterviewRecord) -> u64 {
     raw.push(("page_taken_over", Some(at + 400), json!({})));
     add_raw_events(record, "t", raw);
     at
+}
+
+// ---------- 上行慢，画面的码率降了下来 ----------
+
+fn reduced_all(scenarios: &Path, samples: &Path, out: &Path, only: &[String]) -> Result<()> {
+    let scenarios = load_scenarios(scenarios, only)?;
+    std::fs::create_dir_all(out)?;
+    for scenario in &scenarios {
+        let mut record: InterviewRecord =
+            read_json(&samples.join(format!("{}.json", scenario.id)))?;
+        let (phone_at, unclear_at) = add_reduced_video_events(&mut record);
+        let path = out.join(format!("{}.json", scenario.id));
+        std::fs::write(&path, serde_json::to_string_pretty(&record)? + "\n")?;
+        println!(
+            "{}：{} 有一帧看成了手机，{} 有一帧看不清 → {}",
+            scenario.id,
+            clock(phone_at),
+            clock(unclear_at),
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+/// 加上上行网速慢的面试会有的事件：`interview_started` 里写着画面降到了 120 kbps，
+/// 录像画面检查过，并且在糊的画面上看错了两处，各只有一帧：一处把手里的东西看成了手机，
+/// 一处说画面看不清。这两种是用 120 kbps 的测试录像实测出来会多出来的错（见 README）。
+/// 两处都放在候选人作答的时候。返回这两帧的时间。
+fn add_reduced_video_events(record: &mut InterviewRecord) -> (u64, u64) {
+    const INTERVAL_MS: u64 = 5_000;
+    let answers: Vec<u64> = record
+        .transcript
+        .iter()
+        .filter(|segment| segment.speaker == Speaker::Candidate)
+        .map(|segment| (segment.start_ms + segment.end_ms) / 2 / INTERVAL_MS * INTERVAL_MS)
+        .collect();
+    let pick = |fraction: usize| {
+        answers
+            .get(answers.len() * fraction / 4)
+            .copied()
+            .unwrap_or(record.duration_ms * fraction as u64 / 4)
+    };
+    let (phone_at, unclear_at) = (pick(1), pick(3));
+    let frames = record.duration_ms / INTERVAL_MS + 1;
+
+    let mut raw = Vec::new();
+    if !record
+        .events
+        .iter()
+        .any(|event| event.kind == "page_opened")
+    {
+        raw.push((
+            "page_opened",
+            None,
+            json!({
+                "signals": {"visibility": true, "fullscreen": true, "device_change": true, "network": true, "clipboard": true},
+                "in_app_browser": null
+            }),
+        ));
+    }
+    raw.push((
+        "device_report",
+        None,
+        json!({"camera": "ok", "microphone": "ok", "speaker": "ok", "uplink_kbps": 310}),
+    ));
+    raw.push((
+        "interview_started",
+        Some(0),
+        json!({"resumed": false, "video_kbps": 120, "video_reduced": true}),
+    ));
+    raw.push((
+        "frames_checked",
+        Some(0),
+        json!({
+            "duration_ms": (frames - 1) * INTERVAL_MS,
+            "frames": frames, "interval_ms": INTERVAL_MS, "flagged": 2, "unreadable": 0
+        }),
+    ));
+    raw.push((
+        "phone_visible",
+        Some(phone_at),
+        json!({"frames": 1, "note": "一人手持白色长方形手机"}),
+    ));
+    raw.push((
+        "face_count_changed",
+        Some(unclear_at),
+        json!({"people": null, "frames": 1, "note": "画面模糊，暗色块遮挡", "unclear": true}),
+    ));
+    add_raw_events(record, "v", raw);
+    (phone_at, unclear_at)
 }
 
 /// 毫秒写成「分:秒」。
