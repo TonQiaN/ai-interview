@@ -60,7 +60,7 @@ export function Table({ hover = true, className, ...rest }: TableProps) {
     return () => observer.disconnect();
   }, []);
   return (
-    // biome-ignore lint/a11y/noNoninteractiveTabindex: 只在要横着滚的时候能停到，为的是用键盘滚
+    // 只在要横着滚的时候能停到，为的是用键盘滚
     <div ref={wrap} className="oil-table-wrap" tabIndex={scrolls ? 0 : undefined}>
       <table className={clsx("oil-table", hover && "oil-table--hover", className)} {...rest} />
     </div>
