@@ -9,6 +9,7 @@ import {
   passPreflight,
   roomState,
   type SeededInterview,
+  seedInterview,
 } from "./helpers";
 
 /**
@@ -116,6 +117,8 @@ test("留在后面的页面点「结束面试」结束不了面试：它被告�
 }) => {
   const interview = await enterInterview(page, { silenceSec: 30 });
   await expectQuestion(page, 1);
+  // 等到真的在听第一题的回答（说开场白的时候题号也是 1）：之后这个页面不会自己再去问服务端下一步
+  await expect(button(page, "我答完了，下一题")).toBeVisible();
   // 这个页面没来得及从别的响应里知道面试换了地方：把提醒去掉，只留结束面试那一个请求的
   await page.route("**/api/v1/room/**", async (route) => {
     const response = await route.fetch();
@@ -140,6 +143,46 @@ test("留在后面的页面点「结束面试」结束不了面试：它被告�
   expect(roomState(interview).status).toBe("in_progress");
   await expect(other.getByText("录制中")).toBeVisible();
   await expect(movedNotice(other)).toHaveCount(0);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await context.close();
+});
+
+test("往下走的请求正好撞上面试换了页面，提醒又没送到：照样告诉候选人面试在另一个页面里", async ({
+  page,
+  browser,
+}) => {
+  const interview = seedInterview({ silenceSec: 30 });
+  // 提醒用的响应头一个都到不了这个页面（像被中间的代理去掉了）；开场白说完往下走的那个请求先按住
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/v1/room/**", async (route) => {
+    if (route.request().url().endsWith("/advance")) await held;
+    const response = await route.fetch();
+    const headers = response.headers();
+    delete headers["x-room-active-elsewhere"];
+    await route.fulfill({ response, headers });
+  });
+  await open(page, interview.token);
+  await passPreflight(page);
+  await button(page, "开始面试").click();
+  await expect(page.getByText("录制中")).toBeVisible();
+
+  const context = await browser.newContext();
+  const other = await context.newPage();
+  await openElsewhere(other, interview);
+  await button(other, "继续面试").click();
+  await expect(other.getByText("录制中")).toBeVisible();
+
+  // 这时候那个请求才到服务端：服务端不让它往下走。页面不能说成「链接已经失效」
+  release();
+  await expect(movedNotice(page)).toBeVisible();
+  await expect(button(page, "回到这个页面继续面试")).toBeVisible({ timeout: 30_000 });
+  expect(roomState(interview).status).toBe("in_progress");
+  expect(takenOver(interview)).toBe(1);
+  await expect(other.getByText("录制中")).toBeVisible();
+  await page.unrouteAll({ behavior: "ignoreErrors" });
   await context.close();
 });
 

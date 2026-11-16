@@ -15,6 +15,13 @@
 //! 是把它从中间截断得到的，另外有一批不依赖题目的固定说法。
 //!
 //! 读环境变量 `DEEPSEEK_API_KEY`，会产生少量费用（默认设置下约 0.03 元）。
+//!
+//! 设了 `AI_INTERVIEW_EVAL_HEARD_CMD` 时，每个例子里候选人的话先读出来再识别回去，引擎拿到的是带
+//! 识别错误的文字（见 `scripts/asr_roundtrip.py`）。没说完的例子是先截断再读，所以识别在句子半中间
+//! 加上的句号也会留着。
+
+#[path = "support/heard.rs"]
+mod heard;
 
 use std::path::Path;
 
@@ -101,11 +108,12 @@ fn half(sentence: &str) -> String {
 async fn candidate_answer(
     model: &dyn ChatModel,
     input: &PlanInput,
+    style: &str,
     before: Option<(&str, &str)>,
     asked: &str,
 ) -> Result<(String, Usage)> {
     let system = format!(
-        "你在扮演一位正在参加语音面试的候选人，用来测试面试系统。\n\n你的简历：\n{}\n\n你确实做过简历上写的事情。回答具体，有你自己的做法和数字，分四到六句话说完，一共 120 到 200 字。第一句直接讲你的做法，不要先说「分成两段」「主要有三点」这类预告后面还有几部分的话。\n\n要求：只输出你口头回答的话，像真人说话一样，不要加括号、动作描写或解释。",
+        "你在扮演一位正在参加语音面试的候选人，用来测试面试系统。\n\n你的简历：\n{}\n\n你确实做过简历上写的事情。回答具体，有你自己的做法和数字，分四到六句话说完，一共 120 到 200 字。第一句直接讲你的做法，不要先说「分成两段」「主要有三点」这类预告后面还有几部分的话。\n\n要求：只输出你口头回答的话，像真人说话一样，不要加括号、动作描写或解释。{style}",
         input.candidate.resume_text
     );
     let mut messages = vec![Message::system(system)];
@@ -183,6 +191,7 @@ async fn main() -> Result<()> {
     }
     let config = &input.config;
     let model = DeepSeekClient::from_env()?;
+    let mut ears = heard::Ears::from_env()?;
 
     let plan: InterviewPlan = if Path::new(plan_path).exists() {
         serde_json::from_str(&std::fs::read_to_string(plan_path)?)?
@@ -211,7 +220,8 @@ async fn main() -> Result<()> {
     let transition = at_second.last_said.first().cloned().unwrap_or_default();
     println!("第二题 [{}] {}\n", question.key, question.text);
 
-    let (answer, answer_usage) = candidate_answer(&model, &input, None, &question.text).await?;
+    let (answer, answer_usage) =
+        candidate_answer(&model, &input, ears.style(), None, &question.text).await?;
     println!("候选人的完整回答：{answer}\n");
     let parts = sentences(&answer);
     if parts.len() < 3 {
@@ -223,13 +233,19 @@ async fn main() -> Result<()> {
         config,
         &at_second,
         &format!("probe adequate\n{probe}"),
-        &answer,
+        &ears.hear(&answer)?,
         150_000,
     )
     .await?;
     let probe_key = probed.last_said.first().cloned().unwrap_or_default();
-    let (probe_answer, probe_usage) =
-        candidate_answer(&model, &input, Some((&question.text, &answer)), probe).await?;
+    let (probe_answer, probe_usage) = candidate_answer(
+        &model,
+        &input,
+        ears.style(),
+        Some((&question.text, &answer)),
+        probe,
+    )
+    .await?;
     // 再追问到不能追问为止：这时候选人说没听清，不能因为不让追问了就换题
     let mut probed_out = probed.clone();
     while config.follow_ups.enabled
@@ -454,14 +470,31 @@ async fn main() -> Result<()> {
         expected: SPOKE,
     });
 
+    // 引擎拿到的是识别出来的字。什么都没识别出来的话真实面试里不会交给引擎，这样的例子去掉
+    let mut heard_cases = Vec::new();
+    for mut case in cases {
+        let said = std::mem::take(&mut case.turn.text);
+        case.turn.text = ears.hear(&said)?;
+        if case.turn.text.is_empty() {
+            println!("去掉「{}」：什么都没识别出来", case.label);
+            continue;
+        }
+        heard_cases.push((case, said));
+    }
+
     let mut usage = Usage::default();
     let mut wait_ms = Vec::new();
     let mut other_ms = Vec::new();
     let mut first_speech_ms = Vec::new();
     let mut right = [0u32; 3];
     let mut total = [0u32; 3];
+    let compare = heard_cases
+        .iter()
+        .any(|(case, said)| *said != case.turn.text);
+    let mut clean_right = [0u32; 3];
+    let mut clean_total = [0u32; 3];
     let mut group = "";
-    for case in &cases {
+    for (case, said) in &heard_cases {
         if case.group != group {
             group = case.group;
             println!("\n== {group} ==");
@@ -516,15 +549,61 @@ async fn main() -> Result<()> {
             got,
             case.expected
         );
-        println!("    候选人：{}", case.turn.text);
+        println!("    候选人：{said}");
+        if *said != case.turn.text {
+            println!("    识别成：{}", case.turn.text);
+        }
         if !spoken.is_empty() {
             println!("    面试官：{spoken}");
+        }
+
+        // 识别改过字的例子，原样的字也跑一遍，才分得清错是识别带来的还是本来就会错
+        if !compare {
+            continue;
+        }
+        let mut clean = got.clone();
+        if *said != case.turn.text {
+            clean.clear();
+            let turn = CandidateTurn {
+                text: said.clone(),
+                ..case.turn.clone()
+            };
+            for _ in 0..runs {
+                let outcome = respond_with(
+                    &model,
+                    &plan,
+                    config,
+                    &case.state,
+                    &turn,
+                    &case.context,
+                    &mut |_| {},
+                )
+                .await?;
+                usage += outcome.usage;
+                clean.push(outcome.action);
+            }
+            let ok = clean.iter().all(|action| case.expected.contains(action));
+            println!("    原样的字：{} {clean:?}", if ok { "对" } else { "错" });
+        }
+        for action in &clean {
+            clean_total[slot] += 1;
+            if case.expected.contains(action) {
+                clean_right[slot] += 1;
+            }
         }
     }
 
     println!();
     for (index, name) in ["没说完", "说完了", "被打断"].iter().enumerate() {
         println!("{name}：{} 次里对了 {} 次", total[index], right[index]);
+    }
+    if compare {
+        for (index, name) in ["没说完", "说完了", "被打断"].iter().enumerate() {
+            println!(
+                "同样的例子用原样的字，{name}：{} 次里对了 {} 次",
+                clean_total[index], clean_right[index]
+            );
+        }
     }
     summarize("决定接着听", &mut wait_ms);
     summarize("决定别的动作", &mut other_ms);

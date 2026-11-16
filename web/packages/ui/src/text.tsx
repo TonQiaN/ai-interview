@@ -6,6 +6,8 @@ import { createContext, type ReactNode, useContext } from "react";
 export interface UiText {
   /** Dialog 右上角关闭按钮的读屏文字 */
   close: string;
+  /** Dialog 里有没保存的内容、按 Esc 或点遮罩没关成时的提示 */
+  unsavedHint: string;
   /** CopyField 按钮上的字 */
   copy: string;
   /** CopyField 复制成功后按钮上的字 */
@@ -36,6 +38,7 @@ export interface UiText {
 
 export const uiTextZh: UiText = {
   close: "关闭",
+  unsavedHint: "这里的内容还没保存。不想要了，点右上角的关闭。",
   copy: "复制",
   copied: "已复制",
   loading: "加载中",
@@ -53,6 +56,7 @@ export const uiTextZh: UiText = {
 
 export const uiTextEn: UiText = {
   close: "Close",
+  unsavedHint: "Your changes are not saved yet. To discard them, use the close button.",
   copy: "Copy",
   copied: "Copied",
   loading: "Loading",

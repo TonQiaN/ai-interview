@@ -17,7 +17,17 @@ import {
   Textarea,
   useToast,
 } from "@ai-interview/ui";
-import { Archive, Ban, Link2, Pencil, RefreshCw, Send, Trash2 } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  Ban,
+  CalendarPlus,
+  Link2,
+  Pencil,
+  RefreshCw,
+  Send,
+  Trash2,
+} from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { errorMessage, fieldErrors } from "../api/http";
@@ -38,6 +48,7 @@ import {
   useRegenerateReport,
   useReport,
   useReportVersions,
+  useRestoreInterview,
   useRevokeInvite,
   useSavePlan,
   useTranscript,
@@ -67,7 +78,8 @@ import {
 import { PageHeader } from "../components/PageHeader";
 import { ReplayPlayer } from "../components/ReplayPlayer";
 import { ReportView } from "../components/ReportView";
-import { useVoiceName, VoicePicker } from "../components/VoicePicker";
+import { useVoiceEngine, useVoiceName, VoicePicker } from "../components/VoicePicker";
+import { sameForm } from "../lib/form";
 import {
   categoryLabel,
   decisionLabel,
@@ -93,18 +105,97 @@ import { updateOutcome } from "../lib/replan";
 
 type Tab = "overview" | "questions" | "invites" | "replay" | "report";
 
+// 归档了的面试只能看：不改设置和题目、不准备、不发链接、不用再取消
+const archived = (i: Interview) => Boolean(i.archived_at);
 const editable = (i: Interview) =>
-  i.status === "draft" || i.status === "prepare_failed" || i.status === "ready";
+  !archived(i) && (i.status === "draft" || i.status === "prepare_failed" || i.status === "ready");
 const cancellable = (i: Interview) =>
-  !["completed", "abandoned", "expired", "cancelled"].includes(i.status);
+  !archived(i) && !["completed", "abandoned", "expired", "cancelled"].includes(i.status);
 const ended = (i: Interview) => i.status === "completed" || i.status === "abandoned";
+/** 这一场已经走到头了（面完、中途离开、取消、过期），想再面只能另外安排一场 */
+const over = (i: Interview) => ended(i) || i.status === "cancelled" || i.status === "expired";
+/** 给同一位候选人、同一个岗位再安排一场，设置沿用这一场的 */
+const againPath = (i: Interview) => `/interviews/new?from=${i.id}`;
 const reportBusy = (i: Interview) =>
   i.report?.status === "running" || i.report?.status === "pending";
 const gap = (size: number) => ({ "--oil-gap": `var(--oil-space-${size})` }) as React.CSSProperties;
 
 // ───────── 概览 ─────────
 
+/**
+ * 题目出好了、语音没合成全时说什么。后端给的原因是每一句各带一遍、连着网络报错的一长串，
+ * 这里先用一两句话说清楚出了什么事、该怎么办，原话收在「详细原因」里。
+ */
+function SynthFailed({ interview }: { interview: Interview }) {
+  const engine = useVoiceEngine(interview.voice_id);
+  const failed = interview.synth.failed;
+  const count = failed > 0 ? `${failed} 句语音` : "有几句语音";
+  return (
+    <>
+      {engine && !engine.available ? (
+        <>
+          {`${engine.name} 现在不可用，${count}没合成出来。`}
+          {"题目已经保留：等它恢复以后点「重试」，只补没合成的这几句；"}
+          {"也可以在「改设置」里换一个音色。引擎为什么不可用，在"}
+          <Link to="/voices" className="adm-link">
+            「声音」
+          </Link>
+          里能看到。
+        </>
+      ) : (
+        `${count}没合成出来。题目已经保留，点「重试」只补没合成的这几句。`
+      )}
+      {interview.prepare_error && (
+        <details className="adm-utter__more">
+          <summary>详细原因</summary>
+          <div style={{ overflowWrap: "anywhere" }}>{interview.prepare_error}</div>
+        </details>
+      )}
+    </>
+  );
+}
+
+/**
+ * 发了链接、候选人还没开始。链接到期以后面试的状态不会变，还是「已发链接」，
+ * 所以这里看一眼链接本身：过期了就提醒 HR 换一个，没过期就写上什么时候过期、候选人打开过没有。
+ */
+function InvitedStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) => void }) {
+  const invites = useInvites(interview.id).data?.items;
+  // 还没取到链接时先按没过期说，免得闪一下警告
+  if (!invites) return <Banner tone="info">{statusHint.invited}</Banner>;
+
+  const active = invites.find((invite) => invite.status === "active");
+  if (active) {
+    const opened =
+      active.open_count > 0 ? `打开过 ${active.open_count} 次，还没开始面试` : "还没打开";
+    return (
+      <Banner tone="info">
+        {`${statusHint.invited}链接 ${relativeTime(active.expires_at)}过期，候选人${opened}。`}
+      </Banner>
+    );
+  }
+  // 新的在前：最近发出去的那一个
+  const latest = invites[0];
+  const opened = invites.some((invite) => invite.open_count > 0);
+  return (
+    <Banner
+      tone="warning"
+      title="链接过期了，候选人还没有面试"
+      actions={
+        <Button size="sm" icon={<Send aria-hidden="true" />} onClick={() => goTo("invites")}>
+          换一个新链接
+        </Button>
+      }
+    >
+      {latest ? `链接在 ${fullTime(latest.expires_at)} 过期，` : ""}
+      {opened ? "候选人打开过链接，但没有开始面试。" : "候选人没有打开过链接。"}
+      题目和语音都还在，生成一个新链接发给候选人就行。
+    </Banner>
+  );
+}
+
 function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) => void }) {
+  const navigate = useNavigate();
   const prepare = usePrepareInterview(interview.id);
   const toast = useToast();
   const run = () => prepare.mutate(false, { onError: (e) => toast(errorMessage(e)) });
@@ -118,7 +209,7 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
           <span>
             {synthesizing
               ? `题目出好了，已合成 ${synth.done} / ${synth.total} 句语音。`
-              : "正在按简历和岗位要求出题。"}
+              : "正在出题。"}
             可以先去做别的，好了会停在「待发送」。
           </span>
           <Progress value={synthesizing ? synth.done / synth.total : 0.05} label="准备进度" />
@@ -127,20 +218,20 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
     );
   }
   if (status === "prepare_failed") {
+    const retry = (
+      <Button size="sm" loading={prepare.isPending} onClick={run}>
+        重试
+      </Button>
+    );
+    if (!interview.has_plan)
+      return (
+        <Banner tone="danger" title="题目没有准备好" actions={retry}>
+          {interview.prepare_error ?? "准备过程出错了。"}
+        </Banner>
+      );
     return (
-      <Banner
-        tone="danger"
-        title={interview.has_plan ? "语音没有全部合成出来" : "题目没有准备好"}
-        actions={
-          <Button size="sm" loading={prepare.isPending} onClick={run}>
-            重试
-          </Button>
-        }
-      >
-        {interview.prepare_error ?? "准备过程出错了。"}
-        {interview.has_plan &&
-          synth.failed > 0 &&
-          ` 有 ${synth.failed} 句没合成成功，重试只补这几句。`}
+      <Banner tone="danger" title="语音没有全部合成出来" actions={retry}>
+        <SynthFailed interview={interview} />
       </Banner>
     );
   }
@@ -174,6 +265,7 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
       </Banner>
     );
   }
+  if (status === "invited") return <InvitedStep interview={interview} goTo={goTo} />;
   if (ended(interview) && interview.report?.status === "done" && interview.decision === "pending") {
     return (
       <Banner
@@ -211,9 +303,25 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
       </Banner>
     );
   }
+  // 没面完就结束了的，多半要再来一次：给一个一步到位的入口
+  const unfinished = status === "abandoned" || status === "cancelled" || status === "expired";
   return (
-    <Banner tone={status === "abandoned" || status === "expired" ? "warning" : "info"}>
+    <Banner
+      tone={status === "abandoned" || status === "expired" ? "warning" : "info"}
+      actions={
+        unfinished && !archived(interview) ? (
+          <Button
+            size="sm"
+            icon={<CalendarPlus aria-hidden="true" />}
+            onClick={() => navigate(againPath(interview))}
+          >
+            再安排一场
+          </Button>
+        ) : undefined
+      }
+    >
       {statusHint[status]}
+      {unfinished && !archived(interview) && "想让候选人重新面，可以再安排一场，设置沿用这一场的。"}
     </Banner>
   );
 }
@@ -393,6 +501,7 @@ function EditConfigDialog({
     <Dialog
       open={open}
       onClose={onClose}
+      unsaved={!sameForm(config, interview.config) || voiceId !== (interview.voice_id ?? null)}
       wide
       title="改这一场的设置"
       footer={
@@ -550,7 +659,8 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
 
   return (
     <div className="oil-stack" style={gap(5)}>
-      <NextStep interview={interview} goTo={goTo} />
+      {/* 归档了又没面完的，下一步那些事（准备、发链接）都做不了，上面已经说明了 */}
+      {(!archived(interview) || ended(interview)) && <NextStep interview={interview} goTo={goTo} />}
       <div className="adm-split">
         <Card>
           <CardHeader
@@ -610,6 +720,16 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
             </CardBody>
           </Card>
           <div className="oil-row oil-row--wrap">
+            {over(interview) && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<CalendarPlus aria-hidden="true" />}
+                onClick={() => navigate(againPath(interview))}
+              >
+                再安排一场
+              </Button>
+            )}
             {cancellable(interview) && (
               <Button
                 variant="secondary"
@@ -622,14 +742,16 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
             )}
             {interview.status !== "in_progress" && interview.status !== "preparing" && (
               <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={<Archive aria-hidden="true" />}
-                  onClick={() => setConfirming("delete")}
-                >
-                  归档
-                </Button>
+                {!archived(interview) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<Archive aria-hidden="true" />}
+                    onClick={() => setConfirming("delete")}
+                  >
+                    归档
+                  </Button>
+                )}
                 {me.data?.role === "admin" && (
                   <Button
                     variant="ghost"
@@ -1077,6 +1199,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
       <Dialog
         open={editing !== null}
         onClose={() => setEditing(null)}
+        unsaved={editing !== null && text !== editing.text}
         title={editing ? `改${editing.label}` : ""}
         footer={
           <>
@@ -1140,17 +1263,24 @@ function QuestionsTab({ interview }: { interview: Interview }) {
 
 // ───────── 链接 ─────────
 
+/**
+ * 给候选人的话。要和候选人页实际的要求对得上：电脑和手机都能面，
+ * 聊天软件自带的浏览器录不了音和像（候选人页会拦住，让人复制链接换浏览器），所以这里先说。
+ */
 function inviteMessage(interview: Interview, url: string, expiresAt: string): string {
+  // 只有第一轮初筛才说「第一轮」，深入面试前面可能已经面过
+  const round = interview.config.stage === "screening" ? "第一轮" : "这一轮";
   return `${interview.candidate.name}你好：
 
-感谢你应聘「${interview.position.title}」。第一轮是线上的 AI 面试，大约 ${interview.config.target_duration_minutes} 分钟，不用下载软件，也不用登录。
+感谢你应聘「${interview.position.title}」。${round}是线上的 AI 面试，大约 ${interview.config.target_duration_minutes} 分钟，不用下载软件，也不用登录。
 
 面试链接：${url}
 
 请在 ${fullTime(expiresAt)} 之前完成。开始前请准备好：
-1. 一台带摄像头和麦克风的电脑，用 Chrome 或 Edge 打开；
-2. 一个安静、网络稳定的地方；
-3. 打开链接后按提示允许使用摄像头和麦克风。
+1. 一台带摄像头和麦克风的电脑（用手机也可以），用最新版的 Chrome、Edge 或 Safari 打开链接；
+2. 请不要在微信、钉钉这类聊天软件里直接点开，那里面录不了音和像：复制链接，到浏览器里粘贴打开；
+3. 一个安静、网络稳定的地方；
+4. 打开链接后按提示允许使用摄像头和麦克风。
 
 面试过程会录像，只用于这次招聘。祝顺利。`;
 }
@@ -1164,7 +1294,8 @@ function InvitesTab({ interview }: { interview: Interview }) {
   // 完整链接只在生成时返回一次，离开这一页就看不到了
   const [fresh, setFresh] = useState<CreatedInvite | null>(null);
   const [revoking, setRevoking] = useState<Invite | null>(null);
-  const canCreate = interview.status === "ready" || interview.status === "invited";
+  const canCreate =
+    !archived(interview) && (interview.status === "ready" || interview.status === "invited");
   const hasActive = invites.data?.items.some((invite) => invite.status === "active") ?? false;
 
   return (
@@ -1500,6 +1631,41 @@ function Verdict({ interview }: { interview: Interview }) {
   );
 }
 
+/** 归档了的面试打开时，说清楚它现在是什么情况 */
+function ArchivedNote({ interview }: { interview: Interview }) {
+  const me = useMe();
+  const toast = useToast();
+  const restore = useRestoreInterview();
+  return (
+    <Banner
+      tone="info"
+      title="这场面试已经归档"
+      className="adm-gap-below"
+      actions={
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<ArchiveRestore />}
+          loading={restore.isPending}
+          onClick={() =>
+            restore.mutate(interview.id, {
+              onSuccess: () => toast("已恢复"),
+              onError: (e) => toast(errorMessage(e)),
+            })
+          }
+        >
+          恢复
+        </Button>
+      }
+    >
+      归档的面试不在列表里显示，发出去的链接打不开，也不能再改设置、改题目或者生成链接。录像、逐字稿和报告都还在，这里照常能看；在面试列表勾上「带上已归档的」能找到它。归档错了，点「恢复」就回到列表里，没过期、没撤销的链接又能用。
+      {me.data?.role === "admin"
+        ? "要把录像和报告真的删掉，用概览里的「彻底删除」。"
+        : "候选人要求删除录像时，请找管理员彻底删除。"}
+    </Banner>
+  );
+}
+
 export function InterviewDetailPage() {
   const { id = "" } = useParams();
   const [params, setParams] = useSearchParams();
@@ -1533,12 +1699,14 @@ export function InterviewDetailPage() {
             description={
               <span className="oil-row oil-row--wrap">
                 <StatusBadge status={i.status} />
+                {archived(i) && <Badge plain>已归档</Badge>}
                 <Verdict interview={i} />
                 <DecisionBadge value={i.decision} />
                 <span>{relativeTime(i.updated_at)}更新</span>
               </span>
             }
           />
+          {archived(i) && <ArchivedNote interview={i} />}
           <Tabs
             aria-label="面试的各部分"
             value={tab}

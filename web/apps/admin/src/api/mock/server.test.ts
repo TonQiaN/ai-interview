@@ -502,6 +502,45 @@ describe("假后端", () => {
     expect(candidates.data.items.some((c) => c.id === candidate.id)).toBe(false);
   });
 
+  it("归档的面试不出现在列表里，带上 include_archived 才有，详情照常能取", async () => {
+    await login(server);
+    const interview = server.db.interviews.find((i) => i.status === "completed");
+    if (!interview) throw new Error("演示数据里没有面完的面试");
+    expect((await call(server, "DELETE", `/interviews/${interview.id}`)).status).toBe(204);
+    const usual = await call<Page<InterviewSummary>>(server, "GET", "/interviews?page_size=100");
+    expect(usual.data.items.some((i) => i.id === interview.id)).toBe(false);
+    const all = await call<Page<InterviewSummary>>(
+      server,
+      "GET",
+      "/interviews?page_size=100&include_archived=true",
+    );
+    expect(all.data.items.find((i) => i.id === interview.id)?.archived_at).toBeTruthy();
+    expect(all.data.items.filter((i) => i.archived_at)).toHaveLength(1);
+    const detail = await call<Interview>(server, "GET", `/interviews/${interview.id}`);
+    expect(detail.data.archived_at).toBeTruthy();
+    // 归档了就不能再生成链接
+    expect((await call(server, "POST", `/interviews/${interview.id}/invites`, {})).status).toBe(
+      409,
+    );
+  });
+
+  it("归档的面试能恢复：回到列表里，又能生成链接；没归档的再恢复一次也算成功", async () => {
+    await login(server);
+    const interview = server.db.interviews.find((i) => i.status === "ready");
+    if (!interview) throw new Error("演示数据里没有待发送的面试");
+    await call(server, "DELETE", `/interviews/${interview.id}`);
+    const restored = await call<Interview>(server, "POST", `/interviews/${interview.id}/restore`);
+    expect(restored.status).toBe(200);
+    expect(restored.data.archived_at).toBeNull();
+    expect(restored.data.status).toBe("ready");
+    const usual = await call<Page<InterviewSummary>>(server, "GET", "/interviews?page_size=100");
+    expect(usual.data.items.some((i) => i.id === interview.id)).toBe(true);
+    expect(
+      (await call(server, "POST", `/interviews/${interview.id}/invites`, {})).status,
+    ).toBeLessThan(300);
+    expect((await call(server, "POST", `/interviews/${interview.id}/restore`)).status).toBe(200);
+  });
+
   it("粘贴岗位描述能整理出草稿，但不保存", async () => {
     await login(server);
     const before = server.db.positions.length;

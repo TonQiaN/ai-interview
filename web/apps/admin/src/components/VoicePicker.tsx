@@ -1,7 +1,8 @@
 import { Field, Select } from "@ai-interview/ui";
+import { TriangleAlert } from "lucide-react";
 import { Link } from "react-router";
 import { useEngines, useVoices } from "../api/queries";
-import type { Voice } from "../api/types";
+import type { SpeechEngine, Voice } from "../api/types";
 
 /** 「默认面试官 · IndexTTS 2」这样的一句，页面上显示音色时都用它 */
 export function useVoiceName(): (voiceId: string | null | undefined) => string {
@@ -20,6 +21,18 @@ export function useVoiceName(): (voiceId: string | null | undefined) => string {
   };
 }
 
+/**
+ * 这个音色用的是哪个引擎，用来看它现在可不可用。没指定音色就看默认音色。
+ * 连默认音色都没有时用的是后端配置的引擎，这里看不到，返回 undefined。
+ */
+export function useVoiceEngine(voiceId: string | null | undefined): SpeechEngine | undefined {
+  const voices = useVoices();
+  const engines = useEngines();
+  const items = voices.data?.items ?? [];
+  const used = voiceId ? items.find((v) => v.id === voiceId) : items.find((v) => v.is_default);
+  return used ? engines.data?.items.find((e) => e.id === used.engine) : undefined;
+}
+
 export interface VoicePickerProps {
   /** null 是跟着默认音色走 */
   value: string | null;
@@ -33,18 +46,30 @@ export function VoicePicker({ value, onChange, disabled, error }: VoicePickerPro
   const voices = useVoices();
   const voiceName = useVoiceName();
   const items = voices.data?.items ?? [];
+  const engine = useVoiceEngine(value);
   return (
     <Field
       label="面试官的声音"
       error={error}
       hint={
-        <>
-          三个语音引擎各有音色，选了音色就定了用哪个引擎。可以在
-          <Link to="/voices" className="adm-link">
-            「声音」
-          </Link>
-          里添加和试听。
-        </>
+        engine && !engine.available ? (
+          <span className="adm-warn-text">
+            <TriangleAlert aria-hidden="true" size={14} /> 这个音色用的 {engine.name}{" "}
+            现在不可用，原因在
+            <Link to="/voices" className="adm-link">
+              「声音」
+            </Link>
+            里能看到。面试可以先建，但准备时合成不了语音：等引擎恢复以后再点一次「准备」，或者换一个音色。
+          </span>
+        ) : (
+          <>
+            三个语音引擎各有音色，选了音色就定了用哪个引擎。可以在
+            <Link to="/voices" className="adm-link">
+              「声音」
+            </Link>
+            里添加和试听。
+          </>
+        )
       }
     >
       {({ id, describedBy }) => (

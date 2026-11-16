@@ -254,7 +254,14 @@ export const en: Texts = {
     offlineTitle: "Connection lost",
     offlineBody: "It continues by itself once you are back online. Please keep this page open.",
     saving: "Saving",
+    slowDescription:
+      "Your upload speed is slow, so saving the recording will take a while. Please keep this page open. You will see a message when it is saved.",
     remaining: (size) => `${size} left`,
+    remainingWithWait: (size, wait) => `${size} left, ${wait}`,
+    waitUnderMinute: "less than a minute",
+    waitMinutes: (minutes) => `about ${minutes} min`,
+    waitHours: (hours, minutes) =>
+      minutes > 0 ? `about ${hours} h ${minutes} min` : `about ${hours} h`,
     movedTitle: "The interview continues in another page",
     movedDescription:
       "This page has stopped recording and is saving what it recorded. Please keep it open for now.",

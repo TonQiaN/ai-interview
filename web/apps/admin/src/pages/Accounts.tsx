@@ -135,6 +135,9 @@ function CreateDialog({ open, onClose }: { open: boolean; onClose: () => void })
     <Dialog
       open={open}
       onClose={onClose}
+      unsaved={!done && (email !== "" || name !== "" || password !== "")}
+      // 密码只显示这一次：必须点「好了」才关，免得按到 Esc 就再也看不到了
+      persistent={done !== null}
       title={done ? "账号开好了" : "开账号"}
       footer={
         done ? (
@@ -247,6 +250,11 @@ function EditDialog({
     <Dialog
       open={account !== null}
       onClose={onClose}
+      unsaved={
+        account !== null &&
+        (name !== account.display_name ||
+          role !== (account.role === "admin" ? "admin" : "recruiter"))
+      }
       title="改账号"
       footer={
         <>
@@ -323,6 +331,9 @@ function ResetDialog({ account, onClose }: { account: Account | null; onClose: (
     <Dialog
       open={account !== null}
       onClose={onClose}
+      unsaved={!done && password !== ""}
+      // 新密码只显示这一次：必须点「好了」才关
+      persistent={done !== null}
       title={done ? "密码重设好了" : `给${account?.display_name ?? ""}重设密码`}
       footer={
         done ? (

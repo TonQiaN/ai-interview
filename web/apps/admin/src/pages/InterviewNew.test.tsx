@@ -1,11 +1,12 @@
 import { ToastProvider } from "@ai-interview/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Route, Routes } from "react-router";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setFetch } from "../api/http";
 import { createMockServer } from "../api/mock/server";
-import type { InterviewSummary, Page } from "../api/types";
+import type { CandidateListItem, InterviewSummary, Page } from "../api/types";
+import { TestRouter } from "../test/router";
 import { InterviewNewPage } from "./InterviewNew";
 
 type Server = ReturnType<typeof createMockServer>;
@@ -13,6 +14,16 @@ let server: Server;
 /** 让第几次建面试的请求失败，0 是不失败 */
 let failOn = 0;
 let created = 0;
+
+// jsdom 没有实现弹窗的打开和关闭
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function showModal() {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function close() {
+    this.open = false;
+  };
+});
 
 beforeEach(async () => {
   server = createMockServer({ latencyMs: 0, jobMs: 60_000 });
@@ -38,18 +49,19 @@ beforeEach(async () => {
 
 afterEach(cleanup);
 
-function open() {
+function open(entry = "/interviews/new") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <MemoryRouter initialEntries={["/interviews/new"]}>
+        <TestRouter initialEntries={[entry]}>
           <Routes>
             <Route path="/interviews/new" element={<InterviewNewPage />} />
             <Route path="/interviews/:id" element={<p>面试详情页</p>} />
             <Route path="/positions/:id" element={<p>岗位详情页</p>} />
+            <Route path="/candidates" element={<p>候选人列表页</p>} />
           </Routes>
-        </MemoryRouter>
+        </TestRouter>
       </ToastProvider>
     </QueryClientProvider>,
   );
@@ -133,5 +145,298 @@ describe("安排面试", () => {
     fireEvent.click(row);
     expect(row.getAttribute("aria-pressed")).toBe("false");
     expect(document.querySelectorAll(".adm-picked li")).toHaveLength(0);
+  });
+
+  it("选了几位候选人以后点到别的页面，先问一句，留下来选的人还在", async () => {
+    open();
+    const names = await pick(2);
+    fireEvent.click(screen.getByRole("button", { name: "上一步" }));
+
+    fireEvent.click(await screen.findByRole("link", { name: "去上传简历" }));
+    const dialog = await screen.findByRole("dialog", { name: "这一页的内容还没保存" });
+    expect(screen.queryByText("候选人列表页")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "留在这一页" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "这一页的内容还没保存" })).toBeNull(),
+    );
+    expect(screen.getByRole("list", { name: "已选 2 位" }).textContent).toContain(names[0]);
+  });
+
+  describe("候选人的简历", () => {
+    /** 把列表里排在最前面的几位（pick() 选的就是他们）的简历改成要测的样子，返回他们的名字 */
+    async function resumesOf(states: ("done" | "running" | "failed" | "none")[]) {
+      const response = await server.fetch("/api/v1/candidates?page_size=50");
+      const { items } = (await response.json()) as Page<CandidateListItem>;
+      return states.map((state, index) => {
+        const candidate = items[index];
+        if (!candidate) throw new Error("演示数据里的候选人不够");
+        if (state === "none") {
+          server.db.resumes = server.db.resumes.filter((r) => r.candidate_id !== candidate.id);
+        } else {
+          const resume = server.db.resumes.find(
+            (r) => r.candidate_id === candidate.id && r.is_primary,
+          );
+          if (!resume) throw new Error("演示数据里这位候选人没有简历");
+          resume.parse_status = state;
+        }
+        return candidate.name;
+      });
+    }
+
+    it("简历解析好了：说会结合简历出题", async () => {
+      await resumesOf(["done"]);
+      open();
+      await pick(1);
+      expect(screen.getByText("面试官会结合这份简历和岗位要求出题。")).toBeTruthy();
+    });
+
+    it("没有简历：提醒只能按岗位要求出题", async () => {
+      await resumesOf(["none"]);
+      open();
+      await pick(1);
+      expect(
+        screen.getByText("这位候选人还没有解析好的简历，面试官只能按岗位要求出题。"),
+      ).toBeTruthy();
+      expect(screen.queryByText(/会结合这份简历/)).toBeNull();
+    });
+
+    it("简历没解析出来：也提醒只能按岗位要求出题", async () => {
+      await resumesOf(["failed"]);
+      open();
+      await pick(1);
+      expect(screen.getByText(/还没有解析好的简历，面试官只能按岗位要求出题/)).toBeTruthy();
+    });
+
+    it("简历还在解析：说明出题会等它解析完", async () => {
+      await resumesOf(["running"]);
+      open();
+      await pick(1);
+      expect(screen.getByText("这位候选人的简历还在解析，面试官会等它解析完再出题。")).toBeTruthy();
+    });
+
+    it("选了几位：说出谁没有简历、谁的简历还在解析", async () => {
+      const [, missing, reading] = await resumesOf(["done", "none", "running"]);
+      open();
+      await pick(3);
+      const banner = screen.getByText(/3 位候选人面试/).closest(".oil-banner");
+      expect(banner?.textContent).toContain(`${missing}还没有解析好的简历，只能按岗位要求出题。`);
+      expect(banner?.textContent).toContain(`${reading}的简历还在解析，会等解析完再出题。`);
+    });
+
+    it("第一步的候选人那一栏：有简历但没填职位的人不说成没有简历", async () => {
+      const [filled, missing] = await resumesOf(["done", "none"]);
+      for (const c of server.db.candidates)
+        if (c.name === filled) Object.assign(c, { current_title: null, current_company: null });
+      open();
+      await waitFor(() => expect(document.querySelectorAll(".adm-pick").length).toBeGreaterThan(1));
+      const rowOf = (name: string | undefined) =>
+        Array.from(document.querySelectorAll<HTMLElement>(".adm-split .oil-card .adm-pick")).find(
+          (row) => row.querySelector("strong")?.textContent === name,
+        );
+      expect(rowOf(filled)?.textContent).not.toContain("还没有简历");
+      expect(rowOf(missing)?.textContent).toContain("还没有简历");
+    });
+  });
+
+  describe("从候选人页、岗位页点过来", () => {
+    /** 再建 count 个，原来的就排到列表的 100 名以后了 */
+    async function addMany(path: "/candidates" | "/positions", count: number) {
+      for (let n = 0; n < count; n += 1) {
+        const body =
+          path === "/candidates" ? { name: `合成候选人${n}` } : { title: `合成岗位${n}` };
+        const response = await server.fetch(`/api/v1${path}`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) throw new Error(`没建成：${response.status}`);
+      }
+    }
+    const picked = (label: string) => screen.queryByRole("list", { name: label });
+    const listsLoaded = () =>
+      waitFor(() => expect(document.querySelectorAll(".adm-pick").length).toBeGreaterThan(1));
+
+    it("候选人多于 100 位：排在后面的人也替他选好了", async () => {
+      const target = server.db.candidates[0];
+      if (!target) throw new Error("演示数据里没有候选人");
+      await addMany("/candidates", 101);
+      open(`/interviews/new?candidate=${target.id}`);
+
+      const list = await screen.findByRole("list", { name: "已选 1 位" });
+      expect(list.textContent).toContain(target.name);
+    });
+
+    it("岗位多于 100 个：排在后面的岗位也选好了，而且看得出选的是哪个", async () => {
+      const target = server.db.positions.find((p) => p.status === "open");
+      if (!target) throw new Error("演示数据里没有在招的岗位");
+      await addMany("/positions", 101);
+      open(`/interviews/new?position=${target.id}`);
+
+      const list = await screen.findByRole("list", { name: "已选的岗位" });
+      expect(list.textContent).toContain(target.title);
+    });
+
+    it("两个都带着：选好以后能直接下一步", async () => {
+      const candidate = server.db.candidates[0];
+      const position = server.db.positions.find((p) => p.status === "open");
+      if (!candidate || !position) throw new Error("演示数据不够");
+      open(`/interviews/new?candidate=${candidate.id}&position=${position.id}`);
+
+      await screen.findByRole("list", { name: "已选的岗位" });
+      await screen.findByRole("list", { name: "已选 1 位" });
+      expect(screen.getByRole("button", { name: "下一步" })).toHaveProperty("disabled", false);
+    });
+
+    it("超过 50 个时只列前 50 个：写着一共多少，搜到的不满 50 个就不写了", async () => {
+      await addMany("/candidates", 60);
+      await addMany("/positions", 60);
+      const total = async (path: string) =>
+        ((await (await server.fetch(`/api/v1${path}`)).json()) as Page<unknown>).total;
+      const candidates = await total("/candidates?page_size=1");
+      const positions = await total("/positions?status=open&page_size=1");
+      open();
+
+      expect(
+        await screen.findByText(
+          `这里只列了最新的 50 位，一共 ${candidates} 位。搜姓名、公司或职位能找到其他人。`,
+        ),
+      ).toBeTruthy();
+      expect(
+        await screen.findByText(
+          `这里只列了最新的 50 个，一共 ${positions} 个在招的岗位。搜岗位或部门能找到其他的。`,
+        ),
+      ).toBeTruthy();
+
+      fireEvent.change(screen.getByLabelText("搜姓名、公司或职位"), {
+        target: { value: "合成候选人59" },
+      });
+      await waitFor(() => expect(screen.queryByText(/这里只列了最新的 50 位/)).toBeNull());
+      expect(screen.getByText(/这里只列了最新的 50 个/)).toBeTruthy();
+    });
+
+    it("归档的候选人、不在招的岗位不替人选", async () => {
+      const candidate = server.db.candidates[0];
+      const position = server.db.positions.find((p) => p.status === "open");
+      if (!candidate || !position) throw new Error("演示数据不够");
+      await server.fetch(`/api/v1/candidates/${candidate.id}`, { method: "DELETE" });
+      position.status = "closed";
+      open(`/interviews/new?candidate=${candidate.id}&position=${position.id}`);
+
+      await listsLoaded();
+      // 等按编号取的那两个请求回来
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(picked("已选 1 位")).toBeNull();
+      expect(picked("已选的岗位")).toBeNull();
+      expect(screen.getByRole("button", { name: "下一步" })).toHaveProperty("disabled", true);
+    });
+
+    it("选好的岗位可以换成别的", async () => {
+      const position = server.db.positions.find((p) => p.status === "open");
+      if (!position) throw new Error("演示数据里没有在招的岗位");
+      open(`/interviews/new?position=${position.id}`);
+      await screen.findByRole("list", { name: "已选的岗位" });
+      await listsLoaded();
+
+      const positionCard = document.querySelectorAll<HTMLElement>(".adm-split .oil-card")[1];
+      const other = Array.from(positionCard?.querySelectorAll<HTMLElement>(".adm-pick") ?? []).find(
+        (row) => row.querySelector("strong")?.textContent !== position.title,
+      );
+      if (!other) throw new Error("演示数据里只有一个在招的岗位");
+      fireEvent.click(other);
+
+      const title = other.querySelector("strong")?.textContent ?? "";
+      expect(picked("已选的岗位")?.textContent).toContain(title);
+      expect(picked("已选的岗位")?.textContent).not.toContain(position.title);
+    });
+  });
+
+  describe("从一场面试点「再安排一场」过来", () => {
+    /** 演示数据里的一场面试，候选人没归档、岗位在招；顺手给它填上专门的设置 */
+    function source() {
+      const target = server.db.interviews.find((i) => {
+        const candidate = server.db.candidates.find((c) => c.id === i.candidate.id);
+        const position = server.db.positions.find((p) => p.id === i.position.id);
+        return candidate && !candidate.archived_at && position?.status === "open";
+      });
+      if (!target) throw new Error("演示数据里没有能再安排的面试");
+      target.config = {
+        ...target.config,
+        target_duration_minutes: 35,
+        focus_instructions: ["合成的考察要求：看看带人的经验"],
+      };
+      return target;
+    }
+
+    it("人、岗位都选好了，直接停在设置那一步，设置沿用上一场的", async () => {
+      const target = source();
+      const before = await interviewCount();
+      open(`/interviews/new?from=${target.id}`);
+
+      expect(
+        await screen.findByText(`${target.candidate.name} 面试 ${target.position.title}`),
+      ).toBeTruthy();
+      expect(await screen.findByDisplayValue("合成的考察要求：看看带人的经验")).toBeTruthy();
+      const start = screen.getByLabelText(/^从哪份设置开始/) as HTMLSelectElement;
+      expect(start.selectedOptions[0]?.textContent).toBe("上一场面试的设置");
+
+      fireEvent.click(screen.getByRole("button", { name: "先存草稿" }));
+      await screen.findByText("面试详情页");
+      expect(await interviewCount()).toBe(before + 1);
+      const made = server.db.interviews.find(
+        (i) => i.id !== target.id && i.status === "draft" && i.candidate.id === target.candidate.id,
+      );
+      expect(made?.config.target_duration_minutes).toBe(35);
+      expect(made?.config.focus_instructions).toEqual(["合成的考察要求：看看带人的经验"]);
+      expect(made?.position.id).toBe(target.position.id);
+    });
+
+    it("换成别的模板以后，还能选回上一场的设置", async () => {
+      const target = source();
+      open(`/interviews/new?from=${target.id}`);
+      await screen.findByDisplayValue("合成的考察要求：看看带人的经验");
+
+      const start = screen.getByLabelText(/^从哪份设置开始/) as HTMLSelectElement;
+      fireEvent.change(start, { target: { value: "" } });
+      await waitFor(() =>
+        expect(screen.queryByDisplayValue("合成的考察要求：看看带人的经验")).toBeNull(),
+      );
+      const again = Array.from(start.options).find((o) => o.textContent === "上一场面试的设置");
+      fireEvent.change(start, { target: { value: again?.value } });
+      expect(await screen.findByDisplayValue("合成的考察要求：看看带人的经验")).toBeTruthy();
+    });
+
+    it("候选人已经归档：不替人选，停在第一步", async () => {
+      const target = source();
+      const candidate = server.db.candidates.find((c) => c.id === target.candidate.id);
+      if (!candidate) throw new Error("没找到候选人");
+      candidate.archived_at = new Date().toISOString();
+      open(`/interviews/new?from=${target.id}`);
+
+      const list = await screen.findByRole("list", { name: "已选的岗位" });
+      expect(list.textContent).toContain(target.position.title);
+      expect(screen.queryByRole("list", { name: "已选 1 位" })).toBeNull();
+      expect(screen.getByRole("button", { name: "下一步" })).toHaveProperty("disabled", true);
+    });
+
+    it("没动设置就点到别的页面，直接走，不拦", async () => {
+      const target = source();
+      target.voice_id = server.db.voices.find((v) => v.ready)?.id ?? null;
+      open(`/interviews/new?from=${target.id}`);
+      await screen.findByDisplayValue("合成的考察要求：看看带人的经验");
+
+      fireEvent.click(screen.getByRole("button", { name: "上一步" }));
+      fireEvent.click(await screen.findByRole("link", { name: "去上传简历" }));
+      expect(await screen.findByText("候选人列表页")).toBeTruthy();
+    });
+  });
+
+  it("只选了一位候选人和岗位、没动设置，点到别的页面直接走", async () => {
+    open();
+    await pick(1);
+    fireEvent.click(screen.getByRole("button", { name: "上一步" }));
+
+    fireEvent.click(await screen.findByRole("link", { name: "去上传简历" }));
+
+    expect(await screen.findByText("候选人列表页")).toBeTruthy();
   });
 });

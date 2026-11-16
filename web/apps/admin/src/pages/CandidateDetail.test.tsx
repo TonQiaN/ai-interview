@@ -203,4 +203,33 @@ describe("候选人详情", () => {
     expect(requests).toContain(`POST /candidates/${candidate.id}/restore`);
     expect(server.db.candidates.find((c) => c.id === candidate.id)?.archived_at).toBeNull();
   });
+
+  it("归档了的面试也列在这位候选人名下，标着已归档", async () => {
+    const candidate = busyCandidate();
+    const interview = server.db.interviews.find((i) => i.candidate.id === candidate.id);
+    if (!interview) throw new Error("这位候选人没有面试");
+    interview.archived_at = new Date().toISOString();
+    open(candidate.id);
+
+    const link = await screen.findAllByRole("link", { name: interview.position.title });
+    const rows = link.map((a) => a.closest("li")).filter((li) => li !== null);
+    expect(rows.some((li) => within(li).queryByText("已归档"))).toBe(true);
+  });
+
+  it("还没有画像时不说出题会用到画像：出题看的是简历", async () => {
+    const created = (await (
+      await server.fetch("/api/v1/candidates", {
+        method: "POST",
+        body: JSON.stringify({ name: "合成候选人甲" }),
+      })
+    ).json()) as { id: string };
+    open(created.id);
+
+    expect(
+      await screen.findByText(
+        "还没有画像。上传一份简历，大模型会读出经历、技能和值得核实的地方，面试官也会按这份简历出题。",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/出题时(也)?会用到/)).toBeNull();
+  });
 });
