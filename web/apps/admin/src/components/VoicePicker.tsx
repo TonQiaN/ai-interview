@@ -2,7 +2,7 @@ import { Field, Select } from "@ai-interview/ui";
 import { TriangleAlert } from "lucide-react";
 import { Link } from "react-router";
 import { useEngines, useVoices } from "../api/queries";
-import type { Voice } from "../api/types";
+import type { SpeechEngine, Voice } from "../api/types";
 
 /** 「默认面试官 · IndexTTS 2」这样的一句，页面上显示音色时都用它 */
 export function useVoiceName(): (voiceId: string | null | undefined) => string {
@@ -21,6 +21,18 @@ export function useVoiceName(): (voiceId: string | null | undefined) => string {
   };
 }
 
+/**
+ * 这个音色用的是哪个引擎，用来看它现在可不可用。没指定音色就看默认音色。
+ * 连默认音色都没有时用的是后端配置的引擎，这里看不到，返回 undefined。
+ */
+export function useVoiceEngine(voiceId: string | null | undefined): SpeechEngine | undefined {
+  const voices = useVoices();
+  const engines = useEngines();
+  const items = voices.data?.items ?? [];
+  const used = voiceId ? items.find((v) => v.id === voiceId) : items.find((v) => v.is_default);
+  return used ? engines.data?.items.find((e) => e.id === used.engine) : undefined;
+}
+
 export interface VoicePickerProps {
   /** null 是跟着默认音色走 */
   value: string | null;
@@ -32,12 +44,9 @@ export interface VoicePickerProps {
 /** 这场面试的面试官用哪个音色说话。音色自己带着引擎，所以选音色也就选了引擎。 */
 export function VoicePicker({ value, onChange, disabled, error }: VoicePickerProps) {
   const voices = useVoices();
-  const engines = useEngines();
   const voiceName = useVoiceName();
   const items = voices.data?.items ?? [];
-  // 没选就是跟着默认音色走。连默认音色都没有时用的是后端配置的引擎，这里看不到，不提示
-  const used = value ? items.find((v) => v.id === value) : items.find((v) => v.is_default);
-  const engine = used ? engines.data?.items.find((e) => e.id === used.engine) : undefined;
+  const engine = useVoiceEngine(value);
   return (
     <Field
       label="面试官的声音"

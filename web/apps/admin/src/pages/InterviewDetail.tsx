@@ -68,7 +68,7 @@ import {
 import { PageHeader } from "../components/PageHeader";
 import { ReplayPlayer } from "../components/ReplayPlayer";
 import { ReportView } from "../components/ReportView";
-import { useVoiceName, VoicePicker } from "../components/VoicePicker";
+import { useVoiceEngine, useVoiceName, VoicePicker } from "../components/VoicePicker";
 import { sameForm } from "../lib/form";
 import {
   categoryLabel,
@@ -108,6 +108,39 @@ const gap = (size: number) => ({ "--oil-gap": `var(--oil-space-${size})` }) as R
 
 // ───────── 概览 ─────────
 
+/**
+ * 题目出好了、语音没合成全时说什么。后端给的原因是每一句各带一遍、连着网络报错的一长串，
+ * 这里先用一两句话说清楚出了什么事、该怎么办，原话收在「详细原因」里。
+ */
+function SynthFailed({ interview }: { interview: Interview }) {
+  const engine = useVoiceEngine(interview.voice_id);
+  const failed = interview.synth.failed;
+  const count = failed > 0 ? `${failed} 句语音` : "有几句语音";
+  return (
+    <>
+      {engine && !engine.available ? (
+        <>
+          {`${engine.name} 现在不可用，${count}没合成出来。`}
+          {"题目已经保留：等它恢复以后点「重试」，只补没合成的这几句；"}
+          {"也可以在「改设置」里换一个音色。引擎为什么不可用，在"}
+          <Link to="/voices" className="adm-link">
+            「声音」
+          </Link>
+          里能看到。
+        </>
+      ) : (
+        `${count}没合成出来。题目已经保留，点「重试」只补没合成的这几句。`
+      )}
+      {interview.prepare_error && (
+        <details className="adm-utter__more">
+          <summary>详细原因</summary>
+          <div style={{ overflowWrap: "anywhere" }}>{interview.prepare_error}</div>
+        </details>
+      )}
+    </>
+  );
+}
+
 function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) => void }) {
   const prepare = usePrepareInterview(interview.id);
   const toast = useToast();
@@ -131,20 +164,20 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
     );
   }
   if (status === "prepare_failed") {
+    const retry = (
+      <Button size="sm" loading={prepare.isPending} onClick={run}>
+        重试
+      </Button>
+    );
+    if (!interview.has_plan)
+      return (
+        <Banner tone="danger" title="题目没有准备好" actions={retry}>
+          {interview.prepare_error ?? "准备过程出错了。"}
+        </Banner>
+      );
     return (
-      <Banner
-        tone="danger"
-        title={interview.has_plan ? "语音没有全部合成出来" : "题目没有准备好"}
-        actions={
-          <Button size="sm" loading={prepare.isPending} onClick={run}>
-            重试
-          </Button>
-        }
-      >
-        {interview.prepare_error ?? "准备过程出错了。"}
-        {interview.has_plan &&
-          synth.failed > 0 &&
-          ` 有 ${synth.failed} 句没合成成功，重试只补这几句。`}
+      <Banner tone="danger" title="语音没有全部合成出来" actions={retry}>
+        <SynthFailed interview={interview} />
       </Banner>
     );
   }
