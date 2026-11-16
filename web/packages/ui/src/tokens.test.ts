@@ -44,6 +44,9 @@ const pairs: ReadonlyArray<readonly [string, string, number]> = [
   ["--oil-ink-2", "--oil-canvas", 4.5],
   ["--oil-ink-3", "--oil-canvas", 4.5],
   ["--oil-ink-3", "--oil-linen", 4.5],
+  // 凹下去的槽上也写小字：表头、报告里引用的原话、候选人对比里每个人的那一格
+  ["--oil-ink-2", "--oil-sunken", 4.5],
+  ["--oil-ink-3", "--oil-sunken", 4.5],
   ["--oil-on-primary", "--oil-primary", 4.5],
   ["--oil-on-accent", "--oil-accent", 4.5],
   ["--oil-on-gold", "--oil-gold", 4.5],

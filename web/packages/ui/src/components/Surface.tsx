@@ -34,7 +34,8 @@ export function CardHeader({
 }) {
   return (
     <div className={clsx("oil-card__head", className)}>
-      {title && <div className="oil-card__title">{title}</div>}
+      {/* 卡片的标题是页面标题下面的一级标题：读屏软件按标题跳的时候能一张卡片一张卡片地走 */}
+      {title && <h2 className="oil-card__title">{title}</h2>}
       {children}
       {actions}
     </div>

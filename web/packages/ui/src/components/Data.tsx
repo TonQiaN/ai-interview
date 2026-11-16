@@ -1,5 +1,13 @@
 import { clsx } from "clsx";
-import type { CSSProperties, HTMLAttributes, ReactNode, TableHTMLAttributes } from "react";
+import {
+  type CSSProperties,
+  type HTMLAttributes,
+  type ReactNode,
+  type TableHTMLAttributes,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 export type Tone = "neutral" | "success" | "warning" | "danger" | "info";
 
@@ -31,10 +39,29 @@ export interface TableProps extends TableHTMLAttributes<HTMLTableElement> {
   hover?: boolean;
 }
 
-/** 表格外面自带横向滚动容器，窄屏不会撑破页面。 */
+/**
+ * 表格外面自带横向滚动容器，窄屏不会撑破页面。
+ *
+ * 表格比容器宽、要横着滚的时候，容器能用 Tab 停到，停到以后用方向键滚：
+ * 不然只用键盘的人看不到右边的列（表格里没有链接和按钮时，没有别的办法滚过去）。
+ */
 export function Table({ hover = true, className, ...rest }: TableProps) {
+  const wrap = useRef<HTMLDivElement>(null);
+  const [scrolls, setScrolls] = useState(false);
+  useEffect(() => {
+    const el = wrap.current;
+    if (!el) return;
+    const check = () => setScrolls(el.scrollWidth > el.clientWidth);
+    check();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    return () => observer.disconnect();
+  }, []);
   return (
-    <div className="oil-table-wrap">
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: 只在要横着滚的时候能停到，为的是用键盘滚
+    <div ref={wrap} className="oil-table-wrap" tabIndex={scrolls ? 0 : undefined}>
       <table className={clsx("oil-table", hover && "oil-table--hover", className)} {...rest} />
     </div>
   );
