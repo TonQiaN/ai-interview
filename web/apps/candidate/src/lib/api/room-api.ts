@@ -80,6 +80,8 @@ const PAGE_HEADER = "X-Room-Page";
 const ACTIVE_ELSEWHERE_HEADER = "X-Room-Active-Elsewhere";
 
 export interface RoomApiHooks {
+  /** 这个页面的标识，每次打开页面换一个。默认随机生成。 */
+  pageId?: string;
   /**
    * 服务端说面试正在另一个页面里进行。只要还是这样，每个响应都会报一次；
    * 这个页面本来就没在面试的话（刚打开、还在检测设备）不用理会。
@@ -89,8 +91,6 @@ export interface RoomApiHooks {
 
 export interface HttpRoomApiOptions extends RoomApiHooks {
   token: string;
-  /** 这个页面的标识，每次打开页面换一个。默认随机生成。 */
-  pageId?: string;
   /** 后端的地址，默认是页面所在的站点。 */
   baseUrl?: string;
   fetch?: (request: Request) => Promise<Response>;

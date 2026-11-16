@@ -31,6 +31,11 @@ export interface SegmentMeta {
    * 没有这一项的按很久以前录的算。
    */
   createdAt?: number;
+  /**
+   * 录这一段的页面的标识。同一个浏览器里几个标签页共用这份队列，靠它分清一段是谁的
+   * （owned-chunk-store.ts）。没有这一项的是加这个标记之前留下的。
+   */
+  owner?: string;
 }
 
 export interface ChunkKey {

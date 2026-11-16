@@ -1100,6 +1100,35 @@ async fn archived_interviews_are_hidden_by_default(pool: PgPool) {
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_list_and_the_detail_say_when_an_interview_was_archived(pool: PgPool) {
+    let h = Harness::new(pool, None, FakeBackend::new()).await;
+    let kept = h.create(json!({})).await;
+    let archived = h.create(json!({})).await;
+    assert!(h.detail(&archived).await["archived_at"].is_null());
+
+    let response = TestRequest::delete(format!("/api/v1/interviews/{archived}"))
+        .send(&h.app)
+        .await;
+    assert_eq!(response.status, StatusCode::NO_CONTENT);
+
+    let all = h.get("/api/v1/interviews?include_archived=true").await;
+    let all = all.json();
+    let item = |id: &str| {
+        all["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert!(item(&kept)["archived_at"].is_null(), "没归档的是空");
+    assert!(item(&archived)["archived_at"].is_string(), "归档的带时间");
+    assert!(h.detail(&kept).await["archived_at"].is_null());
+    assert!(h.detail(&archived).await["archived_at"].is_string());
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn waits_for_the_resume_to_be_parsed(pool: PgPool) {
     let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;
     sqlx::query("UPDATE resumes SET parse_status = 'running' WHERE candidate_id = $1")
