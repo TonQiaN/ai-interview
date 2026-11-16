@@ -687,7 +687,12 @@ export function ReportView({
               intro={report.integrity.summary}
             >
               {report.integrity.signals.length === 0 ? (
-                <p className="oil-muted adm-flat">没有发现值得注意的迹象。</p>
+                // 偶尔模型给了风险等级却没列迹象（#408）。这时候不能说「没有发现」，和旁边的等级对不上
+                <p className="oil-muted adm-flat">
+                  {report.integrity.risk_level === "none"
+                    ? "没有发现值得注意的迹象。"
+                    : "这份报告没有把迹象一条一条列出来，依据都在上面这段话里。请到回看里对着录像核对，或者重新生成报告。"}
+                </p>
               ) : (
                 <>
                   <p className="adm-caution">

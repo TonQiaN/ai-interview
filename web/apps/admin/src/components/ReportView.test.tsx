@@ -48,6 +48,24 @@ describe("分析报告", () => {
       expect(screen.getByText(signal.alternative_explanations)).toBeTruthy();
   });
 
+  it("风险不是「无」、迹象却一条没列出来时，不说没有发现迹象", () => {
+    const report = sampleReport("ops-cheating", "i-1", Date.now());
+    if (!report.integrity) throw new Error("样例里没有诚信观察");
+    report.integrity.signals = [];
+    render(<ReportView report={report} onSeek={() => {}} />);
+    expect(screen.queryByText("没有发现值得注意的迹象。")).toBeNull();
+    expect(screen.getByText(/没有把迹象一条一条列出来/)).toBeTruthy();
+  });
+
+  it("风险是「无」、也没有迹象时，说没有发现迹象", () => {
+    const report = sampleReport("backend-strong", "i-1", Date.now());
+    if (!report.integrity) throw new Error("样例里没有诚信观察");
+    report.integrity.risk_level = "none";
+    report.integrity.signals = [];
+    render(<ReportView report={report} onSeek={() => {}} />);
+    expect(screen.getByText("没有发现值得注意的迹象。")).toBeTruthy();
+  });
+
   it("没考察到的能力不显示成 0 分", () => {
     const report = sampleReport("backend-strong", "i-1", Date.now());
     const first = report.competencies[0];
