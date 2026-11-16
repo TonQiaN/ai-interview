@@ -92,7 +92,7 @@ describe("面试列表：导出表格", () => {
     fireEvent.click(screen.getByRole("button", { name: "导出表格" }));
     const { name, lines } = await download.file();
     expect(name).toMatch(/^面试结果-\d{8}\.csv$/);
-    expect(lines[0]).toContain("候选人,岗位,状态");
+    expect(lines[0]).toContain("候选人,岗位,轮次,状态");
     expect(lines.length).toBe(total + 1);
     expect(await screen.findByText(`导出了 ${total} 场面试`)).toBeTruthy();
   });
@@ -110,5 +110,58 @@ describe("面试列表：导出表格", () => {
     const { lines } = await download.file();
     expect(lines.length).toBe(completed + 1);
     for (const line of lines.slice(1)) expect(line).toContain(",已完成,");
+  });
+});
+
+describe("面试列表：链接过期和面试的轮次", () => {
+  /** 列表里这位候选人、这个状态的那一行 */
+  async function rowOf(name: string, status: string) {
+    const rows = (await screen.findAllByText(name))
+      .map((cell) => cell.closest("tr"))
+      .filter((row): row is HTMLTableRowElement => !!row && !!within(row).queryByText(status));
+    const [row] = rows;
+    if (!row) throw new Error(`没找到 ${name} ${status} 的那一行`);
+    return within(row);
+  }
+
+  it("发了链接、链接已经过期的，标着「链接已过期」，不写「已发链接」", async () => {
+    const expired = server.db.interviews.find(
+      (i) =>
+        i.status === "invited" &&
+        (server.db.invites.get(i.id) ?? []).every((invite) => invite.status === "expired"),
+    );
+    if (!expired) throw new Error("演示数据里没有链接过期的面试");
+    open();
+
+    const row = await rowOf(expired.candidate.name, "链接已过期");
+    expect(row.queryByText("已发链接")).toBeNull();
+  });
+
+  it("链接还有效的照旧写「已发链接」", async () => {
+    const waiting = server.db.interviews.find(
+      (i) =>
+        i.status === "invited" &&
+        (server.db.invites.get(i.id) ?? []).some((invite) => invite.status === "active"),
+    );
+    if (!waiting) throw new Error("演示数据里没有等候选人的面试");
+    open();
+
+    const row = await rowOf(waiting.candidate.name, "已发链接");
+    expect(row.queryByText("链接已过期")).toBeNull();
+  });
+
+  it("深入面试标出来，第一轮初筛不标", async () => {
+    const [deep, first] = server.db.interviews.filter((i) => i.status === "completed");
+    if (!deep || !first) throw new Error("演示数据里面完的面试不够两场");
+    deep.config = { ...deep.config, stage: "in_depth" };
+    server.db.interviews = [deep, first];
+    open();
+
+    await screen.findByText(deep.candidate.name);
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(2);
+    const marked = rows.filter((row) => within(row).queryByText("深入面试"));
+    expect(marked).toHaveLength(1);
+    expect(within(marked[0] as HTMLElement).getByText(deep.candidate.name)).toBeTruthy();
   });
 });
