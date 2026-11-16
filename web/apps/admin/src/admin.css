@@ -529,6 +529,10 @@
     gap: var(--oil-space-2);
     white-space: nowrap;
   }
+  .adm-utter__actions {
+    display: flex;
+    gap: var(--oil-space-1);
+  }
   @media (max-width: 640px) {
     .adm-utter {
       grid-template-columns: minmax(0, 1fr);

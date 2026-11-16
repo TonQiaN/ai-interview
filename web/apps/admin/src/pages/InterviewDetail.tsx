@@ -903,6 +903,14 @@ interface Editing {
   apply: (plan: InterviewPlan, text: string) => InterviewPlan;
 }
 
+/** 准备去掉的一道题或一句追问：确认的时候怎么说，确认以后计划变成什么样 */
+interface Removing {
+  title: string;
+  confirmLabel: string;
+  body: string;
+  apply: (plan: InterviewPlan) => InterviewPlan;
+}
+
 function SynthBadge({ utterance }: { utterance: Utterance | undefined }) {
   if (!utterance) return null;
   return (
@@ -921,6 +929,8 @@ function Line({
   follow,
   utterance,
   onEdit,
+  onRemove,
+  removeLabel,
   children,
 }: {
   label: string;
@@ -928,6 +938,10 @@ function Line({
   follow?: boolean;
   utterance: Utterance | undefined;
   onEdit?: () => void;
+  /** 去掉这一句。只有题目和追问能去掉，开场白这些固定要说的话不能 */
+  onRemove?: () => void;
+  /** 「去掉」按钮念出来的名字：一页上有很多个，要说清是哪一句 */
+  removeLabel?: string;
   children?: ReactNode;
 }) {
   return (
@@ -942,10 +956,30 @@ function Line({
       </div>
       <div className="adm-utter__side">
         <SynthBadge utterance={utterance} />
-        {onEdit && (
-          <Button size="sm" variant="ghost" icon={<Pencil aria-hidden="true" />} onClick={onEdit}>
-            改
-          </Button>
+        {(onEdit || onRemove) && (
+          <div className="adm-utter__actions">
+            {onEdit && (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Pencil aria-hidden="true" />}
+                onClick={onEdit}
+              >
+                改
+              </Button>
+            )}
+            {onRemove && (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Trash2 aria-hidden="true" />}
+                aria-label={removeLabel}
+                onClick={onRemove}
+              >
+                去掉
+              </Button>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -1017,6 +1051,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
   const [editing, setEditing] = useState<Editing | null>(null);
   const [text, setText] = useState("");
   const [regenerating, setRegenerating] = useState(false);
+  const [removing, setRemoving] = useState<Removing | null>(null);
   const canEdit = editable(interview);
 
   // 出题的那一步结束后，把题目取回来
@@ -1068,6 +1103,33 @@ function QuestionsTab({ interview }: { interview: Interview }) {
       phrases: { ...current.phrases, [key]: next },
     });
   };
+  const remove = (target: Removing) => {
+    if (!canEdit) return undefined;
+    return () => {
+      save.reset();
+      setRemoving(target);
+    };
+  };
+  const removeQuestion = (q: PlannedQuestion, label: string) => {
+    // 后端要求至少留一道主问题，最后一道不给去掉
+    if (!q.reserve && main.length <= 1) return undefined;
+    const followCount = q.follow_ups?.length ?? 0;
+    return remove({
+      title: `去掉${label}？`,
+      confirmLabel: "去掉这道题",
+      body: [
+        `面试时不会再问这道题${followCount > 0 ? `和它的 ${followCount} 句追问` : ""}，别的题和已经合成好的语音都不动。`,
+        q.origin === "must_ask"
+          ? "这是设置里指定的必问题：设置不改的话，重新出题时它还会回来。"
+          : "去掉以后想要回来，只能重新出题。",
+      ].join(""),
+      // 按 key 找：确认框开着的时候题目重新取过也不会去错
+      apply: (current) => ({
+        ...current,
+        questions: current.questions.filter((x) => x.key !== q.key),
+      }),
+    });
+  };
   let mainNo = 0;
 
   return (
@@ -1079,7 +1141,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
           {followUps > 0 && `，${followUps} 句追问`}
           {speech > 0 && `；面试官说话约 ${duration(speech)}`}。
           {canEdit
-            ? "可以改措辞，改完那一句会重新合成语音。"
+            ? "可以改措辞，改完那一句会重新合成语音；不想问的题和追问可以去掉。"
             : preparing
               ? ""
               : "链接发出之后题目不能再改。"}
@@ -1115,6 +1177,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
           {data.questions.map((q, index) => {
             if (!q.reserve) mainNo += 1;
             const label = q.reserve ? "备用" : `Q${mainNo}`;
+            const name = q.reserve ? "这道备用题" : `第 ${mainNo} 题`;
             return (
               <div key={q.key}>
                 <Line
@@ -1122,12 +1185,14 @@ function QuestionsTab({ interview }: { interview: Interview }) {
                   text={q.text}
                   utterance={byKey.get(q.key)}
                   onEdit={edit({
-                    label: q.reserve ? "这道备用题" : `第 ${mainNo} 题`,
+                    label: name,
                     text: q.text,
                     hint: q.intent ? `想考察：${q.intent}` : undefined,
                     apply: (current, next) =>
                       setQuestion(index, (old) => ({ ...old, text: next }))(current),
                   })}
+                  onRemove={removeQuestion(q, name)}
+                  removeLabel={`去掉${name}`}
                 >
                   <div className="adm-utter__tags">
                     <Badge plain>{categoryLabel[q.category]}</Badge>
@@ -1159,6 +1224,23 @@ function QuestionsTab({ interview }: { interview: Interview }) {
                           ),
                         }))(current),
                     })}
+                    onRemove={remove({
+                      title: "去掉这句追问？",
+                      confirmLabel: "去掉这句追问",
+                      body: `${name}还在，只是候选人答得笼统时不会再追问这一句。去掉以后想要回来，只能重新出题。`,
+                      apply: (current) => ({
+                        ...current,
+                        questions: current.questions.map((x) =>
+                          x.key === q.key
+                            ? {
+                                ...x,
+                                follow_ups: (x.follow_ups ?? []).filter((y) => y.key !== f.key),
+                              }
+                            : x,
+                        ),
+                      }),
+                    })}
+                    removeLabel={`去掉 ${label} 的第 ${fIndex + 1} 句追问`}
                   >
                     <div className="adm-utter__intent">什么时候问：{f.ask_when}</div>
                   </Line>
@@ -1317,6 +1399,28 @@ function QuestionsTab({ interview }: { interview: Interview }) {
           </Field>
         </div>
       </Dialog>
+      <Confirm
+        open={removing !== null}
+        title={removing?.title ?? ""}
+        confirmLabel={removing?.confirmLabel ?? "去掉"}
+        danger
+        loading={save.isPending}
+        onClose={() => setRemoving(null)}
+        onConfirm={() =>
+          removing &&
+          save.mutate(removing.apply(data), {
+            onSuccess: () => {
+              toast("去掉了");
+              setRemoving(null);
+            },
+          })
+        }
+      >
+        <div className="oil-stack">
+          {save.error && <Banner tone="danger">{errorMessage(save.error)}</Banner>}
+          <span>{removing?.body}</span>
+        </div>
+      </Confirm>
       <Confirm
         open={regenerating}
         title="重新出题？"

@@ -539,5 +539,85 @@ describe("面试详情", () => {
       expect(await screen.findByText(/道主问题/)).toBeTruthy();
       expect(asked.some((url) => url.endsWith("/plan"))).toBe(true);
     });
+
+    /** 演示数据里一场待发送的面试，和它现在的题目 */
+    function readyWithPlan() {
+      const target = server.db.interviews.find((i) => i.status === "ready");
+      const plan = target && server.db.plans.get(target.id);
+      if (!target || !plan) throw new Error("演示数据里没有出好题的待发送面试");
+      return { target, plan };
+    }
+
+    async function openQuestions(id: string) {
+      open(id);
+      fireEvent.click(await screen.findByRole("tab", { name: "题目" }));
+      await screen.findByText(/道主问题/);
+    }
+
+    it("去掉一道题：先问一句，确认以后这道题和它的追问一起没了，别的题不动", async () => {
+      const { target, plan } = readyWithPlan();
+      const before = plan.questions.map((q) => q.key);
+      const second = plan.questions[1];
+      if (!second || before.length < 3) throw new Error("演示数据里的题不够三道");
+      await openQuestions(target.id);
+      expect(screen.getByText(new RegExp(`共 ${before.length} 道主问题`))).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "去掉第 2 题" }));
+      // 只是问一句，这时还没有动
+      const dialog = await screen.findByRole("dialog", { name: "去掉第 2 题？" });
+      expect(server.db.plans.get(target.id)?.questions.map((q) => q.key)).toEqual(before);
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "去掉这道题" }));
+
+      await waitFor(() =>
+        expect(server.db.plans.get(target.id)?.questions.map((q) => q.key)).toEqual(
+          before.filter((key) => key !== second.key),
+        ),
+      );
+      expect(await screen.findByText(new RegExp(`共 ${before.length - 1} 道主问题`))).toBeTruthy();
+      expect(screen.queryByText(second.text)).toBeNull();
+    });
+
+    it("去掉一句追问：这道题还在，只少这一句", async () => {
+      const { target, plan } = readyWithPlan();
+      const index = plan.questions.findIndex((q) => (q.follow_ups ?? []).length > 0);
+      const question = plan.questions[index];
+      const followUp = question?.follow_ups?.[0];
+      if (!question || !followUp) throw new Error("演示数据里没有带追问的题");
+      await openQuestions(target.id);
+
+      fireEvent.click(screen.getByRole("button", { name: `去掉 Q${index + 1} 的第 1 句追问` }));
+      const dialog = await screen.findByRole("dialog", { name: "去掉这句追问？" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "去掉这句追问" }));
+
+      await waitFor(() => {
+        const saved = server.db.plans.get(target.id)?.questions[index];
+        expect(saved?.key).toBe(question.key);
+        expect((saved?.follow_ups ?? []).map((f) => f.key)).not.toContain(followUp.key);
+      });
+      expect(server.db.plans.get(target.id)?.questions).toHaveLength(plan.questions.length);
+    });
+
+    it("只剩一道主问题时不给去掉它（后端也不收），备用题还能去掉", async () => {
+      const { target, plan } = readyWithPlan();
+      const [first, second] = plan.questions;
+      if (!first || !second) throw new Error("演示数据里的题不够两道");
+      server.db.plans.set(target.id, {
+        ...plan,
+        questions: [first, { ...second, reserve: true, required: false }],
+      });
+      await openQuestions(target.id);
+
+      expect(screen.queryByRole("button", { name: "去掉第 1 题" })).toBeNull();
+      expect(screen.getByRole("button", { name: "去掉这道备用题" })).toBeTruthy();
+    });
+
+    it("链接发出以后题目不能改，也没有「去掉」", async () => {
+      const target = server.db.interviews.find((i) => i.status === "invited" && i.has_plan);
+      if (!target) throw new Error("演示数据里没有已发链接的面试");
+      await openQuestions(target.id);
+
+      expect(screen.queryAllByRole("button", { name: /^去掉/ })).toEqual([]);
+    });
   });
 });

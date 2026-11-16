@@ -1569,7 +1569,7 @@ export function createMockServer(options: MockOptions = {}) {
     planOf(i);
     const plan = body as InterviewPlan;
     const details: Record<string, string> = {};
-    if (plan.questions.length === 0) details.questions = "至少要有一道题";
+    if (plan.questions.every((q) => q.reserve)) details.questions = "至少要有一道主问题";
     plan.questions.forEach((q, index) => {
       if (!q.text.trim()) details[`questions[${index}].text`] = "不能为空";
       (q.follow_ups ?? []).forEach((f, n) => {
