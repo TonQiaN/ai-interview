@@ -13,6 +13,14 @@ use uuid::Uuid;
 
 use crate::store;
 
+/// 哪些后台任务是这场面试的（`$1` 是面试的 id）。
+///
+/// 任务内容里带 `interview_id` 的都算。合并录像的任务只带了录像的 id（`recording_id`），
+/// 按录像找回它是哪场面试的。
+const TASKS_OF_INTERVIEW: &str = "payload->>'interview_id' = $1::uuid::text \
+     OR payload->>'recording_id' IN \
+        (SELECT id::text FROM interview_recordings WHERE interview_id = $1::uuid)";
+
 /// 删掉这场面试的全部数据。调用方已经确认过面试存在、不在准备中也不在面试中。
 pub(crate) async fn purge(ctx: &AppContext, id: Uuid) -> ApiResult<()> {
     stop(ctx, id).await?;
@@ -25,10 +33,12 @@ pub(crate) async fn purge(ctx: &AppContext, id: Uuid) -> ApiResult<()> {
         .execute(&mut *tx)
         .await?;
     // 跑完的任务里可能留着这场面试的出错信息
-    sqlx::query("DELETE FROM tasks WHERE payload->>'interview_id' = $1 AND status <> 'running'")
-        .bind(id.to_string())
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(&format!(
+        "DELETE FROM tasks WHERE ({TASKS_OF_INTERVIEW}) AND status <> 'running'"
+    ))
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
     // 比过这场面试的候选人对比里有这位候选人的结论，一起删。HR 要看就重新比一次
     sqlx::query("DELETE FROM position_comparisons WHERE $1 = ANY(interview_ids)")
         .bind(id)
@@ -51,23 +61,23 @@ pub(crate) async fn purge(ctx: &AppContext, id: Uuid) -> ApiResult<()> {
 /// （候选人手里的链接随之失效）。后台正在处理它的时候不删，等处理完。
 async fn stop(ctx: &AppContext, id: Uuid) -> ApiResult<()> {
     let mut tx = ctx.db.begin().await?;
-    sqlx::query(
+    sqlx::query(&format!(
         "UPDATE tasks SET status = 'cancelled', finished_at = now()
-         WHERE status = 'queued' AND payload->>'interview_id' = $1",
-    )
-    .bind(id.to_string())
+         WHERE status = 'queued' AND ({TASKS_OF_INTERVIEW})"
+    ))
+    .bind(id)
     .execute(&mut *tx)
     .await?;
-    let running: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM tasks WHERE status = 'running' AND payload->>'interview_id' = $1",
-    )
-    .bind(id.to_string())
+    let running: i64 = sqlx::query_scalar(&format!(
+        "SELECT count(*) FROM tasks WHERE status = 'running' AND ({TASKS_OF_INTERVIEW})"
+    ))
+    .bind(id)
     .fetch_one(&mut *tx)
     .await?;
     if running > 0 {
         // 不提交：排着队的任务保持原样，等会儿再删时一起处理
         return Err(ApiError::conflict(
-            "后台正在处理这场面试（转写或者写报告），等它做完再删",
+            "后台正在处理这场面试（合并录像、转写或者写报告），等它做完再删",
         ));
     }
     let open: Vec<InterviewStatus> = InterviewStatus::ALL

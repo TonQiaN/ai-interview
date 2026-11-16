@@ -825,6 +825,9 @@ export function createMockServer(options: MockOptions = {}) {
     find.position(params[0]).archived_at = iso(0);
     return null;
   });
+  on("POST", "/positions/:id/restore", ({ params }) =>
+    Object.assign(find.position(params[0]), { archived_at: null }),
+  );
 
   // ───────── RAAS ─────────
   const raasReady = () => {
@@ -1087,6 +1090,9 @@ export function createMockServer(options: MockOptions = {}) {
     find.candidate(params[0]).archived_at = iso(0);
     return null;
   });
+  on("POST", "/candidates/:id/restore", ({ params }) =>
+    detail(Object.assign(find.candidate(params[0]), { archived_at: null })),
+  );
   on("POST", "/candidates/:id/purge", ({ params }) => {
     requireAdmin();
     const c = find.candidate(params[0]);

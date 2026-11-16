@@ -279,3 +279,53 @@ async fn interviews_in_use_are_not_purged(pool: PgPool) {
     // 被取消的收尾任务不会再跑
     assert_eq!(h.run_tasks().await, 0);
 }
+
+/// 合并录像的任务内容里只有录像的 id，没有面试的 id。它正在跑的时候不能删：
+/// 合并出来的文件会在删完以后才写到磁盘上，库里却已经没有这场面试了。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_recording_being_assembled_blocks_the_purge(pool: PgPool) {
+    let h = harness(pool).await;
+    let id = h.finished_interview("completed").await;
+    let interview_id: Uuid = id.parse().unwrap();
+    let files = files_left(&h, interview_id).await;
+    let recording_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO interview_recordings (interview_id, track, content_type, status) \
+         VALUES ($1, 'camera', 'video/webm', 'assembling') RETURNING id",
+    )
+    .bind(interview_id)
+    .fetch_one(&h.ctx.db)
+    .await
+    .unwrap();
+    let assemble_task = |status: &'static str| {
+        sqlx::query(
+            "INSERT INTO tasks (id, kind, payload, status, locked_at) \
+             VALUES ($1, 'recording.assemble', $2, $3, now())",
+        )
+        .bind(interview_core::new_id())
+        .bind(json!({ "recording_id": recording_id }))
+        .bind(status)
+        .execute(&h.ctx.db)
+    };
+
+    assemble_task("running").await.unwrap();
+    let response = purge(&h, &id).await;
+    assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.text());
+    assert_eq!(files_left(&h, interview_id).await, files);
+
+    // 这一段合并完了，还有一次合并排着队：可以删，排着队的那次不会再跑
+    sqlx::query("UPDATE tasks SET status = 'succeeded' WHERE status = 'running'")
+        .execute(&h.ctx.db)
+        .await
+        .unwrap();
+    assemble_task("queued").await.unwrap();
+    assert_eq!(purge(&h, &id).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(rows_left(&h, interview_id).await, 0);
+    assert_eq!(files_left(&h, interview_id).await, 0);
+    let left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM tasks WHERE kind = 'recording.assemble'")
+            .fetch_one(&h.ctx.db)
+            .await
+            .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(h.run_tasks().await, 0);
+}

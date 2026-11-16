@@ -221,6 +221,18 @@ export function useDeletePosition() {
   });
 }
 
+/** 把归档的岗位恢复回来 */
+export function useRestorePosition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => unwrap(api.POST("/api/v1/positions/{id}/restore", at(id))),
+    onSuccess: (p) => {
+      qc.setQueryData(["position", p.id], p);
+      qc.invalidateQueries({ queryKey: ["positions"] });
+    },
+  });
+}
+
 export function useRaasStatus() {
   return useQuery({
     queryKey: ["raas-status"],
@@ -321,6 +333,18 @@ export function useDeleteCandidate() {
       qc.invalidateQueries({ queryKey: ["candidates"] });
       // 详情也要重新取，不然马上再打开时还是归档前的样子
       qc.invalidateQueries({ queryKey: ["candidate", id] });
+    },
+  });
+}
+
+/** 把归档的候选人恢复回来 */
+export function useRestoreCandidate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => unwrap(api.POST("/api/v1/candidates/{id}/restore", at(id))),
+    onSuccess: (c) => {
+      qc.setQueryData(["candidate", c.id], c);
+      qc.invalidateQueries({ queryKey: ["candidates"] });
     },
   });
 }

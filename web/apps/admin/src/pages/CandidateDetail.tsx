@@ -15,7 +15,16 @@ import {
   PageHeader,
   useToast,
 } from "@ai-interview/ui";
-import { Archive, FileText, Pencil, Plus, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  FileText,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage, isMock } from "../api/http";
@@ -30,6 +39,7 @@ import {
   usePurgeCandidate,
   useRegenerateProfile,
   useReparseResume,
+  useRestoreCandidate,
   useResume,
   useResumes,
   useSaveCandidate,
@@ -547,6 +557,7 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
   const reparse = useReparseResume(candidate.id);
   const regenerate = useRegenerateProfile(candidate.id);
   const remove = useDeleteCandidate();
+  const restore = useRestoreCandidate();
   const [editing, setEditing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -600,8 +611,28 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
         }
       />
       {archived && (
-        <Banner tone="info" title="这位候选人已经归档" className="adm-gap-below">
-          归档的候选人不在列表里显示，不能再修改、上传简历或安排面试。资料和简历还留在服务器上，在候选人列表勾上「带上已归档的」能找到。
+        <Banner
+          tone="info"
+          title="这位候选人已经归档"
+          className="adm-gap-below"
+          actions={
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<ArchiveRestore />}
+              loading={restore.isPending}
+              onClick={() =>
+                restore.mutate(candidate.id, {
+                  onSuccess: () => toast("已恢复"),
+                  onError: (e) => toast(errorMessage(e)),
+                })
+              }
+            >
+              恢复
+            </Button>
+          }
+        >
+          归档的候选人不在列表里显示，不能再修改、上传简历或安排面试。资料和简历还留在服务器上，在候选人列表勾上「带上已归档的」能找到。归档错了，点「恢复」就回到列表里。
         </Banner>
       )}
       {candidate.possible_duplicates.length > 0 && (
