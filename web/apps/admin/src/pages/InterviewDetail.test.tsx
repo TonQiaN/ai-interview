@@ -502,4 +502,42 @@ describe("面试详情", () => {
     expect(await screen.findByRole("button", { name: "归档" })).toBeTruthy();
     expect(screen.queryByText("这场面试已经归档")).toBeNull();
   });
+
+  describe("「题目」这一页", () => {
+    /** 把页面发出去的请求记下来 */
+    function watchRequests() {
+      const asked: string[] = [];
+      setFetch((request) => {
+        asked.push(typeof request === "string" ? request : (request as Request).url);
+        return server.fetch(request);
+      });
+      return asked;
+    }
+
+    it("还没出题的面试不去取题目：取了只会是一个 404", async () => {
+      const created = await call<Interview>("POST", "/interviews", {
+        candidate_id: server.db.candidates[0]?.id,
+        position_id: server.db.positions[0]?.id,
+      });
+      const asked = watchRequests();
+      open(created.id);
+
+      fireEvent.click(await screen.findByRole("tab", { name: "题目" }));
+
+      expect(await screen.findByText(/还没生成题目。回到「概览」/)).toBeTruthy();
+      expect(asked.filter((url) => url.endsWith("/plan"))).toEqual([]);
+    });
+
+    it("出好题的面试照常取题目", async () => {
+      const target = server.db.interviews.find((i) => i.status === "ready");
+      if (!target) throw new Error("演示数据里没有待发送的面试");
+      const asked = watchRequests();
+      open(target.id);
+
+      fireEvent.click(await screen.findByRole("tab", { name: "题目" }));
+
+      expect(await screen.findByText(/道主问题/)).toBeTruthy();
+      expect(asked.some((url) => url.endsWith("/plan"))).toBe(true);
+    });
+  });
 });

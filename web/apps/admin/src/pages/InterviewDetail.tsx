@@ -1008,7 +1008,8 @@ function BriefCard({ plan }: { plan: InterviewPlan }) {
 
 function QuestionsTab({ interview }: { interview: Interview }) {
   const preparing = interview.status === "preparing";
-  const plan = usePlan(interview.id);
+  // 还没出题就不去取：取了也只是一个 404，白白在浏览器和后端的日志里各留一条报错
+  const plan = usePlan(interview.id, interview.has_plan);
   const utterances = useUtterances(interview.id, true, preparing);
   const save = useSavePlan(interview.id);
   const prepare = usePrepareInterview(interview.id);
@@ -1021,12 +1022,14 @@ function QuestionsTab({ interview }: { interview: Interview }) {
   // 出题的那一步结束后，把题目取回来
   // biome-ignore lint/correctness/useExhaustiveDependencies: 只在这两个值变的时候重新取
   useEffect(() => {
-    void plan.refetch();
+    if (interview.has_plan) void plan.refetch();
   }, [interview.has_plan, interview.status]);
 
-  if (plan.error) return <LoadError error={plan.error} onRetry={() => plan.refetch()} />;
-  if (plan.isPending) return <Loading />;
-  const data = plan.data;
+  if (interview.has_plan && plan.error)
+    return <LoadError error={plan.error} onRetry={() => plan.refetch()} />;
+  if (interview.has_plan && plan.isPending) return <Loading />;
+  // 题目被清掉以后（改了设置要重新出题），之前取到的那一份不再算数
+  const data = interview.has_plan ? plan.data : null;
   if (!data) {
     return (
       <Banner tone="info">
