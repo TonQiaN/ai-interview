@@ -1,7 +1,7 @@
 import { ToastProvider } from "@ai-interview/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { Link, MemoryRouter, Route, Routes } from "react-router";
+import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setFetch } from "../api/http";
 import { createMockServer } from "../api/mock/server";
@@ -37,6 +37,11 @@ beforeEach(async () => {
 
 afterEach(cleanup);
 
+/** 安排面试页的替身：只把地址上带的东西写出来 */
+function NewPageStub() {
+  return <p>安排面试页{useLocation().search}</p>;
+}
+
 /** me 不传就是演示数据里登录的管理员；传了就当成那个人在看 */
 function open(id: string, me?: AdminUser, staleTime = 0) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime } } });
@@ -46,6 +51,7 @@ function open(id: string, me?: AdminUser, staleTime = 0) {
       <ToastProvider>
         <MemoryRouter initialEntries={[`/interviews/${id}`]}>
           <Routes>
+            <Route path="/interviews/new" element={<NewPageStub />} />
             <Route path="/interviews/:id" element={<InterviewDetailPage />} />
             <Route
               path="/interviews"
@@ -326,6 +332,72 @@ describe("面试详情", () => {
         await screen.findByText("链接已经生成，等候选人来面试。链接 2 天后过期，候选人还没打开。"),
       ).toBeTruthy();
       expect(screen.queryByText("链接过期了，候选人还没有面试")).toBeNull();
+    });
+  });
+
+  describe("再安排一场", () => {
+    function withStatus(status: Interview["status"]) {
+      const target = server.db.interviews.find((i) => i.status === "ready");
+      if (!target) throw new Error("演示数据里没有准备好的面试");
+      target.status = status;
+      return target;
+    }
+
+    it("候选人中途离开的面试：提示可以再安排一场，点了带着这一场去安排面试页", async () => {
+      const target = withStatus("abandoned");
+      open(target.id);
+
+      expect(await screen.findByText(/想让候选人重新面，可以再安排一场/)).toBeTruthy();
+      const [first] = await screen.findAllByRole("button", { name: "再安排一场" });
+      if (!first) throw new Error("应该有「再安排一场」");
+      fireEvent.click(first);
+      expect(await screen.findByText(`安排面试页?from=${target.id}`)).toBeTruthy();
+    });
+
+    it("已取消的面试也有", async () => {
+      const target = withStatus("cancelled");
+      open(target.id);
+      expect((await screen.findAllByRole("button", { name: "再安排一场" })).length).toBe(2);
+    });
+
+    it("还没面的面试没有这个按钮", async () => {
+      const target = server.db.interviews.find((i) => i.status === "ready");
+      if (!target) throw new Error("演示数据里没有准备好的面试");
+      open(target.id);
+      await screen.findByText("可以发给候选人了");
+      expect(screen.queryByRole("button", { name: "再安排一场" })).toBeNull();
+    });
+  });
+
+  describe("可以直接发给候选人的话", () => {
+    /** 给一场待发送的面试生成链接，返回那段话 */
+    async function message(stage: Interview["config"]["stage"]) {
+      const target = server.db.interviews.find((i) => i.status === "ready");
+      if (!target) throw new Error("演示数据里没有待发送的面试");
+      target.config.stage = stage;
+      open(target.id);
+      fireEvent.click(await screen.findByRole("tab", { name: "链接" }));
+      fireEvent.click(await screen.findByRole("button", { name: "生成链接" }));
+      await screen.findByText("链接生成好了");
+      const text = document.querySelector(".adm-message")?.textContent;
+      if (!text) throw new Error("没有找到那段话");
+      return text;
+    }
+
+    it("手机和电脑都行，提醒不要在微信里直接打开", async () => {
+      const text = await message("screening");
+
+      expect(text).toContain("第一轮是线上的 AI 面试");
+      expect(text).toContain("用手机也可以");
+      expect(text).toContain("Chrome、Edge 或 Safari");
+      expect(text).toContain("不要在微信、钉钉这类聊天软件里直接点开");
+    });
+
+    it("不是第一轮初筛的面试，不说成第一轮", async () => {
+      const text = await message("in_depth");
+
+      expect(text).not.toContain("第一轮");
+      expect(text).toContain("这一轮是线上的 AI 面试");
     });
   });
 

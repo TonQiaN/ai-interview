@@ -20,6 +20,7 @@ import {
   useCandidates,
   useConfigDefaults,
   useCreateInterview,
+  useInterview,
   usePosition,
   usePositions,
   useTemplates,
@@ -31,6 +32,7 @@ import { useLeaveGuard } from "../components/LeaveGuard";
 import { PageHeader } from "../components/PageHeader";
 import { VoicePicker } from "../components/VoicePicker";
 import { sameForm } from "../lib/form";
+import { fullTime } from "../lib/format";
 import { scheduleAll } from "../lib/schedule";
 
 /**
@@ -205,6 +207,9 @@ function PickPosition({
   );
 }
 
+/** 「从哪份设置开始」里代表「上一场面试的设置」的那一项，不会和模板的编号撞上 */
+const SOURCE = "__source";
+
 export function InterviewNewPage() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -225,18 +230,25 @@ export function InterviewNewPage() {
   // 设置是从哪一份开始改的（系统默认或者选的模板），用来看有没有动过
   const [baseConfig, setBaseConfig] = useState<InterviewConfig | null>(null);
   const [voiceId, setVoiceId] = useState<string | null>(null);
+  // 声音是从哪个开始改的：一般是没选（用默认的），从一场面试点「再安排一场」过来时是那一场的
+  const [baseVoiceId, setBaseVoiceId] = useState<string | null>(null);
   // 只选了一位候选人和岗位时两下就能选回来，不拦；选了几位、动了设置或者正在安排时，离开前先问一句
   const leave = useLeaveGuard(
     busy ||
       candidates.length > 1 ||
-      voiceId !== null ||
+      voiceId !== baseVoiceId ||
       (config !== null && baseConfig !== null && !sameForm(config, baseConfig)),
   );
 
+  // 从一场面试点「再安排一场」过来：人、岗位、设置和声音都沿用那一场的
+  const source = useInterview(params.get("from") ?? undefined).data;
+  const [usingSource, setUsingSource] = useState(false);
+  const [sourceDone, setSourceDone] = useState(false);
+
   // 从候选人页或岗位页点过来时，先替他选好。按编号直接取，不在列表里找：
   // 列表一次最多给 100 个，人多了以后排在后面的就找不到了
-  const presetCandidate = useCandidate(params.get("candidate") ?? undefined);
-  const presetPosition = usePosition(params.get("position") ?? undefined);
+  const presetCandidate = useCandidate(params.get("candidate") ?? source?.candidate.id);
+  const presetPosition = usePosition(params.get("position") ?? source?.position.id);
   const [presetDone, setPresetDone] = useState({ candidate: false, position: false });
   useEffect(() => {
     const preset = presetCandidate.data;
@@ -260,8 +272,35 @@ export function InterviewNewPage() {
     setBaseConfig(defaults.data.config);
   }, [config, defaults.data]);
 
+  function applySource() {
+    if (!source) return;
+    setUsingSource(true);
+    setTemplateId(null);
+    setConfig(structuredClone(source.config));
+    setBaseConfig(source.config);
+  }
+  // 那一场面试取到的时候套一次，之后的改动归用户
+  useEffect(() => {
+    if (!source || sourceDone) return;
+    setUsingSource(true);
+    setTemplateId(null);
+    setConfig(structuredClone(source.config));
+    setBaseConfig(source.config);
+    setVoiceId(source.voice_id ?? null);
+    setBaseVoiceId(source.voice_id ?? null);
+    setSourceDone(true);
+  }, [source, sourceDone]);
+  // 人和岗位都替他选好了，就直接到设置那一步；有一个没选上（归档了、岗位不招了）就留在第一步
+  const [skipped, setSkipped] = useState(false);
+  useEffect(() => {
+    if (!source || skipped || !presetDone.candidate || !presetDone.position) return;
+    setSkipped(true);
+    if (candidates.length === 1 && position) setStep(1);
+  }, [source, skipped, presetDone, candidates.length, position]);
+
   function applyTemplate(id: string) {
     const template = templates.data?.items.find((t) => t.id === id);
+    setUsingSource(false);
     setTemplateId(template?.id ?? null);
     const base = template?.config ?? defaults.data?.config;
     if (!base) return;
@@ -277,9 +316,11 @@ export function InterviewNewPage() {
 
   async function submit(prepare: boolean) {
     if (candidates.length === 0 || !position || !config || busy) return;
+    // 沿用上一场的设置时，模板记成那一场用的（模板后来删了就不记）
+    const sourceTemplate = templates.data?.items.find((t) => t.id === source?.template_id);
     const shared = {
       position_id: position.id,
-      template_id: templateId,
+      template_id: usingSource ? (sourceTemplate?.id ?? null) : templateId,
       voice_id: voiceId,
       config: cleanConfig(config),
     };
@@ -376,14 +417,24 @@ export function InterviewNewPage() {
           )}
           <Card>
             <CardBody className="adm-form-grid">
-              <Field label="从哪份设置开始" hint="选一个模板，下面的内容可以再改，只对这一场生效。">
+              <Field
+                label="从哪份设置开始"
+                hint={
+                  usingSource && source
+                    ? `沿用了 ${fullTime(source.created_at)} 安排的那一场的设置和声音。下面的内容可以再改，只对这一场生效。`
+                    : "选一个模板，下面的内容可以再改，只对这一场生效。"
+                }
+              >
                 {({ id, describedBy }) => (
                   <Select
                     id={id}
                     aria-describedby={describedBy}
-                    value={templateId ?? ""}
-                    onChange={(e) => applyTemplate(e.target.value)}
+                    value={usingSource ? SOURCE : (templateId ?? "")}
+                    onChange={(e) =>
+                      e.target.value === SOURCE ? applySource() : applyTemplate(e.target.value)
+                    }
                   >
+                    {source && <option value={SOURCE}>上一场面试的设置</option>}
                     <option value="">系统默认</option>
                     {templates.data?.items.map((t) => (
                       <option key={t.id} value={t.id}>
