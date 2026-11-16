@@ -1,21 +1,16 @@
 {
   "schema_version": 1,
   "interview_id": "sample-ops-cheating",
-  "generated_at_ms": 1794819950179,
+  "generated_at_ms": 1794820754418,
   "recommendation": {
     "decision": "not_advance",
     "confidence": "medium",
-    "headline": "核心活动实为执行角色，硬性要求不满足，另有诚信疑点",
-    "overview": "候选人口头表达流畅，方法论框架完整，但几乎拿不出任何属于自己的实操细节。HR 最想确认的「七日打卡」是否由他策划，面试中已经得到相反答案：他自述主要负责执行和跟进，规则由主管制定，留存数字也不是他算的，这与简历中「策划」的说法冲突；几道追问还显示他记不清上线月份、灰度时长和对照样本量。再加上五道主问题前都有页面切出和粘贴记录，建议不进入下一轮；如 HR 仍想保留，应先核实这些疑点。",
+    "headline": "核心活动经历实为执行角色，两项硬性要求不成立，不建议推进",
+    "overview": "候选人表达条理清楚、抗压平稳，社群运营的方法论框架也讲得完整。但简历唯一的核心卖点「策划新人七日打卡并把留存从18%做到27%」在面试中被他自己推翻：角色是执行和跟进，积分规则由主管定，上线月份记不清，两个留存数字不是他算的、口径也没参与制定。两项硬性要求一项不成立、一项只部分成立，且作答前多次切走页面并出现粘贴，诚信疑点需先核实。综合不建议占用人工面试时间。",
     "key_reasons": [
       {
-        "point": "硬性要求「独立策划过活动并对结果负责」按面试表现不成立，与简历写的「策划」直接矛盾",
+        "point": "简历里唯一完整的活动经历，本人自述是执行和跟进角色，不是策划者，硬性要求「独立策划过活动并对结果负责」不成立",
         "evidence": [
-          {
-            "source": "resume",
-            "quote": "策划「新人七日打卡」活动，新用户七日留存从 18% 提升到 27%",
-            "quote_match": "exact"
-          },
           {
             "source": "transcript",
             "segment_id": "s3",
@@ -33,12 +28,26 @@
             "end_ms": 97354,
             "speaker": "candidate",
             "quote_match": "exact"
+          },
+          {
+            "source": "resume",
+            "quote": "策划「新人七日打卡」活动，新用户七日留存从 18% 提升到 27%",
+            "quote_match": "exact"
           }
         ]
       },
       {
-        "point": "简历里最亮眼的数据成果不是他产出、口径也没参与，无法支撑「会看数据并据此调整策略」",
+        "point": "数据能力停在概念复述：留存口径讲得对，但两个数字不是他算的，对照组样本量不记得，口径没参与制定，也没有讲出任何一次「看完数据后改了策略」",
         "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s11",
+            "quote": "样本量我不太记得了，数据是数据同学那边出的",
+            "start_ms": 180810,
+            "end_ms": 192348,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
           {
             "source": "transcript",
             "segment_id": "s13",
@@ -50,10 +59,10 @@
           },
           {
             "source": "transcript",
-            "segment_id": "s11",
-            "quote": "样本量我不太记得了，数据是数据同学那边出的",
-            "start_ms": 180810,
-            "end_ms": 192348,
+            "segment_id": "s13",
+            "quote": "具体怎么定我没参与",
+            "start_ms": 199262,
+            "end_ms": 208909,
             "speaker": "candidate",
             "quote_match": "exact"
           },
@@ -69,12 +78,12 @@
         ]
       },
       {
-        "point": "社群、分层、场景题都只给通用方法论，没有任何自己运营过的社群案例、指标或结果，经验深度无法确认",
+        "point": "五道题都是同一套「首先、其次、再次、最后」的书面框架，场景题和动机题也没有一件具体的事、一个具体数字，听得到结构听不到实据",
         "evidence": [
           {
             "source": "transcript",
             "segment_id": "s15",
-            "quote": "首先，我会先做诊断，通过数据去定位不活跃的原因",
+            "quote": "我会设计一些轻量的互动玩法，比如话题讨论、打卡、用户共创，构建用户激励体系",
             "start_ms": 227951,
             "end_ms": 264309,
             "speaker": "candidate",
@@ -83,32 +92,37 @@
           {
             "source": "transcript",
             "segment_id": "s17",
-            "quote": "在策略上，不同层级要匹配不同的运营动作",
+            "quote": "头部用户侧重荣誉激励和专属服务，腰部和长尾用户侧重习惯养成和内容激励",
             "start_ms": 278066,
             "end_ms": 316500,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s19",
+            "quote": "贵司在社区产品上的定位和我的经验方向是比较契合的",
+            "start_ms": 334400,
+            "end_ms": 372114,
             "speaker": "candidate",
             "quote_match": "exact"
           }
         ]
       },
       {
-        "point": "沟通表达能力本身不差：作答结构清楚、听题准确、被追问答不出时坦率承认，不编造",
+        "point": "加分项社群运营方向是对的，先诊断原因再给办法，但同样没有一个他实际运营过的社群案例",
         "evidence": [
           {
-            "source": "transcript",
-            "segment_id": "s13",
-            "quote": "不是我算的，是数据那边给的看板",
-            "start_ms": 199262,
-            "end_ms": 208909,
-            "speaker": "candidate",
+            "source": "resume",
+            "quote": "负责 50 个核心用户社群的日常运营",
             "quote_match": "exact"
           },
           {
             "source": "transcript",
-            "segment_id": "s3",
-            "quote": "再次，在激励层面，我们构建了积分加勋章的双重激励体系",
-            "start_ms": 34585,
-            "end_ms": 73232,
+            "segment_id": "s15",
+            "quote": "首先，我会先做诊断，通过数据去定位不活跃的原因",
+            "start_ms": 227951,
+            "end_ms": 264309,
             "speaker": "candidate",
             "quote_match": "exact"
           }
@@ -117,1164 +131,7 @@
     ],
     "risks": [
       {
-        "point": "作答过程有规律的旁证迹象：五道主问题问完后页面立刻切到后台 7—10 秒，回来后 1—2 秒即开始成套输出，其中两次切回后还有粘贴事件，追问期间则没有切出；需回看录像核实是否查阅或粘贴外部材料",
-        "evidence": [
-          {
-            "source": "event",
-            "event_id": "e1",
-            "quote": "visibility_hidden",
-            "start_ms": 23085,
-            "end_ms": 32085,
-            "quote_match": "exact"
-          },
-          {
-            "source": "event",
-            "event_id": "e2",
-            "quote": "paste",
-            "start_ms": 32585,
-            "end_ms": 32585,
-            "quote_match": "exact"
-          },
-          {
-            "source": "event",
-            "event_id": "e5",
-            "quote": "paste",
-            "start_ms": 226151,
-            "end_ms": 226151,
-            "quote_match": "exact"
-          },
-          {
-            "source": "event",
-            "event_id": "e7",
-            "quote": "visibility_hidden",
-            "start_ms": 322400,
-            "end_ms": 331400,
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "point": "「泛泛流畅、细节掉线」的反差：能提前准备的概述题答得术语密集，一追问只有亲历者才知道的细节（积分规则、上线月份、样本量、口径归属）就全部落空",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s5",
-            "quote": "每天打卡给多少分，这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数。",
-            "start_ms": 81732,
-            "end_ms": 97354,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s7",
-            "quote": "灰度好像就一个星期左右，具体时间我得回去翻一下记录。",
-            "start_ms": 103511,
-            "end_ms": 113111,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s13",
-            "quote": "不是我算的，是数据那边给的看板。口径……应该就是按七日留存那个标准定义吧，具体怎么定我没参与。",
-            "start_ms": 199262,
-            "end_ms": 208909,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "point": "第 1 题讲完设计思路后自述只做执行，但第 2 题又大谈自己设计归因方法和分层拆解，前后说法不一致",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s3",
-            "quote": "整个活动从策划到落地大概经历了需求梳理、方案评审、灰渡测试和全量上线几个阶段，我主要负责其中的执行和跟进工作。",
-            "start_ms": 34585,
-            "end_ms": 73232,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s9",
-            "quote": "其次是归因方法，我们采用了同期对比的思路",
-            "start_ms": 134011,
-            "end_ms": 174125,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "point": "简历写负责 50 个核心社群运营，但整场没有任何一个社群的具体规模、动作或数据，加分项无法确认",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "负责 50 个核心用户社群的日常运营",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s15",
-            "quote": "我会设计一些轻量的互动玩法，比如话题讨论、打卡、用户共创",
-            "start_ms": 227951,
-            "end_ms": 264309,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      }
-    ]
-  },
-  "overall_score": 58,
-  "score_range": {
-    "low": 56,
-    "high": 60
-  },
-  "competencies": [
-    {
-      "name": "专业能力",
-      "rating": 2,
-      "comment": "用户运营的方法论词汇和框架都有，但活动、社群、分层三块都停在概念层面，说不出自己独立决策的部分、具体规则和结果，与岗位要求的「独立策划并对结果负责」有实质差距",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s5",
-          "quote": "这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数",
-          "start_ms": 81732,
-          "end_ms": 97354,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s17",
-          "quote": "常见的会结合用户的生命周期阶段、行为活跃度、内容贡献度以及付费或者商业价值等维度做交叉划分",
-          "start_ms": 278066,
-          "end_ms": 316500,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        }
-      ]
-    },
-    {
-      "name": "解决问题",
-      "rating": 3,
-      "comment": "场景题给出「先诊断原因再给办法」的正确顺序，动作覆盖内容、机制、核心用户、召回四个层面；但全部是假设性表述，没有指标、阈值和实际验证",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s15",
-          "quote": "首先，我会先做诊断，通过数据去定位不活跃的原因，是内容供给不足、互动机制缺失，还是社群的生命周期到了衰退期。",
-          "start_ms": 227951,
-          "end_ms": 264309,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        }
-      ]
-    },
-    {
-      "name": "沟通表达",
-      "rating": 3,
-      "comment": "结构清楚、听题准确、不跑题，答不出时也不硬编；但回答高度模板化，具体信息量低，需要靠追问才能拼出他实际做了什么",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s11",
-          "quote": "样本量我不太记得了，数据是数据同学那边出的。",
-          "start_ms": 180810,
-          "end_ms": 192348,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s19",
-          "quote": "再次，我看重团队的方法论沉淀和数据驱动的氛围，这和我自己的工作习惯比较一致。",
-          "start_ms": 334400,
-          "end_ms": 372114,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        }
-      ]
-    },
-    {
-      "name": "学习与成长",
-      "rating": null,
-      "comment": "本轮没有问到学习、复盘、改进相关的问题，无法评价",
-      "evidence": []
-    },
-    {
-      "name": "动机与契合",
-      "rating": 3,
-      "comment": "动机分行业匹配、个人成长、团队氛围、岗位价值四层讲，逻辑说得通，也明确指向社区类产品；但通篇没有一句公司特有的内容，也没有任何事例支撑，换成任何一家社区产品都成立",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s19",
-          "quote": "贵司在社区产品上的定位和我的经验方向是比较契合的",
-          "start_ms": 334400,
-          "end_ms": 372114,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        }
-      ]
-    },
-    {
-      "name": "职业素养",
-      "rating": 2,
-      "comment": "被追问时态度坦诚、不编造，这点是加分；但简历写「策划」而自述只做执行，核心成果数字也非本人产出，加上作答时段的规律性切出与粘贴记录，诚信方面需要人工核实",
-      "evidence": [
-        {
-          "source": "resume",
-          "quote": "策划「新人七日打卡」活动，新用户七日留存从 18% 提升到 27%",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s3",
-          "quote": "我主要负责其中的执行和跟进工作",
-          "start_ms": 34585,
-          "end_ms": 73232,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "event",
-          "event_id": "e2",
-          "quote": "paste",
-          "start_ms": 32585,
-          "end_ms": 32585,
-          "quote_match": "exact"
-        }
-      ]
-    }
-  ],
-  "focus_checks": [
-    {
-      "focus": "确认七日打卡活动是不是他自己策划的",
-      "verdict": "not_satisfied",
-      "finding": "已问清，答案是否定的。他讲完设计框架后自述「主要负责其中的执行和跟进工作」；追问积分规则和每日分值时，他说规则由主管制定，自己负责发群消息、统计打卡人数；上线月份只记得「去年上半年」，灰度时长要回去翻记录。这与简历「策划」的表述直接冲突，应视为执行角色而非策划者",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s3",
-          "quote": "我主要负责其中的执行和跟进工作",
-          "start_ms": 34585,
-          "end_ms": 73232,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s5",
-          "quote": "这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数",
-          "start_ms": 81732,
-          "end_ms": 97354,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s7",
-          "quote": "灰度好像就一个星期左右，具体时间我得回去翻一下记录",
-          "start_ms": 103511,
-          "end_ms": 113111,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        }
-      ]
-    }
-  ],
-  "questions": [
-    {
-      "question_id": "q1",
-      "question_text": "讲讲你策划的「新人七日打卡」活动，你当时是怎么设计的？",
-      "asked": true,
-      "segment_ids": [
-        "s2",
-        "s3",
-        "s4",
-        "s5",
-        "s6",
-        "s7"
-      ],
-      "timing": {
-        "start_ms": 16371,
-        "end_ms": 113111,
-        "response_latency_ms": 12000,
-        "candidate_speaking_ms": 63869,
-        "candidate_chars": 328,
-        "chars_per_minute": 308,
-        "longest_pause_ms": null
-      },
-      "judgement": {
-        "answered": true,
-        "answer_summary": "候选人按「目标—机制—激励—节奏—上线流程」的框架讲了七日打卡活动：目标帮新人熟悉内容生态，七天任务由易到难，积分加勋章配合连续打卡奖励，设每日提醒和补签，上线经过需求梳理、方案评审、灰度测试、全量上线。但被追问积分能换什么、每天给多少分、哪个月上线、灰度跑多久时，都答记不清，并说明规则由主管定、自己主要负责发群消息和统计打卡人数。",
-        "rating": 2.5,
-        "ratings": [
-          2.5,
-          2.5,
-          2.5
-        ],
-        "rating_reason": "比 2 分好的地方：能完整说出活动设计的常规框架，任务阶梯由易到难降低参与门槛这一处有设计逻辑，看得出对活动运营有基本认知，不是完全答不上来。够不上 3 分的地方：题目问的是「你当时是怎么设计的」，而所有具体规则、数值、时间节点全部落空，还明确说积分规则是主管定的、自己负责发群消息和统计打卡，最后一段更自述「主要负责其中的执行和跟进工作」，与简历写的「策划」对不上，核心问题实质没有被证实。",
-        "strengths": [
-          {
-            "point": "能讲清活动的整体设计框架，目标、任务机制、激励、节奏、上线流程都有覆盖",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s3",
-                "quote": "整个活动从策划到落地大概经历了需求梳理、方案评审、灰渡测试和全量上线几个阶段",
-                "start_ms": 34585,
-                "end_ms": 73232,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "任务阶梯由易到难的设计讲出了理由（降低新人参与门槛）",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s3",
-                "quote": "第一天是浏览和点赞，后面逐步过渡到发布内容和互动评论，降低新人的参与门槛",
-                "start_ms": 34585,
-                "end_ms": 73232,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "weaknesses": [
-          {
-            "point": "自述在活动中主要负责执行和跟进，与简历「策划」的说法不一致，这正是 HR 要确认的点",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s3",
-                "quote": "我主要负责其中的执行和跟进工作",
-                "start_ms": 34585,
-                "end_ms": 73232,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "激励机制的关键细节答不出来，且明确表示规则不是自己定的",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s5",
-                "quote": "每天打卡给多少分，这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数",
-                "start_ms": 81732,
-                "end_ms": 97354,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "上线时间、灰度时长都说不准，缺乏可核实的事实",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s7",
-                "quote": "灰度好像就一个星期左右，具体时间我得回去翻一下记录",
-                "start_ms": 103511,
-                "end_ms": 113111,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "follow_up": "请具体说明这个活动里哪一部分是你独立决策的：七天任务阶梯分几级、每级任务和奖励规则分别是谁定的、你提出过哪些被采纳的改动，能否提供当时的活动方案或复盘文档？"
-      }
-    },
-    {
-      "question_id": "q2",
-      "question_text": "留存从 18% 提升到 27%，这个数字是怎么算出来的？你怎么确定是活动带来的？",
-      "asked": true,
-      "segment_ids": [
-        "s8",
-        "s9",
-        "s10",
-        "s11",
-        "s12",
-        "s13"
-      ],
-      "timing": {
-        "start_ms": 114011,
-        "end_ms": 208909,
-        "response_latency_ms": 11000,
-        "candidate_speaking_ms": 61299,
-        "candidate_chars": 325,
-        "chars_per_minute": 318,
-        "longest_pause_ms": null
-      },
-      "judgement": {
-        "answered": true,
-        "answer_summary": "候选人先用较标准的定义讲了七日留存的口径（分母为当日新增用户数，分子为第七日仍有登录或内容消费的人数），归因上说是「同期对比」活动前的新用户并「排除大促等外部因素」，还提到按渠道、首日行为做了分层拆解。追问下承认对照组就是活动前的一批新用户、样本量记不清，18% 和 27% 不是自己算的，口径也没参与制定，最后还补了一句提升是多种运营手段共同作用的结果。",
-        "rating": 3.0,
-        "ratings": [
-          3.0,
-          3.0,
-          3.0
-        ],
-        "rating_reason": "按评分要点，候选人讲清了口径（比「讲不出口径」的 2 分档要好），也点出了要做分层拆解，能看出具备基础的数据常识，所以不低于 2。但对照这一半没有落地：对照组怎么选、样本量多少、怎么排除大促影响，全停在名词层面，追问后即失效；两个核心数字不是本人产出，口径也非本人制定，等于对结果没有负责。而且他自己把提升归因为「多种运营手段共同作用」，与简历把 18%→27% 归给这场活动的说法不一致。整体是术语框架完整、细节和归属都拿不出来，属于「内容偏泛、细节不足」的合格档，够不上良好。",
-        "strengths": [
-          {
-            "point": "能说清留存的基本口径，分母分子定义明确",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s9",
-                "quote": "留存的定义是当日新增用户在第七日仍然有活跃行为的比例，分母是当天的新增用户数",
-                "start_ms": 134011,
-                "end_ms": 174125,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "知道要看不同人群的差异，提到按渠道和首日行为拆解",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s9",
-                "quote": "比如按照渠道、按照首日行为去拆分，看不同人群的提升幅度是否有差异",
-                "start_ms": 134011,
-                "end_ms": 174125,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "weaknesses": [
-          {
-            "point": "对照组只有笼统描述，样本量记不清，无法支撑归因",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s11",
-                "quote": "对照组就是活动之前的那批新用户，取了一个差不多长度的时间段。样本量我不太记得了",
-                "start_ms": 180810,
-                "end_ms": 192348,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "「排除大促等外部因素」只给结论，没讲用什么方法排除",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s9",
-                "quote": "同时排除大促等外部因素的影响",
-                "start_ms": 134011,
-                "end_ms": 174125,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "两个核心数字不是本人计算，口径也没参与制定，对结果缺少负责的证据",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s13",
-                "quote": "不是我算的，是数据那边给的看板",
-                "start_ms": 199262,
-                "end_ms": 208909,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              },
-              {
-                "source": "transcript",
-                "segment_id": "s13",
-                "quote": "具体怎么定我没参与",
-                "start_ms": 199262,
-                "end_ms": 208909,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "自述提升是多种手段共同作用，与简历把结果归给该活动的表述对不上",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s9",
-                "quote": "整体来看，这个提升是多种运营手段共同作用的结果。",
-                "start_ms": 134011,
-                "end_ms": 174125,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "follow_up": "请他用自己掌握的数字复盘一次归因：活动期和对照期各有多少新用户、七日留存分别是多少、同期还有哪些运营动作上线，他会用什么办法把这场活动带来的增量单独拆出来；如果拆不出来，简历上「18% 提升到 27%」这句话应该怎么改。"
-      }
-    },
-    {
-      "question_id": "q3",
-      "question_text": "如果一个社群越来越不活跃，你会怎么办？",
-      "asked": true,
-      "segment_ids": [
-        "s14",
-        "s15"
-      ],
-      "timing": {
-        "start_ms": 209809,
-        "end_ms": 264309,
-        "response_latency_ms": 13000,
-        "candidate_speaking_ms": 36358,
-        "candidate_chars": 203,
-        "chars_per_minute": 335,
-        "longest_pause_ms": null
-      },
-      "judgement": {
-        "answered": true,
-        "answer_summary": "候选人给出了一套诊断—内容—机制—核心用户维护的四步思路：先用数据定位不活跃原因（内容供给、互动机制、社群生命周期衰退），再从内容排期激活沉默用户，设计话题讨论、打卡、用户共创等轻量互动玩法并建激励体系，最后做核心用户一对一维护和流失预警、沉默用户分层召回。",
-        "rating": 3.0,
-        "ratings": [
-          3.0,
-          3.0,
-          3.0
-        ],
-        "rating_reason": "基本切题，思路框架完整，能看出对社群运营有体系化认知，符合「先分析原因再给办法」。但全程是通用方法论，没有任何自己的实际案例：没说在哪个社群做过、具体怎么诊断、用了什么指标、做完之后活跃度有什么变化。考察要点里的「有具体的动作」只停留在「话题讨论、打卡、用户共创」这类名词层面，没有拆解怎么做、为什么这么选，属于「内容偏泛、细节不足」，因此给合格档而不是良好档。",
-        "strengths": [
-          {
-            "point": "先诊断再给方案，顺序正确，明确提出用数据定位原因是内容供给、互动机制还是生命周期衰退",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s15",
-                "quote": "首先，我会先做诊断，通过数据去定位不活跃的原因，是内容供给不足、互动机制缺失，还是社群的生命周期到了衰退期。",
-                "start_ms": 227951,
-                "end_ms": 264309,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "覆盖了内容、机制、核心用户、召回四个层面，动作方向比较全，还提到流失预警和分层召回",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s15",
-                "quote": "通过一对一沟通和专属权益，把关键少数留下来",
-                "start_ms": 227951,
-                "end_ms": 264309,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "weaknesses": [
-          {
-            "point": "没有任何真实案例支撑，全是「我会……」的假设性表述，没说自己在哪个社群遇到过低活跃、实际怎么处理、结果如何",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s15",
-                "quote": "首先，我会先做诊断，通过数据去定位不活跃的原因",
-                "start_ms": 227951,
-                "end_ms": 264309,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "具体动作停留在名词层面，比如轻量互动玩法只列举了形式，没讲规则怎么设计、激励是什么、怎么判断有效",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s15",
-                "quote": "我会设计一些轻量的互动玩法，比如话题讨论、打卡、用户共创",
-                "start_ms": 227951,
-                "end_ms": 264309,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "「通过数据去定位」没有落到具体指标和判断标准，看不出实际的分析能力",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s15",
-                "quote": "是内容供给不足、互动机制缺失，还是社群的生命周期到了衰退期",
-                "start_ms": 227951,
-                "end_ms": 264309,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "follow_up": "请举一个你亲手运营过的、真实出现过活跃下滑的社群：当时你看了哪些具体数据判断原因，做了什么动作，最后活跃度有没有回来、回到什么水平？"
-      }
-    },
-    {
-      "question_id": "q4",
-      "question_text": "你怎么理解用户分层运营？",
-      "asked": true,
-      "segment_ids": [
-        "s16",
-        "s17"
-      ],
-      "timing": {
-        "start_ms": 265209,
-        "end_ms": 316500,
-        "response_latency_ms": 10500,
-        "candidate_speaking_ms": 38434,
-        "candidate_chars": 221,
-        "chars_per_minute": 345,
-        "longest_pause_ms": null
-      },
-      "judgement": {
-        "answered": true,
-        "answer_summary": "候选人按「首先、其次、再次、最后」四层作答：先讲分层的本质是资源有限下做差异化投入，把资源投向价值更高、更有成长性的人群；再讲分层维度（生命周期、行为活跃度、内容贡献度、付费价值交叉划分）；然后讲不同层级匹配不同动作（头部荣誉激励、腰尾部习惯养成、沉默用户召回）；最后强调分层要动态更新、配合数据看板做效果追踪。",
-        "rating": 3.5,
-        "ratings": [
-          3.5,
-          3.5,
-          3.0
-        ],
-        "rating_reason": "按评分要点「为什么分层、怎么分、分完怎么用」三项都讲到了，而且额外补了动态更新和数据追踪，结构完整、表达清楚，比「内容偏泛但能看出基本能力」的合格档要完整一些；但通篇是方法论复述，没有一处结合自己运营过 50 个核心社群的经历，没有具体的分层阈值、每层人数、做了什么动作、结果怎样，属于「有框架无实例」，够不上良好档要求的「有具体内容」。故给 3.5。",
-        "strengths": [
-          {
-            "point": "讲清了分层的动机：资源有限、差异化投入、向高价值和有成长性的人群倾斜",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s17",
-                "quote": "用户分层运营的本质是在资源有限的前提下做差异化的投入，把运营资源投向价值更高、更有成长性的人群",
-                "start_ms": 278066,
-                "end_ms": 316500,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "分层维度给得比较全，且提出交叉划分而不是单维度切",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s17",
-                "quote": "常见的会结合用户的生命周期阶段、行为活跃度、内容贡献度以及付费或者商业价值等维度做交叉划分",
-                "start_ms": 278066,
-                "end_ms": 316500,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "分完怎么用有对应动作，头部、腰尾部、沉默用户分别给了策略",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s17",
-                "quote": "头部用户侧重荣誉激励和专属服务，腰部和长尾用户侧重习惯养成和内容激励，沉默用户侧重召回和唤醒",
-                "start_ms": 278066,
-                "end_ms": 316500,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "意识到分层是动态的，要定期调整规则并用看板追踪效果",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s17",
-                "quote": "分层不是一次性的工作，需要建立动态的更新机制，随着用户行为的变化定期调整分层规则",
-                "start_ms": 278066,
-                "end_ms": 316500,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "weaknesses": [
-          {
-            "point": "全程停留在方法论层面，完全没有落到自己做过的社群上，没有案例、数字和结果",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s17",
-                "quote": "在策略上，不同层级要匹配不同的运营动作",
-                "start_ms": 278066,
-                "end_ms": 316500,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "没有讲分层的具体操作口径，比如头部/腰部怎么划线、用什么指标和阈值、多久更新一次",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s17",
-                "quote": "配合数据看板做持续的效果追踪和策略迭代",
-                "start_ms": 278066,
-                "end_ms": 316500,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "follow_up": "请拿你运营过的那 50 个核心社群举例：你实际是按什么指标把用户分成几层、各层大概多少人，分层之后对每层做了什么具体动作，最后哪个层级的数据发生了什么变化？"
-      }
-    },
-    {
-      "question_id": "q5",
-      "question_text": "你为什么想来我们这里做用户运营？",
-      "asked": true,
-      "segment_ids": [
-        "s18",
-        "s19"
-      ],
-      "timing": {
-        "start_ms": 317400,
-        "end_ms": 372114,
-        "response_latency_ms": 12500,
-        "candidate_speaking_ms": 37714,
-        "candidate_chars": 220,
-        "chars_per_minute": 350,
-        "longest_pause_ms": null
-      },
-      "judgement": {
-        "answered": true,
-        "answer_summary": "候选人分四个层面讲了动机：希望在有真实社区氛围的产品里做用户运营；希望从活动策划到用户分层、社群做全链路实践，而不是单一模块执行；看重团队的方法论沉淀和数据驱动氛围；认为用户运营的价值在于长期陪伴用户成长、把过去的积累复用过来。整段回答没有提到这家公司的具体产品或自己的使用体验，换成任何一家社区产品都成立。",
-        "rating": 3.0,
-        "ratings": [
-          3.0,
-          3.0,
-          3.0
-        ],
-        "rating_reason": "回答切题，结构清楚，四个动机维度都说得通，也能看出对用户运营这个岗位有基本认知，属于「基本切题、内容偏泛」的合格档。但评分要点要求「理由具体」，这段没有任何具体支撑：没说公司产品哪里契合、没讲自己为什么现在想换、没举一个自己做过的事情来说明「长期陪伴用户」的信念，全部是通用表述。放在合格档，但离良好差在没有细节和事例。",
-        "strengths": [
-          {
-            "point": "动机分了层面来讲（行业匹配、个人成长、团队氛围、岗位价值），逻辑完整，不是一句话敷衍",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s19",
-                "quote": "首先，从行业和业务的匹配度来看，我一直希望在一个有真实社区氛围的产品里做用户运营",
-                "start_ms": 334400,
-                "end_ms": 372114,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "对自己的职业诉求说得比较明确：不想只做单一模块的执行，想要全链路",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s19",
-                "quote": "从活动策划到用户分层、思域社群做全链路的实践，而不是只做单一模块的执行",
-                "start_ms": 334400,
-                "end_ms": 372114,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "把动机落到岗位价值上，提到想复用社群和活动上的积累",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s19",
-                "quote": "我认为用户运营的价值在于长期陪伴用户成长，我希望能把过去在社群和活动上的积累复用过来",
-                "start_ms": 334400,
-                "end_ms": 372114,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "weaknesses": [
-          {
-            "point": "全程没有一句公司特有的内容，不知道候选人是否真的了解、使用过这家公司的产品，「契合」只是空口结论",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s19",
-                "quote": "贵司在社区产品上的定位和我的经验方向是比较契合的",
-                "start_ms": 334400,
-                "end_ms": 372114,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "没有具体事例支撑，比如哪段经历让他形成「长期陪伴」的想法、哪次活动验证过，听起来像准备好的模板",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s19",
-                "quote": "再次，我看重团队的方法论沉淀和数据驱动的氛围，这和我自己的工作习惯比较一致。",
-                "start_ms": 334400,
-                "end_ms": 372114,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "提到想做社群、私域方向，但没有展开自己在这块的实际情况（简历里写负责 50 个核心用户社群，这里完全没有接上）",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s19",
-                "quote": "从活动策划到用户分层、思域社群做全链路的实践",
-                "start_ms": 334400,
-                "end_ms": 372114,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "follow_up": "你说希望在有真实社区氛围的产品里做用户运营——你最近一次用我们的产品是什么时候？具体用过哪些功能、你觉得社区氛围好在哪、又有哪个环节你会想动手改？请举实例说明。"
-      }
-    }
-  ],
-  "requirement_match": {
-    "match_level": "low",
-    "summary": "最关键的硬性要求「独立策划过活动并对结果负责」没有得到满足：简历写的是他策划了「新人七日打卡」，但面试里他两次自述只做执行和跟进，积分规则是主管定的，自己对上线时间、灰度时长都记不清。数据能力只能算略懂，他能讲清留存口径和对比思路，但明确指出 18% 和 27% 不是自己算的，也没参与确定口径；社群经验偏执行，没有举出具体案例。整体看，他与岗位的匹配程度偏低，不建议直接进入下一轮；如果 HR 仍想保留，建议在人工面试中重点核实该活动的真实角色，并追问数据结果由谁负责。",
-    "items": [
-      {
-        "requirement": "两年以上用户运营经验",
-        "importance": "must_have",
-        "verdict": "met",
-        "basis": "resume",
-        "reasoning": "简历显示从 2023.03 至今在某内容社区担任用户运营，此前还有约 8 个月的电商运营助理经历，用户运营岗位的时间超过两年。面试中没有与这段任职时长冲突的说法，但也没有主动补充具体起止时间。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "2023.03 至今 某内容社区 用户运营",
-            "quote_match": "exact"
-          },
-          {
-            "source": "resume",
-            "quote": "2022.07 至 2023.02 某电商公司 运营助理",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "requirement": "独立策划过活动并对结果负责",
-        "importance": "must_have",
-        "verdict": "not_met",
-        "basis": "both",
-        "reasoning": "这项要求也是 HR 点名要核实的。简历写的是策划「新人七日打卡」并对留存结果负责，但面试中他自述只负责执行和跟进；被追问积分规则时，他说规则是主管定的，自己主要负责发群消息、统计打卡人数；连上线月份和灰度时长都答不上来。面试说法与简历表述直接矛盾，这项要求按面试表现判定为未满足。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "策划「新人七日打卡」活动，新用户七日留存从 18% 提升到 27%",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s3",
-            "quote": "我主要负责其中的执行和跟进工作",
-            "start_ms": 34585,
-            "end_ms": 73232,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s5",
-            "quote": "这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数",
-            "start_ms": 81732,
-            "end_ms": 97354,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s7",
-            "quote": "灰度好像就一个星期左右，具体时间我得回去翻一下记录",
-            "start_ms": 103511,
-            "end_ms": 113111,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "requirement": "会看数据并据此调整策略",
-        "importance": "must_have",
-        "verdict": "partially_met",
-        "basis": "interview",
-        "reasoning": "他讲得出留存的口径定义，包括分母与分子、第七日活跃行为，也说明了用活动前的新用户做同期对比并排除大促影响，概念层面是懂的。但被追问时明确说这两个数字不是自己算的，口径没有参与，对照组样本量也记不清；第 3 题只笼统说「通过数据定位原因」，没有讲出任何一次看到什么数据、据此改了什么策略的具体例子。",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s11",
-            "quote": "样本量我不太记得了，数据是数据同学那边出的",
-            "start_ms": 180810,
-            "end_ms": 192348,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s13",
-            "quote": "不是我算的，是数据那边给的看板",
-            "start_ms": 199262,
-            "end_ms": 208909,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s9",
-            "quote": "整体来看，这个提升是多种运营手段共同作用的结果",
-            "start_ms": 134011,
-            "end_ms": 174125,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "requirement": "做过私域或社群运营",
-        "importance": "nice_to_have",
-        "verdict": "partially_met",
-        "basis": "both",
-        "reasoning": "简历写负责 50 个核心用户社群的日常运营，第 3 题能讲出从诊断原因到内容激活、互动机制、核心用户维护的完整框架，第 5 题也提到想做私域社群。但全程没有举出任何一个自己运营过的社群的具体动作或数据，而在第 1 题追问时，他把社群工作描述成发群消息、统计打卡人数，偏执行层面。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "负责 50 个核心用户社群的日常运营",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s15",
-            "quote": "我会先做诊断，通过数据去定位不活跃的原因",
-            "start_ms": 227951,
-            "end_ms": 264309,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s5",
-            "quote": "我主要是负责发群消息、统计打卡人数",
-            "start_ms": 81732,
-            "end_ms": 97354,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "requirement": "有内容、社区产品的用户增长与活跃相关经验",
-        "importance": "must_have",
-        "verdict": "met",
-        "basis": "both",
-        "reasoning": "简历显示他在内容社区做用户运营，涉及新用户留存活动和核心用户社群；面试中对新用户习惯养成、社群激活、用户分层的思路与社区产品场景吻合，求职动机也明确指向社区类产品。相关经验是有的，但深度受上面几条限制。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "2023.03 至今 某内容社区 用户运营",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s3",
-            "quote": "我们希望通过七日打卡帮助新人快速熟悉社区的内容生态，建立使用习惯",
-            "start_ms": 34585,
-            "end_ms": 73232,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      }
-    ]
-  },
-  "resume_verification": {
-    "credibility": "low",
-    "summary": "简历把「新人七日打卡」活动写成由候选人策划的成果，但面试中他自述主要负责执行和跟进，打卡规则由主管制定，自己只负责发群消息、统计人数，角色和简历明显不符。18%到27%的留存数字他讲得出留存定义和归因思路，但样本量、对照组细节、口径由谁制定都答不出，并明确说不是自己算的、口径没参与，数字与他的关系无法确认。社群、电商经历和数据分析能力本轮基本没被问到，无法印证。",
-    "claims": [
-      {
-        "claim": "策划「新人七日打卡」活动",
-        "verdict": "contradicted",
-        "reasoning": "简历用「策划」定位这段经历，但候选人在讲完设计思路后自己补充说主要负责执行和跟进；追问积分规则时进一步说规则是主管定的，自己只负责发群消息、统计打卡人数。策划者的角色与执行者的自述对不上，这正是 HR 要重点确认的点。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "策划「新人七日打卡」活动，新用户七日留存从 18% 提升到 27%",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s3",
-            "quote": "我主要负责其中的执行和跟进工作",
-            "start_ms": 34585,
-            "end_ms": 73232,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s5",
-            "quote": "这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数",
-            "start_ms": 81732,
-            "end_ms": 97354,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "请具体说明七日打卡活动里哪些决策是你做的：活动目标、任务阶梯、激励规则分别是谁定的？方案评审时你提了什么、被否了什么？主管和你各自负责什么？"
-      },
-      {
-        "claim": "新用户七日留存从 18% 提升到 27%",
-        "verdict": "doubtful",
-        "reasoning": "能说出留存口径定义和同期对比的归因思路，但一追问实操细节就断了：对照组只说是活动前的一批新用户，样本量不记得，数字不是他算的，口径也没参与制定。数字本身可能真实，但无法确认是他的工作成果，也无法确认提升来自这个活动。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "新用户七日留存从 18% 提升到 27%",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s11",
-            "quote": "样本量我不太记得了，数据是数据同学那边出的",
-            "start_ms": 180810,
-            "end_ms": 192348,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s13",
-            "quote": "不是我算的，是数据那边给的看板",
-            "start_ms": 199262,
-            "end_ms": 208909,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "看板是谁搭的？活动前后新用户各多少样本、对照组怎么圈的？如果让你重新设计这次评估，你会怎么排除同期其他运营动作的影响？"
-      },
-      {
-        "claim": "负责 50 个核心用户社群的日常运营",
-        "verdict": "not_covered",
-        "reasoning": "面试只出了一道「社群不活跃怎么办」的场景题，候选人给的是通用框架，没有提到自己那 50 个社群的规模、日常动作或数据，无法据此判断这段经历的真实程度。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "负责 50 个核心用户社群的日常运营",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "这 50 个社群分别多大规模、什么类型？你每天具体做哪些事？有没有分层运营，活跃度和留存有什么变化，你怎么衡量？"
-      },
-      {
-        "claim": "2022.07 至 2023.02 在某电商公司做运营助理，协助大促活动执行",
-        "verdict": "not_covered",
-        "reasoning": "本轮五道题都没有问到这段经历，无法判断。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "协助大促活动的执行",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "电商大促你具体负责哪一部分？是执行、对接还是数据跟进？遇到过什么突发问题、怎么处理的？"
-      },
-      {
-        "claim": "技能：数据分析",
-        "verdict": "doubtful",
-        "reasoning": "简历把数据分析列为技能，但面试中涉及数据的部分，留存口径由数据同学出、样本量不记得、数字不是自己算的、口径制定也没参与，只停留在复述概念定义。没有讲出任何一次自己独立做分析、用分析结论调整策略的经历。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "活动策划、社群运营、数据分析",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s13",
-            "quote": "口径……应该就是按七日留存那个标准定义吧，具体怎么定我没参与",
-            "start_ms": 199262,
-            "end_ms": 208909,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "讲一次你自己独立做的数据分析：用什么工具、看哪些指标、得出了什么结论、这个结论让活动或策略做了什么调整？"
-      },
-      {
-        "claim": "技能：社群运营",
-        "verdict": "partially_corroborated",
-        "reasoning": "第 3、4 题答出了诊断原因、内容激活、轻量互动玩法、核心用户维护、动态分层等完整框架，方向正确、条理清楚；但全部是方法论表述，没有举自己社群里的具体案例、数据或踩过的坑，不足以确认是亲手做过。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "活动策划、社群运营、数据分析",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s15",
-            "quote": "我会先做诊断，通过数据去定位不活跃的原因",
-            "start_ms": 227951,
-            "end_ms": 264309,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "举一个你自己社群里真实不活跃的例子：当时数据是什么样、你判断原因是什么、做了哪几个动作、多久见效、最后结果如何？"
-      }
-    ]
-  },
-  "integrity": {
-    "risk_level": "high",
-    "summary": "五道主问题几乎每一次都出现同一套动作：问题刚问完，面试页立刻切到后台 7—10 秒，切回来后 1—2 秒内开始作答，其中第 1 题和第 3 题前还各有一次粘贴事件；而回答本身高度书面化、全是「首先/其次/再次/最后」的框架话术，一追问自己的活动细节（积分规则、上线月份、样本量、口径归属）就答不上来，两道追问也是零延迟答、内容很空。这套「切出去—回来照着说」的配合，加上内容层面「泛泛流畅、细节掉线」的反差，互相印证，指向候选人可能在作答时查阅或粘贴外部准备好的材料。需要说明的是：这场没有做录像画面检查，画面里有没有第二个人或手机无法判断；转写里没有出现第三个人的声音，也没有对 AI 下指令的内容；面试全程没有换页面/换设备的情况，也没有第三人在场的转写证据。建议 HR 回看上述几个时间点前后的录像，再判断是否继续推进。",
-    "signals": [
-      {
-        "kind": "page_event",
-        "severity": "high",
-        "reliability": "medium",
-        "description": "每道主问题问完后约 1 秒，面试页就切到后台（不可见），持续 7—10 秒，页面恢复后 1—2 秒内即开始作答；五道主问题无一例外，而三道追问期间没有任何切出。具体为：00:23 起隐藏 9 秒，00:32 有一次粘贴，00:34 开始答第 1 题；02:03 起隐藏 8 秒，02:14 答第 2 题；03:35 起隐藏 10 秒，03:46 有粘贴，03:47 答第 3 题；04:28 起隐藏 7 秒，04:38 答第 4 题；05:22 起隐藏 9 秒，05:34 答第 5 题。切出时长正好覆盖了每道题的开口等待时间。",
-        "alternative_explanations": "可能只是切到别的应用看消息、看简历或记笔记，或手机通知、系统把后台页面挂起；粘贴也可能是在别的窗口回复同事。但切出稳定发生在每一道主问题之后、且与开口时间严丝合缝，普通干扰很难这么规律。",
+        "point": "五道题开口前页面都被切走 7 到 10 秒，切走时长几乎正好填满提问到开口的等待，其中两次切回来的当口紧接着出现粘贴操作，随后直接开始作答，疑似边看材料边答",
         "evidence": [
           {
             "source": "event",
@@ -1335,16 +192,12 @@
         ]
       },
       {
-        "kind": "depth_mismatch",
-        "severity": "high",
-        "reliability": "high",
-        "description": "凡是能提前准备的概述题，候选人都答得条理完整、术语密集；一旦问到只有亲身做过才知道的细节，立刻变成「记不清」「是别人定的」「我没参与」：积分能换什么、每天给多少分推给主管；上线月份说不准、灰度时长要回去翻记录；对照组样本量记不得、说是数据同学出的；18% 和 27% 不是自己算的、口径也没参与。第 1 题还自述「主要负责其中的执行和跟进工作」，与第 2 题里大谈自己设计归因方法、做分层拆解的说法前后对不上。",
-        "alternative_explanations": "活动距今有段时间，具体数字遗忘很正常；也可能候选人在团队中确实只承担执行角色、对数据环节不掌握。但遗忘通常集中在数字，不太会连自己核心项目的上线月份和规则归属都完全没有把握。",
+        "point": "简历写「策划」，面试自述只做执行；追问积分兑换、每日分值、上线月份、灰度时长全部答不上来，活动的策划身份和真实性都要核实",
         "evidence": [
           {
             "source": "transcript",
             "segment_id": "s5",
-            "quote": "每天打卡给多少分，这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数。",
+            "quote": "积分好像是可以在商城里面换一些周边的吧，具体多少分我有点记不清了",
             "start_ms": 81732,
             "end_ms": 97354,
             "speaker": "candidate",
@@ -1353,7 +206,7 @@
           {
             "source": "transcript",
             "segment_id": "s7",
-            "quote": "应该是……去年上半年吧，三四月份的时候？灰度好像就一个星期左右，具体时间我得回去翻一下记录。",
+            "quote": "应该是……去年上半年吧，三四月份的时候？灰度好像就一个星期左右",
             "start_ms": 103511,
             "end_ms": 113111,
             "speaker": "candidate",
@@ -1361,39 +214,17 @@
           },
           {
             "source": "transcript",
-            "segment_id": "s11",
-            "quote": "对照组就是活动之前的那批新用户，取了一个差不多长度的时间段。样本量我不太记得了，数据是数据同学那边出的。",
-            "start_ms": 180810,
-            "end_ms": 192348,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s13",
-            "quote": "不是我算的，是数据那边给的看板。口径……应该就是按七日留存那个标准定义吧，具体怎么定我没参与。",
-            "start_ms": 199262,
-            "end_ms": 208909,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s3",
-            "quote": "整个活动从策划到落地大概经历了需求梳理、方案评审、灰渡测试和全量上线几个阶段，我主要负责其中的执行和跟进工作。",
-            "start_ms": 34585,
-            "end_ms": 73232,
+            "segment_id": "s7",
+            "quote": "具体时间我得回去翻一下记录",
+            "start_ms": 103511,
+            "end_ms": 113111,
             "speaker": "candidate",
             "quote_match": "exact"
           }
         ]
       },
       {
-        "kind": "scripted_answer",
-        "severity": "medium",
-        "reliability": "medium",
-        "description": "五段回答共用同一套写作模板：每段都以「首先……其次……再次……最后……」推进，配「正向反馈闭环」「差异化投入」「全链路的实践」等书面词，通篇是方法论框架，几乎没有一个属于个人的场景、动作或人。口头作答出现这种整齐度和零口语痕迹，与追问时的磕绊形成明显落差。",
-        "alternative_explanations": "候选人表达能力强、习惯结构化表达，或事先准备了常见问题的答题框架；用户运营岗位的通用问题本来就容易套方法论。单看这一条不足以定性。",
+        "point": "语速 308 到 350 字/分钟且逐题递增，五题最长停顿全部为空，配合高度雷同的排比结构，像提前准备的书面材料而非即时作答",
         "evidence": [
           {
             "source": "transcript",
@@ -1406,44 +237,923 @@
           },
           {
             "source": "transcript",
-            "segment_id": "s15",
-            "quote": "首先，我会先做诊断，通过数据去定位不活跃的原因，是内容供给不足、互动机制缺失，还是社群的生命周期到了衰退期。",
-            "start_ms": 227951,
-            "end_ms": 264309,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
             "segment_id": "s17",
-            "quote": "首先，用户分层运营的本质是在资源有限的前提下做差异化的投入，把运营资源投向价值更高、更有成长性的人群。",
+            "quote": "首先，用户分层运营的本质是在资源有限的前提下做差异化的投入",
             "start_ms": 278066,
             "end_ms": 316500,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s19",
-            "quote": "首先，从行业和业务的匹配度来看，我一直希望在一个有真实社区氛围的产品里做用户运营，贵司在社区产品上的定位和我的经验方向是比较契合的。",
-            "start_ms": 334400,
-            "end_ms": 372114,
             "speaker": "candidate",
             "quote_match": "exact"
           }
         ]
       },
       {
-        "kind": "timing_pattern",
-        "severity": "medium",
-        "reliability": "medium",
-        "description": "五道主问题的开口等待高度一致（10.5—13 秒），随后是 308—350 字/分钟的高速、全程无长停顿的连续输出；而两道需要报具体数字的追问只等了 1—2 秒就开口，内容却是「记不清」「不是我算的」。等待时间不是跟着题目难度走，而是跟着「这道题能不能提前准备」走，这与页面切出的时间窗完全重合。",
-        "alternative_explanations": "候选人可能习惯先默想提纲再开口，或者页面切换本身占用了这几秒；追问答得快而空，也可能只是紧张下的本能回应。",
+        "point": "录像画面没有检查过，画面里有没有其他人、有没有手机，从这份记录里看不出来，无法排除有人在场协助",
+        "evidence": [
+          {
+            "source": "event",
+            "event_id": "e2",
+            "quote": "paste",
+            "start_ms": 32585,
+            "end_ms": 32585,
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e5",
+            "quote": "paste",
+            "start_ms": 226151,
+            "end_ms": 226151,
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ]
+  },
+  "overall_score": 57,
+  "score_range": {
+    "low": 54,
+    "high": 60
+  },
+  "competencies": [
+    {
+      "name": "专业能力",
+      "rating": 2,
+      "comment": "活动设计、留存口径、用户分层、社群激活的概念框架都讲得出，术语也熟，但全部停在方法论层面。作为简历唯一作品的活动，他被明确归为执行角色，规则由主管定，数据由数据同学出，本人只有发群消息和统计打卡人数。岗位要求的「独立策划」和「用数据调策略」两项都没有实据支撑。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s3",
+          "quote": "我主要负责其中的执行和跟进工作",
+          "start_ms": 34585,
+          "end_ms": 73232,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s5",
+          "quote": "我主要是负责发群消息、统计打卡人数",
+          "start_ms": 81732,
+          "end_ms": 97354,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "解决问题",
+      "rating": 3,
+      "comment": "社群不活跃那道题先诊断原因再给办法，能区分内容供给、互动机制、生命周期衰退三种成因，还想到留住核心用户和做流失预警，思路顺序是对的。但诊断看哪些指标、怎么判定不活跃、具体做过哪种玩法，一个都没说，办法落不了地。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s15",
+          "quote": "是内容供给不足、互动机制缺失，还是社群的生命周期到了衰退期",
+          "start_ms": 227951,
+          "end_ms": 264309,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s15",
+          "quote": "通过数据去定位不活跃的原因",
+          "start_ms": 227951,
+          "end_ms": 264309,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "沟通表达",
+      "rating": 3,
+      "comment": "句子通顺、分点清楚，被追问答不上来时也不慌，直接承认不知道，没有编数字圆场。问题是回答模板化，被问到具体规则和数字就绕开，听的人拿不到有效信息，六分钟下来对他到底做过什么仍然模糊。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s13",
+          "quote": "不是我算的，是数据那边给的看板。口径……应该就是按七日留存那个标准定义吧，具体怎么定我没参与。",
+          "start_ms": 199262,
+          "end_ms": 208909,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s11",
+          "quote": "这个……对照组就是活动之前的那批新用户，取了一个差不多长度的时间段。",
+          "start_ms": 180810,
+          "end_ms": 192348,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "学习与成长",
+      "rating": null,
+      "comment": "没有考察到。面试没有问过他学过什么新东西、犯过什么错、后来怎么改的，五道题都不涉及这方面，无法评价。",
+      "evidence": []
+    },
+    {
+      "name": "动机与契合",
+      "rating": 2,
+      "comment": "动机四平八稳，但全程没有提到公司任何一款产品、哪类用户或自己观察到的现象，所谓「定位契合」换任何一家社区公司都能套。他说不想只做单一模块的执行，可他目前唯一的经历恰恰就是执行，动机和自身经历对不上。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s19",
+          "quote": "贵司在社区产品上的定位和我的经验方向是比较契合的。",
+          "start_ms": 334400,
+          "end_ms": 372114,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s19",
+          "quote": "而不是只做单一模块的执行",
+          "start_ms": 334400,
+          "end_ms": 372114,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "职业素养",
+      "rating": 2,
+      "comment": "态度礼貌、时间配合，答不上来时不硬编，这是好的。但简历写「策划」，面试自述是执行；五道题开口前页面都被切走，其中两次切回来紧接粘贴操作。这些是指向诚信的迹象，不是定论，需要 HR 核实。",
+      "evidence": [
+        {
+          "source": "resume",
+          "quote": "策划「新人七日打卡」活动，新用户七日留存从 18% 提升到 27%",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s3",
+          "quote": "我主要负责其中的执行和跟进工作",
+          "start_ms": 34585,
+          "end_ms": 73232,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "event",
+          "event_id": "e2",
+          "quote": "paste",
+          "start_ms": 32585,
+          "end_ms": 32585,
+          "quote_match": "exact"
+        }
+      ]
+    }
+  ],
+  "focus_checks": [
+    {
+      "focus": "确认七日打卡活动是不是他自己策划的",
+      "verdict": "not_satisfied",
+      "finding": "他自己否认了策划身份。他说活动从策划到落地几个阶段里他主要负责执行和跟进；打卡给多少分是主管定的规则，他主要负责发群消息、统计打卡人数；积分能换什么只记得「好像是换周边」；上线月份给的是「应该是去年上半年，三四月份」，灰度「好像就一个星期」，都要回去翻记录。只有开头讲设计思路时用的是设计者口吻，一追问细节就断开了。另外，这道题作答前页面被切走 9 秒，切回来紧接着出现一次粘贴。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s3",
+          "quote": "我主要负责其中的执行和跟进工作",
+          "start_ms": 34585,
+          "end_ms": 73232,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s5",
+          "quote": "每天打卡给多少分，这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数",
+          "start_ms": 81732,
+          "end_ms": 97354,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s5",
+          "quote": "积分好像是可以在商城里面换一些周边的吧，具体多少分我有点记不清了",
+          "start_ms": 81732,
+          "end_ms": 97354,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s7",
+          "quote": "应该是……去年上半年吧，三四月份的时候？灰度好像就一个星期左右，具体时间我得回去翻一下记录",
+          "start_ms": 103511,
+          "end_ms": 113111,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "event",
+          "event_id": "e2",
+          "quote": "paste",
+          "start_ms": 32585,
+          "end_ms": 32585,
+          "quote_match": "exact"
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "question_id": "q1",
+      "question_text": "讲讲你策划的「新人七日打卡」活动，你当时是怎么设计的？",
+      "asked": true,
+      "segment_ids": [
+        "s2",
+        "s3",
+        "s4",
+        "s5",
+        "s6",
+        "s7"
+      ],
+      "timing": {
+        "start_ms": 16371,
+        "end_ms": 113111,
+        "response_latency_ms": 12000,
+        "candidate_speaking_ms": 63869,
+        "candidate_chars": 328,
+        "chars_per_minute": 308,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人按「目标—机制—激励—节奏—落地阶段」的顺序介绍了七日打卡活动：把七天拆成由易到难的任务阶梯，采用积分加勋章、连续打卡额外奖励，设置每日提醒和补签，活动从需求梳理走到灰度测试和全量上线。但他明确说自己「主要负责其中的执行和跟进」，积分规则是主管定的，自己主要发群消息、统计打卡人数。追问积分的具体兑换、每日分值和上线月份、灰度时长时，他都答记不清、需要回去翻记录。",
+        "rating": 2.5,
+        "ratings": [
+          2.5,
+          2.5,
+          2.5
+        ],
+        "rating_reason": "比 2 分强的地方：设计框架讲得完整有条理，任务阶梯的难度递进、连续奖励、补签机制这些属于活动设计的具体动作，能看出他至少熟悉这套玩法。离 3 分差的地方：全程是框架式表述，没有一处是他自己做的判断和取舍；关键细节（积分规则、上线月份、灰度时长）全部推给别人或记不清；最关键的是他自己承认是执行和跟进角色、规则由主管定，与题目问的「你策划的」以及简历上「策划」的表述对不上，等于回避了这道题的核心。",
+        "strengths": [
+          {
+            "point": "活动机制的描述有内容，讲出了任务阶梯的设计思路和降低参与门槛的用意",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s3",
+                "quote": "我们把七天拆成由易到难的任务阶梯，第一天是浏览和点赞，后面逐步过渡到发布内容和互动评论，降低新人的参与门槛",
+                "start_ms": 34585,
+                "end_ms": 73232,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "讲得出活动的落地流程和节奏把控手段",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s3",
+                "quote": "整个活动从策划到落地大概经历了需求梳理、方案评审、灰渡测试和全量上线几个阶段",
+                "start_ms": 34585,
+                "end_ms": 73232,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "本人自述是执行角色，不是策划者，与简历「策划」的表述和 HR 的重点核实项直接冲突",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s3",
+                "quote": "我主要负责其中的执行和跟进工作",
+                "start_ms": 34585,
+                "end_ms": 73232,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s5",
+                "quote": "这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数",
+                "start_ms": 81732,
+                "end_ms": 97354,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "最基础的规则细节都记不清，说明对活动设计的参与深度有限",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s5",
+                "quote": "积分好像是可以在商城里面换一些周边的吧，具体多少分我有点记不清了",
+                "start_ms": 81732,
+                "end_ms": 97354,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "活动上线时间和灰度时长都给不出准确答案，活动真实性需要核实",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s7",
+                "quote": "应该是……去年上半年吧，三四月份的时候？灰度好像就一个星期左右，具体时间我得回去翻一下记录",
+                "start_ms": 103511,
+                "end_ms": 113111,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "表述偏框架化，多为「形成正向反馈闭环」这类通用说法，缺少只有亲历者才说得出的一手细节",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s3",
+                "quote": "配合连续打卡的额外奖励，形成正向反馈闭环",
+                "start_ms": 34585,
+                "end_ms": 73232,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请他说出一个由他本人拍板、而非主管决定的设计点（例如任务阶梯分几档、每档做什么、补签规则怎么定），并说明当时为什么这么定；同时请他在下一轮带来能证明策划身份的材料（方案文档、评审记录、需求单），并核对活动上线的准确月份和灰度时长。"
+      }
+    },
+    {
+      "question_id": "q2",
+      "question_text": "留存从 18% 提升到 27%，这个数字是怎么算出来的？你怎么确定是活动带来的？",
+      "asked": true,
+      "segment_ids": [
+        "s8",
+        "s9",
+        "s10",
+        "s11",
+        "s12",
+        "s13"
+      ],
+      "timing": {
+        "start_ms": 114011,
+        "end_ms": 208909,
+        "response_latency_ms": 11000,
+        "candidate_speaking_ms": 61299,
+        "candidate_chars": 325,
+        "chars_per_minute": 318,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人先按「口径—归因—数据来源—分层拆解」四层讲了留存的计算方式：七日留存的分母是当日新增用户数，分子是这批用户在第七天有登录或内容消费行为的人数；归因采用与活动前新用户同期对比并排除大促影响。但被追问对照组怎么选、样本量多少、数字是不是自己算的、口径谁定的时，他都说记不清或不是自己做的，数据由数据同学出，口径没参与制定，最后还表示提升是多种运营手段共同作用的结果。",
+        "rating": 3.0,
+        "ratings": [
+          3.0,
+          3.0,
+          2.5
+        ],
+        "rating_reason": "口径这一层讲清楚了，符合评分要点里「讲得清口径」的底线要求，不至于掉到 2 分；归因思路（同期对比、排除大促、按渠道和首日行为拆解）也说得完整。但整段停在方法论层面，没有一组具体数字：对照组只是「活动之前差不多长度的一段时间」，样本量不记得，数字不是自己算的，口径不是自己定的，最后还自己承认提升是多种手段共同作用的结果，等于把简历上「活动带来 18%→27%」的因果关系说没了。有框架无细节，够不上良好。",
+        "strengths": [
+          {
+            "point": "留存口径的定义表述准确，分子分母说清了",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s9",
+                "quote": "留存的定义是当日新增用户在第七日仍然有活跃行为的比例",
+                "start_ms": 134011,
+                "end_ms": 174125,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s9",
+                "quote": "分子是这批用户在第七天有登录或者内容消费行为的人数",
+                "start_ms": 134011,
+                "end_ms": 174125,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "知道归因要做同期对比并排除外部因素，也知道按渠道、首日行为拆开看差异",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s9",
+                "quote": "我们采用了同期对比的思路，把活动期间的新用户和活动之前一段时间的新用户做对比",
+                "start_ms": 134011,
+                "end_ms": 174125,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s9",
+                "quote": "比如按照渠道、按照首日行为去拆分，看不同人群的提升幅度是否有差异",
+                "start_ms": 134011,
+                "end_ms": 174125,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "对照组只有一句「之前差不多长度的一段时间」，样本量不知道，归因的可信度无法核实",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s11",
+                "quote": "对照组就是活动之前的那批新用户，取了一个差不多长度的时间段",
+                "start_ms": 180810,
+                "end_ms": 192348,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s11",
+                "quote": "样本量我不太记得了，数据是数据同学那边出的",
+                "start_ms": 180810,
+                "end_ms": 192348,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "18% 和 27% 不是本人算的，口径也没参与制定，简历上这两个数与他的实际参与程度对不上",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "不是我算的，是数据那边给的看板",
+                "start_ms": 199262,
+                "end_ms": 208909,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s13",
+                "quote": "具体怎么定我没参与",
+                "start_ms": 199262,
+                "end_ms": 208909,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "自己把提升归为多种运营手段共同作用，没有正面回答「怎么确定是活动带来的」，与简历表述相矛盾",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s9",
+                "quote": "整体来看，这个提升是多种运营手段共同作用的结果",
+                "start_ms": 134011,
+                "end_ms": 174125,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "全程没有出现任何一个具体数字或自己做的分析动作，答的是通用方法论，看不出他本人在数据环节里做了什么",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s9",
+                "quote": "主要来自买点系统和数据看板的漏抖分析",
+                "start_ms": 134011,
+                "end_ms": 174125,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请他把 18%→27% 当场重算一遍：对照组的具体时间窗口和多大规模、这批用户是怎么筛出来的、如果同期有大促怎么扣掉，再说明他本人在这个数据里到底做了哪一步（取数、算、还是只看结果），以及除了活动之外还有哪些可能造成提升的原因。"
+      }
+    },
+    {
+      "question_id": "q3",
+      "question_text": "如果一个社群越来越不活跃，你会怎么办？",
+      "asked": true,
+      "segment_ids": [
+        "s14",
+        "s15"
+      ],
+      "timing": {
+        "start_ms": 209809,
+        "end_ms": 264309,
+        "response_latency_ms": 13000,
+        "candidate_speaking_ms": 36358,
+        "candidate_chars": 203,
+        "chars_per_minute": 335,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人按「先诊断、再给方案」的顺序作答：先通过数据定位不活跃的原因（内容供给不足、互动机制缺失、社群进入衰退期），再从内容排期、轻量互动玩法与激励体系、核心用户一对一维护和专属权益、流失预警与分层召回几个方面给出办法。全程是方法和框架的罗列，没有举出任何自己做过的事例、具体指标或执行细节。",
+        "rating": 3.0,
+        "ratings": [
+          3.0,
+          3.0,
+          3.0
+        ],
+        "rating_reason": "切题，顺序也对：先分析原因再给办法，覆盖了诊断、内容、机制、核心用户、召回五个层面，能看出具备基本的社群运营思路，所以不是 2 分。但这道题的评分要点还要求「有具体的动作」，候选人一个具体动作都没给：诊断看哪些指标、判断标准是什么、设计过什么互动玩法、核心用户怎么维护、结果如何，全部只有抽象名词。简历里写着负责 50 个核心用户社群，却没结合任何一段真实经历来讲。框架完整但内容是空的，属于「内容偏泛或细节不足」，给 3 分。",
+        "strengths": [
+          {
+            "point": "答题顺序符合要求，先诊断原因再给对策，没有上来就堆动作",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "首先，我会先做诊断，通过数据去定位不活跃的原因，是内容供给不足、互动机制缺失，还是社群的生命周期到了衰退期。",
+                "start_ms": 227951,
+                "end_ms": 264309,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "诊断时给了三个可以区分的原因方向，说明他知道不活跃要对症下药，而不是一套动作套所有社群",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "是内容供给不足、互动机制缺失，还是社群的生命周期到了衰退期",
+                "start_ms": 227951,
+                "end_ms": 264309,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "除了拉活跃，还想到留住核心用户和建立流失预警，考虑到了社群的长期维护",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "最后，我会关注核心用户的维护，通过一对一沟通和专属权益，把关键少数留下来",
+                "start_ms": 227951,
+                "end_ms": 264309,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "全篇没有一个具体动作，说的都是动作类别，比如「设计一些轻量的互动玩法」，但没说自己实际做过哪一种、怎么做的、效果如何",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "我会设计一些轻量的互动玩法，比如话题讨论、打卡、用户共创，构建用户激励体系，让活跃行为得到及时反馈",
+                "start_ms": 227951,
+                "end_ms": 264309,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "诊断环节只说「通过数据」，没讲看哪些指标、数据到什么程度算不活跃、怎么排除是产品改版或季节性因素造成的",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "通过数据去定位不活跃的原因",
+                "start_ms": 227951,
+                "end_ms": 264309,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "简历里写了负责 50 个核心用户社群，这道题完全可以结合真实案例讲，但候选人一句实际经历都没有引用，无法判断他是不是真的处理过社群衰退",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s15",
+                "quote": "同时建立流失预警机制，对沉默用户做分层招回",
+                "start_ms": 227951,
+                "end_ms": 264309,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请举一个你实际运营过的社群变得不活跃的例子：你当时看了哪些数据、判断是什么原因造成的、具体做了哪几件事、后来活跃度有没有变化？如果做过但没起效，也请讲讲没起效的原因。"
+      }
+    },
+    {
+      "question_id": "q4",
+      "question_text": "你怎么理解用户分层运营？",
+      "asked": true,
+      "segment_ids": [
+        "s16",
+        "s17"
+      ],
+      "timing": {
+        "start_ms": 265209,
+        "end_ms": 316500,
+        "response_latency_ms": 10500,
+        "candidate_speaking_ms": 38434,
+        "candidate_chars": 221,
+        "chars_per_minute": 345,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人从分层的目的、划分维度、不同层级的运营动作、动态更新四个方面讲了用户分层运营的理解：本质是资源有限下的差异化投入，按生命周期、活跃度、内容贡献、付费价值交叉划分，头部用户做荣誉激励和专属服务、腰部做习惯养成、沉默用户做召回，并强调分层要动态更新、配合数据看板持续追踪。",
+        "rating": 3.5,
+        "ratings": [
+          3.5,
+          3.5,
+          3.0
+        ],
+        "rating_reason": "四个层面都答到了（为什么分层、怎么分、分完怎么用、怎么迭代），框架完整，也提到了交叉分层和动态更新，比只罗列维度的合格档略好。但通篇是方法论式的抽象表述，没有举出自己做过的一次分层实践——分了几层、每层用什么规则、配了什么动作、效果如何；分层维度也是「常见的会结合」这类通用列举，看不出他自己的判断和取舍。相比良好档要求的「有具体内容」，缺的正是个人实操细节，因此给 3.5。",
+        "strengths": [
+          {
+            "point": "讲清了分层的出发点：资源有限下的差异化投入，把资源投向价值和成长性更高的人群",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s17",
+                "quote": "用户分层运营的本质是在资源有限的前提下做差异化的投入，把运营资源投向价值更高、更有成长性的人群",
+                "start_ms": 278066,
+                "end_ms": 316500,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "给出的分层维度是多维交叉而非单一维度，并区分了不同层级匹配不同动作",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s17",
+                "quote": "常见的会结合用户的生命周期阶段、行为活跃度、内容贡献度以及付费或者商业价值等维度做交叉划分",
+                "start_ms": 278066,
+                "end_ms": 316500,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "提到分层不是一次性工作，需要动态更新规则并配合数据看板追踪效果",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s17",
+                "quote": "分层不是一次性的工作，需要建立动态的更新机制，随着用户行为的变化定期调整分层规则",
+                "start_ms": 278066,
+                "end_ms": 316500,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "全程是方法论陈述，没有任何自己实操过的分层案例：分了哪几层、规则怎么定、动作怎么落地、结果如何",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s17",
+                "quote": "在策略上，不同层级要匹配不同的运营动作",
+                "start_ms": 278066,
+                "end_ms": 316500,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "分层维度和各层动作都是通用列举，没有结合社区产品的具体场景说明取舍标准，无法判断是真做过还是背框架",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s17",
+                "quote": "头部用户侧重荣誉激励和专属服务，腰部和长尾用户侧重习惯养成和内容激励，沉默用户侧重召回和唤醒",
+                "start_ms": 278066,
+                "end_ms": 316500,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请举一个你自己做过的用户分层案例：当时按什么规则把用户分成了几层、每层各配了什么动作、你怎么判断这种分层是有效的？"
+      }
+    },
+    {
+      "question_id": "q5",
+      "question_text": "你为什么想来我们这里做用户运营？",
+      "asked": true,
+      "segment_ids": [
+        "s18",
+        "s19"
+      ],
+      "timing": {
+        "start_ms": 317400,
+        "end_ms": 372114,
+        "response_latency_ms": 12500,
+        "candidate_speaking_ms": 37714,
+        "candidate_chars": 220,
+        "chars_per_minute": 350,
+        "longest_pause_ms": null
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人按「行业匹配—个人成长—团队氛围—岗位价值」四点说明来意：希望在有真实社区氛围的产品做用户运营，认为公司社区定位与自己经验契合；想从活动策划到用户分层、社群做全链路实践，而非单一模块执行；看重团队的方法论沉淀和数据驱动；最后说用户运营的价值在于长期陪伴用户成长，希望复用过去的社群和活动积累。",
+        "rating": 3.0,
+        "ratings": [
+          2.5,
+          3.0,
+          3.0
+        ],
+        "rating_reason": "答案是切题的，四点都围绕「为什么来做用户运营」，也讲出不愿只做单一模块、想做全链路这类个人诉求，比 2 分「空泛或回避核心」要好。但全文没有一处具体内容：没有提到公司任何一款产品、哪类用户、自己观察到什么问题，也没有举过去哪段经历让他产生这个想法，全部停在「契合」「氛围」「价值」这类通用表述上，任何一家社区公司都能套用，够不上 4 分要求的「有具体内容」。",
+        "strengths": [
+          {
+            "point": "动机说得比较完整，覆盖了业务匹配、个人成长、团队氛围、岗位理解四个角度，能看出对用户运营这个岗位有基本认知",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s19",
+                "quote": "我希望能够在一个更完整的运营体系里，从活动策划到用户分层、思域社群做全链路的实践，而不是只做单一模块的执行。",
+                "start_ms": 334400,
+                "end_ms": 372114,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "提到了重视数据驱动和方法论沉淀的工作习惯，与岗位要求有一定呼应",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s19",
+                "quote": "我看重团队的方法论沉淀和数据驱动的氛围，这和我自己的工作习惯比较一致。",
+                "start_ms": 334400,
+                "end_ms": 372114,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "对这家公司没有任何具体了解，全程没有提到产品名、用户群体或自己观察到的具体现象，所谓「定位契合」是空话，无法判断他是不是真的了解这家公司",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s19",
+                "quote": "贵司在社区产品上的定位和我的经验方向是比较契合的。",
+                "start_ms": 334400,
+                "end_ms": 372114,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "没有用任何自身经历支撑这个动机，比如自己是什么时候开始用这类社区产品、在哪段工作里意识到想做全链路，全是抽象表述",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s19",
+                "quote": "我认为用户运营的价值在于长期陪伴用户成长，我希望能把过去在社群和活动上的积累复用过来，和团队一起把用户的规模和活跃做得更好。",
+                "start_ms": 334400,
+                "end_ms": 372114,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "你平时用过我们产品吗？请具体说出你观察到的一个社区问题或者一个你觉得做得好的地方，以及如果你来做你会怎么改。"
+      }
+    }
+  ],
+  "requirement_match": {
+    "match_level": "low",
+    "summary": "工作年限和社群运营这两块对得上，但简历主打的「新人七日打卡」在面试里被自己说成只是执行跟进：打卡积分规则是主管定的，留存数据是数据同学出的，18% 到 27% 这两个数也不是他算的。岗位最看重的两条硬性要求「独立策划过活动并对结果负责」「会看数据并据此调整策略」基本不成立，整体匹配偏低。另外，作答前出现过两次粘贴操作，活动描述又高度书面化，像准备好的稿子，建议人工一并核实。",
+    "items": [
+      {
+        "requirement": "两年以上用户运营经验",
+        "importance": "must_have",
+        "verdict": "met",
+        "basis": "resume",
+        "reasoning": "简历显示 2023.03 至今在某内容社区做用户运营，此前 2022.07 至 2023.02 在某电商公司做运营助理，累计运营类岗位时间达到两年以上。面试中没有再核对任职时间和具体职责范围，这一条只能依据简历，建议 HR 在下一轮顺带确认起止时间和汇报关系。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "2023.03 至今 某内容社区 用户运营",
+            "quote_match": "exact"
+          },
+          {
+            "source": "resume",
+            "quote": "2022.07 至 2023.02 某电商公司 运营助理",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "独立策划过活动并对结果负责",
+        "importance": "must_have",
+        "verdict": "not_met",
+        "basis": "interview",
+        "reasoning": "「新人七日打卡」是简历里唯一一个完整活动，但面试中他自己把角色说成执行：活动从策划到落地几个阶段里他主要负责执行和跟进；追问积分规则时说打卡给多少分是主管定的，他主要负责发群消息、统计打卡人数；追问上线时间和灰度周期时也答不上来，要回去翻记录。能够自己定规则、说得清时间节奏，是判断活动是否本人策划的基本点，这几点都答不上来。另外，这道题作答前网页上出现过一次粘贴操作，回答又是整段「首先、其次、再次、最后」的排比，之后被追问细节就断开，像是提前准备的书面材料。建议人工面试直接要求他复盘一个自己定规则、自己跟进结果的活动，问清时间、规则数值和上线节奏。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "我主要负责其中的执行和跟进工作",
+            "start_ms": 34585,
+            "end_ms": 73232,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数",
+            "start_ms": 81732,
+            "end_ms": 97354,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "具体时间我得回去翻一下记录",
+            "start_ms": 103511,
+            "end_ms": 113111,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e2",
+            "quote": "paste",
+            "start_ms": 32585,
+            "end_ms": 32585,
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "会看数据并据此调整策略",
+        "importance": "must_have",
+        "verdict": "partially_met",
+        "basis": "interview",
+        "reasoning": "概念层面他说得清楚：能讲出七日留存的口径，分子分母怎么定义，用活动前的新用户做同期对比，还提到按渠道和首日行为拆开看。但一问到实操就露出缺口：对照组样本量记不清，说是数据同学出的；18% 和 27% 不是他算的，是数据那边给的看板；口径怎么定他没参与。也就是说，他能复述一套分析方法，但没有自己算过数、定过口径，更没有讲出「看完数据后具体改了什么策略」。第三题里说「通过数据去定位不活跃的原因」也停留在框架层面，没有具体指标和动作。",
         "evidence": [
           {
             "source": "transcript",
             "segment_id": "s9",
-            "quote": "首先是数据口径的问题，留存的定义是当日新增用户在第七日仍然有活跃行为的比例，分母是当天的新增用户数",
+            "quote": "留存的定义是当日新增用户在第七日仍然有活跃行为的比例",
+            "start_ms": 134011,
+            "end_ms": 174125,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s9",
+            "quote": "我们采用了同期对比的思路，把活动期间的新用户和活动之前一段时间的新用户做对比",
             "start_ms": 134011,
             "end_ms": 174125,
             "speaker": "candidate",
@@ -1452,9 +1162,427 @@
           {
             "source": "transcript",
             "segment_id": "s11",
-            "quote": "这个……对照组就是活动之前的那批新用户，取了一个差不多长度的时间段。",
+            "quote": "样本量我不太记得了，数据是数据同学那边出的",
             "start_ms": 180810,
             "end_ms": 192348,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "不是我算的，是数据那边给的看板",
+            "start_ms": 199262,
+            "end_ms": 208909,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "应该就是按七日留存那个标准定义吧，具体怎么定我没参与",
+            "start_ms": 199262,
+            "end_ms": 208909,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "做过私域或社群运营（加分项）",
+        "importance": "nice_to_have",
+        "verdict": "met",
+        "basis": "both",
+        "reasoning": "简历写负责 50 个核心用户社群的日常运营；面试第三题问社群不活跃怎么办，他给出了先诊断原因（内容供给、互动机制、生命周期衰退），再从内容排期、轻量互动玩法、核心用户一对一维护、沉默用户分层召回着手的思路，并提到建流失预警机制，方向是合理的。但整个过程没有一个自己社群的具体例子、具体数据或具体动作，都是通用框架，深度还需要人工面试用他实际运营的那 50 个群去追问。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "负责 50 个核心用户社群的日常运营",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s15",
+            "quote": "我会从内容侧入手，重新梳理社群的议题和内容排期，用优质内容去激活沉默用户",
+            "start_ms": 227951,
+            "end_ms": 264309,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s15",
+            "quote": "通过一对一沟通和专属权益，把关键少数留下来",
+            "start_ms": 227951,
+            "end_ms": 264309,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ]
+  },
+  "resume_verification": {
+    "credibility": "low",
+    "summary": "简历最核心的卖点——策划「新人七日打卡」并把新用户七日留存从 18% 做到 27%——在面试里没有得到印证：候选人自述主要负责执行和跟进，做的是发群消息、统计打卡人数，活动规则、上线月份、灰度时长都答不上来，留存数字也不是他算的、口径不是他定的。其余几条（50 个核心社群的运营、电商大促执行、任职时间）面试里没有问到，无法判断。建议按「执行层」而非「能独立策划并对结果负责」来评估这个人。",
+    "claims": [
+      {
+        "claim": "「新人七日打卡」活动是他策划的",
+        "verdict": "doubtful",
+        "reasoning": "他讲设计思路时是一套完整框架（目标、由易到难的任务阶梯、积分加勋章、提醒和补签），但一追问具体内容就全部落空：积分能换什么、每天给多少分记不清，并明确说规则是主管定的，自己主要负责发群消息和统计打卡人数；上线月份和灰度时长也只给得出「去年上半年」「好像一个星期」。他还自述「我主要负责其中的执行和跟进工作」。这些和简历写的「策划」在角色深度上明显不相称。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "策划「新人七日打卡」活动，新用户七日留存从 18% 提升到 27%",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "我主要负责其中的执行和跟进工作",
+            "start_ms": 34585,
+            "end_ms": 73232,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "积分好像是可以在商城里面换一些周边的吧，具体多少分我有点记不清了",
+            "start_ms": 81732,
+            "end_ms": 97354,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "每天打卡给多少分，这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数",
+            "start_ms": 81732,
+            "end_ms": 97354,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "去年上半年吧，三四月份的时候？灰度好像就一个星期左右",
+            "start_ms": 103511,
+            "end_ms": 113111,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "请他完整复述一遍活动方案：七天各是什么任务、积分和勋章的数值是谁定的、方案评审上他提的哪些意见被采纳、哪几个决策是他拍板的；再问如果重做一次他会改哪里。"
+      },
+      {
+        "claim": "新用户七日留存从 18% 提升到 27%",
+        "verdict": "partially_corroborated",
+        "reasoning": "他能准确说出七日留存的口径定义（当日新增中第七天仍有活跃行为的比例）和归因思路，方向是对的。但对照组只说是「活动之前那批新用户」，样本量不记得；两个数字不是他算的，是数据同学的看板，口径他也没参与制定；最后还把提升归因为「多种运营手段共同作用」，等于没有把结果算在这次活动头上。数字本身可能是真的，但无法确认是他的成果。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "新用户七日留存从 18% 提升到 27%",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s9",
+            "quote": "留存的定义是当日新增用户在第七日仍然有活跃行为的比例",
+            "start_ms": 134011,
+            "end_ms": 174125,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s9",
+            "quote": "整体来看，这个提升是多种运营手段共同作用的结果",
+            "start_ms": 134011,
+            "end_ms": 174125,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s11",
+            "quote": "样本量我不太记得了，数据是数据同学那边出的",
+            "start_ms": 180810,
+            "end_ms": 192348,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "不是我算的，是数据那边给的看板",
+            "start_ms": 199262,
+            "end_ms": 208909,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "让他现场把取数过程走一遍：对照组截的是哪段时间、样本量多少、同期还上线了哪些动作、有没有做分渠道拆分；再请他判断这个提升里能归到这次活动上的部分大概是多少。"
+      },
+      {
+        "claim": "负责 50 个核心用户社群的日常运营",
+        "verdict": "not_covered",
+        "reasoning": "面试没有问社群运营的规模和方法，无法判断 50 个核心社群是不是他在运营、运营到什么程度。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "负责 50 个核心用户社群的日常运营",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "请他说清 50 个社群怎么分层维护、每天和每周的固定动作有哪些、用什么指标判断社群健康度、他个人和团队各承担什么。"
+      },
+      {
+        "claim": "技能包括数据分析",
+        "verdict": "partially_corroborated",
+        "reasoning": "留存口径、同期对比归因、按渠道和首日行为拆分，这套说法讲得完整，说明有基本的分析概念。但取数、样本量、口径制定全部由数据同学完成，他本人没参与；面试里也没有举出任何一次「看了数据之后调整了某个策略」的实例。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "活动策划、社群运营、数据分析",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s9",
+            "quote": "留存的定义是当日新增用户在第七日仍然有活跃行为的比例",
+            "start_ms": 134011,
+            "end_ms": 174125,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "具体怎么定我没参与",
+            "start_ms": 199262,
+            "end_ms": 208909,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "请他举一个自己看数据后改动作的具体例子：看的是哪个指标、发现了什么、改了什么、最后结果如何。"
+      },
+      {
+        "claim": "2023.03 至今在某内容社区做用户运营",
+        "verdict": "not_covered",
+        "reasoning": "面试没有核实这段任职的起止时间、汇报关系和职责范围。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "2023.03 至今 某内容社区 用户运营",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "核实入职时间和是否仍在职、团队规模与汇报对象，确认「两年以上用户运营经验」是否成立，以及前面电商助理那段是否计入。"
+      },
+      {
+        "claim": "2022.07 至 2023.02 在某电商公司做运营助理，协助大促活动执行",
+        "verdict": "not_covered",
+        "reasoning": "面试完全没有问到这段经历。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "2022.07 至 2023.02 某电商公司 运营助理",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "问这段做的是什么品类的大促、他具体负责哪一块、和用户运营有没有关系。"
+      }
+    ]
+  },
+  "integrity": {
+    "risk_level": "high",
+    "summary": "最突出的问题是：五道题在开口作答前都把面试页切走 7 到 10 秒，切走的时长与开口前的等待时间几乎完全重合，其中两次切回页面时紧接着出现粘贴操作；与此同时，回答一律套用「首先、其次、再次、最后」的书面结构，语速 308 到 350 字/分钟且几乎不停顿；而一旦问到自己经手的细节（积分规则、对照组样本量、数字是谁算的），就全部答不上来。这几条互相印证，像是边看材料边答，风险按高处理，建议回看这五段作答前后的录像再决定是否推进。需要说明：这场面试的录像画面没有检查，画面里有没有别人、有没有手机都看不到；转写里没有第三个人的声音，也没有对 AI 下指令的话，全程没有换页面接续面试的情况。",
+    "signals": [
+      {
+        "kind": "page_event",
+        "severity": "medium",
+        "reliability": "high",
+        "description": "五道题在开口前，面试页都被切到别的窗口：第1题 00:23 切走 9 秒、第2题 02:03 切走 8 秒、第3题 03:35 切走 10 秒、第4题 04:28 切走 7 秒、第5题 05:22 切走 9 秒，切走的时间几乎正好填满从提问到开口的等待。其中 00:32 和 03:46 两次切回页面的当口紧接着有粘贴操作，随后都直接开始作答，没有停顿。",
+        "alternative_explanations": "手机弹通知或自动锁屏、浏览器被其他窗口挡住、网络或设备切换导致页面短暂失焦，都可能留下类似记录；也可能是候选人自己开着提前写好的提纲，作答时来回查看，而不是在查答案。",
+        "evidence": [
+          {
+            "source": "event",
+            "event_id": "e1",
+            "quote": "visibility_hidden",
+            "start_ms": 23085,
+            "end_ms": 32085,
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e2",
+            "quote": "paste",
+            "start_ms": 32585,
+            "end_ms": 32585,
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e3",
+            "quote": "visibility_hidden",
+            "start_ms": 123511,
+            "end_ms": 131511,
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e4",
+            "quote": "visibility_hidden",
+            "start_ms": 215451,
+            "end_ms": 225451,
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e5",
+            "quote": "paste",
+            "start_ms": 226151,
+            "end_ms": 226151,
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e6",
+            "quote": "visibility_hidden",
+            "start_ms": 268066,
+            "end_ms": 275066,
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e7",
+            "quote": "visibility_hidden",
+            "start_ms": 322400,
+            "end_ms": 331400,
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "kind": "timing_pattern",
+        "severity": "medium",
+        "reliability": "medium",
+        "description": "开口前的等待高度一致：依次为 12.0、11.0、13.0、10.5、12.5 秒，第4题这种基础认知题和第5题这种动机题也没有变短。作答语速 308 到 350 字/分钟，高于日常口语，且逐题递增，五道题的最长停顿一栏全部为空，等于一口气说完。",
+        "alternative_explanations": "有人习惯先在心里组织好再开口，常见题准备过也正常；语速快可能是紧张，或者平时语速就偏快。单独看这一条说明不了什么。",
+        "evidence": [
+          {
+            "source": "event",
+            "event_id": "e1",
+            "quote": "visibility_hidden",
+            "start_ms": 23085,
+            "end_ms": 32085,
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e4",
+            "quote": "visibility_hidden",
+            "start_ms": 215451,
+            "end_ms": 225451,
+            "quote_match": "exact"
+          },
+          {
+            "source": "event",
+            "event_id": "e7",
+            "quote": "visibility_hidden",
+            "start_ms": 322400,
+            "end_ms": 331400,
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "kind": "scripted_answer",
+        "severity": "medium",
+        "reliability": "medium",
+        "description": "五段回答用同一套「首先、其次、再次、最后」的骨架，出现「正向反馈闭环」「生命周期阶段」「差异化的投入」这类书面表达。场景题和动机题本应更口语化，但第3题、第4题、第5题仍然是同样的排比结构，从头到尾没有一个具体的人、一次具体的冲突或一件亲手做过的事。",
+        "alternative_explanations": "面试经验多、习惯模板化表达，或者提前背过常见题的框架，都可能形成这种语感，不必然说明是在念稿。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s15",
+            "quote": "首先，我会先做诊断，通过数据去定位不活跃的原因",
+            "start_ms": 227951,
+            "end_ms": 264309,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s17",
+            "quote": "首先，用户分层运营的本质是在资源有限的前提下做差异化的投入",
+            "start_ms": 278066,
+            "end_ms": 316500,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s19",
+            "quote": "首先，从行业和业务的匹配度来看，我一直希望在一个有真实社区氛围的产品里做用户运营",
+            "start_ms": 334400,
+            "end_ms": 372114,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "kind": "depth_mismatch",
+        "severity": "medium",
+        "reliability": "medium",
+        "description": "讲通用的方法论时很流畅，一旦被问到自己经手的细节就答不上来：第1题追问积分能换什么、每天给多少分，回答「具体多少分我有点记不清了」，并说自己「主要是负责发群消息、统计打卡人数」，与开头以设计者口吻讲的做法对不上；第2题追问对照组怎么选、样本量多少、18% 和 27% 是谁算的、口径谁定，全部回答不记得、不是我算的、我没参与。",
+        "alternative_explanations": "更常见的解释是简历上的参与程度被夸大了，候选人实际只做执行，记不清属于正常；也不排除时间久了细节遗忘。这一条本身是表现和简历真实性问题，不等于面试现场作弊。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "具体多少分我有点记不清了。",
+            "start_ms": 81732,
+            "end_ms": 97354,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s5",
+            "quote": "我主要是负责发群消息、统计打卡人数",
+            "start_ms": 81732,
+            "end_ms": 97354,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s3",
+            "quote": "我主要负责其中的执行和跟进工作",
+            "start_ms": 34585,
+            "end_ms": 73232,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s11",
+            "quote": "样本量我不太记得了，数据是数据同学那边出的。",
+            "start_ms": 180810,
+            "end_ms": 192348,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s13",
+            "quote": "不是我算的，是数据那边给的看板。",
+            "start_ms": 199262,
+            "end_ms": 208909,
             "speaker": "candidate",
             "quote_match": "exact"
           }
@@ -1463,17 +1591,17 @@
     ]
   },
   "communication": {
-    "summary": "表达流畅、层次清楚，几乎每道题都用「首先/其次/再次/最后」的四点式框架作答，属于口头上很会组织语言的一类候选人。但框架之下具体细节经常缺失，或答不上来后把责任推给主管和数据同学；被追问时没有慌乱，比较坦率地承认记不清、不是自己做的。整体看，沟通形式上的表现明显好于内容上的具体程度。",
+    "summary": "候选人说话连贯、几乎不卡壳，每题都按「首先、其次、再次、最后」的顺序作答，框架感很强，听起来条理清楚。但内容多停在方法论层面，一旦被追问具体数字、时间、规则细节，就答「记不清」「是主管或数据同学定的」，听得见结构、听不到实据。被追问到答不上来时没有慌乱，直接承认不知道，态度平稳。",
     "aspects": [
       {
         "aspect": "clarity",
         "rating": 3,
-        "observation": "句子通顺、用词专业，单个观点能讲明白。但用来回答「你当时是怎么设计的」时，讲的是一套通用的活动设计逻辑，直到最后才轻描淡写地说「我主要负责执行和跟进」，听的人要靠后面追问才能拼出他实际做了什么。追问积分规则时，回答里带着「呃这个」「好像是」这类不确定的措辞，信息给得很模糊。",
+        "observation": "句子本身通顺，术语用得熟，能把自己的做法分点讲出来；但讲完后听的人仍拿不到具体信息。被问到积分能换什么、每天给多少分时，只能给「好像是换周边」这类模糊说法，具体数值说不出来。",
         "evidence": [
           {
             "source": "transcript",
             "segment_id": "s3",
-            "quote": "我主要负责其中的执行和跟进工作。",
+            "quote": "再次，在激励层面，我们构建了积分加勋章的双重激励体系，配合连续打卡的额外奖励，形成正向反馈闭环。",
             "start_ms": 34585,
             "end_ms": 73232,
             "speaker": "candidate",
@@ -1493,12 +1621,12 @@
       {
         "aspect": "structure",
         "rating": 4,
-        "observation": "五道题全部采用分点作答，依次讲目标、机制、激励、节奏，或口径、归因、数据来源、分层分析，主次分明，没有跑题或想到哪说到哪的情况。但回答都套用同一个模板，追问越深入，这种模板越容易显得空泛。",
+        "observation": "五道题几乎都用了显式的分层结构，先讲目标或诊断、再讲机制、再讲数据或后续动作，最后收一句总结，顺序稳定，没有跳来跳去。缺点是这种结构更像套模板，各点的轻重缓急不明显，很少主动说哪一条最关键。",
         "evidence": [
           {
             "source": "transcript",
             "segment_id": "s3",
-            "quote": "首先，在活动目标上，我们希望通过七日打卡帮助新人快速熟悉社区的内容生态",
+            "quote": "首先，在活动目标上，我们希望通过七日打卡帮助新人快速熟悉社区的内容生态，建立使用习惯。",
             "start_ms": 34585,
             "end_ms": 73232,
             "speaker": "candidate",
@@ -1506,10 +1634,10 @@
           },
           {
             "source": "transcript",
-            "segment_id": "s9",
-            "quote": "首先是数据口径的问题，留存的定义是当日新增用户在第七日仍然有活跃行为的比例",
-            "start_ms": 134011,
-            "end_ms": 174125,
+            "segment_id": "s17",
+            "quote": "最后，分层不是一次性的工作，需要建立动态的更新机制，随着用户行为的变化定期调整分层规则",
+            "start_ms": 278066,
+            "end_ms": 316500,
             "speaker": "candidate",
             "quote_match": "exact"
           }
@@ -1517,33 +1645,33 @@
       },
       {
         "aspect": "responsiveness",
-        "rating": 4,
-        "observation": "基本上都听懂了问题，回答的是被问的那件事。追问他「这两个数是你自己算的吗」，他直接回答不是自己算的，而是数据那边给的看板，没有绕开。不足之处是回答问题的深度不够：问到设计细节、上线时间、样本量这类具体问题时，没能给出实质信息，而是用「回去翻记录」「数据同学出的」带过。",
+        "rating": 3,
+        "observation": "多数问题听懂了并且答在点上，比如被问留存怎么算时，先给了留存口径的定义。但涉及细节的追问常常绕开正面回答：问对照组怎么选、样本量多少，只答「活动之前的那批新用户」和「不记得」；问活动哪个月上线，给的是「应该是去年上半年吧，三四月份」这种不确定的说法。",
         "evidence": [
           {
             "source": "transcript",
-            "segment_id": "s13",
-            "quote": "不是我算的，是数据那边给的看板。",
-            "start_ms": 199262,
-            "end_ms": 208909,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s7",
-            "quote": "应该是……去年上半年吧，三四月份的时候？",
-            "start_ms": 103511,
-            "end_ms": 113111,
+            "segment_id": "s9",
+            "quote": "留存的定义是当日新增用户在第七日仍然有活跃行为的比例，分母是当天的新增用户数",
+            "start_ms": 134011,
+            "end_ms": 174125,
             "speaker": "candidate",
             "quote_match": "exact"
           },
           {
             "source": "transcript",
             "segment_id": "s11",
-            "quote": "样本量我不太记得了，数据是数据同学那边出的。",
+            "quote": "这个……对照组就是活动之前的那批新用户，取了一个差不多长度的时间段。样本量我不太记得了",
             "start_ms": 180810,
             "end_ms": 192348,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s7",
+            "quote": "应该是……去年上半年吧，三四月份的时候？灰度好像就一个星期左右，具体时间我得回去翻一下记录。",
+            "start_ms": 103511,
+            "end_ms": 113111,
             "speaker": "candidate",
             "quote_match": "exact"
           }
@@ -1552,62 +1680,62 @@
       {
         "aspect": "composure",
         "rating": 4,
-        "observation": "连续几次被追问到答不上来的地方，都没有出现明显的慌乱，也没有强行编造或东拉西扯，而是坦率说明记不清、规则是主管定的，态度平稳。减分的地方在于，答不出具体内容时，他会立刻退回到一套通用的方法论描述上；这种做法虽然稳，但也有回避具体问题的成分，人工面试时可以再压一压。",
+        "observation": "连续被追问数字和归属时没有出现明显的慌乱或辩解，直接说明「不是我算的」「是数据那边给的看板」「口径我没参与」，随后仍然能把思路讲下去。也没有为了圆场编造具体数字，这一点比较稳。",
         "evidence": [
           {
             "source": "transcript",
-            "segment_id": "s5",
-            "quote": "这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数。",
-            "start_ms": 81732,
-            "end_ms": 97354,
+            "segment_id": "s13",
+            "quote": "不是我算的，是数据那边给的看板。口径……应该就是按七日留存那个标准定义吧，具体怎么定我没参与。",
+            "start_ms": 199262,
+            "end_ms": 208909,
             "speaker": "candidate",
             "quote_match": "exact"
           },
           {
             "source": "transcript",
-            "segment_id": "s7",
-            "quote": "具体时间我得回去翻一下记录。",
-            "start_ms": 103511,
-            "end_ms": 113111,
+            "segment_id": "s5",
+            "quote": "每天打卡给多少分，这个当时是主管定的规则，我主要是负责发群消息、统计打卡人数。",
+            "start_ms": 81732,
+            "end_ms": 97354,
             "speaker": "candidate",
             "quote_match": "exact"
           }
         ]
       }
     ],
-    "reliability_note": "只有转写文字和计时数据，看不到表情也听不到语气，结论只能作参考。值得注意的是，五道题从问完到开口的等待都在 10.5 到 13 秒之间，异常整齐，是临场思考、习惯性停顿还是另有准备，这份材料无法判断。另外，整场实际只进行了 6 分 22 秒，回答普遍简短，可观察的样本有限。"
+    "reliability_note": "只能从转写文字和计时推断，看不到表情也听不到语气；每题开口前都有 10.5–13 秒的等待且五次非常接近，更像固定的系统或思考延迟，不宜当作紧张程度的证据。"
   },
   "next_round": {
     "focus_areas": [
-      "核实七日打卡活动中他的真实角色边界：哪些决策是他做的、哪些是主管做的，能否拿出方案或复盘文档",
-      "核实留存数据的归属与归因方法，以及他本人是否具备独立分析能力",
-      "社群与私域的实际运营深度：50 个社群的规模、日常动作、分层方式和数据变化",
-      "作答过程的诚信疑点：回看作答前页面切出的几个时间点录像，确认是否有外部辅助"
+      "核实本人对活动方案的实际决策权：哪些规则是他拍板的、评审上他提的什么意见被采纳",
+      "核实简历上两个留存数字的来历和他的参与程度，以及看完数据后具体改过什么动作",
+      "用他简历上写的 50 个核心社群追问真实运营细节，验证加分项是真做过还是只懂框架",
+      "当面核实面试中多次切走页面并出现粘贴的情况，以及简历「策划」与实际执行角色的差距"
     ],
     "questions": [
       {
-        "question": "七日打卡活动的方案文档是谁写的？七天任务阶梯的每一级、每级奖励数值分别由谁最终拍板？你在评审会上提过哪些被采纳或被否掉的改动？",
-        "purpose": "把「策划」和「执行」的边界问实，验证简历表述"
+        "question": "请完整复盘一次由你本人定规则、你本人对结果负责的活动：七天各是什么任务、积分和勋章数值谁定的、哪几个决策是你拍板的、如果重做一次你会改哪里？",
+        "purpose": "判断他到底有没有独立策划过活动，这是硬性要求的第一条"
       },
       {
-        "question": "如果现在让你重新做一次这个活动的效果评估，活动期和对照期各有多少新用户、七日留存分别是多少、同期还上线了哪些运营动作，你会怎么把这场活动的增量单独拆出来？",
-        "purpose": "看数据归因是不是真懂，还是只会复述口径定义"
+        "question": "18% 到 27% 这两个数请你当场重算一遍：对照组截的是哪段时间、样本量多大、同期还上线了哪些动作、这个提升里你认为能归到这次活动的有多少？",
+        "purpose": "验证数据是不是他做的，以及他有没有归因判断力，对应硬性要求第二条"
       },
       {
-        "question": "18% 到 27% 这个说法如果要写进简历，你觉得应该怎么改才准确？",
-        "purpose": "观察他对简历表述的自我认知和诚实度"
+        "question": "请举一个你看完数据后改了运营动作的具体例子：看的哪个指标、发现了什么、改了什么、最后结果如何？",
+        "purpose": "这一轮他只讲了方法没讲动作，需要确认「据此调整策略」是否真实发生"
       },
       {
-        "question": "你负责的那 50 个社群，单个规模多大、什么类型？你实际用什么指标把用户分层、各层多少人、对每层分别做了什么、哪个层级的数据发生了变化？",
-        "purpose": "核实加分项私域/社群运营的真实深度"
+        "question": "你简历上写负责 50 个核心用户社群，请说说这些群怎么分层维护、每天和每周的固定动作有哪些、你用什么指标判断一个群健不健康、举一个你把不活跃的群做起来的例子。",
+        "purpose": "用他简历上的真实规模追问细节，验证社群运营这个加分项的深度"
       },
       {
-        "question": "讲一次你自己独立做的数据分析：用什么工具、看哪些指标、得出什么结论、这个结论让哪一项运营动作做了调整？",
-        "purpose": "补上这一轮没被证实的数据分析能力"
+        "question": "这一轮有五道题在你开口前页面都切走了 7 到 10 秒，其中两次切回来紧接着有粘贴，能说明一下当时在做什么吗？",
+        "purpose": "当面对质疑似查阅外部材料的情况，判断是否需要按诚信问题处理"
       },
       {
-        "question": "刚才回答前你有几次切出了面试页面，还在两处出现了粘贴操作，能说明一下当时在做什么吗？",
-        "purpose": "当面核实诚信疑点，配合录像回看判断"
+        "question": "你平时用我们的产品吗？请具体说出一个你观察到的问题或一个你觉得做得好的地方，以及如果你来做会怎么改。",
+        "purpose": "判断他来面试前有没有真的了解公司和产品，动机是不是套话"
       }
     ]
   },
@@ -1627,35 +1755,35 @@
     },
     {
       "code": "resume_doubt",
-      "message": "简历里有 3 条说法在面试中存疑或对不上，建议下一轮当面核实。"
+      "message": "简历里有 1 条说法在面试中存疑或对不上，建议下一轮当面核实。"
     }
   ],
   "limitations": [
-    "实际面试只有 6 分 22 秒，五道题加追问，可观察样本有限",
-    "未做录像画面检查，画面里是否有他人或手机无法判断，页面切出的真实用途只能靠回看和当面询问核实",
-    "转写来自语音识别，存在同音错字（如「灰渡」「买点系统」「漏抖」「思域」），已按最合理意思理解，但个别细节可能失真",
-    "学习与成长、抗压、团队协作等维度本轮没有考察到",
-    "简历中的电商运营助理经历本轮完全未涉及，无法判断"
+    "实际只面了 6 分 22 秒，比预期的 15 分钟短不少，每道题只有一到两次追问，深度有限。",
+    "转写来自语音识别，有明显同音错字（灰渡、买点系统、漏抖分析、思域社群、围度、招回），已按最合理意思理解。",
+    "录像画面没有检查过，画面里有没有其他人、有没有手机，从这份记录里看不出来，无法据此判断是否有第三方协助。",
+    "学习与成长、团队协作、抗压以外的职业素养维度没有考察到，未作评价。",
+    "任职时间、离职原因、汇报关系、50 个社群的运营细节均未在面试中涉及，只能依据简历。"
   ],
   "meta": {
     "model": "deepseek-flash",
     "thinking": "high",
-    "prompt_version": 8,
+    "prompt_version": 9,
     "system_fingerprints": [
       "bc19ba97cbe016479903222bb1578db6"
     ],
     "usage": {
       "calls": 20,
-      "prompt_tokens": 95367,
-      "completion_tokens": 42130,
-      "reasoning_tokens": 23799,
-      "cache_hit_tokens": 72832,
-      "cache_miss_tokens": 22535
+      "prompt_tokens": 98260,
+      "completion_tokens": 49310,
+      "reasoning_tokens": 29298,
+      "cache_hit_tokens": 75392,
+      "cache_miss_tokens": 22868
     },
-    "elapsed_ms": 72053,
+    "elapsed_ms": 85627,
     "evidence": {
-      "cited": 115,
-      "exact": 115,
+      "cited": 131,
+      "exact": 131,
       "approximate": 0,
       "whole_segment": 0,
       "dropped": 0
