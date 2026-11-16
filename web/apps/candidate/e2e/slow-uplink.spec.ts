@@ -61,9 +61,37 @@ async function shownRemaining(page: Page): Promise<number | null> {
   return Number(match[1]) * (match[2] === "MB" ? 1024 * 1024 : 1024);
 }
 
+/** 页面现在拦着屏幕熄灭的有几个（申请了还没松开的屏幕常亮）。 */
+const screenLocksHeld = (page: Page) =>
+  page.evaluate(
+    () =>
+      (window as unknown as { __screenLocks: { released: boolean }[] }).__screenLocks.filter(
+        (lock) => !lock.released,
+      ).length,
+  );
+
 test("上传比录像慢：面试照常往下走，结束页上「还剩多少」和本机真的留着的对得上，只减不增", async ({
   page,
 }) => {
+  // 没有界面的浏览器不给屏幕常亮，换一个假的：记下页面申请的每一个，后面看它什么时候松开
+  await page.addInitScript(() => {
+    const locks: { released: boolean }[] = [];
+    Object.assign(window, { __screenLocks: locks });
+    const wakeLock = {
+      request: async () => {
+        const lock = {
+          released: false,
+          release: async () => {
+            lock.released = true;
+          },
+          addEventListener: () => {},
+        };
+        locks.push(lock);
+        return lock;
+      },
+    };
+    Object.defineProperty(Navigator.prototype, "wakeLock", { get: () => wakeLock });
+  });
   const interview = await enterInterview(page, { silenceSec: 30 });
   const sessionKey = await sessionKeyOf(page, interview.token);
   const cdp = await page.context().newCDPSession(page);
@@ -86,6 +114,7 @@ test("上传比录像慢：面试照常往下走，结束页上「还剩多少�
   await expect(button(page, "我答完了，下一题")).toBeHidden();
   await expect(button(page, "我答完了，下一题")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText("录制中")).toBeVisible();
+  expect(await screenLocksHeld(page)).toBe(1);
   // 越攒越多的时候提醒一直在
   expect((await localBacklog(page, sessionKey)).chunks).toBeGreaterThan(10);
   await expect(page.getByText(SLOW_HINT)).toBeVisible();
@@ -105,6 +134,8 @@ test("上传比录像慢：面试照常往下走，结束页上「还剩多少�
       // 最后一片落到本机之后不会再有新的：从这时候起这个数只减不增
       if (!local.recording) settled.push(remaining);
     }
+    // 录像还没传完：手机这时候自己锁屏的话上传就停了，所以屏幕常亮要留到传完
+    expect(await screenLocksHeld(page)).toBe(1);
     await page.waitForTimeout(1000);
   }
   expect(settled.length).toBeGreaterThan(3);
@@ -122,4 +153,6 @@ test("上传比录像慢：面试照常往下走，结束页上「还剩多少�
   }
   await expectRecordingsReady(interview, 1);
   expect((await localBacklog(page, sessionKey)).chunks).toBe(0);
+  // 传完了，不用再拦着屏幕熄灭
+  await expect.poll(() => screenLocksHeld(page)).toBe(0);
 });
