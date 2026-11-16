@@ -67,6 +67,7 @@ import { UiTextProvider, uiTextEn } from "@ai-interview/ui";
 - 动效只动 `transform` 和 `opacity`，并且尊重「减少动态效果」的系统设置。
 - 文字对比度达到 WCAG AA，`src/tokens.test.ts` 会检查两套主题。在哪种底色上写了小字，就把那一对颜色加进去。
 - 页面的标题层级：页面顶上是一级标题，`CardHeader` 的标题是二级标题，卡片里面再分小节用三级。可交互的东西不要放在另一个可交互的东西里面（比如滑块里放按钮），读屏软件点不到。
+- 给读屏软件的字：同一种按钮在一页上出现好几个时，名字里要带上它管的是哪一条（`ConsentList` 的展开按钮叫「查看详情 加这一条的内容」）。只是不想让眼睛看到的字用看不见的写法（`oil-sr-only` 那一套），不用 `display: none`，那样读屏软件也念不到；`Steps` 收起来的步骤名就是这样。`InterviewerPresence` 的状态文字默认会念出来，页面上另有一处念状态时传 `announce={false}`。
 
 ## 重新生成插画
 
