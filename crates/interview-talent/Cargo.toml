@@ -19,6 +19,7 @@ interview-core = { workspace = true, features = ["sqlx"] }
 interview-llm.workspace = true
 interview-platform.workspace = true
 interview-raas.workspace = true
+quick-xml.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -30,10 +31,12 @@ tracing.workspace = true
 utoipa.workspace = true
 utoipa-axum.workspace = true
 uuid.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 wiremock.workspace = true
+zip.workspace = true
 
 [lints]
 workspace = true

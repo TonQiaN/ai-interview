@@ -201,7 +201,7 @@ async fn upload_checks_the_candidate_and_the_file(pool: PgPool) {
     assert!(
         error["error"]["message"]
             .as_str()
-            .is_some_and(|message| message.contains("另存为 PDF")),
+            .is_some_and(|message| message.contains("另存为 .docx 或 PDF")),
         "{error}"
     );
 
@@ -433,6 +433,88 @@ async fn reads_a_pdf_resume_page_by_page(pool: PgPool) {
     assert_eq!(parsed["parse_warning"], Value::Null);
     // 转写、整理、画像各一次
     assert_eq!(model.requests().len(), 3);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_word_resume_is_read_as_text(pool: PgPool) {
+    let model = Arc::new(ScriptedModel::new().reply(EXTRACTION).reply(PROFILE));
+    let app = app_with_model(pool, model.clone()).await;
+    let candidate_id = new_candidate(&app).await;
+    let docx = include_bytes!("fixtures/resume-synthetic.docx");
+    let (status, uploaded) = upload(&app, &candidate_id, "林知夏.docx", docx).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{uploaded}");
+    assert_eq!(
+        uploaded["content_type"],
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
+    let id = uploaded["id"].as_str().expect("有 id");
+
+    run_tasks(&app.ctx, Some(model.clone())).await;
+    let parsed = resume(&app, id).await;
+    assert_eq!(parsed["parse_status"], "done", "{parsed}");
+    // 页眉里的联系方式、表格里的学历、正文都取出来了
+    let text = parsed["text_content"].as_str().expect("有全文");
+    assert!(
+        text.starts_with("林知夏\n手机：13800001234"),
+        "页眉应该在最前面：{text}"
+    );
+    assert!(
+        text.contains("2014.09 - 2018.06\t浙江示例大学\t计算机科学与技术\t本科"),
+        "表格的一行应该是一行：{text}"
+    );
+    assert!(text.contains("结算引擎重构"), "{text}");
+    // 文字是直接取出来的，不用让模型转写：只有整理和画像两次调用，发给模型的就是取出来的文字
+    let requests = model.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].text().contains("杭州示例云科技有限公司"));
+
+    // 原件原样取回
+    let file = TestRequest::get(format!("/api/v1/resumes/{id}/file"))
+        .send(&app.router)
+        .await;
+    assert_eq!(file.status, StatusCode::OK);
+    assert_eq!(file.body.as_ref(), docx.as_slice());
+    assert_eq!(
+        file.content_type(),
+        Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    );
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_word_file_without_text_is_refused_at_upload(pool: PgPool) {
+    use std::io::Write as _;
+
+    // 一份只有图片占位、没有文字的 .docx
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    writer
+        .start_file(
+            "word/document.xml",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .expect("开始写文件");
+    writer
+        .write_all(
+            br#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:drawing/></w:r></w:p></w:body></w:document>"#,
+        )
+        .expect("写内容");
+    let scanned = writer.finish().expect("写完").into_inner();
+
+    let app = app(pool.clone()).await;
+    let candidate_id = new_candidate(&app).await;
+    let (status, error) = upload(&app, &candidate_id, "扫描件.docx", &scanned).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(error["error"]["code"], "unreadable_file");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("另存为 PDF")),
+        "{error}"
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM resumes")
+        .fetch_one(&pool)
+        .await
+        .expect("查得到");
+    assert_eq!(count, 0);
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]

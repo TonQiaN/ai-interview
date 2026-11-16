@@ -295,8 +295,8 @@ async fn import_accepts_pasted_text_and_rejects_bad_files(pool: PgPool) {
     for (field, name, content, code) in [
         (
             "file",
-            Some("简历.docx"),
-            &b"PK\x03\x04...."[..],
+            Some("简历.doc"),
+            &b"\xD0\xCF\x11\xE0...."[..],
             "unsupported_file",
         ),
         ("file", Some("空.pdf"), &b""[..], "empty_file"),

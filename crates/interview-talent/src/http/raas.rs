@@ -811,7 +811,7 @@ async fn get_raas_candidate(
 /// 导入 RAAS 候选人
 ///
 /// 一次最多 20 位，每位各自成功或失败，看 `items[].outcome`。基本信息直接建档；简历优先取 RAAS 里的
-/// 原始文件，没有原始文件（或者是 Word 这类读不了的）就用 RAAS 的解析结果拼一份文字版，
+/// 原始文件，没有原始文件（或者是老格式的 Word 这类读不了的）就用 RAAS 的解析结果拼一份文字版，
 /// 两种都交给后台的 `resume.parse` 任务让大模型读，读完自动生成画像。
 ///
 /// 已经导入过的默认不动。`refresh` 为真时：基本信息只补空的（在我们这边改过的不动），
@@ -1004,7 +1004,7 @@ async fn fetch_resume(raas: &RaasClient, detail: &RaasCandidateDetail) -> ApiRes
     match raas.candidate_resume_file(candidate_id, None).await {
         Ok(file) => {
             let file_name = detail.resume_original_filename.as_deref();
-            // Word 文档、空文件、超过大小上限的原件我们读不了，退回去用解析结果
+            // 老格式的 Word（.doc）、空文件、超过大小上限的原件我们读不了，退回去用解析结果
             if let Ok(upload) = Upload::from_bytes(file_name, Bytes::from(file.bytes)) {
                 return Ok(ResumeSource::File(upload));
             }

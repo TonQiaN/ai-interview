@@ -3,6 +3,7 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
+use crate::docx;
 use crate::error::TalentError;
 use crate::render::PdfRenderer;
 
@@ -13,6 +14,8 @@ pub enum DocumentKind {
     Pdf,
     /// 图片，直接给大模型看。
     Image(ImageFormat),
+    /// Word 文档（.docx），取出里面的文字当正文。
+    Docx,
     /// 纯文本或 Markdown，直接当正文。
     Text,
 }
@@ -20,7 +23,8 @@ pub enum DocumentKind {
 impl DocumentKind {
     /// 按文件内容认种类。文件名和浏览器报的类型只用来给出更清楚的报错。
     ///
-    /// 只看文件开头的特征字节，不信任扩展名：扩展名可以随便改。
+    /// 只看文件内容，不信任扩展名：扩展名可以随便改。Word 文档会顺便确认里面读得出文字，
+    /// 读不出的在这里就报错，不用等到解析时才发现。
     pub fn detect(bytes: &[u8], file_name: Option<&str>) -> Result<Self, TalentError> {
         if bytes.is_empty() {
             return Err(TalentError::EmptyFile);
@@ -31,10 +35,17 @@ impl DocumentKind {
         if let Some(format) = ImageFormat::detect(bytes) {
             return Ok(Self::Image(format));
         }
-        // Word、WPS、压缩包都是 ZIP 或 OLE 容器
-        if bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"\xD0\xCF\x11\xE0") {
+        // .docx、表格、演示文稿、压缩包都是 ZIP，里面有 Word 的正文才算 .docx
+        if bytes.starts_with(b"PK\x03\x04") {
+            return match docx::extract_text(bytes) {
+                Ok(_) => Ok(Self::Docx),
+                Err(error) => Err(error.into_talent_error(extension_label(file_name))),
+            };
+        }
+        // 老格式的 Word（.doc）、WPS（.wps）是 OLE 容器，读不了
+        if bytes.starts_with(b"\xD0\xCF\x11\xE0") {
             return Err(TalentError::UnsupportedFile(format!(
-                "{}（Word 文档请先另存为 PDF）",
+                "{}（老格式的 Word 文档请另存为 .docx 或 PDF）",
                 extension_label(file_name)
             )));
         }
@@ -49,6 +60,7 @@ impl DocumentKind {
         match self {
             Self::Pdf => "pdf",
             Self::Image(format) => format.extension(),
+            Self::Docx => "docx",
             Self::Text => "txt",
         }
     }
@@ -58,6 +70,7 @@ impl DocumentKind {
         match self {
             Self::Pdf => "application/pdf",
             Self::Image(format) => format.content_type(),
+            Self::Docx => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             Self::Text => "text/plain; charset=utf-8",
         }
     }
@@ -176,7 +189,8 @@ impl std::fmt::Debug for ResumeContent {
 }
 
 impl ResumeContent {
-    /// 把上传的文件变成大模型能读的内容：PDF 渲染成图片，图片原样用，文本直接当正文。
+    /// 把上传的文件变成大模型能读的内容：PDF 渲染成图片，图片原样用，
+    /// Word 文档取出文字，文本直接当正文。
     pub async fn load(
         bytes: &[u8],
         file_name: Option<&str>,
@@ -199,6 +213,9 @@ impl ResumeContent {
                 text_layer: None,
                 truncated: false,
             }),
+            DocumentKind::Docx => docx::extract_text(bytes)
+                .map(Self::Text)
+                .map_err(|error| error.into_talent_error(".docx".to_owned())),
             DocumentKind::Text => {
                 let text = String::from_utf8_lossy(bytes).trim().to_owned();
                 if text.is_empty() {
@@ -245,11 +262,50 @@ mod tests {
             DocumentKind::detect(b"", None),
             Err(TalentError::EmptyFile)
         ));
-        let word = DocumentKind::detect(b"PK\x03\x04....", Some("简历.DOCX")).unwrap_err();
-        assert!(word.to_string().contains(".docx"), "{word}");
-        assert!(word.to_string().contains("另存为 PDF"), "{word}");
+        let old_word = DocumentKind::detect(b"\xD0\xCF\x11\xE0....", Some("简历.DOC")).unwrap_err();
+        assert!(matches!(old_word, TalentError::UnsupportedFile(_)));
+        assert!(old_word.to_string().contains(".doc（"), "{old_word}");
+        assert!(
+            old_word.to_string().contains("另存为 .docx 或 PDF"),
+            "{old_word}"
+        );
+        let sheet = crate::docx::tests::zip_of(&[("xl/workbook.xml", "<workbook/>")]);
+        let sheet = DocumentKind::detect(&sheet, Some("名单.xlsx")).unwrap_err();
+        assert!(matches!(sheet, TalentError::UnsupportedFile(_)));
+        assert!(sheet.to_string().contains(".xlsx"), "{sheet}");
         let binary = DocumentKind::detect(b"\x00\x01\x02\xFF", Some("a.<script>")).unwrap_err();
         assert!(binary.to_string().contains("未知格式"), "{binary}");
+    }
+
+    #[tokio::test]
+    async fn a_word_document_is_read_as_text() {
+        let body =
+            "<w:p><w:r><w:t>林知夏</w:t></w:r></w:p><w:p><w:r><w:t>后端工程师</w:t></w:r></w:p>";
+        let bytes = crate::docx::tests::docx_with_body(body);
+        // 扩展名写错了也认得出
+        let kind = DocumentKind::detect(&bytes, Some("简历.pdf")).expect("认得出");
+        assert_eq!(kind, DocumentKind::Docx);
+        assert_eq!(kind.extension(), "docx");
+
+        let content = ResumeContent::load(&bytes, Some("简历.docx"), &PdfRenderer::default())
+            .await
+            .expect("读得出");
+        assert_eq!(
+            content,
+            ResumeContent::Text("林知夏\n后端工程师".to_owned())
+        );
+    }
+
+    #[test]
+    fn word_documents_we_cannot_read_say_what_to_do() {
+        let broken = DocumentKind::detect(b"PK\x03\x04....", Some("简历.DOCX")).unwrap_err();
+        assert!(matches!(broken, TalentError::Docx(_)), "{broken}");
+        assert!(broken.to_string().contains("损坏"), "{broken}");
+
+        let scanned = crate::docx::tests::docx_with_body("<w:p><w:r><w:drawing/></w:r></w:p>");
+        let scanned = DocumentKind::detect(&scanned, Some("简历.docx")).unwrap_err();
+        assert!(matches!(scanned, TalentError::Docx(_)), "{scanned}");
+        assert!(scanned.to_string().contains("另存为 PDF"), "{scanned}");
     }
 
     #[test]
