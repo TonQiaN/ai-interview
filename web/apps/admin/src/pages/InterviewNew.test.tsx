@@ -49,12 +49,12 @@ beforeEach(async () => {
 
 afterEach(cleanup);
 
-function open() {
+function open(entry = "/interviews/new") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <TestRouter initialEntries={["/interviews/new"]}>
+        <TestRouter initialEntries={[entry]}>
           <Routes>
             <Route path="/interviews/new" element={<InterviewNewPage />} />
             <Route path="/interviews/:id" element={<p>面试详情页</p>} />
@@ -236,6 +236,90 @@ describe("安排面试", () => {
         );
       expect(rowOf(filled)?.textContent).not.toContain("还没有简历");
       expect(rowOf(missing)?.textContent).toContain("还没有简历");
+    });
+  });
+
+  describe("从候选人页、岗位页点过来", () => {
+    /** 再建 count 个，原来的就排到列表的 100 名以后了 */
+    async function addMany(path: "/candidates" | "/positions", count: number) {
+      for (let n = 0; n < count; n += 1) {
+        const body =
+          path === "/candidates" ? { name: `合成候选人${n}` } : { title: `合成岗位${n}` };
+        const response = await server.fetch(`/api/v1${path}`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) throw new Error(`没建成：${response.status}`);
+      }
+    }
+    const picked = (label: string) => screen.queryByRole("list", { name: label });
+    const listsLoaded = () =>
+      waitFor(() => expect(document.querySelectorAll(".adm-pick").length).toBeGreaterThan(1));
+
+    it("候选人多于 100 位：排在后面的人也替他选好了", async () => {
+      const target = server.db.candidates[0];
+      if (!target) throw new Error("演示数据里没有候选人");
+      await addMany("/candidates", 101);
+      open(`/interviews/new?candidate=${target.id}`);
+
+      const list = await screen.findByRole("list", { name: "已选 1 位" });
+      expect(list.textContent).toContain(target.name);
+    });
+
+    it("岗位多于 100 个：排在后面的岗位也选好了，而且看得出选的是哪个", async () => {
+      const target = server.db.positions.find((p) => p.status === "open");
+      if (!target) throw new Error("演示数据里没有在招的岗位");
+      await addMany("/positions", 101);
+      open(`/interviews/new?position=${target.id}`);
+
+      const list = await screen.findByRole("list", { name: "已选的岗位" });
+      expect(list.textContent).toContain(target.title);
+    });
+
+    it("两个都带着：选好以后能直接下一步", async () => {
+      const candidate = server.db.candidates[0];
+      const position = server.db.positions.find((p) => p.status === "open");
+      if (!candidate || !position) throw new Error("演示数据不够");
+      open(`/interviews/new?candidate=${candidate.id}&position=${position.id}`);
+
+      await screen.findByRole("list", { name: "已选的岗位" });
+      await screen.findByRole("list", { name: "已选 1 位" });
+      expect(screen.getByRole("button", { name: "下一步" })).toHaveProperty("disabled", false);
+    });
+
+    it("归档的候选人、不在招的岗位不替人选", async () => {
+      const candidate = server.db.candidates[0];
+      const position = server.db.positions.find((p) => p.status === "open");
+      if (!candidate || !position) throw new Error("演示数据不够");
+      await server.fetch(`/api/v1/candidates/${candidate.id}`, { method: "DELETE" });
+      position.status = "closed";
+      open(`/interviews/new?candidate=${candidate.id}&position=${position.id}`);
+
+      await listsLoaded();
+      // 等按编号取的那两个请求回来
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(picked("已选 1 位")).toBeNull();
+      expect(picked("已选的岗位")).toBeNull();
+      expect(screen.getByRole("button", { name: "下一步" })).toHaveProperty("disabled", true);
+    });
+
+    it("选好的岗位可以换成别的", async () => {
+      const position = server.db.positions.find((p) => p.status === "open");
+      if (!position) throw new Error("演示数据里没有在招的岗位");
+      open(`/interviews/new?position=${position.id}`);
+      await screen.findByRole("list", { name: "已选的岗位" });
+      await listsLoaded();
+
+      const positionCard = document.querySelectorAll<HTMLElement>(".adm-split .oil-card")[1];
+      const other = Array.from(positionCard?.querySelectorAll<HTMLElement>(".adm-pick") ?? []).find(
+        (row) => row.querySelector("strong")?.textContent !== position.title,
+      );
+      if (!other) throw new Error("演示数据里只有一个在招的岗位");
+      fireEvent.click(other);
+
+      const title = other.querySelector("strong")?.textContent ?? "";
+      expect(picked("已选的岗位")?.textContent).toContain(title);
+      expect(picked("已选的岗位")?.textContent).not.toContain(position.title);
     });
   });
 
