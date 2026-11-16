@@ -137,7 +137,19 @@ pub struct CreateInterview {
 pub struct UpdateInterview {
     pub config: Option<InterviewConfig>,
     pub resume_id: Option<Uuid>,
-    pub voice_id: Option<Uuid>,
+    /// 面试官音色。不带这个字段是不改；带 `null` 是改回用默认音色
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<Uuid>)]
+    pub voice_id: Option<Option<Uuid>>,
+}
+
+/// 区分「没带这个字段」（外层是 `None`）和「带了 null」（`Some(None)`）。和 `#[serde(default)]` 一起用。
+fn present<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 /// 改完之后的面试。
