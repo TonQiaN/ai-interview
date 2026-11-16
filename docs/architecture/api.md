@@ -205,7 +205,7 @@ HR 侧：
 
 | 方法和路径 | 做什么 |
 | --- | --- |
-| `GET /api/v1/room/session` | 会话信息：状态、岗位和公司的展示名、预期时长、模式、同意事项、静音秒数、断点位置 |
+| `GET /api/v1/room/session` | 会话信息：状态、岗位和公司的展示名、预期时长、模式、面试语言、同意事项、静音秒数、断点位置 |
 | `POST /api/v1/room/consent` | 记录同意：`{ "consent_version", "agreed_keys" }`。必须同意的少勾了返回 422；版本和服务端当前的不一样返回 409（`consent_outdated`） |
 | `POST /api/v1/room/device-check` | 上报设备检测结果，记成一条 `device_report` 事件 |
 | `POST /api/v1/room/uplink-probe` | 测上行网速用：请求体是一段字节（最多 1 MiB），服务端收完就丢，什么都不存。页面按花了多久算出网速，随设备检测结果一起上报 |
@@ -279,6 +279,7 @@ HR 侧：
 - 候选人答完之后，`advance` 马上返回一句过渡语，回答放到后台判断。页面报告过渡语播完时判断还没好，这次请求会等到判断完再返回；判断最多等 20 秒，等不到就按顺序问下一题。极少数情况下返回 503（`answer_pending`），页面过一会儿原样重试。
 - `advance` 是幂等的：同一个 `seq` 重复提交返回同样的下一步（断网重试用）；`seq` 不是当前这一句也不是上一句时返回 409（`seq_conflict`）。面试已经结束时返回 `finish`。
 - 断点续面：`GET /room/session` 的 `resume` 是当前该播的那一句；页面重新检查设备后调 `start`，从这一句继续。录像从新的一段开始录。续面时这一步里的 `progress.elapsed_ms` 是服务端现在的时间（面试开始到此刻过了多久），页面拿它当时间轴的起点，新的一段录像才不会和刷新前的那段叠在一起。
+- `GET /room/session` 的 `language` 是面试配置里的面试语言（`zh` 或 `en`）。面试页的文字按它显示，`consent.items` 也是这种语言的；候选人同意时存下来的标题就是他看到的那一份。两种语言的同意事项项目和顺序一样，共用一个 `consent.version`。
 - 面试结束之后 `GET /room/session` 的 `stage` 是 `finished`，`end_reason` 是结束的原因（取值和 `finish` 的 `reason` 一样），页面据此决定结束页说「面试完成」还是「面试已结束」。还没结束时 `end_reason` 是 null。
 - 面试结束（不管哪种原因）时，服务端在同一个事务里排一个 `interview.finalize` 任务，转写和出报告从那里开始。
 - 页面超过 15 分钟（`AI_INTERVIEW_ROOM_ABANDON_MINUTES`）没有任何动静（不上报、不传录像），后台任务 `room.watchdog` 把面试按 `connection_lost` 结束，并记一条服务端事件 `interview_abandoned`。结束语已经发给页面的不算中途离开，记成正常结束。

@@ -1,6 +1,7 @@
 import { clsx } from "clsx";
 import { Check } from "lucide-react";
 import { Fragment, type ReactNode, useId } from "react";
+import { useUiText } from "../text";
 
 export interface TabItem<T extends string> {
   value: T;
@@ -65,6 +66,7 @@ export interface StepsProps {
 }
 
 export function Steps({ steps, current, compact, className }: StepsProps) {
+  const text = useUiText();
   return (
     <ol className={clsx("oil-steps", compact && "oil-steps--compact", className)}>
       {steps.map((label, i) => {
@@ -85,7 +87,7 @@ export function Steps({ steps, current, compact, className }: StepsProps) {
               aria-current={state === "current" ? "step" : undefined}
             >
               <span className="oil-step__dot">
-                {state === "done" ? <Check aria-label="已完成" /> : i + 1}
+                {state === "done" ? <Check aria-label={text.stepDone} /> : i + 1}
               </span>
               <span className="oil-step__text">{label}</span>
             </li>

@@ -1,7 +1,7 @@
 import { allConsented, Banner, Button, ConsentList, Stage, Steps } from "@ai-interview/ui";
 import { useMemo, useState } from "react";
 import type { RoomSession } from "../lib/api/room-types";
-import { FLOW_STEPS } from "./WelcomePage";
+import { useText } from "../text";
 
 export interface ConsentPageProps {
   room: RoomSession;
@@ -11,7 +11,10 @@ export interface ConsentPageProps {
 }
 
 export function ConsentPage({ room, busy, error, onAgree }: ConsentPageProps) {
+  const t = useText();
+  const text = t.consent;
   const [checked, setChecked] = useState<Set<string>>(() => new Set());
+  // 同意事项的文字是服务端按面试语言给的，存下来的也是这一份
   const items = useMemo(
     () =>
       room.consent.items.map((item) => ({ id: item.key, label: item.title, detail: item.body })),
@@ -26,12 +29,12 @@ export function ConsentPage({ room, busy, error, onAgree }: ConsentPageProps) {
 
   return (
     <Stage
-      header={<Steps compact steps={FLOW_STEPS} current={1} />}
+      header={<Steps compact steps={t.steps} current={1} />}
       footer={
         <>
           {error && (
             <Banner tone="danger">
-              {error === "network" ? "网络不稳定，没有提交成功，请再试一次。" : error}
+              {error === "network" ? text.networkError : t.otherError(error)}
             </Banner>
           )}
           <Button
@@ -42,19 +45,19 @@ export function ConsentPage({ room, busy, error, onAgree }: ConsentPageProps) {
             loading={busy}
             onClick={() => onAgree([...checked])}
           >
-            同意并继续
+            {text.agree}
           </Button>
         </>
       }
     >
       <div>
-        <h1 className="oil-display oil-title-md">开始之前，请确认</h1>
+        <h1 className="oil-display oil-title-md">{text.title}</h1>
         <p className="oil-muted" style={{ marginTop: 6 }}>
-          点右边的箭头可以看每一项的详细说明。全部勾选后才能继续。
+          {text.hint}
         </p>
       </div>
       <ConsentList items={items} checked={checked} onChange={setChecked} />
-      <Banner>如果你不同意其中任何一项，可以直接关闭页面，并联系招聘人员安排其他面试方式。</Banner>
+      <Banner>{text.decline}</Banner>
     </Stage>
   );
 }

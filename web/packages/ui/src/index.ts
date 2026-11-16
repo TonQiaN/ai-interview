@@ -10,4 +10,5 @@ export * from "./components/Shell";
 export * from "./components/Surface";
 export * from "./components/Toast";
 export * from "./paintings";
+export * from "./text";
 export * from "./theme";

@@ -14,9 +14,9 @@ import {
 import { useEffect, useState } from "react";
 import { CameraPreview } from "../components/CameraPreview";
 import { MicMeter } from "../components/MicMeter";
-import type { UtteranceKind } from "../lib/api/room-types";
 import type { RunnerPhase, RunnerSnapshot } from "../lib/interview/runner";
 import type { UploadStatus } from "../lib/upload/uploader";
+import { useText } from "../text";
 
 export interface InterviewPageProps {
   runner: RunnerSnapshot;
@@ -50,15 +50,6 @@ const PRESENCE: Record<RunnerPhase, PresenceState> = {
   failed: "idle",
 };
 
-const KIND_LABEL: Record<UtteranceKind, string> = {
-  opening: "开场",
-  question: "提问",
-  follow_up: "追问",
-  transition: "过渡",
-  closing: "结束语",
-  other: "",
-};
-
 /** 本机攒了多少分片没传出去，才提示候选人（按 5 秒一片算，大约半分钟）。 */
 const BACKLOG_WARNING_CHUNKS = 6;
 
@@ -80,14 +71,16 @@ export function InterviewPage(props: InterviewPageProps) {
   const held = interrupted || audioHalted;
   const seconds = useElapsedSeconds(props.elapsedMs);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const t = useText();
+  const text = t.interview;
 
   const { phase, utterance, progress, turn } = runner;
   const listening = phase === "listening";
   const isQuestion = progress !== null && progress.index > 0;
   const meta = isQuestion
-    ? `第 ${progress.index} 题 / 共 ${progress.total} 题`
+    ? text.questionOf(progress.index, progress.total)
     : utterance
-      ? KIND_LABEL[utterance.kind]
+      ? text.utteranceKind[utterance.kind]
       : "";
   const countdownTotal = Math.min(3, silenceSec);
 
@@ -95,18 +88,19 @@ export function InterviewPage(props: InterviewPageProps) {
   const offline = upload?.state === "offline" || runner.submitFailures > 0;
 
   let hint = "";
-  if (phase === "preparing") hint = "正在准备下一题";
-  else if (phase === "submitting") hint = runner.submitFailures > 0 ? "正在重新连接" : "好的，稍等";
-  else if (phase === "asking") hint = runner.expectsAnswer ? "请听题，听完直接回答" : "";
-  else if (phase === "reading")
-    hint = runner.expectsAnswer ? "语音没有加载出来，请看文字，准备好后点「开始回答」" : "";
+  const hints = text.hints;
+  if (phase === "preparing") hint = hints.preparing;
+  else if (phase === "submitting")
+    hint = runner.submitFailures > 0 ? hints.reconnecting : hints.submitting;
+  else if (phase === "asking") hint = runner.expectsAnswer ? hints.asking : "";
+  else if (phase === "reading") hint = runner.expectsAnswer ? hints.reading : "";
   else if (listening) {
-    if (held) hint = "已暂停";
-    else if (turn?.noSpeechPromptVisible) hint = "请开始回答。如果已经在说，请靠近麦克风";
-    else if (turn?.maxWarningVisible) hint = "这道题的时间快到了，请尽快收尾";
-    else if (runner.speaking) hint = "正在听";
-    else if (turn?.countdownVisible) hint = "说完了吗？还想补充就继续说";
-    else hint = "请回答";
+    if (held) hint = hints.paused;
+    else if (turn?.noSpeechPromptVisible) hint = hints.noSpeech;
+    else if (turn?.maxWarningVisible) hint = hints.maxWarning;
+    else if (runner.speaking) hint = hints.hearing;
+    else if (turn?.countdownVisible) hint = hints.countdown;
+    else hint = hints.answer;
   }
 
   return (
@@ -114,11 +108,11 @@ export function InterviewPage(props: InterviewPageProps) {
       night
       header={
         <>
-          <RecordingIndicator />
+          <RecordingIndicator>{text.recording}</RecordingIndicator>
           <div className="oil-grow" />
-          <Timer seconds={seconds} />
+          <Timer seconds={seconds} label={text.elapsed} />
           <Button variant="ghost" size="sm" onClick={() => setConfirmLeave(true)}>
-            结束
+            {text.end}
           </Button>
         </>
       }
@@ -126,22 +120,22 @@ export function InterviewPage(props: InterviewPageProps) {
         <>
           {listening && !held && turn?.countdownVisible && (
             <Button block size="lg" variant="gold" onClick={props.onContinue}>
-              我还没说完
+              {text.notDone}
             </Button>
           )}
           {listening && !held && (
             <Button block size="lg" variant="secondary" onClick={props.onDone}>
-              我答完了，下一题
+              {text.done}
             </Button>
           )}
           {listening && !held && runner.canReplay && (
             <Button block variant="ghost" onClick={props.onReplay}>
-              再听一遍题目
+              {text.replay}
             </Button>
           )}
           {phase === "reading" && runner.expectsAnswer && (
             <Button block size="lg" variant="accent" onClick={props.onReady}>
-              开始回答
+              {text.startAnswer}
             </Button>
           )}
         </>
@@ -150,41 +144,35 @@ export function InterviewPage(props: InterviewPageProps) {
       {interrupted && (
         <Banner
           tone="danger"
-          title="摄像头或麦克风断开了"
+          title={text.deviceLost.title}
           actions={
             <Button size="sm" loading={busy} onClick={props.onReconnect}>
-              重新连接
+              {text.deviceLost.action}
             </Button>
           }
         >
-          {actionError?.startsWith("capture:")
-            ? "还是连不上。请检查设备有没有被拔掉或被别的应用占用，然后再试。"
-            : "面试已暂停，计时也停了。接好设备后点「重新连接」继续。"}
+          {actionError?.startsWith("capture:") ? text.deviceLost.failed : text.deviceLost.body}
         </Banner>
       )}
       {audioHalted && (
         <Banner
           tone="danger"
-          title="声音被暂停了"
+          title={text.audioHalted.title}
           actions={
             <Button size="sm" loading={busy} onClick={props.onResumeAudio}>
-              继续面试
+              {text.audioHalted.action}
             </Button>
           }
         >
-          {actionError === "audio_halted"
-            ? "声音还是没有恢复。请先挂断电话或关掉正在用麦克风的应用，再点「继续面试」。"
-            : "可能是来了电话，或者刚才切到了别的应用。面试已暂停，计时也停了，点「继续面试」接着进行。"}
+          {actionError === "audio_halted" ? text.audioHalted.failed : text.audioHalted.body}
         </Banner>
       )}
       {!held && offline && (
-        <Banner tone="warning" title="网络不稳定">
-          正在重新连接。录像先存在本机，不会丢，网络恢复后自动上传。
+        <Banner tone="warning" title={text.offline.title}>
+          {text.offline.body}
         </Banner>
       )}
-      {!held && !offline && backlog && (
-        <Banner tone="info">网络较慢，部分录像还在上传。面试可以正常进行。</Banner>
-      )}
+      {!held && !offline && backlog && <Banner tone="info">{text.backlog}</Banner>}
 
       {isQuestion && <QuestionProgress total={progress.total} current={progress.index - 1} />}
 
@@ -208,12 +196,12 @@ export function InterviewPage(props: InterviewPageProps) {
       <Dialog
         open={confirmLeave}
         onClose={() => setConfirmLeave(false)}
-        title="现在结束面试？"
+        title={text.leave.title}
         modalOnly
         footer={
           <>
             <Button variant="secondary" onClick={() => setConfirmLeave(false)}>
-              继续面试
+              {text.leave.stay}
             </Button>
             <Button
               variant="danger"
@@ -222,12 +210,12 @@ export function InterviewPage(props: InterviewPageProps) {
                 props.onLeave();
               }}
             >
-              结束面试
+              {text.leave.confirm}
             </Button>
           </>
         }
       >
-        <p>结束之后不能再回来继续。已经回答的内容会保存并提交给招聘人员。</p>
+        <p>{text.leave.body}</p>
       </Dialog>
     </Stage>
   );
