@@ -1458,6 +1458,9 @@ export function createMockServer(options: MockOptions = {}) {
     i.archived_at ??= iso(0);
     return null;
   });
+  on("POST", "/interviews/:id/restore", ({ params }) =>
+    Object.assign(find.interview(params[0]), { archived_at: null }),
+  );
   on("POST", "/interviews/:id/purge", ({ params }) => {
     requireAdmin();
     const i = find.interview(params[0]);
