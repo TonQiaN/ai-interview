@@ -1,9 +1,12 @@
 //! 同一个岗位几位候选人的横向对比。
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use async_trait::async_trait;
+use axum::Router;
 use axum::http::StatusCode;
-use interview_llm::{ChatModel, DeepSeekClient};
+use interview_llm::{ChatModel, ChatRequest, ChatStream, DeepSeekClient, LlmError};
 use interview_platform::testing::{TestRequest, TestResponse};
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -288,6 +291,76 @@ async fn a_failed_comparison_keeps_the_last_good_one(pool: PgPool) {
         failed["error"].as_str().unwrap().contains("没有写好的报告"),
         "{failed}"
     );
+}
+
+/// 模型第一次被调用的时候，HR 正好在后台点了几下。用来测「对比生成到一半，别处动了数据」。
+struct BusyHr {
+    inner: Arc<ReportModel>,
+    app: Router,
+    requests: Vec<(String, Value)>,
+    done: AtomicBool,
+}
+
+#[async_trait]
+impl ChatModel for BusyHr {
+    async fn chat_stream(&self, request: ChatRequest) -> Result<ChatStream, LlmError> {
+        if !self.done.swap(true, Ordering::SeqCst) {
+            for (uri, body) in &self.requests {
+                let response = TestRequest::post(uri.as_str())
+                    .json(body)
+                    .send(&self.app)
+                    .await;
+                assert!(response.status.is_success(), "{uri}：{}", response.text());
+            }
+        }
+        self.inner.chat_stream(request).await
+    }
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_comparison_deleted_halfway_leaves_the_others_alone(pool: PgPool) {
+    let h = harness(pool).await;
+    let ids = interviews_with_reports(&h, 2).await;
+    let (a, b, c) = (ids[0].as_str(), ids[1].as_str(), ids[2].as_str());
+    let h = h.with_review(Some(model()), None);
+    assert_eq!(h.compare(&[a, b]).await.status, StatusCode::ACCEPTED);
+    assert_eq!(h.run_tasks().await, 1);
+    let first = h.comparison().await;
+    assert_eq!(first["status"], "done");
+
+    // 比 b 和 c 的时候，模型还没答完，HR 把 c 那场面试彻底删了（这份对比跟着删掉），
+    // 接着又点了一次 a 和 b 的对比
+    let busy = h.with_review(
+        Some(Arc::new(BusyHr {
+            inner: model(),
+            app: h.app.clone(),
+            requests: vec![
+                (format!("/api/v1/interviews/{c}/purge"), json!({})),
+                (h.comparison_uri(), json!({ "interview_ids": [b, a] })),
+            ],
+            done: AtomicBool::new(false),
+        })),
+        None,
+    );
+    assert_eq!(busy.compare(&[b, c]).await.status, StatusCode::ACCEPTED);
+    // 两个任务：被删掉的那一份，和后来点的那一份
+    assert_eq!(busy.run_tasks().await, 2);
+
+    // 被删掉的那一份做完以后什么都不该动：后来点的那一份照常生成
+    let latest = busy.comparison().await;
+    assert_eq!(latest["status"], "done", "{latest}");
+    assert_eq!(latest["interview_ids"], json!([b, a]));
+    assert_eq!(latest["result"]["people"].as_array().unwrap().len(), 2);
+    assert_eq!(busy.comparison_rows().await, 1);
+    // 被删掉的那一份不留结果
+    let with_c: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM position_comparisons WHERE $1::uuid = ANY(interview_ids)",
+    )
+    .bind(c)
+    .fetch_one(&busy.ctx.db)
+    .await
+    .unwrap();
+    assert_eq!(with_c, 0);
 }
 
 /// 用真的大模型走一遍接口：报告线的三份样例报告（合成的，不是真人）挂到同一个岗位的三场面试上，
