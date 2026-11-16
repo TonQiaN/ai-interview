@@ -234,3 +234,176 @@ async fn openapi_operation_ids_are_unique() {
         seen.len()
     );
 }
+
+/// 接口文档里一个类型的某个字段指向哪个类型，返回那个类型的定义。
+fn field_type<'a>(spec: &'a serde_json::Value, owner: &str, field: &str) -> &'a serde_json::Value {
+    let schemas = &spec["components"]["schemas"];
+    let property = &schemas[owner]["properties"][field];
+    let reference = property["$ref"]
+        .as_str()
+        .or_else(|| {
+            property["oneOf"]
+                .as_array()?
+                .iter()
+                .find_map(|option| option["$ref"].as_str())
+        })
+        .unwrap_or_else(|| panic!("{owner}.{field} 在接口文档里没有指向一个类型：{property}"));
+    let name = reference.rsplit('/').next().unwrap();
+    &schemas[name]
+}
+
+/// 几个模块里有同名的类型（面试语言和合成语言都叫 `Language`）。接口文档里类型按名字放，
+/// 重名的只留下一个，另一个的字段就指到了别人的定义上，前端生成的类型跟着错。
+#[tokio::test]
+async fn openapi_keeps_same_named_types_apart() {
+    let json = interview_server::serve::openapi_json().unwrap();
+    let spec: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let values = |schema: &serde_json::Value| -> Vec<String> {
+        schema["enum"]
+            .as_array()
+            .unwrap_or_else(|| panic!("不是枚举：{schema}"))
+            .iter()
+            .map(|v| v.as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    // 面试语言只有两种，合成语言有五种
+    assert_eq!(
+        values(field_type(&spec, "InterviewConfig", "language")),
+        ["zh", "en"]
+    );
+    assert_eq!(
+        values(field_type(&spec, "VoiceSettings", "language")),
+        ["zh", "en", "ja", "es", "ar"]
+    );
+    // 对话记录里只有面试官和候选人；报告的证据里还可能是录到的第三个人
+    assert_eq!(
+        values(field_type(&spec, "TurnView", "speaker")),
+        ["interviewer", "candidate"]
+    );
+    assert_eq!(
+        values(field_type(&spec, "Evidence", "speaker")),
+        ["interviewer", "candidate", "other"]
+    );
+    // 报告的用量带调用次数，单次调用的用量没有
+    assert!(
+        field_type(&spec, "ReportMeta", "usage")["properties"]
+            .get("calls")
+            .is_some()
+    );
+    assert!(
+        field_type(&spec, "GenerationInfo", "usage")["properties"]
+            .get("calls")
+            .is_none()
+    );
+}
+
+/// 上面那个测试只管已经知道的几对。这个测试翻源码，把所有会进接口文档的类型（派生了 `ToSchema`
+/// 的，和 `text_enum!` 定义的）按文档里的名字归拢，不同模块里重名的就报出来。
+///
+/// 重名了怎么办：给其中一个加 `#[schema(as = 新名字)]`，它在文档里就叫新名字。
+#[test]
+fn schema_names_are_unique_across_crates() {
+    // 这几个名字有两处定义，但不碍事：要么只有一处进了接口文档（另一处是模块内部用的，比如报告的输入、
+    // 引擎给面试间的类型），要么两处的定义一模一样。后面的数字是现在有几处；多出一处来就要重新看。
+    // 哪天另一处也要进文档而且长得不一样，把它从这里去掉，再给它加 `#[schema(as = ...)]`。
+    const KNOWN_HARMLESS: &[(&str, usize)] = &[
+        ("Candidate", 2),
+        ("InterviewConfig", 2),
+        ("Position", 2),
+        ("Progress", 2),
+        ("Speaker", 2),
+        ("Utterance", 2),
+        ("UtteranceKind", 2),
+    ];
+
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_owned();
+    let mut files = Vec::new();
+    let mut pending = vec![crates.clone()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if path.is_dir() {
+                // 只看各个 crate 的 src
+                if name != "target" && name != "tests" && name != "examples" {
+                    pending.push(path);
+                }
+            } else if name.ends_with(".rs") && path.components().any(|c| c.as_os_str() == "src") {
+                files.push(path);
+            }
+        }
+    }
+
+    let mut seen: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for file in &files {
+        let source = std::fs::read_to_string(file).unwrap();
+        let lines: Vec<&str> = source.lines().collect();
+        for (index, line) in lines.iter().enumerate() {
+            let declaration = line.trim_start();
+            let Some(rest) = declaration
+                .strip_prefix("pub struct ")
+                .or_else(|| declaration.strip_prefix("pub enum "))
+            else {
+                continue;
+            };
+            let type_name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if type_name.is_empty() {
+                // 宏定义里的 `pub enum $name`
+                continue;
+            }
+            // 这个类型前面紧挨着的属性和注释（往上到空行、上一个定义结束的地方为止）
+            let mut attributes = String::new();
+            for above in lines[..index].iter().rev() {
+                let above = above.trim();
+                if above.is_empty() || above.ends_with('}') || above.ends_with(';') {
+                    break;
+                }
+                attributes.push_str(above);
+                attributes.push('\n');
+            }
+            if !attributes.contains("ToSchema") && !attributes.contains("text_enum!") {
+                continue;
+            }
+            let published = attributes
+                .split("schema(as = ")
+                .nth(1)
+                .map(|renamed| {
+                    renamed
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect()
+                })
+                .unwrap_or(type_name);
+            let place = file.strip_prefix(&crates).unwrap().display().to_string();
+            seen.entry(published).or_default().push(place);
+        }
+    }
+    assert!(
+        seen.len() > 100,
+        "应该能找到一百多个进接口文档的类型，只找到 {} 个，是不是找的办法失效了",
+        seen.len()
+    );
+    // 找的办法要认得 `text_enum!` 里定义的类型
+    assert!(seen.contains_key("InterviewStatus"));
+
+    let clashes: Vec<String> = seen
+        .iter()
+        .filter(|(name, places)| {
+            places.len() > 1 && !KNOWN_HARMLESS.contains(&(name.as_str(), places.len()))
+        })
+        .map(|(name, places)| format!("{name}：{}", places.join("、")))
+        .collect();
+    assert!(
+        clashes.is_empty(),
+        "这些类型在接口文档里重名了，只会留下一个。给其中一个加 #[schema(as = 新名字)]：\n{}",
+        clashes.join("\n")
+    );
+}

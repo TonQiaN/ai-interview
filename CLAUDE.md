@@ -116,6 +116,7 @@ cargo test -p interview-server --features sherpa --test live -- --ignored --noca
 - 不写 `unsafe`（workspace 里设了 forbid）。clippy 警告当错误处理，不要用 `#[allow]` 压掉，除非写明理由。
 - 云端容器的出网经过代理并重新签发证书：HTTP 客户端要信任系统证书（reqwest 0.13 默认的 rustls 就走系统证书校验，不要换成内置根证书的方案），不要关 TLS 校验。
 - JSON 字段用 `snake_case`；接口出错返回统一的错误结构（见 `docs/architecture/api.md`）。
+- 接口文档里类型按名字放，两个模块里重名的只会留下一个。新加的类型和别的模块重名、又都要进接口文档时，给其中一个加 `#[schema(as = 新名字)]`（`crates/interview-server/tests/app.rs` 里有测试拦着）。
 - 数据库查询用 sqlx 的运行时接口（`query_as` 等），不用要离线缓存的 `query!` 宏；要数据库的测试用 `#[sqlx::test]`。
 - 候选人的简历、录像、声音是个人信息：不进日志，不进测试数据，发给大模型的内容只带任务需要的部分。
 - 前端调后端只用 `@ai-interview/api-client`（`createApiClient()` 给 HR 后台，`createRoomClient(token)` 给面试间），类型由 OpenAPI 生成，不手写接口类型。生成结果在 `web/packages/api-client/src/generated/`，不进 Git。

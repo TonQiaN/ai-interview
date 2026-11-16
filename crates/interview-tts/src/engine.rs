@@ -69,8 +69,12 @@ impl FromStr for EngineId {
 }
 
 /// 合成文本的语言。
+///
+/// 接口文档里叫 `SpeechLanguage`：面试语言（`interview_engine::Language`，只有中英文）也叫 `Language`，
+/// 文档里类型按名字放，重名的只会留下一个。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
+#[schema(as = SpeechLanguage)]
 pub enum Language {
     Zh,
     En,
