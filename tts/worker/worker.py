@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import heapq
 import hmac
 import json
 import logging
@@ -29,6 +30,7 @@ import struct
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -39,6 +41,8 @@ MAX_REQUEST_BYTES = 256 * 1024
 # 请求里 diffusion_steps 允许的范围。后端那边的范围（crates/interview-tts/src/request.rs）要和这里一致
 MIN_DIFFUSION_STEPS = 4
 MAX_DIFFUSION_STEPS = 50
+# 请求里 priority 可以取的值。不给就是 interactive
+PRIORITIES = ("interactive", "background")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 log = logging.getLogger("tts-worker")
@@ -141,20 +145,58 @@ class ModelThread:
         raise value
 
 
+class Gate:
+    """模型一次只能跑一条：GPU 只有一个，并发只会互相拖慢。所以同时来的请求在这里排队。
+
+    有人等着听的（实时对话里现场要说的话、试听）排在后台预先合成的前面，同一类按到的先后。
+    正在合成的那一条不打断，所以有人等着的请求最多等一条的时间。
+    """
+
+    def __init__(self):
+        self.changed = threading.Condition()
+        self.busy = False
+        # （级别，第几个到），最小的先走
+        self.waiting: list[tuple[int, int]] = []
+        self.arrived = 0
+
+    @contextmanager
+    def hold(self, background: bool):
+        with self.changed:
+            self.arrived += 1
+            ticket = (1 if background else 0, self.arrived)
+            heapq.heappush(self.waiting, ticket)
+            while self.busy or self.waiting[0] != ticket:
+                self.changed.wait()
+            heapq.heappop(self.waiting)
+            self.busy = True
+        try:
+            yield
+        finally:
+            with self.changed:
+                self.busy = False
+                self.changed.notify_all()
+
+    def state(self) -> tuple[bool, int]:
+        """（是不是正在合成，有几条在排队）。"""
+        with self.changed:
+            return self.busy, len(self.waiting)
+
+
 class Worker:
     def __init__(self, engines: dict, references: ReferenceStore, token: str | None, model: ModelThread):
         self.engines = engines
         self.references = references
         self.token = token
         self.model = model
-        # 模型一次只能跑一条：GPU 只有一个，并发只会互相拖慢
-        self.lock = threading.Lock()
+        self.gate = Gate()
 
     def health(self) -> dict:
+        busy, waiting = self.gate.state()
         return {
             "worker": "ai-interview-tts",
             "protocol": PROTOCOL_VERSION,
-            "busy": self.lock.locked(),
+            "busy": busy,
+            "waiting": waiting,
             "engines": [engine.status() for engine in self.engines.values()],
         }
 
@@ -199,6 +241,8 @@ class Worker:
             raise invalid(
                 f"diffusion_steps 要是 {MIN_DIFFUSION_STEPS} 到 {MAX_DIFFUSION_STEPS} 之间的整数，不给就用引擎默认的"
             )
+        if body.get("priority") not in (None, *PRIORITIES):
+            raise invalid(f"priority 要是 {' 或 '.join(PRIORITIES)}，不给就是 interactive")
         return engine, {
             "text": text,
             "language": body.get("language") or "zh",
@@ -319,9 +363,10 @@ class Handler(BaseHTTPRequestHandler):
             raise invalid("请求体不是合法的 JSON")
         engine, params = self.worker.prepare(body)
         stream = bool(body.get("stream"))
+        background = body.get("priority") == "background"
         model = self.worker.model
         waited = time.monotonic()
-        with self.worker.lock, _closing_in(model, engine.synthesize(**params)) as chunks:
+        with self.worker.gate.hold(background), _closing_in(model, engine.synthesize(**params)) as chunks:
             started = time.monotonic()
             try:
                 first = model.call(lambda: next(chunks, None))
@@ -393,9 +438,10 @@ class Handler(BaseHTTPRequestHandler):
             took = time.monotonic() - started
         audio_secs = total / 2 / sample_rate
         log.info(
-            "%s 合成 %d 字，音频 %.2f 秒，排队 %.0f 毫秒，首块 %.0f 毫秒，共 %.2f 秒（实时率 %.2f）%s",
+            "%s 合成 %d 字，音频 %.2f 秒，排队 %.0f 毫秒，首块 %.0f 毫秒，共 %.2f 秒（实时率 %.2f）%s%s",
             engine.name, len(params["text"]), audio_secs, (started - waited) * 1000,
             first_ms, took, took / max(audio_secs, 1e-3), "，流式" if stream else "",
+            "，后台" if background else "",
         )
 
 

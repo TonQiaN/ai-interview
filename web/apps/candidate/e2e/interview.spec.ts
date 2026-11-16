@@ -310,3 +310,83 @@ test("切到别的页面会记进过程事件，只记发生过，不记内容",
   const paste = roomState(interview).events.find((event) => event.kind === "paste");
   expect(JSON.stringify(paste?.payload ?? {})).not.toMatch(/text|content|data/);
 });
+
+test("声音被系统停掉：能恢复就自己恢复，恢复不了就停下来等候选人点「继续面试」", async ({
+  page,
+}) => {
+  // 记下页面建的 AudioContext，好在测试里像手机系统那样把它停掉
+  await page.addInitScript(() => {
+    const contexts: AudioContext[] = [];
+    const Original = window.AudioContext;
+    window.AudioContext = class extends Original {
+      constructor(options?: AudioContextOptions) {
+        super(options);
+        contexts.push(this);
+      }
+    };
+    Object.assign(window, { __audioContexts: contexts });
+  });
+  /**
+   * 把声音停掉。`blocked` 时页面自己恢复不了，像 iPhone 上那样只有在点击的处理里才让恢复
+   * （page.evaluate 本身会被浏览器当成用户操作，所以这里自己认点击，不看 navigator.userActivation）。
+   */
+  const haltAudio = (blocked: boolean) =>
+    page.evaluate(async (blocked) => {
+      const { __audioContexts } = window as unknown as { __audioContexts: AudioContext[] };
+      let clicking = false;
+      if (blocked) {
+        const onClick = () => {
+          clicking = true;
+          setTimeout(() => {
+            clicking = false;
+          }, 0);
+        };
+        document.addEventListener("click", onClick, true);
+      }
+      for (const context of __audioContexts) {
+        if (context.state === "closed") continue;
+        if (blocked) {
+          const resume = context.resume.bind(context);
+          context.resume = () => (clicking ? resume() : Promise.reject(new Error("blocked")));
+        }
+        await context.suspend();
+      }
+    }, blocked);
+  const audioEvents = (kind: string) =>
+    roomState(interview).events.filter(
+      (event) => event.kind === kind && event.payload.device === "audio_output",
+    );
+
+  const interview = await enterInterview(page);
+  await expectQuestion(page, 1);
+
+  // 系统停了一下又肯恢复：页面自己恢复，候选人看不到提示
+  await haltAudio(false);
+  await expect.poll(() => audioEvents("device_recovered"), { timeout: 20_000 }).toHaveLength(1);
+  await expect(page.getByText("声音被暂停了")).toBeHidden();
+  expect(audioEvents("recording_gap")[0]?.payload).toMatchObject({ cause: "suspended" });
+
+  // 系统不让恢复：面试停在原地，不会把这段没声音的时间当成候选人答完了
+  await expectQuestion(page, 2);
+  await haltAudio(true);
+  await expect(page.getByText("声音被暂停了")).toBeVisible();
+  await expect(button(page, "我答完了，下一题")).toBeHidden();
+  const answered = () =>
+    roomState(interview).turns.filter((turn) => turn.speaker === "candidate").length;
+  const before = answered();
+  await page.waitForTimeout(8_000);
+  expect(answered()).toBe(before);
+  await expect(page.getByText("第 2 题 / 共 3 题")).toBeVisible();
+
+  await button(page, "继续面试").click();
+  await expect(page.getByText("声音被暂停了")).toBeHidden();
+  await expect(page.getByText("面试完成，谢谢你")).toBeVisible({ timeout: 60_000 });
+
+  const state = await expectRecordingsReady(interview, 1);
+  expect(state.status).toBe("completed");
+  expect(spokenKeys(state)).toEqual(SPOKEN_IN_ORDER);
+  expect(audioEvents("recording_gap")).toHaveLength(2);
+  const recovered = audioEvents("device_recovered");
+  expect(recovered).toHaveLength(2);
+  expect(recovered[1]?.payload.duration_ms).toBeGreaterThanOrEqual(8_000);
+});
