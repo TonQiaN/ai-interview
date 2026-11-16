@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::compose::Shared;
 
-/// 启动服务：连数据库、跑迁移、建第一个管理员、启动后台任务、监听端口。收到 Ctrl-C 或 SIGTERM 后退出。
+/// 启动服务：连数据库、跑迁移、建第一个管理员、启动后台任务、监听端口。收到 Ctrl-C、SIGTERM 或 SIGHUP 后退出。
 pub async fn serve(config: PlatformConfig) -> anyhow::Result<()> {
     let ctx = AppContext::connect(config).await?;
     db::migrate(&ctx.db).await.context("数据库迁移失败")?;
@@ -67,24 +67,37 @@ async fn warn_if_no_admin(ctx: &AppContext) {
     }
 }
 
+/// 等一个让服务退出的信号：Ctrl-C、SIGTERM（kill、进程管理工具停服务），
+/// 还有 SIGHUP（关掉终端、SSH 断开）。SIGHUP 不处理的话进程会被直接杀掉，来不及收尾。
 async fn wait_for_signal() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
     };
     #[cfg(unix)]
-    let terminate = async {
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            Err(_) => std::future::pending::<()>().await,
-        }
+    let (terminate, hangup) = {
+        use tokio::signal::unix::SignalKind;
+        (
+            unix_signal(SignalKind::terminate()),
+            unix_signal(SignalKind::hangup()),
+        )
     };
     #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
+    let (terminate, hangup) = (std::future::pending::<()>(), std::future::pending::<()>());
     tokio::select! {
         () = ctrl_c => {}
         () = terminate => {}
+        () = hangup => {}
+    }
+}
+
+/// 等一个 Unix 信号。登记不上就一直等下去，别的信号照样能让服务退出。
+#[cfg(unix)]
+async fn unix_signal(kind: tokio::signal::unix::SignalKind) {
+    match tokio::signal::unix::signal(kind) {
+        Ok(mut signal) => {
+            signal.recv().await;
+        }
+        Err(_) => std::future::pending::<()>().await,
     }
 }
 
@@ -153,5 +166,30 @@ pub async fn reset_password(
             Ok(())
         }
         Err(err) => Err(anyhow::anyhow!("{}", err.message())),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::time::Duration;
+
+    use super::wait_for_signal;
+
+    /// 关掉终端、SSH 断开时进程收到的是 SIGHUP。服务要把它当成退出信号正常收尾，
+    /// 不处理的话系统默认的做法是直接把进程杀掉（这个测试所在的进程也会被杀）。
+    #[tokio::test]
+    async fn hangup_is_a_shutdown_signal() {
+        let waiting = tokio::spawn(wait_for_signal());
+        // 让它先跑到登记信号那一步
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let sent = std::process::Command::new("kill")
+            .args(["-HUP", &std::process::id().to_string()])
+            .status()
+            .expect("要有 kill 命令");
+        assert!(sent.success());
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("收到 SIGHUP 以后应该开始退出")
+            .unwrap();
     }
 }

@@ -203,6 +203,25 @@
   .adm-item--wrap {
     flex-wrap: wrap;
   }
+  /* 总览上「三步安排第一场面试」每一步前面的序号，做完的换成对勾 */
+  .adm-step__dot {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--oil-line);
+    color: var(--oil-ink-2);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .adm-step__dot[data-done] {
+    border-color: transparent;
+    background: var(--oil-success-soft);
+    color: var(--oil-success-ink);
+  }
   .adm-item__tags {
     display: flex;
     flex-wrap: wrap;
