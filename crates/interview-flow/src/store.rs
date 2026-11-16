@@ -96,15 +96,24 @@ fn push_filters(
 
 const LIST_FROM: &str = " FROM interviews i \
      JOIN candidates c ON c.id = i.candidate_id \
-     JOIN positions p ON p.id = i.position_id \
-     WHERE true";
+     JOIN positions p ON p.id = i.position_id";
+
+/// 每场面试最新一份生成好的报告。列表里的结论和分数取自它：重新生成的那一份还没好时，先显示上一份的。
+const LIST_LATEST_REPORT: &str = " LEFT JOIN LATERAL ( \
+       SELECT r.content FROM interview_reports r \
+       WHERE r.interview_id = i.id AND r.status = 'done' AND r.content IS NOT NULL \
+       ORDER BY r.version DESC LIMIT 1 \
+     ) rep ON true";
+
+/// 报告里的综合得分。报告的内容是 JSON，这里取出来当数字用。
+const LIST_SCORE: &str = "(rep.content->>'overall_score')::int";
 
 pub(crate) async fn list_interviews(
     db: &PgPool,
     filter: &InterviewFilter,
     query: &PageQuery,
 ) -> Result<(Vec<InterviewSummary>, i64), sqlx::Error> {
-    let mut count = QueryBuilder::new(format!("SELECT count(*){LIST_FROM}"));
+    let mut count = QueryBuilder::new(format!("SELECT count(*){LIST_FROM} WHERE true"));
     push_filters(&mut count, filter, query);
     let total: i64 = count.build_query_scalar().fetch_one(db).await?;
 
@@ -116,18 +125,24 @@ pub(crate) async fn list_interviews(
             ("candidate", "c.name"),
             ("position", "p.title"),
             ("status", "i.status"),
+            ("score", LIST_SCORE),
         ],
         "i.created_at DESC",
     );
+    // 报告里是 JSON 的 null 时，-> 取出来的是 jsonb 的 null，不是 SQL 的 NULL，换一下
     let mut list = QueryBuilder::new(format!(
         "SELECT i.id, i.status, i.decision, i.candidate_id, c.name AS candidate_name, \
          i.position_id, p.title AS position_title, \
          (SELECT r.status FROM interview_reports r WHERE r.interview_id = i.id \
           ORDER BY r.version DESC LIMIT 1) AS report_status, \
-         i.started_at, i.ended_at, i.created_at, i.updated_at{LIST_FROM}"
+         {LIST_SCORE} AS overall_score, \
+         NULLIF(rep.content->'score_range', 'null'::jsonb) AS score_range, \
+         NULLIF(rep.content->'recommendation'->'decision', 'null'::jsonb) AS recommendation, \
+         i.started_at, i.ended_at, i.created_at, i.updated_at{LIST_FROM}{LIST_LATEST_REPORT} WHERE true"
     ));
     push_filters(&mut list, filter, query);
-    list.push(format!(" ORDER BY {order}, i.id LIMIT "))
+    // 没有分数的排在最后，正序倒序都是
+    list.push(format!(" ORDER BY {order} NULLS LAST, i.id LIMIT "))
         .push_bind(query.limit())
         .push(" OFFSET ")
         .push_bind(query.offset());
