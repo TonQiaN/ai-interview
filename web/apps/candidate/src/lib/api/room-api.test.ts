@@ -297,6 +297,22 @@ describe("候选人侧接口客户端", () => {
     expect(told).toBe(2);
   });
 
+  it("提醒的响应头没到（被中间的代理去掉了），服务端拒绝时写明了原因，也照样报一声", async () => {
+    let told = 0;
+    const { api } = setup(
+      () =>
+        new Response(JSON.stringify(errorBody("active_elsewhere", "在别处进行")), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }),
+      { onActiveElsewhere: () => (told += 1) },
+    );
+
+    const refused = await api.finish("candidate_left").catch((caught: unknown) => caught);
+    expect(refused).toMatchObject({ status: 409, code: ACTIVE_ELSEWHERE });
+    expect(told).toBe(1);
+  });
+
   it("错误归类规则", () => {
     expect(classifyHttpError(401, "invite_invalid")).toBe("invalid_link");
     expect(classifyHttpError(410, "invite_expired")).toBe("expired");
