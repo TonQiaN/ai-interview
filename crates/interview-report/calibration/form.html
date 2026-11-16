@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>面试评分表</title>
+<style>
+  :root {
+    --bg: #f7f4ee; --card: #fffdf8; --ink: #2b2620; --soft: #6b6257; --line: #d9d0c1;
+    --accent: #8a4b2a; --warn: #9a5b00; --ok: #2f6b3c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1f1c18; --card: #2a2621; --ink: #ece5d8; --soft: #a79c8c; --line: #4a4339;
+      --accent: #d99a6c; --warn: #e0a54a; --ok: #7fbf8d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 96px; background: var(--bg); color: var(--ink);
+    font: 16px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 0 0 8px; }
+  h3 { font-size: 16px; margin: 20px 0 6px; }
+  p { margin: 6px 0; }
+  .soft { color: var(--soft); font-size: 14px; }
+  section {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px; margin: 16px 0;
+  }
+  .notice { border-left: 4px solid var(--warn); padding: 8px 12px; margin: 10px 0; background: transparent; }
+  label { display: block; }
+  input[type=text], input[type=number], textarea, select {
+    font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 8px; width: 100%;
+  }
+  input[type=number] { width: 110px; }
+  select { width: auto; min-width: 110px; }
+  textarea { min-height: 72px; resize: vertical; }
+  .question { border-top: 1px solid var(--line); padding: 12px 0; }
+  .question:first-of-type { border-top: 0; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+  .row > .grow { flex: 1 1 260px; }
+  .choices label { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; }
+  .choices input { flex: none; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td { border-top: 1px solid var(--line); padding: 4px 8px 4px 0; vertical-align: top; }
+  td:first-child { white-space: nowrap; font-weight: 600; }
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0; background: var(--card);
+    border-top: 1px solid var(--line); padding: 10px 16px;
+  }
+  .bar > div { max-width: 860px; margin: 0 auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  button {
+    font: inherit; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--accent);
+    background: var(--accent); color: var(--card); cursor: pointer;
+  }
+  button.plain { background: transparent; color: var(--accent); }
+  #status { font-size: 14px; color: var(--soft); flex: 1 1 200px; }
+  #status.warn { color: var(--warn); }
+  #status.ok { color: var(--ok); }
+  code { font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>面试评分表</h1>
+  <p class="soft">面试 <code id="interview-id"></code></p>
+
+  <section>
+    <h2>填表之前</h2>
+    <p>这张表用来核对 AI 写的面试报告准不准。分两步填：</p>
+    <p><b>第一步</b>，看完这场面试的录像，按你自己的判断打分。<b>这一步填完之前不要看 AI 的报告</b>，看了以后你的判断会被它带着走，这张表就没用了。</p>
+    <p><b>第二步</b>，打开 AI 的报告，抽几条证据对一对，写下它说错的和漏掉的。</p>
+    <p>拿不准的地方可以空着。这张表不联网，填的内容只在这台电脑上；填完点最下面的「保存评分表」，把下载的文件交给组织的人。中途可以先保存，下次点「接着填」把文件选回来。</p>
+    <div class="row">
+      <label class="grow">你的代号（组织的人会告诉你，比如 hr-1，不要写真名）
+        <input type="text" id="annotator" autocomplete="off">
+      </label>
+    </div>
+  </section>
+
+  <section>
+    <h2>第一步：独立评分</h2>
+    <div class="notice">看完录像再填。这一步填完之前不要打开 AI 的报告。</div>
+
+    <h3>每道题答得怎么样</h3>
+    <table>
+      <tr><td>5 优秀</td><td>切题，有具体的事例和细节，讲得出为什么这么做和结果如何，深度超出岗位的要求</td></tr>
+      <tr><td>4 良好</td><td>切题，有具体内容，个别地方不够深入</td></tr>
+      <tr><td>3 合格</td><td>基本切题，内容偏泛或细节不足，但能看出具备基本的能力</td></tr>
+      <tr><td>2 较弱</td><td>只有一部分切题，内容空泛或有明显错误，或者回避了问题的核心</td></tr>
+      <tr><td>1 不合格</td><td>没有作答、答非所问，或者内容明显错误</td></tr>
+    </table>
+    <p class="soft">明确落在某一档就选整数；介于两档之间、归到哪一档都勉强时选带 .5 的。追问算在它所追的那道题里。没问到的题空着。</p>
+    <div id="questions"></div>
+
+    <h3>各项能力</h3>
+    <p class="soft">1 到 5，标准和上面一样。面试里没考察到的空着，不用硬评。</p>
+    <div id="competencies"></div>
+
+    <h3>简历可信吗</h3>
+    <div class="choices" id="credibility">
+      <label><input type="radio" name="credibility" value="high">高：讲得出只有亲身做过才讲得出的细节</label>
+      <label><input type="radio" name="credibility" value="medium">中：讲到了，但细节不够，有的地方含糊</label>
+      <label><input type="radio" name="credibility" value="low">低：简历上写的讲不出来，或者说的和简历对不上</label>
+      <label><input type="radio" name="credibility" value="insufficient">这场面试没怎么涉及简历，判断不了</label>
+    </div>
+
+    <h3>有没有作弊或者不诚信的情况</h3>
+    <div class="choices" id="misconduct">
+      <label><input type="radio" name="misconduct" value="yes">有，或者很像有</label>
+      <label><input type="radio" name="misconduct" value="no">没看出来</label>
+    </div>
+    <label>看到了什么（照着念、旁边有人、看手机、切出去查……在第几分钟）
+      <textarea id="misconduct-note"></textarea>
+    </label>
+
+    <h3>要不要让他进下一轮</h3>
+    <div class="choices" id="decision">
+      <label><input type="radio" name="decision" value="strong_advance">强烈建议进入：明显高于岗位的要求，没有需要担心的风险</label>
+      <label><input type="radio" name="decision" value="advance">建议进入：达到岗位的要求，值得人工面试官花时间</label>
+      <label><input type="radio" name="decision" value="borderline">待定：有明显的亮点也有明显的疑问，或者信息不够、有要先核实的情况</label>
+      <label><input type="radio" name="decision" value="not_advance">不建议：没有达到岗位的要求，或者硬性要求明显不满足</label>
+    </div>
+    <label>主要的理由
+      <textarea id="decision-reason"></textarea>
+    </label>
+
+    <div class="row">
+      <label>看录像加打分一共花了几分钟
+        <input type="number" id="minutes" min="0" max="600" step="1">
+      </label>
+    </div>
+    <div class="choices">
+      <label><input type="checkbox" id="blind">上面这些是我在看 AI 的报告之前填的</label>
+    </div>
+  </section>
+
+  <section>
+    <h2>第二步：对着 AI 的报告核对</h2>
+    <p class="soft">第一步填完并保存一次以后再做。第一步填的内容不要回头改。</p>
+    <p>报告里每条结论后面有证据：一句候选人的原话和它在录像里的时间点。抽 10 条左右，点开对一对：这句话是不是候选人说的，时间点对不对，能不能支持那句结论。</p>
+    <div class="row">
+      <label>抽查了几条证据
+        <input type="number" id="evidence-checked" min="0" max="500" step="1">
+      </label>
+      <label>其中几条对不上
+        <input type="number" id="evidence-wrong" min="0" max="500" step="1">
+      </label>
+    </div>
+    <label>报告里说错的地方（一行一条）
+      <textarea id="wrong-findings"></textarea>
+    </label>
+    <label>报告漏掉的重要内容（一行一条）
+      <textarea id="missed"></textarea>
+    </label>
+    <div class="row">
+      <label>这份报告对你做决定有多大帮助
+        <select id="usefulness">
+          <option value="">没选</option>
+          <option value="5">5 很有用</option>
+          <option value="4">4 有用</option>
+          <option value="3">3 一般</option>
+          <option value="2">2 用处不大</option>
+          <option value="1">1 没用</option>
+        </select>
+      </label>
+    </div>
+    <h3>看完报告，你会改第一步里给的结论吗</h3>
+    <div class="choices" id="change">
+      <label><input type="radio" name="change" value="yes">会</label>
+      <label><input type="radio" name="change" value="no">不会</label>
+    </div>
+    <label>其他想说的
+      <textarea id="review-note"></textarea>
+    </label>
+  </section>
+</main>
+
+<div class="bar"><div>
+  <button id="save" type="button">保存评分表</button>
+  <button id="load" type="button" class="plain">接着填</button>
+  <input type="file" id="file" accept="application/json,.json" hidden>
+  <span id="status"></span>
+</div></div>
+
+<script>
+"use strict";
+const blank = /*__FORM__*/null;
+const $ = (id) => document.getElementById(id);
+const status = (text, kind) => { $("status").textContent = text; $("status").className = kind || ""; };
+
+function element(tag, attributes, children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attributes || {})) {
+    if (key === "text") node.textContent = value; else node.setAttribute(key, value);
+  }
+  for (const child of children || []) node.append(child);
+  return node;
+}
+
+function ratingSelect(id, steps) {
+  const select = element("select", { id });
+  select.append(element("option", { value: "", text: "没评" }));
+  for (const step of steps) select.append(element("option", { value: String(step), text: String(step) }));
+  return select;
+}
+
+const HALF_STEPS = [5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1];
+const WHOLE_STEPS = [5, 4, 3, 2, 1];
+
+function build(form) {
+  $("interview-id").textContent = form.interview_id;
+  document.title = "面试评分表 " + form.interview_id;
+  $("annotator").value = form.annotator || "";
+  const questions = $("questions");
+  questions.replaceChildren();
+  form.questions.forEach((question, index) => {
+    questions.append(element("div", { class: "question" }, [
+      element("p", { text: "第 " + (index + 1) + " 题　" + (question.question_text || question.question_id) }),
+      element("div", { class: "row" }, [
+        element("label", { text: "评分 " }, [ratingSelect("q-rating-" + index, HALF_STEPS)]),
+        element("label", { class: "grow", text: "备注（可以不写）" }, [
+          element("input", { type: "text", id: "q-note-" + index, autocomplete: "off" }),
+        ]),
+      ]),
+    ]));
+  });
+  if (form.questions.length === 0) questions.append(element("p", { class: "soft", text: "这场面试没有题目。" }));
+  const competencies = $("competencies");
+  competencies.replaceChildren();
+  form.competencies.forEach((competency, index) => {
+    competencies.append(element("div", { class: "row" }, [
+      element("label", { text: competency.name + " " }, [ratingSelect("c-rating-" + index, WHOLE_STEPS)]),
+    ]));
+  });
+}
+
+function radio(name) {
+  const checked = document.querySelector('input[name="' + name + '"]:checked');
+  return checked ? checked.value : null;
+}
+function setRadio(name, value) {
+  for (const input of document.querySelectorAll('input[name="' + name + '"]')) input.checked = input.value === value;
+}
+function number(id) {
+  const text = $(id).value.trim();
+  if (text === "") return null;
+  const value = Number(text);
+  return Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
+}
+function lines(id) {
+  return $(id).value.split("\n").map((line) => line.trim()).filter((line) => line !== "");
+}
+function yesNo(name) {
+  const value = radio(name);
+  return value === null ? null : value === "yes";
+}
+
+function collect(form) {
+  const review = {
+    evidence_checked: number("evidence-checked") || 0,
+    evidence_wrong: number("evidence-wrong") || 0,
+    wrong_findings: lines("wrong-findings"),
+    missed: lines("missed"),
+    usefulness: $("usefulness").value === "" ? null : Number($("usefulness").value),
+    would_change_decision: yesNo("change"),
+    note: $("review-note").value.trim(),
+  };
+  const reviewed = review.evidence_checked > 0 || review.wrong_findings.length > 0 || review.missed.length > 0
+    || review.usefulness !== null || review.would_change_decision !== null || review.note !== "";
+  return {
+    form_version: form.form_version,
+    interview_id: form.interview_id,
+    annotator: $("annotator").value.trim(),
+    blind: $("blind").checked,
+    decision: radio("decision"),
+    decision_reason: $("decision-reason").value.trim(),
+    questions: form.questions.map((question, index) => ({
+      question_id: question.question_id,
+      question_text: question.question_text,
+      rating: $("q-rating-" + index).value === "" ? null : Number($("q-rating-" + index).value),
+      note: $("q-note-" + index).value.trim(),
+    })),
+    competencies: form.competencies.map((competency, index) => ({
+      name: competency.name,
+      rating: $("c-rating-" + index).value === "" ? null : Number($("c-rating-" + index).value),
+    })),
+    resume_credibility: radio("credibility"),
+    suspected_misconduct: yesNo("misconduct"),
+    misconduct_note: $("misconduct-note").value.trim(),
+    minutes_spent: number("minutes"),
+    review: reviewed ? review : null,
+    saved_at: new Date().toISOString(),
+  };
+}
+
+function fill(saved) {
+  $("annotator").value = saved.annotator || "";
+  $("blind").checked = saved.blind === true;
+  setRadio("decision", saved.decision);
+  $("decision-reason").value = saved.decision_reason || "";
+  (saved.questions || []).forEach((question) => {
+    const index = blank.questions.findIndex((mine) => mine.question_id === question.question_id);
+    if (index < 0) return;
+    $("q-rating-" + index).value = question.rating == null ? "" : String(question.rating);
+    $("q-note-" + index).value = question.note || "";
+  });
+  (saved.competencies || []).forEach((competency) => {
+    const index = blank.competencies.findIndex((mine) => mine.name === competency.name);
+    if (index < 0) return;
+    $("c-rating-" + index).value = competency.rating == null ? "" : String(competency.rating);
+  });
+  setRadio("credibility", saved.resume_credibility);
+  setRadio("misconduct", saved.suspected_misconduct == null ? null : saved.suspected_misconduct ? "yes" : "no");
+  $("misconduct-note").value = saved.misconduct_note || "";
+  $("minutes").value = saved.minutes_spent == null ? "" : String(saved.minutes_spent);
+  const review = saved.review || {};
+  $("evidence-checked").value = review.evidence_checked ? String(review.evidence_checked) : "";
+  $("evidence-wrong").value = review.evidence_checked ? String(review.evidence_wrong || 0) : "";
+  $("wrong-findings").value = (review.wrong_findings || []).join("\n");
+  $("missed").value = (review.missed || []).join("\n");
+  $("usefulness").value = review.usefulness == null ? "" : String(review.usefulness);
+  setRadio("change", review.would_change_decision == null ? null : review.would_change_decision ? "yes" : "no");
+  $("review-note").value = review.note || "";
+}
+
+function unfilled(result) {
+  const missing = [];
+  if (result.annotator === "") missing.push("你的代号");
+  const unrated = result.questions.filter((question) => question.rating === null).length;
+  if (unrated > 0) missing.push(unrated + " 道题没评分");
+  if (result.decision === null) missing.push("要不要进下一轮");
+  if (result.resume_credibility === null) missing.push("简历可信吗");
+  if (result.suspected_misconduct === null) missing.push("有没有作弊");
+  if (!result.blind) missing.push("没勾「在看报告之前填的」");
+  if (result.review && result.review.evidence_wrong > result.review.evidence_checked) missing.push("对不上的证据比抽查的还多");
+  return missing;
+}
+
+const storageKey = "ai-interview-annotation:" + (blank ? blank.interview_id : "");
+function remember() {
+  try { localStorage.setItem(storageKey, JSON.stringify(collect(blank))); } catch (error) { /* 存不了就算了，不影响填表 */ }
+}
+
+if (!blank) {
+  status("这张表是空的模板，要用 calibrate 工具按面试生成以后再填。", "warn");
+  $("save").disabled = true;
+  $("load").disabled = true;
+} else {
+  build(blank);
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+    if (saved && saved.interview_id === blank.interview_id) { fill(saved); status("已经恢复上次在这台电脑上填到一半的内容。"); }
+  } catch (error) { /* 没有存过，或者浏览器不让存 */ }
+  document.addEventListener("input", remember);
+  document.addEventListener("change", remember);
+
+  $("save").addEventListener("click", () => {
+    const result = collect(blank);
+    if (result.annotator === "") { status("先填你的代号，再保存。", "warn"); $("annotator").focus(); return; }
+    const name = result.interview_id + "." + result.annotator.replace(/[^A-Za-z0-9_-]/g, "_") + ".json";
+    const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: "application/json" }));
+    const link = element("a", { href: url, download: name });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const missing = unfilled(result);
+    status(missing.length === 0 ? "已保存为 " + name + "。" : "已保存为 " + name + "。还没填的：" + missing.join("、") + "。",
+      missing.length === 0 ? "ok" : "warn");
+  });
+
+  $("load").addEventListener("click", () => $("file").click());
+  $("file").addEventListener("change", async () => {
+    const file = $("file").files[0];
+    $("file").value = "";
+    if (!file) return;
+    try {
+      const saved = JSON.parse(await file.text());
+      if (saved.interview_id !== blank.interview_id) { status("这个文件是另一场面试的评分表，没有读进来。", "warn"); return; }
+      fill(saved);
+      remember();
+      status("已读入 " + file.name + "，可以接着填。", "ok");
+    } catch (error) {
+      status("这个文件读不出来，不是评分表保存出来的文件。", "warn");
+    }
+  });
+}
+</script>
+</body>
+</html>

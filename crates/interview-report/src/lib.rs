@@ -9,8 +9,11 @@
 //!
 //! 同一个岗位有几位候选人时，[`compare`] 拿他们各自的报告做横向对比。
 //!
+//! [`calibration`] 是拿真人面试校准报告用的：评审的评分表、和报告的对照统计。
+//!
 //! 报告的设计依据、各部分的可靠性说明、实测结果见这个 crate 的 `README.md`。
 
+pub mod calibration;
 pub mod compare;
 mod evidence;
 pub mod frames;

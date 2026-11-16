@@ -394,6 +394,22 @@ let comparison = compare(&job, &[&report_a, &report_b, &report_c], &model, &Anal
 
 样例是同一套题，真实面试里每个人的题目按简历出，差别会更大，提示词里已经要求不能凭几分的差距排先后。接进产品要另外做：一个接口取某个岗位下已完成的报告来比，后台一个页面展示。
 
+## 用真人面试校准
+
+上面的实测都是模型扮演的候选人。用真人面试校准要的东西已经备好，步骤见 [CALIBRATION.md](CALIBRATION.md)：找几个人、演哪些情况、评审怎么独立打分、结果怎么读、及格线的提议。
+
+- 评审填的评分表是一个不联网的网页（`calibration/form.html`），按报告里的题目生成，里面没有报告的结论。先独立打分，再对着报告核对。
+- `examples/calibrate.rs` 把收回的评分表、报告和每一场安排的实际情况对起来：结论和评分的一致程度、作弊的漏报和误报、简历核验、证据对不对得上、评审之间的一致程度。每个比例都带置信区间。不调用模型。
+- 数据结构和入口在 `src/calibration.rs`（`calibrate()`）。
+
+```bash
+cargo run -p interview-report --example calibrate -- form 报告目录/*.json --annotator hr-1 --out 评分表目录
+cargo run -p interview-report --example calibrate -- truth 报告目录/*.json --out sessions.json
+cargo run -p interview-report --example calibrate -- stats --reports 报告目录 --annotations 收回的评分表目录 --truth sessions.json
+```
+
+真人面试的报告、评分表和录像是个人信息，都放在仓库外面。
+
 ## 试验台
 
 `examples/lab.rs` 会真实调用 DeepSeek，需要环境变量 `DEEPSEEK_API_KEY`。
@@ -435,5 +451,5 @@ cargo run --release -p interview-report --example stability -- --runs 4 --thinki
 ## 后续
 
 - 识别引擎能输出置信度之后，再看要不要把置信度低的片段标出来（现在的实测结果是不需要）。
-- 用真实面试和人工标注校准评分和诚信迹象。
-- 横向对比接进产品：接口和后台页面。
+- 用真人面试校准评分和诚信迹象（issue #46）。工具和步骤已经备好，见 [CALIBRATION.md](CALIBRATION.md)，等找到扮演的人和评审就做。
+- 横向对比接进产品：接口和后台页面（issue #238）。
