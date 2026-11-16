@@ -157,6 +157,18 @@ observed.add_to(&mut record); // 把事件加进记录并按时间排好，然�
 
 除了综合建议，任何一步失败都不会让整份报告失败：那一部分留空，原因记在 `meta.failed_stages`，并出现 `incomplete_analysis` 提示，重新生成即可。
 
+报告的正文是写给 HR 看的，给程序用的名字不该出现在里面。题目 id 对应第几题是确定的，模型偶尔写出「q3 作答期间」这样的话，由程序换成「第 3 题」。过程事件的种类和字段的英文名（`page_taken_over`、`video_reduced` 这类）不一样：事件的含义是用这些名字讲给模型听的，模型偶尔会原样带进正文，写出「interview_started 的 video_reduced 为 true」这样的话，要整句改写才通顺，所以交给提示词管（第 9 版起），程序只负责数。`program_names_in_prose` 数出正文里带出来的英文名：只认提示词和事件说明里讲给模型听过的名字，加上这场面试的过程事件的种类和字段名；模型自己写的技术名词（建议下一轮问 `dense_rank`）、候选人自己说过的词、枚举值、引文不算；`lab evaluate` 的合计里有这个数，`lab names` 数已经存下来的报告。
+
+实测（2026-11-16，high 档，每组 8 份报告）：
+
+| 样例 | 改之前带出几处 | 提示词第 9 版 |
+| --- | --- | --- |
+| 原样例 | 3 处，2 份报告（第 8 版） | 0 处 |
+| 加了「上行慢、画面码率降过」的事件（`lab reduced`） | 3 处，3 份报告（第 8 版） | 0 处 |
+| 加了「中途换到另一个页面」的事件（`lab takeover`） | 6 处，3 份报告（第 7 版） | 0 处 |
+
+三组的 38 条预期都全部符合，该写的内容没有少：码率降过的 8 份说明里仍然都写了那两帧的时间、看到了什么、这一段画面的码率降过，换页面的 8 份仍然都写了换的时间并请 HR 确认是同一个人。每组只跑了一遍，0 处不等于以后一处都不会有，所以这个数留在评估的合计里，每次改提示词都能看到。
+
 ## 哪些可靠，哪些只能参考
 
 | 部分 | 可靠程度 | 说明 |
@@ -411,7 +423,9 @@ observed.add_to(&mut record); // 把事件加进记录并按时间排好，然�
 
 提示词第 7 版（说明候选人中途换到另一个页面接着面）在 high 档跑了一遍，38 条预期全部符合，8 份报告一共约 1.7 元。
 
-提示词第 8 版（说明画面的码率降过是怎么回事）在 high 档跑了一遍，38 条预期全部符合，8 份报告一共约 1.7 元。`samples/reports/` 里是这一遍的结果。
+提示词第 8 版（说明画面的码率降过是怎么回事）在 high 档跑了一遍，38 条预期全部符合，8 份报告一共约 1.7 元。
+
+提示词第 9 版（给 HR 看的文字里不带事件和字段的英文名）在 high 档跑了一遍，38 条预期全部符合，8 份报告一共约 1.8 元。`samples/reports/` 里是这一遍的结果。
 
 ## 同一个岗位几位候选人的横向对比
 
@@ -499,6 +513,8 @@ cargo run -p interview-report --example lab -- evaluate --samples /tmp/takeover
 # 给样例加上「上行慢、画面的码率降了下来、画面检查看错了两帧」的事件，再评估一遍。不调用模型
 cargo run -p interview-report --example lab -- reduced --out /tmp/reduced
 cargo run -p interview-report --example lab -- evaluate --samples /tmp/reduced
+# 数一数存下来的报告里，给 HR 看的文字带出了几处事件和字段的英文名。不调用模型
+cargo run -p interview-report --example lab -- names --samples /tmp/reduced --reports /tmp/reduced-reports
 # 用面试引擎走实时对话的面试，候选人由模型按场景的人设扮演，记录写到 --out（一场约 0.1 元）
 cargo run -p interview-report --example conversation -- backend-strong pm-mediocre --out /tmp/conversations
 cargo run -p interview-report --example lab -- evaluate backend-strong pm-mediocre --samples /tmp/conversations
@@ -511,7 +527,7 @@ cargo run --release -p interview-report --example stability -- --runs 4 --thinki
 
 加场景：在 `scenarios/` 里加一个 JSON 文件，写上岗位、简历、题目、人设和预期，然后跑 `simulate` 和 `evaluate`。场景和样例里不要出现真人的信息。
 
-改了提示词要做两件事：把 `PROMPT_VERSION` 加一，跑一遍 `evaluate` 确认预期都还符合。改的是评分标准或者等级的定义，再跑一遍 `stability`：单看一遍评估看不出结论稳不稳。
+改了提示词要做两件事：把 `PROMPT_VERSION` 加一，跑一遍 `evaluate` 确认预期都还符合、合计里「带出事件和字段的英文名」还是 0 处。改的是评分标准或者等级的定义，再跑一遍 `stability`：单看一遍评估看不出结论稳不稳。
 
 模型偶尔会交出读不出来的 JSON（后面多带了一段、少了收尾的括号），实测每一百次调用里有四到六次。以前连着三次都这样、又正好在综合建议那一步，整份报告就失败了，全量评估两三遍里会遇到一次。`interview-llm` 现在会直接读出来或者原样重发（issue #114），之后跑的两遍全量评估 16 份报告没有一步失败。`stability` 遇到失败的一遍仍然会跳过接着跑。
 

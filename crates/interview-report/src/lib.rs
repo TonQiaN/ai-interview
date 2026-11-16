@@ -27,5 +27,6 @@ mod transcript;
 pub use compare::{CompareError, Comparison, compare};
 pub use pipeline::{AnalyzeError, AnalyzeOptions, analyze};
 pub use prompts::PROMPT_VERSION;
+pub use prose::program_names_in_prose;
 pub use record::InterviewRecord;
 pub use report::{InterviewReport, SCHEMA_VERSION};

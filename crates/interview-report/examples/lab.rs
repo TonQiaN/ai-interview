@@ -16,6 +16,8 @@
 //! # 给样例加上「上行网速慢，画面的码率降了下来，画面检查在糊的画面上看错了一两帧」的过程事件
 //! cargo run -p interview-report --example lab -- reduced --out /tmp/reduced
 //! cargo run -p interview-report --example lab -- evaluate --samples /tmp/reduced
+//! # 数一数已经存下来的报告里，给 HR 看的文字带了多少处事件和字段的英文名。不调用模型
+//! cargo run -p interview-report --example lab -- names --samples /tmp/reduced --reports /tmp/reduced-reports
 //! # 从一段录像里抽帧，让模型看画面里有几个人、有没有手机，打印整理出来的过程事件
 //! cargo run -p interview-report --example lab -- frames 录像.webm
 //! # 把这些事件加进一份面试记录再分析（--record 指定记录，报告打印到标准输出）
@@ -44,7 +46,7 @@ use interview_report::record::{
 use interview_report::report::{
     Credibility, Decision, InterviewReport, ReviewFlagCode, RiskLevel, SignalKind, Usage,
 };
-use interview_report::{AnalyzeOptions, analyze, compare};
+use interview_report::{AnalyzeOptions, analyze, compare, program_names_in_prose};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -141,6 +143,15 @@ enum Command {
         /// 加了事件的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
         #[arg(long)]
         out: PathBuf,
+    },
+    /// 数一数存下来的报告里，给 HR 看的文字带了多少处事件和字段的英文名。不调用模型
+    Names {
+        /// 面试记录所在的目录
+        #[arg(long, default_value = "crates/interview-report/samples")]
+        samples: PathBuf,
+        /// 报告所在的目录，文件名和面试记录相同
+        #[arg(long, default_value = "crates/interview-report/samples/reports")]
+        reports: PathBuf,
     },
     /// 从录像里抽帧，让模型看画面，打印整理出来的过程事件和每一帧的结果
     Frames {
@@ -270,10 +281,16 @@ async fn main() -> Result<()> {
     {
         return reduced_all(scenarios, samples, out, only);
     }
+    if let Command::Names { samples, reports } = &cli.command {
+        return names_all(samples, reports);
+    }
     let model =
         ReportUnfinished(DeepSeekClient::from_env().context("需要设置环境变量 DEEPSEEK_API_KEY")?);
     match cli.command {
-        Command::Network { .. } | Command::Takeover { .. } | Command::Reduced { .. } => Ok(()),
+        Command::Network { .. }
+        | Command::Takeover { .. }
+        | Command::Reduced { .. }
+        | Command::Names { .. } => Ok(()),
         Command::Simulate {
             only,
             scenarios,
@@ -1092,6 +1109,8 @@ struct Outcome {
     report: InterviewReport,
     seconds: f64,
     checks: Vec<(String, bool)>,
+    /// 给 HR 看的文字里带出来的事件和字段的英文名
+    program_names: Vec<String>,
 }
 
 async fn evaluate_all(
@@ -1115,12 +1134,14 @@ async fn evaluate_all(
             let started = Instant::now();
             let report = analyze(&record, model, options).await?;
             let checks = check(&scenario.expectation, &report);
+            let program_names = program_names_in_prose(&record, &report);
             anyhow::Ok(Outcome {
                 id: scenario.id.clone(),
                 title: scenario.title.clone(),
                 report,
                 seconds: started.elapsed().as_secs_f64(),
                 checks,
+                program_names,
             })
         }
     }))
@@ -1128,6 +1149,7 @@ async fn evaluate_all(
 
     let mut total = Usage::default();
     let (mut passed, mut failed) = (0, 0);
+    let (mut names, mut reports_with_names) = (0, 0);
     for (scenario, result) in scenarios.iter().zip(results) {
         let outcome = result.with_context(|| format!("分析场景 {} 失败", scenario.id))?;
         let report = &outcome.report;
@@ -1181,6 +1203,11 @@ async fn evaluate_all(
                 failed += 1;
             }
         }
+        if !outcome.program_names.is_empty() {
+            println!("  正文里的英文名：{}", outcome.program_names.join("、"));
+            names += outcome.program_names.len();
+            reports_with_names += 1;
+        }
         add_usage(&mut total, &report.meta.usage);
         if let Some(out) = out {
             std::fs::create_dir_all(out)?;
@@ -1189,8 +1216,46 @@ async fn evaluate_all(
         }
     }
     println!(
-        "\n合计：预期 {passed} 条符合，{failed} 条不符合。{}",
+        "\n合计：预期 {passed} 条符合，{failed} 条不符合。\
+         给 HR 看的文字里带出事件和字段的英文名 {names} 处（{reports_with_names} 份报告）。{}",
         usage_line(&total)
+    );
+    Ok(())
+}
+
+/// 数存下来的报告里带出了多少处事件和字段的英文名。
+fn names_all(samples: &Path, reports: &Path) -> Result<()> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(reports)
+        .with_context(|| format!("读不了目录 {}", reports.display()))?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    files.sort();
+    let (mut names, mut reports_with_names) = (0, 0);
+    for path in &files {
+        let Some(file_name) = path.file_name() else {
+            continue;
+        };
+        let report: InterviewReport = read_json(path)?;
+        let record: InterviewRecord = read_json(&samples.join(file_name))?;
+        let found = program_names_in_prose(&record, &report);
+        println!(
+            "{}：{}",
+            file_name.to_string_lossy(),
+            if found.is_empty() {
+                "没有".to_owned()
+            } else {
+                found.join("、")
+            }
+        );
+        if !found.is_empty() {
+            names += found.len();
+            reports_with_names += 1;
+        }
+    }
+    println!(
+        "\n{} 份报告里，给 HR 看的文字带出事件和字段的英文名 {names} 处（{reports_with_names} 份报告）。",
+        files.len()
     );
     Ok(())
 }
