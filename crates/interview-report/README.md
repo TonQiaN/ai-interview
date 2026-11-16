@@ -352,6 +352,48 @@ observed.add_to(&mut record); // 把事件加进记录并按时间排好，然�
 
 提示词第 6 版在 high 档跑了一遍，38 条预期全部符合，8 份报告一共约 1.7 元。`samples/reports/` 里是第 6 版的结果。
 
+## 同一个岗位几位候选人的横向对比
+
+一个岗位面了几个人之后，HR 要决定先约谁。`compare` 拿这几位各自的报告做对比：
+
+```rust
+use interview_report::{AnalyzeOptions, compare};
+
+let comparison = compare(&job, &[&report_a, &report_b, &report_c], &model, &AnalyzeOptions::default()).await?;
+```
+
+`job` 是岗位（和面试记录里的一样），报告至少两份、最多 20 份，一次模型调用。输出（`compare::Comparison`）：
+
+| 字段 | 内容 |
+|------|------|
+| `summary` | 两到四句话：这批人整体怎么样，先约谁，哪几位分不出高下 |
+| `candidates[]` | 按建议约人工面试的先后排。每位带着报告里的结论（建议、总分和范围、诚信风险、简历可信度、复核提示、六项能力的评分），加上对比出来的 `standing`（在这批人里的位置）、`advantages`（比别人强在哪）、`concerns`（比别人弱在哪、要先核实什么）、`close_to`（分数上和谁分不出先后） |
+| `requirements[]` | 岗位要求对照表：一行一条要求，一格一位候选人的结论 |
+| `differences[]` | 这几位之间最值得注意的差别，各自的情况都写出来 |
+| `tie_breakers[]` | 分不出高下的几位，人工面试里问什么能分出来 |
+| `caveats[]` | 看这份对比要注意的地方 |
+
+怎么分工的：
+
+- 每份报告的结论原样带过来，模型改不了，也不重新打分。
+- 排序里建议档次高的一定在前（程序保证）；同一档里的先后由模型判断，依据是硬性要求满足得怎么样、有实际内容的回答有多少、有没有要先核实的疑点，不只看总分。
+- 对照表里每一格的结论是程序从各自的报告里取的。各份报告对同一条要求的写法不一样，模型只负责把它们对到同一行；一份报告里有几条对应同一条要求的，取最弱的一条。
+- `close_to` 是程序算的：建议相同、总分的浮动范围有重叠。
+- 题目不一样、有诚信迹象还没复核、有报告不完整、有人答的题不到一半、报告不是同一版提示词生成的，这几条注意事项由程序写进 `caveats`，模型补充别的。
+- 发给模型的只有报告里的结论和理由，不带证据的引文、面试 id、姓名和简历。候选人用代号 A、B、C（按传入的顺序），正文里提到人用的就是代号，页面用 `candidates[].interview_id` 换成姓名。
+
+实测（2026-11-16，high 档，后端岗位）：
+
+- 5 份报告（三份样例，加实时对话那两场）比了 3 遍，每遍换传入的顺序，代号跟着变。8 份报告（再加真识别模型转写的三份，等于同一个人面了两次）比了 4 遍。
+- 建议档次的先后每一遍都对（程序保证的）。建议进入的几位之间，7 遍里有 5 遍排第一的是总分 80 的那位而不是 84 的那位，理由是他六条硬性要求在面试里都有实证，另一位的 Go 和缓存没被问到；另外 2 遍这两位换了位置。他们的总分范围重叠，每一遍都标成了分不出先后。
+- 待定的几位先后也会变：5 份的 3 遍里有 1 遍、8 份的 4 遍里有 2 遍，「简历夸大」和「旁边有人提示」的两位换了位置。这两种疑点谁更严重本来就没有定论，都要先核实。所以同一档里的先后只是参考，页面上不要显示得太重，分不出先后的要标出来。
+- 同一个人的两份报告每一遍都挨在一起，都标成了分不出先后。有一遍模型在注意事项里指出这两份「内容高度相似，建议先核对是不是两场不同的面试」。
+- 换传入的顺序不影响结果，没有看到偏向排在前面或后面的代号。
+- 有诚信迹象的两位，说明里都写的是「核实之前不宜推进」「未经人工复核」，没有写成认定作弊。
+- 5 份一次约 0.08 元、54 到 75 秒；8 份一次约 0.11 元、77 到 100 秒。
+
+样例是同一套题，真实面试里每个人的题目按简历出，差别会更大，提示词里已经要求不能凭几分的差距排先后。接进产品要另外做：一个接口取某个岗位下已完成的报告来比，后台一个页面展示。
+
 ## 试验台
 
 `examples/lab.rs` 会真实调用 DeepSeek，需要环境变量 `DEEPSEEK_API_KEY`。
@@ -377,6 +419,9 @@ cargo run -p interview-report --example lab -- evaluate --samples /tmp/flaky
 # 用面试引擎走实时对话的面试，候选人由模型按场景的人设扮演，记录写到 --out（一场约 0.1 元）
 cargo run -p interview-report --example conversation -- backend-strong pm-mediocre --out /tmp/conversations
 cargo run -p interview-report --example lab -- evaluate backend-strong pm-mediocre --samples /tmp/conversations
+# 拿几份报告做同一个岗位的横向对比。--rounds 比几遍，每一遍换一下传入的顺序
+cargo run -p interview-report --example lab -- compare --job crates/interview-report/samples/backend-strong.json \
+  crates/interview-report/samples/reports/backend-*.json --rounds 3
 # 同一份记录分析几遍，看评分、总分和各个结论前后差多少（8 份各 4 遍约 7 元、13 分钟）
 cargo run --release -p interview-report --example stability -- --runs 4 --thinking high --out /tmp/stability
 ```
@@ -391,4 +436,4 @@ cargo run --release -p interview-report --example stability -- --runs 4 --thinki
 
 - 识别引擎能输出置信度之后，再看要不要把置信度低的片段标出来（现在的实测结果是不需要）。
 - 用真实面试和人工标注校准评分和诚信迹象。
-- 同一岗位多位候选人的横向对比。
+- 横向对比接进产品：接口和后台页面。
