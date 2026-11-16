@@ -42,7 +42,21 @@ async fn main() -> anyhow::Result<()> {
             let id = args.get(1).context("用法：demo revoke <面试的 ID>")?;
             revoke(&ctx, id.parse().context("面试的 ID 不是 UUID")?).await?
         }
-        _ => bail!("用法：demo seed [选项] | demo state <面试的 ID> | demo revoke <面试的 ID>"),
+        Some("walk-away") => {
+            let usage = "用法：demo walk-away <面试的 ID> <多少分钟之前>";
+            let id = args.get(1).context(usage)?;
+            let minutes = args.get(2).context(usage)?;
+            walk_away(
+                &ctx,
+                id.parse().context("面试的 ID 不是 UUID")?,
+                minutes.parse().context("分钟数不是数字")?,
+            )
+            .await?
+        }
+        _ => bail!(
+            "用法：demo seed [选项] | demo state <面试的 ID> | demo revoke <面试的 ID> | \
+             demo walk-away <面试的 ID> <多少分钟之前>"
+        ),
     };
     println!("{output}");
     Ok(())
@@ -350,6 +364,50 @@ async fn revoke(ctx: &AppContext, interview_id: Uuid) -> anyhow::Result<Value> {
     Ok(json!({ "revoked": revoked }))
 }
 
+/// 当作候选人在 `minutes` 分钟之前关了页面、再也没回来：还在进行的面试按中途离开结束，
+/// 录像最后一次有动静也是那时候，约好的收尾检查提到现在。测试不用真的等那么久。
+async fn walk_away(ctx: &AppContext, interview_id: Uuid, minutes: i32) -> anyhow::Result<Value> {
+    let mut tx = ctx.db.begin().await?;
+    sqlx::query(
+        "UPDATE interviews
+            SET status = CASE WHEN status = 'in_progress' THEN 'abandoned' ELSE status END,
+                end_reason = COALESCE(end_reason, 'connection_lost'),
+                ended_at = now() - make_interval(mins => $2)
+          WHERE id = $1",
+    )
+    .bind(interview_id)
+    .bind(minutes)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE interview_recordings SET created_at = now() - make_interval(mins => $2)
+          WHERE interview_id = $1",
+    )
+    .bind(interview_id)
+    .bind(minutes)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE interview_recording_chunks SET received_at = now() - make_interval(mins => $2)
+          WHERE recording_id IN (SELECT id FROM interview_recordings WHERE interview_id = $1)",
+    )
+    .bind(interview_id)
+    .bind(minutes)
+    .execute(&mut *tx)
+    .await?;
+    let checks = sqlx::query(
+        "UPDATE tasks SET run_at = now()
+          WHERE kind = 'room.recording_salvage' AND status = 'queued'
+            AND payload->>'interview_id' = $1",
+    )
+    .bind(interview_id.to_string())
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    tx.commit().await?;
+    Ok(json!({ "checks": checks }))
+}
+
 async fn state(ctx: &AppContext, interview_id: Uuid) -> anyhow::Result<Value> {
     let interview: Option<(String, Option<String>)> =
         sqlx::query_as("SELECT status, end_reason FROM interviews WHERE id = $1")
@@ -396,10 +454,11 @@ async fn state(ctx: &AppContext, interview_id: Uuid) -> anyhow::Result<Value> {
         Option<i32>,
         Option<i64>,
         Option<String>,
+        Option<String>,
     );
     let recordings: Vec<RecordingRow> = sqlx::query_as(
         "SELECT id, track, segment, content_type, status, start_ms, duration_ms,
-                total_chunks, size_bytes, blob_key
+                total_chunks, size_bytes, blob_key, error
            FROM interview_recordings WHERE interview_id = $1 ORDER BY segment, track",
     )
     .bind(interview_id)
@@ -429,6 +488,7 @@ async fn state(ctx: &AppContext, interview_id: Uuid) -> anyhow::Result<Value> {
             "size_bytes": row.8,
             "chunks": chunks.into_iter().map(|(seq,)| seq).collect::<Vec<_>>(),
             "file": file,
+            "error": row.10,
         }));
     }
 
