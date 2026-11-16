@@ -40,6 +40,7 @@ import {
   useEvents,
   useFrameEvents,
   useInterview,
+  useInterviews,
   useInvites,
   useMe,
   usePlan,
@@ -96,6 +97,7 @@ import {
   scoreRangeText,
   stageLabelOf,
   statusHint,
+  statusLabel,
   styleLabel,
   synthStatusLabel,
   synthStatusTone,
@@ -308,6 +310,8 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
       </Banner>
     );
   }
+  if (canNextRound(interview) && interview.decision === "advance")
+    return <AdvanceStep interview={interview} />;
   // 没面完就结束了的，多半要再来一次：给一个一步到位的入口
   const unfinished = status === "abandoned" || status === "cancelled" || status === "expired";
   return (
@@ -327,6 +331,60 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
     >
       {statusHint[status]}
       {unfinished && !archived(interview) && "想让候选人重新面，可以再安排一场，设置沿用这一场的。"}
+    </Banner>
+  );
+}
+
+/**
+ * 面完了、决定是「进入下一轮」：接着提示安排下一轮。
+ * 这位候选人在这个岗位上已经有更晚安排的一场时不再催，改成说下一轮现在到哪了。
+ */
+function AdvanceStep({ interview }: { interview: Interview }) {
+  const navigate = useNavigate();
+  const others = useInterviews({
+    candidate_id: interview.candidate.id,
+    position_id: interview.position.id,
+    page_size: 50,
+  });
+  // 还没查到有没有下一轮时先不催，免得闪一下
+  if (others.isPending) return <Banner tone="info">{statusHint.completed}</Banner>;
+
+  // 新的在前：最近安排的那一场。取消了的不算
+  const later = (others.data?.items ?? [])
+    .filter(
+      (i) =>
+        i.id !== interview.id && i.status !== "cancelled" && i.created_at > interview.created_at,
+    )
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+  if (later)
+    return (
+      <Banner
+        tone="info"
+        title="下一轮已经安排了"
+        actions={
+          <Button size="sm" onClick={() => navigate(`/interviews/${later.id}`)}>
+            去看那一场
+          </Button>
+        }
+      >
+        {`${fullTime(later.created_at)} 安排的那一场，现在是「${statusLabel[later.status]}」。`}
+      </Banner>
+    );
+  return (
+    <Banner
+      tone="success"
+      title="定了进入下一轮"
+      actions={
+        <Button
+          size="sm"
+          icon={<CircleArrowRight aria-hidden="true" />}
+          onClick={() => navigate(nextRoundPath(interview))}
+        >
+          安排下一轮
+        </Button>
+      }
+    >
+      下一轮还用 AI 面的话可以直接安排：报告建议的方向和问题会填进设置里，都可以再改。
     </Banner>
   );
 }
