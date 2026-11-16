@@ -338,6 +338,8 @@ export function ReplayPlayer({
                         <button
                           type="button"
                           className="adm-chip-btn"
+                          // 同一种事可能出现好几次，念出来带上是哪一刻的
+                          aria-label={`${eventName(e)}，跳到 ${eventWhen(e, events)}`}
                           onClick={() => seek((e.at_ms ?? 0) - 3000)}
                         >
                           {eventName(e)}

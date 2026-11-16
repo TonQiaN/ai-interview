@@ -204,7 +204,7 @@ export function OverviewPage() {
                               size="sm"
                               variant="ghost"
                               iconOnly
-                              aria-label={`打开 ${i.candidate_name} 的面试`}
+                              aria-label={`打开${i.candidate_name}应聘${i.position_title}的面试`}
                               onClick={() => navigate(`/interviews/${i.id}`)}
                             >
                               <ArrowRight aria-hidden="true" />

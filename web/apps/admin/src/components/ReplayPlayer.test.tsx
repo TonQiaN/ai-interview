@@ -117,4 +117,27 @@ describe("回看", () => {
     expect(slider.contains(mark)).toBe(false);
     expect(slider.querySelector("button, a, [tabindex]")).toBeNull();
   });
+
+  it("过程记录里同一种事出现两次，两个按钮念出来带着各自的时间", () => {
+    const left = (id: string, at_ms: number): TimelineEvent => ({
+      id: `0193a000-0000-7000-8000-0000000000${id}`,
+      kind: "visibility_hidden",
+      at_ms,
+      occurred_at: "2026-11-16T00:00:30Z",
+      source: "client",
+      payload: {},
+    });
+    show([recording({})], [left("e3", 30_000), left("e4", 95_000)]);
+
+    const names = screen
+      .getAllByRole("button", { name: /，跳到 \d\d:\d\d$/ })
+      .map((button) => button.getAttribute("aria-label"));
+    expect(names).toHaveLength(2);
+    expect(names[0]).toMatch(/，跳到 00:30$/);
+    expect(names[1]).toMatch(/，跳到 01:35$/);
+    // 看得见的字还是只有这件事的名字，时间在它前面单独写着
+    expect(screen.getAllByRole("button", { name: names[0] ?? "" })[0]?.textContent).not.toMatch(
+      /00:30/,
+    );
+  });
 });

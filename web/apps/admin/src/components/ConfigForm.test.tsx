@@ -79,3 +79,15 @@ describe("一句话说清一份设置", () => {
     expect(summary).not.toContain("停顿");
   });
 });
+
+describe("面试设置：几组可以加条目的地方", () => {
+  it("每一组的「加一条」念出来说清是给哪一组加", async () => {
+    await open({ ...defaults, mode: "scripted" });
+    const names = screen
+      .getAllByRole("button", { name: /加一条$/ })
+      .map((button) => button.getAttribute("aria-label"));
+    expect(names.length).toBeGreaterThan(1);
+    expect(new Set(names).size).toBe(names.length);
+    for (const name of names) expect(name).toMatch(/^给.+加一条$/);
+  });
+});

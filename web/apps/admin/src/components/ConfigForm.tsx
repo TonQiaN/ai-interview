@@ -132,6 +132,8 @@ function StringList({
             variant="secondary"
             size="sm"
             icon={<Plus aria-hidden="true" />}
+            // 设置里有好几组这样的条目，念出来要说清是给哪一组加
+            aria-label={`给${label}加一条`}
             disabled={full}
             onClick={() => onChange([...items, ""])}
           >

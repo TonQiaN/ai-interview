@@ -160,11 +160,11 @@ describe("账号", () => {
     // 侧栏上也有自己的名字，所以按「你」这个标记找那一行
     const mine = await row("你");
     expect(mine.getByText("招聘同事")).toBeTruthy();
-    expect(mine.queryByRole("button", { name: "停用" })).toBeNull();
-    expect(mine.queryByRole("button", { name: "重设密码" })).toBeNull();
+    expect(mine.queryByRole("button", { name: /^停用/ })).toBeNull();
+    expect(mine.queryByRole("button", { name: /重设密码$/ })).toBeNull();
     expect(mine.getByRole("link", { name: "修改密码" }).getAttribute("href")).toBe("/account");
     // 改自己时角色是固定的
-    fireEvent.click(mine.getByRole("button", { name: "改名字和角色" }));
+    fireEvent.click(mine.getByRole("button", { name: "改招聘同事的名字和角色" }));
     const dialog = within(screen.getByRole("dialog"));
     expect(dialog.getByText(/不能把自己改成普通账号/)).toBeTruthy();
     expect(dialog.queryByRole("radio")).toBeNull();
@@ -172,12 +172,12 @@ describe("账号", () => {
 
   it("停用要先确认，停用以后可以恢复", async () => {
     open("/accounts");
-    fireEvent.click((await row("陈雨桐")).getByRole("button", { name: "停用" }));
+    fireEvent.click((await row("陈雨桐")).getByRole("button", { name: "停用陈雨桐的账号" }));
     const dialog = within(screen.getByRole("dialog"));
     expect(dialog.getByText(/马上退出登录/)).toBeTruthy();
     fireEvent.click(dialog.getByRole("button", { name: "停用" }));
     await waitFor(async () => expect((await row("陈雨桐")).getByText("已停用")).toBeTruthy());
-    fireEvent.click((await row("陈雨桐")).getByRole("button", { name: "恢复" }));
+    fireEvent.click((await row("陈雨桐")).getByRole("button", { name: "恢复陈雨桐的账号" }));
     await waitFor(async () => expect((await row("陈雨桐")).getByText("正常")).toBeTruthy());
     const list = await call<Page<Account>>("GET", "/accounts?q=recruiter@example.com");
     expect(list.items[0]?.disabled).toBe(false);
@@ -185,7 +185,7 @@ describe("账号", () => {
 
   it("重设别人的密码以后把新密码摆出来", async () => {
     open("/accounts");
-    fireEvent.click((await row("陈雨桐")).getByRole("button", { name: "重设密码" }));
+    fireEvent.click((await row("陈雨桐")).getByRole("button", { name: "给陈雨桐重设密码" }));
     const dialog = within(screen.getByRole("dialog"));
     fireEvent.change(dialog.getByLabelText(/^新密码/), { target: { value: "reset-password-1" } });
     fireEvent.click(dialog.getByRole("button", { name: "重设密码" }));
@@ -194,6 +194,17 @@ describe("账号", () => {
     expect(handover.textContent).toContain("reset-password-1");
     const body = await sent("PATCH", "/accounts/0193a000-0000-7000-8000-0000000000a2")[0]?.json();
     expect(body).toEqual({ password: "reset-password-1" });
+  });
+
+  it("每个账号那一行的按钮念出来带着是谁的账号", async () => {
+    open("/accounts");
+    const table = (await screen.findByText("陈雨桐")).closest("table");
+    if (!table) throw new Error("账号没有摆在表格里");
+    const names = within(table)
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+    expect(names.length).toBeGreaterThan(3);
+    expect(new Set(names).size).toBe(names.length);
   });
 
   it("普通账号看不到账号菜单，直接打开地址也不去取列表", async () => {
