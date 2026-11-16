@@ -725,7 +725,7 @@ impl HasEvidence for Synthesis {
 }
 
 /// 思考模式写进报告的说法。
-fn thinking_label(thinking: Option<Thinking>) -> String {
+pub(crate) fn thinking_label(thinking: Option<Thinking>) -> String {
     match thinking {
         None => "default".to_owned(),
         Some(thinking) if thinking.enabled => thinking.effort.as_str().to_owned(),
@@ -734,7 +734,7 @@ fn thinking_label(thinking: Option<Thinking>) -> String {
 }
 
 /// 负责调用模型：限制并发、累计用量。JSON 的解析和「输出不合要求就把原因告诉模型重来」由 `interview-llm` 负责。
-struct Runner<'a> {
+pub(crate) struct Runner<'a> {
     model: &'a dyn ChatModel,
     permits: Semaphore,
     attempts: u32,
@@ -751,14 +751,14 @@ struct Tally {
     fingerprints: BTreeSet<String>,
 }
 
-struct Outcome {
-    usage: Usage,
-    models: Vec<String>,
-    fingerprints: Vec<String>,
+pub(crate) struct Outcome {
+    pub(crate) usage: Usage,
+    pub(crate) models: Vec<String>,
+    pub(crate) fingerprints: Vec<String>,
 }
 
 impl<'a> Runner<'a> {
-    fn new(model: &'a dyn ChatModel, options: &AnalyzeOptions) -> Self {
+    pub(crate) fn new(model: &'a dyn ChatModel, options: &AnalyzeOptions) -> Self {
         Self {
             model,
             permits: Semaphore::new(options.max_concurrency.max(1)),
@@ -776,16 +776,23 @@ impl<'a> Runner<'a> {
         context: &str,
         task: &str,
     ) -> Result<T, String> {
-        let mut request = ChatRequest::new(vec![
-            Message::system(SYSTEM),
-            Message::user(format!("{context}\n{task}")),
-        ]);
+        self.ask(SYSTEM, format!("{context}\n{task}"), Checked::check)
+            .await
+    }
+
+    /// 问模型一次，输出读成 `T`。`check` 不通过时把原因告诉模型让它重来。
+    pub(crate) async fn ask<T, F>(&self, system: &str, user: String, check: F) -> Result<T, String>
+    where
+        T: DeserializeOwned,
+        F: Fn(&T) -> Result<(), String> + Send + Sync,
+    {
+        let mut request = ChatRequest::new(vec![Message::system(system), Message::user(user)]);
         request.thinking = self.thinking;
         request.max_tokens = self.max_output_tokens;
 
         let reply = {
             let _permit = self.permits.acquire().await.map_err(|e| e.to_string())?;
-            chat_json_checked::<T, _>(self.model, request, self.attempts, Checked::check)
+            chat_json_checked::<T, _>(self.model, request, self.attempts, check)
                 .await
                 .map_err(|e| e.to_string())?
         };
@@ -804,7 +811,7 @@ impl<'a> Runner<'a> {
         Ok(reply.value)
     }
 
-    fn finish(self) -> Outcome {
+    pub(crate) fn finish(self) -> Outcome {
         let tally = self.tally.into_inner().unwrap_or_default();
         Outcome {
             usage: tally.usage,
