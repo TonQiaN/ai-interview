@@ -5,7 +5,7 @@ import { Route, Routes } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setFetch } from "../api/http";
 import { createMockServer } from "../api/mock/server";
-import type { InterviewSummary, Page } from "../api/types";
+import type { CandidateListItem, InterviewSummary, Page } from "../api/types";
 import { TestRouter } from "../test/router";
 import { InterviewNewPage } from "./InterviewNew";
 
@@ -49,12 +49,12 @@ beforeEach(async () => {
 
 afterEach(cleanup);
 
-function open() {
+function open(entry = "/interviews/new") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <TestRouter initialEntries={["/interviews/new"]}>
+        <TestRouter initialEntries={[entry]}>
           <Routes>
             <Route path="/interviews/new" element={<InterviewNewPage />} />
             <Route path="/interviews/:id" element={<p>面试详情页</p>} />
@@ -161,6 +161,193 @@ describe("安排面试", () => {
       expect(screen.queryByRole("dialog", { name: "这一页的内容还没保存" })).toBeNull(),
     );
     expect(screen.getByRole("list", { name: "已选 2 位" }).textContent).toContain(names[0]);
+  });
+
+  describe("候选人的简历", () => {
+    /** 把列表里排在最前面的几位（pick() 选的就是他们）的简历改成要测的样子，返回他们的名字 */
+    async function resumesOf(states: ("done" | "running" | "failed" | "none")[]) {
+      const response = await server.fetch("/api/v1/candidates?page_size=50");
+      const { items } = (await response.json()) as Page<CandidateListItem>;
+      return states.map((state, index) => {
+        const candidate = items[index];
+        if (!candidate) throw new Error("演示数据里的候选人不够");
+        if (state === "none") {
+          server.db.resumes = server.db.resumes.filter((r) => r.candidate_id !== candidate.id);
+        } else {
+          const resume = server.db.resumes.find(
+            (r) => r.candidate_id === candidate.id && r.is_primary,
+          );
+          if (!resume) throw new Error("演示数据里这位候选人没有简历");
+          resume.parse_status = state;
+        }
+        return candidate.name;
+      });
+    }
+
+    it("简历解析好了：说会结合简历出题", async () => {
+      await resumesOf(["done"]);
+      open();
+      await pick(1);
+      expect(screen.getByText("面试官会结合这份简历和岗位要求出题。")).toBeTruthy();
+    });
+
+    it("没有简历：提醒只能按岗位要求出题", async () => {
+      await resumesOf(["none"]);
+      open();
+      await pick(1);
+      expect(
+        screen.getByText("这位候选人还没有解析好的简历，面试官只能按岗位要求出题。"),
+      ).toBeTruthy();
+      expect(screen.queryByText(/会结合这份简历/)).toBeNull();
+    });
+
+    it("简历没解析出来：也提醒只能按岗位要求出题", async () => {
+      await resumesOf(["failed"]);
+      open();
+      await pick(1);
+      expect(screen.getByText(/还没有解析好的简历，面试官只能按岗位要求出题/)).toBeTruthy();
+    });
+
+    it("简历还在解析：说明出题会等它解析完", async () => {
+      await resumesOf(["running"]);
+      open();
+      await pick(1);
+      expect(screen.getByText("这位候选人的简历还在解析，面试官会等它解析完再出题。")).toBeTruthy();
+    });
+
+    it("选了几位：说出谁没有简历、谁的简历还在解析", async () => {
+      const [, missing, reading] = await resumesOf(["done", "none", "running"]);
+      open();
+      await pick(3);
+      const banner = screen.getByText(/3 位候选人面试/).closest(".oil-banner");
+      expect(banner?.textContent).toContain(`${missing}还没有解析好的简历，只能按岗位要求出题。`);
+      expect(banner?.textContent).toContain(`${reading}的简历还在解析，会等解析完再出题。`);
+    });
+
+    it("第一步的候选人那一栏：有简历但没填职位的人不说成没有简历", async () => {
+      const [filled, missing] = await resumesOf(["done", "none"]);
+      for (const c of server.db.candidates)
+        if (c.name === filled) Object.assign(c, { current_title: null, current_company: null });
+      open();
+      await waitFor(() => expect(document.querySelectorAll(".adm-pick").length).toBeGreaterThan(1));
+      const rowOf = (name: string | undefined) =>
+        Array.from(document.querySelectorAll<HTMLElement>(".adm-split .oil-card .adm-pick")).find(
+          (row) => row.querySelector("strong")?.textContent === name,
+        );
+      expect(rowOf(filled)?.textContent).not.toContain("还没有简历");
+      expect(rowOf(missing)?.textContent).toContain("还没有简历");
+    });
+  });
+
+  describe("从候选人页、岗位页点过来", () => {
+    /** 再建 count 个，原来的就排到列表的 100 名以后了 */
+    async function addMany(path: "/candidates" | "/positions", count: number) {
+      for (let n = 0; n < count; n += 1) {
+        const body =
+          path === "/candidates" ? { name: `合成候选人${n}` } : { title: `合成岗位${n}` };
+        const response = await server.fetch(`/api/v1${path}`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) throw new Error(`没建成：${response.status}`);
+      }
+    }
+    const picked = (label: string) => screen.queryByRole("list", { name: label });
+    const listsLoaded = () =>
+      waitFor(() => expect(document.querySelectorAll(".adm-pick").length).toBeGreaterThan(1));
+
+    it("候选人多于 100 位：排在后面的人也替他选好了", async () => {
+      const target = server.db.candidates[0];
+      if (!target) throw new Error("演示数据里没有候选人");
+      await addMany("/candidates", 101);
+      open(`/interviews/new?candidate=${target.id}`);
+
+      const list = await screen.findByRole("list", { name: "已选 1 位" });
+      expect(list.textContent).toContain(target.name);
+    });
+
+    it("岗位多于 100 个：排在后面的岗位也选好了，而且看得出选的是哪个", async () => {
+      const target = server.db.positions.find((p) => p.status === "open");
+      if (!target) throw new Error("演示数据里没有在招的岗位");
+      await addMany("/positions", 101);
+      open(`/interviews/new?position=${target.id}`);
+
+      const list = await screen.findByRole("list", { name: "已选的岗位" });
+      expect(list.textContent).toContain(target.title);
+    });
+
+    it("两个都带着：选好以后能直接下一步", async () => {
+      const candidate = server.db.candidates[0];
+      const position = server.db.positions.find((p) => p.status === "open");
+      if (!candidate || !position) throw new Error("演示数据不够");
+      open(`/interviews/new?candidate=${candidate.id}&position=${position.id}`);
+
+      await screen.findByRole("list", { name: "已选的岗位" });
+      await screen.findByRole("list", { name: "已选 1 位" });
+      expect(screen.getByRole("button", { name: "下一步" })).toHaveProperty("disabled", false);
+    });
+
+    it("超过 50 个时只列前 50 个：写着一共多少，搜到的不满 50 个就不写了", async () => {
+      await addMany("/candidates", 60);
+      await addMany("/positions", 60);
+      const total = async (path: string) =>
+        ((await (await server.fetch(`/api/v1${path}`)).json()) as Page<unknown>).total;
+      const candidates = await total("/candidates?page_size=1");
+      const positions = await total("/positions?status=open&page_size=1");
+      open();
+
+      expect(
+        await screen.findByText(
+          `这里只列了最新的 50 位，一共 ${candidates} 位。搜姓名、公司或职位能找到其他人。`,
+        ),
+      ).toBeTruthy();
+      expect(
+        await screen.findByText(
+          `这里只列了最新的 50 个，一共 ${positions} 个在招的岗位。搜岗位或部门能找到其他的。`,
+        ),
+      ).toBeTruthy();
+
+      fireEvent.change(screen.getByLabelText("搜姓名、公司或职位"), {
+        target: { value: "合成候选人59" },
+      });
+      await waitFor(() => expect(screen.queryByText(/这里只列了最新的 50 位/)).toBeNull());
+      expect(screen.getByText(/这里只列了最新的 50 个/)).toBeTruthy();
+    });
+
+    it("归档的候选人、不在招的岗位不替人选", async () => {
+      const candidate = server.db.candidates[0];
+      const position = server.db.positions.find((p) => p.status === "open");
+      if (!candidate || !position) throw new Error("演示数据不够");
+      await server.fetch(`/api/v1/candidates/${candidate.id}`, { method: "DELETE" });
+      position.status = "closed";
+      open(`/interviews/new?candidate=${candidate.id}&position=${position.id}`);
+
+      await listsLoaded();
+      // 等按编号取的那两个请求回来
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(picked("已选 1 位")).toBeNull();
+      expect(picked("已选的岗位")).toBeNull();
+      expect(screen.getByRole("button", { name: "下一步" })).toHaveProperty("disabled", true);
+    });
+
+    it("选好的岗位可以换成别的", async () => {
+      const position = server.db.positions.find((p) => p.status === "open");
+      if (!position) throw new Error("演示数据里没有在招的岗位");
+      open(`/interviews/new?position=${position.id}`);
+      await screen.findByRole("list", { name: "已选的岗位" });
+      await listsLoaded();
+
+      const positionCard = document.querySelectorAll<HTMLElement>(".adm-split .oil-card")[1];
+      const other = Array.from(positionCard?.querySelectorAll<HTMLElement>(".adm-pick") ?? []).find(
+        (row) => row.querySelector("strong")?.textContent !== position.title,
+      );
+      if (!other) throw new Error("演示数据里只有一个在招的岗位");
+      fireEvent.click(other);
+
+      const title = other.querySelector("strong")?.textContent ?? "";
+      expect(picked("已选的岗位")?.textContent).toContain(title);
+      expect(picked("已选的岗位")?.textContent).not.toContain(position.title);
+    });
   });
 
   it("只选了一位候选人和岗位、没动设置，点到别的页面直接走", async () => {
