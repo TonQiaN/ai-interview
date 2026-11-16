@@ -679,6 +679,110 @@ async fn a_chosen_voice_can_be_cleared_back_to_the_default(pool: PgPool) {
     assert_eq!(response.json()["status"], "ready");
 }
 
+/// 面试列表带上报告的结论和综合分，HR 不用一场一场点进去看。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_list_carries_the_report_verdict_and_score(pool: PgPool) {
+    let h = Harness::new(pool, None, FakeBackend::new()).await;
+    let high = h.create(config()).await;
+    let low = h.create(config()).await;
+    let old_report = h.create(config()).await;
+    let no_report = h.create(config()).await;
+
+    let report = |interview: &str, version: i32, status: &str, content: Option<Value>| {
+        let db = h.ctx.db.clone();
+        let interview: Uuid = interview.parse().unwrap();
+        let status = status.to_owned();
+        async move {
+            sqlx::query(
+                "INSERT INTO interview_reports (interview_id, version, status, content) \
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(interview)
+            .bind(version)
+            .bind(status)
+            .bind(content)
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+    };
+    // 报告里别的内容列表用不上，这里只放要取的那几项
+    report(
+        &high,
+        1,
+        "done",
+        Some(json!({
+            "overall_score": 82,
+            "score_range": { "low": 78, "high": 86 },
+            "recommendation": { "decision": "advance" },
+        })),
+    )
+    .await;
+    // 正在重新生成：新的一份还没好，先显示上一份的结论
+    report(&high, 2, "running", None).await;
+    report(
+        &low,
+        1,
+        "done",
+        Some(json!({
+            "overall_score": 41,
+            "score_range": { "low": 36, "high": 46 },
+            "recommendation": { "decision": "not_advance" },
+        })),
+    )
+    .await;
+    // 早先的报告没有浮动范围；一道题都没评上分时没有总分
+    report(
+        &old_report,
+        1,
+        "done",
+        Some(json!({
+            "overall_score": null,
+            "recommendation": { "decision": "borderline" },
+        })),
+    )
+    .await;
+    // 只有一份生成失败的报告
+    report(&no_report, 1, "failed", None).await;
+
+    let list = h.get("/api/v1/interviews?sort=-score").await.json();
+    let items = list["items"].as_array().unwrap();
+    let ids: Vec<&str> = items.iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert_eq!(&ids[..2], [high.as_str(), low.as_str()], "分数高的在前");
+    let row = |id: &str| items.iter().find(|i| i["id"] == id).unwrap().clone();
+
+    let item = row(&high);
+    assert_eq!(item["report_status"], "running");
+    assert_eq!(item["overall_score"], 82);
+    assert_eq!(item["score_range"], json!({ "low": 78, "high": 86 }));
+    assert_eq!(item["recommendation"], "advance");
+
+    let item = row(&low);
+    assert_eq!(item["overall_score"], 41);
+    assert_eq!(item["recommendation"], "not_advance");
+
+    let item = row(&old_report);
+    assert_eq!(item["overall_score"], json!(null));
+    assert_eq!(item["score_range"], json!(null));
+    assert_eq!(item["recommendation"], "borderline");
+
+    let item = row(&no_report);
+    assert_eq!(item["report_status"], "failed");
+    assert_eq!(item["overall_score"], json!(null));
+    assert_eq!(item["score_range"], json!(null));
+    assert_eq!(item["recommendation"], json!(null));
+
+    // 正序：分数低的在前，没有分数的还是排在最后
+    let list = h.get("/api/v1/interviews?sort=score").await.json();
+    let ids: Vec<&str> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(&ids[..2], [low.as_str(), high.as_str()]);
+}
+
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn config_changes_that_leave_the_questions_alone_keep_the_plan(pool: PgPool) {
     let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;
