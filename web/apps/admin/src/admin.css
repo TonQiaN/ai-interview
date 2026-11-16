@@ -247,6 +247,10 @@
     gap: var(--oil-space-1);
     color: var(--oil-warning-ink);
   }
+  /* 「声音」页里几个引擎一起不可用时的说明，和下面的引擎卡片隔开 */
+  .adm-engines__outage {
+    margin-bottom: var(--oil-space-4);
+  }
   /* 字段说明里要提醒的一句，可能折成几行，图标跟着第一行走 */
   .adm-warn-text {
     color: var(--oil-warning-ink);
