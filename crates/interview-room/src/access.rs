@@ -73,9 +73,34 @@ impl RoomAccess {
     /// 面试结束之后不再拦：留在后面的页面来问，也该知道面试已经结束了。
     pub fn require_active_page(&self) -> ApiResult<()> {
         if self.status == InterviewStatus::InProgress && self.active_elsewhere() {
-            return Err(
-                ApiError::conflict("面试正在另一个页面里进行").with_code("active_elsewhere")
-            );
+            return Err(active_elsewhere_error());
+        }
+        Ok(())
+    }
+
+    /// 等了一阵的请求再看一次：面试是不是已经换到另一个页面了。
+    ///
+    /// 实时对话里页面报完回答，要等面试官想好才有下一句。等的这一两秒里候选人可能已经在另一个
+    /// 页面点了「继续面试」，这时不能再把下一句交给这个页面（它会在那边多说一句），和
+    /// [`Self::require_active_page`] 一样拒绝，响应上带提醒。
+    ///
+    /// 要在锁着面试那一行的事务里调：接手的页面也是锁着那一行改的，两边不会交错。
+    /// 请求没带页面标识时不查。
+    pub(crate) async fn recheck_active_page(&self, conn: &mut PgConnection) -> ApiResult<()> {
+        let Some(page) = self.page else {
+            return Ok(());
+        };
+        let active: Option<Uuid> =
+            sqlx::query_scalar("SELECT active_page FROM interview_invites WHERE id = $1")
+                .bind(self.invite_id)
+                .fetch_optional(conn)
+                .await?
+                .flatten();
+        if active.is_some_and(|active| active != page) {
+            if let Some(notice) = &self.notice {
+                notice.0.store(true, Ordering::Relaxed);
+            }
+            return Err(active_elsewhere_error());
         }
         Ok(())
     }
@@ -230,6 +255,10 @@ pub(crate) async fn verify(
 /// 请求头里页面给自己起的标识。
 fn page_id(parts: &Parts) -> Option<Uuid> {
     parts.headers.get(PAGE_HEADER)?.to_str().ok()?.parse().ok()
+}
+
+fn active_elsewhere_error() -> ApiError {
+    ApiError::conflict("面试正在另一个页面里进行").with_code("active_elsewhere")
 }
 
 /// 这场面试从现在起归发请求的这个页面面。请求没带页面标识时什么都不做。

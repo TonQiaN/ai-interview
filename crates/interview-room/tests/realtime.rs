@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use common::{TestApp, interview_status, prepared};
+use common::{TestApp, error_code, interview_status, prepared};
 use futures_util::stream;
 use interview_llm::testing::ScriptedModel;
 use interview_llm::{
@@ -1741,4 +1741,110 @@ async fn after_a_restart_mid_turn_the_interview_still_reaches_the_end(pool: PgPo
             "closing"
         ]
     );
+}
+
+// ───────────────────────── 面到一半换页面 ─────────────────────────
+
+const PAGE: &str = "X-Room-Page";
+const ELSEWHERE: &str = "x-room-active-elsewhere";
+
+/// 某个页面发的请求：带着它给自己起的标识。
+async fn post_from(
+    app: &TestApp,
+    token: &str,
+    page: Uuid,
+    path: &str,
+    body: &Value,
+) -> TestResponse {
+    TestRequest::post(format!("/api/v1/room/{path}"))
+        .bearer(token)
+        .header(PAGE, &page.to_string())
+        .json(body)
+        .send(&app.public)
+        .await
+}
+
+/// 候选人答完一段、面试官正在想怎么接的时候，在另一个页面点了「继续面试」。
+/// 另一个页面从刚才那道题接着；原来的页面不能再问「说完没有」，它正等着的那次上报也拿不到下一句。
+/// 面试官想好的话不丢，候选人的回答只记一次。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn moving_to_another_page_while_the_interviewer_thinks_loses_nothing(pool: PgPool) {
+    // 模型刚开始写就卡住，放行了才把追问写出来
+    let asks: &'static str = Box::leak(format!("{}{QUESTION}", probe_ack()).into_boxed_str());
+    let model = Arc::new(SlowWriter::new(&[
+        ("probe weak\n", asks),
+        ("next adequate\n", "负责库存。"),
+    ]));
+    let deps = Deps::new(testing::test_context(pool), no_warm_up())
+        .with_llm(Some(model.clone()))
+        .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
+        .with_voice(Arc::new(FakeVoice::default()));
+    let app = common::app_from(deps).await;
+    let (interview_id, token) = prepared(&app, conversational()).await;
+    let (old, new) = (interview_core::new_id(), interview_core::new_id());
+
+    let opening = post_from(&app, &token, old, "start", &json!({}))
+        .await
+        .json();
+    let q1 = post_from(
+        &app,
+        &token,
+        old,
+        "advance",
+        &report(&opening, 100, "silence"),
+    )
+    .await
+    .json();
+    let answer = report(&q1, 200, "silence");
+
+    // 原来的页面报了回答，在等面试官接话
+    let waiting = post_from(&app, &token, old, "advance", &answer);
+    let moving = async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let resumed = post_from(&app, &token, new, "start", &json!({})).await;
+        assert_eq!(resumed.status, 200, "{}", resumed.text());
+        assert_eq!(resumed.header(ELSEWHERE), None);
+        let pause = json!({
+            "seq": q1["seq"],
+            "utterance_key": q1["utterance"]["key"],
+            "playback_end_ms": 230,
+            "answer_start_ms": 240,
+            "answer_end_ms": 290,
+        });
+        let refused = post_from(&app, &token, old, "pause-check", &pause).await;
+        assert_eq!(refused.status, 409, "{}", refused.text());
+        assert_eq!(refused.header(ELSEWHERE), Some("1"));
+        model.gate.add_permits(100);
+        resumed.json()
+    };
+    let (late, resumed) = tokio::join!(waiting, moving);
+    assert_eq!(
+        resumed["seq"], q1["seq"],
+        "面试官还没想好，从刚才那道题接着"
+    );
+    assert_eq!(key(&resumed), "q1");
+    // 原来的页面等着的那个请求拿不到面试官的接话（不然它会在那边再说一句）：它被告知面试换了页面
+    assert_eq!(late.status, 409, "{}", late.text());
+    assert_eq!(error_code(&late.json()), "active_elsewhere");
+    assert_eq!(late.header(ELSEWHERE), Some("1"));
+
+    // 另一个页面把那道题又播了一遍，候选人又答了一遍：拿到的是面试官想好的接话，回答不重复记
+    let again = report(&resumed, 400, "silence");
+    let ack = post_from(&app, &token, new, "advance", &again).await;
+    assert_eq!(ack.status, 200, "{}", ack.text());
+    let ack = ack.json();
+    assert_eq!(text(&ack), probe_ack());
+    let ask = post_from(&app, &token, new, "advance", &report(&ack, 500, "silence"))
+        .await
+        .json();
+    assert_eq!(
+        (text(&ask), ask["expects_answer"] == true),
+        (QUESTION, true)
+    );
+    let next = post_from(&app, &token, new, "advance", &report(&ask, 600, "silence"))
+        .await
+        .json();
+    assert_eq!(key(&next), "ack.1");
+    assert_eq!(answered(&app, interview_id).await, ["q1", "q1.p1"]);
+    assert_eq!(model.finished.load(Ordering::SeqCst), 2);
 }
