@@ -120,6 +120,108 @@ describe("分析报告", () => {
     expect(container.querySelector(".adm-qa")?.contains(held[0] ?? null)).toBe(true);
   });
 
+  describe("候选人向公司提的问题", () => {
+    const asks = () => {
+      const report = sampleReport("backend-strong", "i-1", Date.now());
+      report.candidate_questions = [
+        {
+          question: "试用期多久？",
+          handling: "answered",
+          reply: "试用期三个月。",
+          evidence: [
+            {
+              source: "transcript",
+              speaker: "candidate",
+              quote: "想问下试用期多久",
+              start_ms: 61_000,
+            },
+            {
+              source: "transcript",
+              speaker: "interviewer",
+              quote: "试用期是三个月",
+              start_ms: 65_000,
+            },
+          ],
+        },
+        {
+          question: "什么时候能知道结果？",
+          handling: "noted",
+          reply: "会转给负责招聘的同事。",
+          evidence: [
+            {
+              source: "transcript",
+              speaker: "candidate",
+              quote: "大概多久出结果",
+              start_ms: 70_000,
+            },
+          ],
+        },
+        {
+          question: "能不能远程办公？",
+          handling: "unaddressed",
+          reply: null,
+          evidence: [
+            { source: "transcript", speaker: "candidate", quote: "可以远程吗", start_ms: 80_000 },
+          ],
+        },
+      ];
+      return report;
+    };
+    const section = () => {
+      const el = document.querySelector<HTMLElement>('[data-report-section="候选人的提问"]');
+      if (!el) throw new Error("没有这一节");
+      expect(within(el).getByText("候选人向公司提的问题")).toBeTruthy();
+      return within(el);
+    };
+
+    it("列出每个问题、面试官怎么回应的，标出几个等 HR 回复", () => {
+      render(<ReportView report={asks()} onSeek={() => {}} />);
+      const s = section();
+      expect(s.getByText("2 个等你回复")).toBeTruthy();
+      expect(s.getByText("试用期多久？")).toBeTruthy();
+      expect(s.getByText("面试官当场答了")).toBeTruthy();
+      expect(s.getByText("试用期三个月。")).toBeTruthy();
+      expect(s.getByText("面试官说会转告，等你回复")).toBeTruthy();
+      expect(s.getByText("面试官没有回应，等你回复")).toBeTruthy();
+      // 当场答了的那一条才提醒「这是 AI 说的，不是公司的正式答复」
+      expect(s.getAllByText(/不是公司的正式答复/)).toHaveLength(1);
+    });
+
+    it("点候选人提问的原话跳到回看的那个时间", () => {
+      const onSeek = vi.fn();
+      render(<ReportView report={asks()} onSeek={onSeek} />);
+      fireEvent.click(section().getByText(/可以远程吗/));
+      expect(onSeek).toHaveBeenCalledWith(80_000);
+    });
+
+    it("候选人没提问时写明没有提问", () => {
+      const report = sampleReport("backend-strong", "i-1", Date.now());
+      report.candidate_questions = [];
+      render(<ReportView report={report} onSeek={() => {}} />);
+      expect(section().getByText("候选人没有提问。")).toBeTruthy();
+      expect(screen.queryByText(/个等你回复/)).toBeNull();
+    });
+
+    it("旧报告没有这一栏：不显示，也不说没有提问", () => {
+      const report = sampleReport("backend-strong", "i-1", Date.now());
+      report.candidate_questions = undefined;
+      render(<ReportView report={report} onSeek={() => {}} />);
+      expect(screen.queryByText("候选人向公司提的问题")).toBeNull();
+      expect(screen.queryByText("候选人没有提问。")).toBeNull();
+    });
+
+    it("这一步没成功：说明没有生成出来，不说没有提问", () => {
+      const report = sampleReport("backend-strong", "i-1", Date.now());
+      report.candidate_questions = null;
+      report.meta.failed_stages = [{ stage: "candidate_questions", error: "超时" }];
+      const { container } = render(<ReportView report={report} onSeek={() => {}} />);
+      expect(section().getByText(/这部分分析没有生成出来/)).toBeTruthy();
+      expect(screen.queryByText("候选人没有提问。")).toBeNull();
+      expect(container.textContent).toContain("候选人的提问");
+      expect(container.textContent).not.toContain("candidate_questions");
+    });
+  });
+
   it("没问到的题目标成没问到", () => {
     const report = sampleReport("sales-early-exit", "i-1", Date.now());
     expect(report.questions.some((q) => !q.asked)).toBe(true);
