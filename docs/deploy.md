@@ -4,8 +4,8 @@
 
 ## 需要什么
 
-- **一台 Apple Silicon 的 Mac**。面试官的声音（三个 TTS 引擎）只能在上面跑。内存：只起 IndexTTS 的 worker 时实际占用最高约 11 GB（进程自己约 4 GB，其余是显存）；连 BreezeTTS2 的一起起，用起来以后常驻 16 GB 左右，合成时峰值 18 GB。实测见 [tts/worker/README.md](../tts/worker/README.md) 的「加载和内存」。只想先看流程、不在乎面试官的声音是测试音的话，Linux 也能跑。
-- 工具：Rust（`rustup` 会按 `rust-toolchain.toml` 自动装）、Node 22 以上和 pnpm 10、PostgreSQL 16、ffmpeg、poppler。macOS 上：
+- **一台 Apple Silicon 的 Mac**。面试官的声音（三个 TTS 引擎）只能在上面跑。内存：只起 IndexTTS 的 worker 时实际占用最高约 11 GB（进程自己约 4 GB，其余是显存）；连 BreezeTTS2 的一起起，刚起来约 8 GB，用起来以后常驻 14 到 17 GB，合成时峰值 18 GB。实测见 [tts/worker/README.md](../tts/worker/README.md) 的「加载和内存」。只想先看流程、不在乎面试官的声音是测试音的话，Linux 也能跑。
+- 工具：Rust（`rustup` 会按 `rust-toolchain.toml` 自动装）、Node 22 以上和 pnpm 10、PostgreSQL 16、ffmpeg、poppler。brew 现在装的是 pnpm 11，也能用：第一次运行时它会按仓库里写的版本联网换成 10.28.0。macOS 上：
 
   ```bash
   brew install node pnpm postgresql@16 ffmpeg poppler
@@ -40,9 +40,11 @@
    scripts/serve.sh
    ```
 
-   它依次做这些事：起数据库（没设 `DATABASE_URL` 时用仓库里的 `.runtime/pg`）、下载语音识别的模型（约 170 MB，只下一次）、构建前端、编译后端（第一次十分钟左右）、起语音合成的 worker 并等模型加载完（每个 7 到 11 秒）、启动服务。按 Ctrl-C 停，worker 跟着一起停。
+   它依次做这些事：起数据库（没设 `DATABASE_URL` 时用仓库里的 `.runtime/pg`）、下载语音识别的模型（约 170 MB，只下一次）、构建前端、编译后端、起语音合成的 worker 并等模型加载完（每个 7 到 11 秒）、启动服务。M3 Max 上实测：第一次装前端依赖约 1 分钟，构建前端约半分钟，后端从头编译约 1 分钟，之后每次从运行到能打开页面约 1 分钟。
 
-   之后重启不想重新构建：`scripts/serve.sh --no-build`。
+   按 Ctrl-C 停。用 `kill` 或者进程管理工具停这个脚本也一样：它会先让服务收尾退出，再停掉这次由它起的 worker。启动前就已经在跑的 worker（比如自己用 `tts/worker/run.sh start` 起的）它直接拿来用，退出时不去停。
+
+   之后重启不想重新构建：`scripts/serve.sh --no-build`（实测约 16 秒能打开页面，主要在等 worker 加载模型）。
 
 5. 打开 <http://127.0.0.1:8080/admin/> 登录。没在 `.env` 里设管理员账号时，账号是 `admin@example.com`，密码在 `.runtime/dev-admin-password` 里（和 `scripts/dev.sh` 用的是同一个账号）。管理员只在库里一个账号都没有时建一次：库里已经有账号的话，用原来的密码登录。
 
