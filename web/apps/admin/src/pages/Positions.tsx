@@ -6,7 +6,6 @@ import {
   Dialog,
   Field,
   Input,
-  PageHeader,
   Segmented,
   Table,
   Textarea,
@@ -30,6 +29,7 @@ import type {
   RaasPosition,
 } from "../api/types";
 import { Empty, Pager, QueryView, SearchInput } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { RaasImportDialog } from "../components/RaasImportDialog";
 import { positionStatusLabel, positionStatusTone, relativeTime } from "../lib/format";
 

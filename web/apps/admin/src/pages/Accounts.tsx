@@ -5,7 +5,6 @@ import {
   Dialog,
   Field,
   Input,
-  PageHeader,
   Segmented,
   Table,
   useToast,
@@ -17,6 +16,7 @@ import { errorMessage, fieldErrors } from "../api/http";
 import { useAccounts, useCreateAccount, useMe, useUpdateAccount } from "../api/queries";
 import type { Account } from "../api/types";
 import { Confirm, Empty, Pager, QueryView, SearchInput } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { fullTime, roleLabel } from "../lib/format";
 import { PASSWORD_MAX, PASSWORD_MIN, passwordProblem } from "./Account";
 

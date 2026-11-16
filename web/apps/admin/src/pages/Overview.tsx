@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router";
 import { useInterviews, useMe, useSystemStatus } from "../api/queries";
 import type { InterviewSummary } from "../api/types";
 import { Empty, Person, QueryView } from "../components/common";
+import { PageTitle } from "../components/PageHeader";
 import { hasVerdict, InterviewTags, ReportVerdict } from "../components/ReportVerdict";
 import { SystemStatusList } from "../components/SystemStatusList";
 import { relativeTime } from "../lib/format";
@@ -35,6 +36,7 @@ export function OverviewPage() {
 
   return (
     <>
+      <PageTitle title="总览" />
       <Hero painting="dusk">
         <div className="oil-eyebrow">{greeting()}</div>
         <h1 className="oil-title-xl" style={{ margin: "var(--oil-space-2) 0" }}>

@@ -7,7 +7,6 @@ import {
   CardHeader,
   Chip,
   Field,
-  PageHeader,
   Select,
   Steps,
   useToast,
@@ -26,6 +25,7 @@ import {
 import type { Candidate, InterviewConfig, Position } from "../api/types";
 import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import { QueryView, SearchInput } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { VoicePicker } from "../components/VoicePicker";
 import { scheduleAll } from "../lib/schedule";
 

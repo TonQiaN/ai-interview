@@ -7,12 +7,12 @@ import {
   Field,
   Input,
   KeyValue,
-  PageHeader,
   useToast,
 } from "@ai-interview/ui";
 import { type FormEvent, useState } from "react";
 import { errorMessage, fieldErrors } from "../api/http";
 import { useChangePassword, useMe } from "../api/queries";
+import { PageHeader } from "../components/PageHeader";
 import { roleLabel } from "../lib/format";
 
 /** 新密码的长度，和后端的检查一致 */

@@ -9,7 +9,6 @@ import {
   Dropzone,
   Field,
   Input,
-  PageHeader,
   Segmented,
   Select,
   Slider,
@@ -53,6 +52,7 @@ import type {
   VoiceSettings,
 } from "../api/types";
 import { Confirm, Empty, QueryView } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { duration, emotionLabel, fileSize, languageLabel, relativeTime } from "../lib/format";
 
 const MAX_REFERENCE_BYTES = 20 * 1024 * 1024;
