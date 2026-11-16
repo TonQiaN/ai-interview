@@ -32,7 +32,7 @@ import {
 import { useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { isMock } from "../api/http";
-import { useInterviews, useLogout, useMe } from "../api/queries";
+import { useInterviewCounts, useLogout, useMe } from "../api/queries";
 import { PageErrorBoundary } from "../components/PageError";
 import { ReLoginDialog } from "../components/ReLoginDialog";
 
@@ -77,9 +77,8 @@ export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const logout = useLogout();
-  // 侧栏上的数字：面试结束了但还没做决定的
-  const waiting = useInterviews({ status: "completed", page_size: 100 }, Boolean(me.data));
-  const undecided = waiting.data?.items.filter((i) => i.decision === "pending").length ?? 0;
+  // 侧栏上的数字：面完了、报告已经出来、还没做决定的
+  const undecided = useInterviewCounts(Boolean(me.data)).data?.awaiting_decision ?? 0;
 
   if (me.isPending) {
     return (

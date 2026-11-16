@@ -51,7 +51,7 @@ import type {
   ParsedResume,
   Resume,
 } from "../api/types";
-import { Confirm, QueryView, StatusBadge } from "../components/common";
+import { Confirm, InterviewStatusBadge, QueryView } from "../components/common";
 import { PageHeader } from "../components/PageHeader";
 import { InterviewTags } from "../components/ReportVerdict";
 import { sameForm } from "../lib/form";
@@ -516,7 +516,7 @@ function PurgeDialog({
                       {fullTime(i.ended_at ?? i.started_at ?? i.created_at)}
                     </div>
                   </div>
-                  <StatusBadge status={i.status} />
+                  <InterviewStatusBadge interview={i} />
                 </li>
               ))}
             </ul>

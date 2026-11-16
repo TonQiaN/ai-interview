@@ -43,6 +43,21 @@ export const statusLabel: Record<InterviewStatus, string> = {
   cancelled: "已取消",
 };
 
+/**
+ * 发了链接、候选人还没开始，链接已经过了有效期。
+ * 链接到期以后后端不改面试的状态，还是「已发链接」，列表上要自己拿到期时间看。
+ */
+export function inviteExpired(
+  interview: { status: InterviewStatus; invite_expires_at?: string | null },
+  now = Date.now(),
+): boolean {
+  return (
+    interview.status === "invited" &&
+    !!interview.invite_expires_at &&
+    Date.parse(interview.invite_expires_at) <= now
+  );
+}
+
 export const statusTone: Record<InterviewStatus, Tone> = {
   draft: "neutral",
   preparing: "info",

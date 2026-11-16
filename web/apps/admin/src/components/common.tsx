@@ -13,18 +13,41 @@ import { Search } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { errorMessage } from "../api/http";
-import type { Decision, InterviewStatus, Recommendation } from "../api/types";
+import type { Decision, InterviewStage, InterviewStatus, Recommendation } from "../api/types";
 import {
   decisionLabel,
   decisionTone,
+  inviteExpired,
   recommendationLabel,
   recommendationTone,
+  stageLabelOf,
   statusLabel,
   statusTone,
 } from "../lib/format";
 
 export function StatusBadge({ status }: { status: InterviewStatus }) {
   return <Badge tone={statusTone[status]}>{statusLabel[status]}</Badge>;
+}
+
+/**
+ * 一场面试到哪一步了。发了链接但链接已经过期的，标成「链接已过期」：
+ * 后端不会因为链接到期改面试的状态，只写「已发链接」的话 HR 会一直等下去。
+ */
+export function InterviewStatusBadge({
+  interview,
+}: {
+  interview: { status: InterviewStatus; invite_expires_at?: string | null };
+}) {
+  return inviteExpired(interview) ? (
+    <Badge tone="warning">链接已过期</Badge>
+  ) : (
+    <StatusBadge status={interview.status} />
+  );
+}
+
+/** 深入面试才标出来：大多数面试是第一轮初筛，每一行都标就等于没标 */
+export function StageBadge({ stage }: { stage: InterviewStage }) {
+  return stage === "in_depth" ? <Badge plain>{stageLabelOf.in_depth}</Badge> : null;
 }
 
 export function RecommendationBadge({ value }: { value: Recommendation | null }) {

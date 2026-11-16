@@ -22,6 +22,7 @@ import type {
   DuplicateHint,
   Interview,
   InterviewConfig,
+  InterviewCounts,
   InterviewInput,
   InterviewPatch,
   InterviewPlan,
@@ -183,8 +184,13 @@ function byNewest<T extends { created_at: string }>(a: T, b: T): number {
 }
 
 /** 列表里的一行。结论和分数取自最新一份生成好的报告，和后端一样 */
-function summary(i: Interview, report: ReportVersion["content"]): InterviewSummary {
+function summary(
+  i: Interview,
+  report: ReportVersion["content"],
+  inviteExpiresAt: string | null,
+): InterviewSummary {
   return {
+    invite_expires_at: inviteExpiresAt,
     overall_score: report?.overall_score ?? null,
     score_range: report?.score_range ?? null,
     recommendation: report?.recommendation.decision ?? null,
@@ -480,6 +486,16 @@ export function createMockServer(options: MockOptions = {}) {
         });
       });
     });
+  }
+
+  /** 没撤销的链接里最晚的那个到期时间，和后端算的一样；没发过或者都撤销了就是空 */
+  function inviteExpiresAt(id: string): string | null {
+    return (db.invites.get(id) ?? [])
+      .filter((invite) => invite.status !== "revoked")
+      .reduce<string | null>(
+        (latest, invite) => (latest && latest >= invite.expires_at ? latest : invite.expires_at),
+        null,
+      );
   }
 
   function refreshInviteState(i: Interview) {
@@ -1353,6 +1369,7 @@ export function createMockServer(options: MockOptions = {}) {
           i,
           (db.reports.get(i.id) ?? []).find((v) => v.brief.status === "done" && v.content)
             ?.content ?? null,
+          inviteExpiresAt(i.id),
         ),
       );
     // 按分数排：没有分数的排在最后，正序倒序都是
@@ -1417,7 +1434,49 @@ export function createMockServer(options: MockOptions = {}) {
     db.interviews.push(i);
     return i;
   });
-  on("GET", "/interviews/:id", ({ params }) => find.interview(params[0]));
+  on("GET", "/interviews/counts", ({ query }): InterviewCounts => {
+    const list = db.interviews
+      .filter((i) => !i.archived_at)
+      .filter((i) => !query.get("candidate_id") || i.candidate.id === query.get("candidate_id"))
+      .filter((i) => !query.get("position_id") || i.position.id === query.get("position_id"));
+    const count = (keep: (i: Interview) => boolean) => list.filter(keep).length;
+    const status = (value: InterviewStatus) => count((i) => i.status === value);
+    const decision = (value: Interview["decision"]) => count((i) => i.decision === value);
+    const over = (i: Interview) => i.status === "completed" || i.status === "abandoned";
+    return {
+      total: list.length,
+      by_status: {
+        draft: status("draft"),
+        preparing: status("preparing"),
+        prepare_failed: status("prepare_failed"),
+        ready: status("ready"),
+        invited: status("invited"),
+        in_progress: status("in_progress"),
+        completed: status("completed"),
+        abandoned: status("abandoned"),
+        expired: status("expired"),
+        cancelled: status("cancelled"),
+      },
+      by_decision: {
+        pending: decision("pending"),
+        advance: decision("advance"),
+        hold: decision("hold"),
+        reject: decision("reject"),
+      },
+      awaiting_decision: count(
+        (i) => over(i) && i.report?.status === "done" && i.decision === "pending",
+      ),
+      report_failed: count((i) => over(i) && i.report?.status === "failed"),
+      invite_expired: count((i) => {
+        const expiresAt = inviteExpiresAt(i.id);
+        return i.status === "invited" && expiresAt !== null && expiresAt <= iso(0);
+      }),
+    };
+  });
+  on("GET", "/interviews/:id", ({ params }) => {
+    const i = find.interview(params[0]);
+    return { ...i, invite_expires_at: inviteExpiresAt(i.id) };
+  });
   on("PATCH", "/interviews/:id", ({ params, body }) => {
     const i = find.interview(params[0]);
     ensureEditable(i);
