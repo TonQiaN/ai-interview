@@ -169,10 +169,14 @@ impl Synthesizer {
     ///
     /// 一条失败只影响它自己。内容完全相同的条目只合成一次。
     /// 一条一条地做，不并发：一台 Mac 上的模型同一时间只能合成一段。
+    ///
+    /// 一批都按后台合成发出去（见 [`SynthesisRequest::background`]）：成批合成是面试前的准备，
+    /// 没有人正等着听，同一台 Mac 上要是有面试正在实时对话，现场要说的话先合成。
     pub async fn synthesize_batch(&self, items: Vec<BatchItem>) -> Vec<BatchOutcome> {
         let mut done: HashMap<String, Synthesized> = HashMap::new();
         let mut outcomes = Vec::with_capacity(items.len());
         for BatchItem { key, request } in items {
+            let request = request.in_background();
             let content_hash = request.content_hash();
             let result = match done.get(&content_hash) {
                 Some(same) => Ok(Synthesized {

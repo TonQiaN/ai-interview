@@ -415,6 +415,10 @@ fn request_body(request: &SynthesisRequest, stream: bool) -> serde_json::Value {
     if let Some(steps) = request.effective_diffusion_steps() {
         body["diffusion_steps"] = json!(steps);
     }
+    // 后台合成的请求在 worker 上让着有人等的。不带这个字段就是有人等
+    if request.background {
+        body["priority"] = json!("background");
+    }
     body
 }
 
@@ -580,6 +584,23 @@ mod tests {
                 "seed": 7,
                 "stream": true,
             })
+        );
+    }
+
+    #[test]
+    fn only_background_requests_carry_a_priority() {
+        let request = SynthesisRequest::new(
+            EngineId::Breeze2,
+            "你好。",
+            Language::Zh,
+            Voice::Design {
+                description: "温和的女声".to_owned(),
+            },
+        );
+        assert!(request_body(&request, false).get("priority").is_none());
+        assert_eq!(
+            request_body(&request.in_background(), false)["priority"],
+            json!("background")
         );
     }
 

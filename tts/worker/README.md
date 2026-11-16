@@ -56,13 +56,14 @@ IndexTTS 2 和 2.5 在同一个进程里，内存里一次只留一个版本，�
   "worker": "ai-interview-tts",
   "protocol": 1,
   "busy": false,
+  "waiting": 0,
   "engines": [
     {"engine": "index2", "ready": true, "loaded": true, "detail": "IndexTTS-2-mlx-8bit"}
   ]
 }
 ```
 
-`ready` 是权重在不在，`loaded` 是模型现在是不是已经在内存里，`busy` 是此刻是不是正在合成。
+`ready` 是权重在不在，`loaded` 是模型现在是不是已经在内存里，`busy` 是此刻是不是正在合成，`waiting` 是有几条请求在排队。
 
 ### `HEAD /v1/references/{sha256}` 和 `PUT /v1/references/{sha256}`
 
@@ -81,9 +82,12 @@ IndexTTS 2 和 2.5 在同一个进程里，内存里一次只留一个版本，�
   "style": {"emotion": "calm", "emotion_strength": 0.65, "instruction": "<导演指令，只有 Breeze 用>"},
   "seed": 42,
   "diffusion_steps": 16,
+  "priority": "background",
   "stream": false
 }
 ```
+
+- `priority` 可以不给。`background` 是后台合成，没有人正等着听（面试前预先合成题目）；不给或者 `interactive` 是有人等着（实时对话里现场要说的话、试听）。只影响排队的先后，见下面「排队」。后端成批合成（`Synthesizer::synthesize_batch`）时带 `background`，别的不带。加这个字段之前的 worker 会直接忽略它，所有请求按到的先后排。
 
 - `diffusion_steps` 可以不给。它是 IndexTTS 声学生成走几步，4 到 50 的整数，不给是 25；BreezeTTS2 忽略它。后端只在实时对话现场合成时带这个字段（设了 `AI_INTERVIEW_TTS_LIVE_DIFFUSION_STEPS` 才带），预先合成的题目不带。加这个字段之前的 worker 会直接忽略它，所以后端和 worker 要一起更新。
 - `voice` 也可以是 `{"kind": "design", "description": "温和的女声"}`，只有 BreezeTTS2 支持。
@@ -96,7 +100,7 @@ IndexTTS 2 和 2.5 在同一个进程里，内存里一次只留一个版本，�
 - 采样率跟着引擎走：IndexTTS 两个版本是 22.05 kHz，BreezeTTS2 是 24 kHz。调用方不能写死，要读 WAV 头或 `X-Sample-Rate`。
 - `stream` 为 `true`：`application/octet-stream`，分块传输的 PCM16 小端单声道裸数据，采样率在响应头 `X-Sample-Rate` 里。引擎生成一块发一块，后端可以边收边播。合成中途出错时 worker 直接断开连接（响应头已经发出去，没法再回错误），后端要把没收完的流当作失败。
 
-模型一次只跑一条请求，同时来的请求排队。
+**排队。** 模型一次只跑一条请求，同时来的请求排队。有人等着的排在后台合成的前面，同一类按到的先后。正在合成的那一条不打断，所以有人等着的请求最多等一条的时间。后端的任务执行器默认同时跑 4 个任务，几场面试一起准备时会有几条预先合成的请求同时在排；这时候来一句现场要说的话，等正在合成的那一条做完就轮到它，不用等前面排着的预先合成。
 
 流式合成到一半调用方断开连接（比如实时对话里候选人打断了面试官），worker 停止生成这一条，不算出错。BreezeTTS2 约 0.4 秒就停；IndexTTS 一段生成到一半停不下来，要等当前这段算完（实测 3 到 7 秒），这期间下一条请求在排队。
 
