@@ -240,6 +240,17 @@
     color: var(--oil-ink-3);
     font-size: var(--oil-text-sm);
   }
+  /* 手机上列表的列多，每列只剩一两个字宽，名字和地点会被竖着拆开。
+     列表里中文不在字中间断行，表格放宽一些，放不下就横向滚动。
+     对比页的表格里是成段的话，照常换行 */
+  @media (max-width: 640px) {
+    .oil-table:not(.adm-compare__table) {
+      min-width: 720px;
+    }
+    .oil-table:not(.adm-compare__table) td {
+      word-break: keep-all;
+    }
+  }
 
   /* 登录页 */
   .adm-login {
