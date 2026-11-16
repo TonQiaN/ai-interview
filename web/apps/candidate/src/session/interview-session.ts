@@ -44,6 +44,8 @@ import {
 import { IndexedDbChunkStore } from "../lib/upload/idb-chunk-store";
 import { discardSession, discardStale } from "../lib/upload/leftovers";
 import { closeOrphanSegments } from "../lib/upload/orphans";
+import { OwnedChunkStore } from "../lib/upload/owned-chunk-store";
+import { announcePage, isPageOpen } from "../lib/upload/page-presence";
 import { SpillChunkStore } from "../lib/upload/spill-chunk-store";
 import { UploadEventTracker } from "../lib/upload/upload-events";
 import { retryDelayMs, Uploader, type UploadStatus } from "../lib/upload/uploader";
@@ -132,6 +134,8 @@ export interface InterviewSessionOptions {
   hash: string;
   /** 测试时可以换掉接口实现。 */
   createApi?: (token: string, hooks: RoomApiHooks) => RoomApi;
+  /** 这个页面的标识。默认随机生成。 */
+  pageId?: string;
 }
 
 export class InterviewSession {
@@ -158,6 +162,8 @@ export class InterviewSession {
     finishReason: null,
   };
 
+  /** 这个页面的标识，每次载入换一个：服务端靠它分清是哪个页面在面试，本机的录像队列靠它分清一段是谁录的。 */
+  private readonly pageId: string;
   private api: RoomApi | null = null;
   private sessionKey = "";
   private store: ChunkStore | null = null;
@@ -184,6 +190,7 @@ export class InterviewSession {
   constructor(options: InterviewSessionOptions) {
     this.hash = options.hash;
     this.createApi = options.createApi ?? ((token, hooks) => new HttpRoomApi({ token, ...hooks }));
+    this.pageId = options.pageId ?? crypto.randomUUID();
   }
 
   getSnapshot = (): SessionSnapshot => this.snapshot;
@@ -220,7 +227,10 @@ export class InterviewSession {
     if (!capability.ok) return this.fail("unsupported");
 
     if (!this.api) {
-      this.api = this.createApi(token, { onActiveElsewhere: this.handleActiveElsewhere });
+      this.api = this.createApi(token, {
+        pageId: this.pageId,
+        onActiveElsewhere: this.handleActiveElsewhere,
+      });
       // 本地队列按面试区分。用令牌的摘要做键，令牌本身不落盘
       this.sessionKey = (
         await sha256Hex(new TextEncoder().encode(token).buffer as ArrayBuffer)
@@ -283,6 +293,9 @@ export class InterviewSession {
       store = new MemoryChunkStore();
       this.patch({ volatileStorage: true });
     }
+    // 同一个浏览器里别的标签页也在用这份队列：先说一声这个页面开着，再只管归自己的那些段
+    this.cleanups.push(announcePage(this.pageId));
+    store = new OwnedChunkStore(store, { pageId: this.pageId, isPageOpen });
     this.store = store;
     // 别的面试在这台设备上留下的旧录像已经传不上去了，顺手清掉
     await discardStale(store, { keep: this.sessionKey, now: Date.now() }).catch(() => {});
@@ -548,6 +561,9 @@ export class InterviewSession {
     const { store, stream, graph } = this;
     const room = this.snapshot.room;
     if (!store || !stream || !graph || !room) return;
+    // 打开页面之后才关掉的别的标签页留下的段，趁这一段还没开始录先收尾。
+    // 开始录了就不能再收尾了（分不清哪一段是正在录的），得等到面试结束
+    await this.closeOrphans();
     const track: RecordingTrack = stream.getVideoTracks().length > 0 ? "camera" : "microphone";
     const recorder = new SegmentRecorder({
       sessionKey: this.sessionKey,
