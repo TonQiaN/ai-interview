@@ -439,7 +439,7 @@ async fn generate(deps: &Deps, task: &Task, id: Uuid) -> Result<Value, Stop> {
 
     let summary = json!({ "candidates": reports.len(), "calls": meta.usage.calls });
     let mut tx = db.begin().await?;
-    sqlx::query(
+    let saved = sqlx::query(
         "UPDATE position_comparisons SET status = 'done', content = $2, error = NULL, \
              generated_at = now() \
          WHERE id = $1",
@@ -448,6 +448,11 @@ async fn generate(deps: &Deps, task: &Task, id: Uuid) -> Result<Value, Stop> {
     .bind(serde_json::to_value(&comparison)?)
     .execute(&mut *tx)
     .await?;
+    if saved.rows_affected() == 0 {
+        // 生成的这段时间里这份对比被删了（彻底删除其中一场面试会这么做）。
+        // 结果不留，这个岗位别的对比也不动
+        return Ok(json!({ "skipped": "生成到一半，这份对比被删除了" }));
+    }
     // 新的一份好了，之前的都不留
     sqlx::query("DELETE FROM position_comparisons WHERE position_id = $1 AND id <> $2")
         .bind(row.position_id)

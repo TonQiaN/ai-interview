@@ -113,8 +113,8 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 
 | 方法和路径 | 做什么 |
 | --- | --- |
-| `GET /api/v1/interviews`、`POST /api/v1/interviews` ★ | 列表（可按候选人、岗位、状态筛；每一行带报告的结论和综合分）、新建 |
-| `GET /api/v1/interviews/{id}`、`PATCH /api/v1/interviews/{id}`、`DELETE /api/v1/interviews/{id}` ★ | 详情（带候选人和岗位摘要、最新报告状态）、改配置、归档 |
+| `GET /api/v1/interviews`、`POST /api/v1/interviews` ★ | 列表（可按候选人、岗位、状态筛；每一行带报告的结论和综合分；`include_archived=true` 带上已归档的，归档的那几行 `archived_at` 有时间）、新建 |
+| `GET /api/v1/interviews/{id}`、`PATCH /api/v1/interviews/{id}`、`DELETE /api/v1/interviews/{id}` ★ | 详情（带候选人和岗位摘要、最新报告状态；归档了的 `archived_at` 有时间）、改配置、归档 |
 | `POST /api/v1/interviews/{id}/prepare` ★ | 出题加预合成语音 |
 | `POST /api/v1/interviews/{id}/cancel` | 取消 |
 | `POST /api/v1/interviews/{id}/purge` | 彻底删除，只有管理员能用，删了不能恢复：这场面试的录像、语音、画面检查的帧，和题目、对话记录、过程事件、面试链接、报告一起删掉，比过它的候选人对比也删，候选人和岗位不动。成功返回 204。正在准备、正在面试，或者后台正在处理它（转写、写报告）时返回 409，先取消或者等一会儿。只想在列表里藏起来用归档 |
@@ -156,9 +156,11 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 
 | 方法和路径 | 做什么 |
 | --- | --- |
-| `GET /api/v1/positions`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 岗位 |
+| `GET /api/v1/positions`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 岗位。`DELETE` 是归档 |
+| `POST /api/v1/positions/{id}/restore` | 把归档的岗位恢复回来，返回岗位。没归档的再调一次也算成功 |
 | `POST /api/v1/positions/draft` | 粘贴一段岗位描述，让大模型整理成岗位草稿（不保存，给新建岗位的表单预填） |
-| `GET /api/v1/candidates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 候选人 |
+| `GET /api/v1/candidates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 候选人。`DELETE` 是归档 |
+| `POST /api/v1/candidates/{id}/restore` | 把归档的候选人恢复回来，返回候选人详情，简历和画像都还在。没归档的再调一次也算成功 |
 | `GET /api/v1/candidates/{id}/resumes`、`POST /api/v1/candidates/{id}/resumes` | 简历列表、上传。能收 PDF、Word（.docx）、图片（PNG、JPG、WebP）和纯文本，最大 20 MB；老格式的 Word（.doc）不收，返回 422 `unsupported_file`；Word 文档坏了或者里面没有文字，返回 422 `unreadable_file` |
 | `GET /api/v1/resumes/{id}`、`GET /api/v1/resumes/{id}/file`、`POST /api/v1/resumes/{id}/parse`、`DELETE /api/v1/resumes/{id}` | 简历详情、原件、重新解析、删除（连原件一起删）。`parse_status` 是 `failed` 时原因在 `parse_error`；是 `done` 但 `parse_warning` 有值时，要把这句话显示给 HR（比如 PDF 页数太多，只读了前 8 页） |
 | `POST /api/v1/candidates/import` | 直接传一份简历，自动建候选人 |
@@ -287,6 +289,7 @@ HR 侧：
 - 候选人答完之后，`advance` 马上返回一句过渡语，回答放到后台判断。页面报告过渡语播完时判断还没好，这次请求会等到判断完再返回；判断最多等 20 秒，等不到就按顺序问下一题。极少数情况下返回 503（`answer_pending`），页面过一会儿原样重试。
 - `advance` 是幂等的：同一个 `seq` 重复提交返回同样的下一步（断网重试用）；`seq` 不是当前这一句也不是上一句时返回 409（`seq_conflict`）。面试已经结束时返回 `finish`。
 - 断点续面：`GET /room/session` 的 `resume` 是当前该播的那一句；页面重新检查设备后调 `start`，从这一句继续。录像从新的一段开始录。续面时这一步里的 `progress.elapsed_ms` 是服务端现在的时间（面试开始到此刻过了多久），页面拿它当时间轴的起点，新的一段录像才不会和刷新前的那段叠在一起。
+- 同一条链接同时开在两个页面里（手机和电脑各开一个、同一个浏览器开了两个标签页）：只有一个页面在面试。页面每次载入给自己起一个 UUID，随面试间的每个请求放在请求头 `X-Room-Page` 里。调 `start` 的那个页面（开始或者续面）就是在面试的页面，后调的接走前一个的。面试进行中，别的页面调 `advance`、`pause-check`、`finish` 返回 409（`active_elsewhere`），它的每一个响应（不管成功失败）都带响应头 `X-Room-Active-Elsewhere: 1`。正在面试的页面看到这个响应头就停下面试和录制，报一条 `page_taken_over`，把录下的传完，告诉候选人面试已经在另一个页面里继续了；还没开始面试的页面（在看欢迎页、做设备检测）不用理它。录像分片、过程事件、会话信息和面试官语音不受影响，被接走的页面录下的那一段照样收。候选人想回到原来的页面，在那里重新载入、检查设备、点继续面试，就又接回来。不带 `X-Room-Page`（或者值不是 UUID）的请求不参与这件事：不会接走面试，也不会被拒绝。面试结束之后不再拒绝、不再提醒。
 - `GET /room/session` 的 `language` 是面试配置里的面试语言（`zh` 或 `en`）。面试页的文字按它显示，`consent.items` 也是这种语言的；候选人同意时存下来的标题就是他看到的那一份。两种语言的同意事项项目和顺序一样，共用一个 `consent.version`。
 - 面试结束之后 `GET /room/session` 的 `stage` 是 `finished`，`end_reason` 是结束的原因（取值和 `finish` 的 `reason` 一样），页面据此决定结束页说「面试完成」还是「面试已结束」。还没结束时 `end_reason` 是 null。
 - 面试结束（不管哪种原因）时，服务端在同一个事务里排一个 `interview.finalize` 任务，转写和出报告从那里开始。
@@ -300,12 +303,13 @@ HR 侧：
 1. 开始录之前 `PUT /room/recordings/{track}/{segment}` 登记这一段。`{track}` 是 `camera`（摄像头加麦克风）、`microphone`（只有声音）或 `screen`；`{segment}` 是浏览器生成的 UUID。请求体 `{ "content_type": "video/webm;codecs=vp8,opus", "start_ms": 1200 }`，`start_ms` 是这一段从面试时间轴的哪一毫秒开始。只接受 WebM 和 MP4。
 2. 每切出一片 `PUT …/chunks/{seq}`，`seq` 从 0 开始，请求体就是这一片的字节，最大 16 MB。`X-Chunk-Sha256` 带内容的 SHA-256（十六进制），服务端校验，对不上返回 422（`checksum_mismatch`）。同一个序号重复上传没有副作用。
 3. 断网或刷新之后，`GET …/chunks` 拿到已收到的序号，只补传缺的。没传完的分片页面存在 IndexedDB 里。
-4. 停止录制后 `POST …/complete`，带 `{ "total_chunks": 38 }`。缺片时返回 409（`chunks_missing`），`details.missing` 是缺的序号（最多列 100 个），补传后再调。一片都没录到就传 0，这一段记成失败。重复调用没有副作用。
+4. 停止录制后 `POST …/complete`，带 `{ "total_chunks": 38 }`。缺片时返回 409（`chunks_missing`），`details.missing` 是缺的序号（最多列 100 个），补传后再调。缺的那几片页面手里也没有了（本机没存下来），就带上 `"accept_missing": true` 再调一次，服务端不再等，把从第 0 片起连得上的部分合并出来，`error` 里写明这一段不完整。一片都没录到就传 0，这一段记成失败。重复调用没有副作用。
 5. 服务端在后台把分片合并成一个文件（任务 `recording.assemble`），再用 ffmpeg 原样重新封装一遍补上时长（`MediaRecorder` 录出来的文件头里没有总时长，播放器拖不了进度条）。没装 ffmpeg 或处理失败时保留合并出来的文件，`error` 里有一句说明。
 
 - 刷新页面、设备断开重连之后开新的一段（新的 UUID），不接着旧的录。服务端给每条轨道的段从 0 开始排序号，HR 侧按 `start_ms` 把几段接起来看。
-- 面试开始之后才能登记和上传。面试结束后 24 小时内链接还能用来补传。
-- 还没登记的段返回 404（`segment_not_found`）；已经在合并的段不再收新分片（409）。
+- 面试开始之后才能登记和上传。面试结束后 24 小时内链接还能用来补传。过了以后（或者链接被撤销、面试被取消或删除）服务端返回 401 或 410，页面把还留在 IndexedDB 里的分片删掉，不把候选人的录像留在设备上。
+- 还没登记的段返回 404（`segment_not_found`）；已经在合并的段不再收新分片（409，`segment_closed`）。
+- 候选人没传完就不回来了（关了页面、本机的分片丢了）：面试结束后，这场面试的录像连着 30 分钟（`AI_INTERVIEW_ROOM_UPLOAD_IDLE_MINUTES`）没有新的分片传来，后台任务 `room.recording_salvage` 就不再等，把每一段从第 0 片起连得上的分片合并出来，`error` 里写明这一段不完整（缺结尾，或者中间缺了一部分）；第 0 片都没有的记成失败。过了补传的期限、面试被取消时也这样收尾。之后这一段不再收新分片（409，`segment_closed`），页面收到后把本机留着的这一段删掉。
 - 一场面试最多 200 段、4 GB。
 
 ### 实时对话（同一套 HTTP 协议）
@@ -362,6 +366,7 @@ HR 侧：
 - `screen_wake_lock` 在开始面试时报一次：`supported`（浏览器有没有屏幕常亮的能力）和 `held`（有没有申请到）。没申请到时手机可能中途自动锁屏，录像会断。
 - `upload_stalled` 是录像传不动了：`cause`（`retrying` 请求失败在重试、`offline` 浏览器报告断网、`failed` 重试也没用）和当时还没传的分片数 `pending_chunks`。又传动了报 `upload_recovered`：`stalled_ms`（停了多久）、`failures`（中间连续失败了几次）、`pending_chunks`。一次停顿不管重试多少次只报这一对。
 - `upload_finished` 是面试结束后录像全部传完：`uploaded_bytes`（这次打开页面以来传了多少字节）和 `wait_ms`（面试结束后候选人等了多久；刷新后回来补传的是 null）。
+- `page_taken_over` 是面试换到另一个页面里继续了（见上面「同一条链接同时开在两个页面里」），由停下来的那个页面报，没有别的内容。这之后到下一条 `interview_started` 之间的录像在另一段里，不是候选人离开了。刷新页面续面不报这一条。
 - `kind` 只能用小写字母、数字和下划线；`payload` 是一个 JSON 对象，序列化后不超过 4096 字节；一次最多报 200 条。格式不对的单条事件会被丢掉，不影响同一批里的其他事件。
 
-`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`upload_stalled`、`upload_recovered`、`upload_finished`、`device_check`、`device_report`、`screen_wake_lock`、`page_opened`、`interview_started`、`interview_finished`、`question_replayed`、`answer_continued`、`events_dropped`、`interview_abandoned`（服务端记的：候选人离开后一直没回来，面试被结束）、`face_count_changed`、`phone_visible`、`frames_checked`（这三种由 ⑦ 面试后从录像抽帧产出，浏览器不报，含义见 `crates/interview-report/README.md` 的「录像画面检查」）。
+`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`upload_stalled`、`upload_recovered`、`upload_finished`、`device_check`、`device_report`、`screen_wake_lock`、`page_opened`、`interview_started`、`interview_finished`、`page_taken_over`、`question_replayed`、`answer_continued`、`events_dropped`、`interview_abandoned`（服务端记的：候选人离开后一直没回来，面试被结束）、`face_count_changed`、`phone_visible`、`frames_checked`（这三种由 ⑦ 面试后从录像抽帧产出，浏览器不报，含义见 `crates/interview-report/README.md` 的「录像画面检查」）。

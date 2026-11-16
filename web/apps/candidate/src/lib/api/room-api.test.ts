@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { UploadError } from "../upload/uploader";
-import { classifyHttpError, HttpRoomApi, RoomApiError } from "./room-api";
+import { ACTIVE_ELSEWHERE, classifyHttpError, HttpRoomApi, RoomApiError } from "./room-api";
 
 const token = "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG0";
 
@@ -16,11 +16,15 @@ interface Call {
   request: Request;
 }
 
-function setup(respond: (call: Call) => Response | Promise<Response>) {
+function setup(
+  respond: (call: Call) => Response | Promise<Response>,
+  hooks: { onActiveElsewhere?: () => void } = {},
+) {
   const calls: Call[] = [];
   const api = new HttpRoomApi({
     token,
     baseUrl: origin,
+    ...hooks,
     fetch: async (request) => {
       const url = new URL(request.url);
       const call = {
@@ -41,6 +45,16 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 const errorBody = (code: string, message: string) => ({ error: { code, message, details: null } });
+
+/**
+ * 假的 fetch 一直不返回时，把请求留在这里。
+ *
+ * 真的 fetch 在请求发出去以后一直拿着它。假的不拿的话，整条等待链上没有一头是被别处引用着的：
+ * 超时的计时器只连着外面那个 AbortController，它到 `request.signal` 是 Node 里的一条弱引用。
+ * 这期间来一次垃圾回收，请求连同等它的代码一起被收走，超时到了也没人知道，测试就卡到 5 秒
+ * 超时（#274）。
+ */
+const inFlight = new Set<Request>();
 
 describe("候选人侧接口客户端", () => {
   it("令牌只放在请求头里，不进地址，也不带 cookie", async () => {
@@ -139,7 +153,20 @@ describe("候选人侧接口客户端", () => {
     expect(calls[2]?.headers.get("Content-Type")).toBe("application/octet-stream");
     // 分片的字节原样发出去，不会被当成 JSON 序列化
     expect([...new Uint8Array(await (calls[2] as Call).request.arrayBuffer())]).toEqual([9, 8]);
-    expect(JSON.parse(calls[3]?.body ?? "")).toEqual({ total_chunks: 3 });
+    expect(JSON.parse(calls[3]?.body ?? "")).toEqual({ total_chunks: 3, accept_missing: false });
+
+    await api.completeSegment(segment, 3, { acceptMissing: true });
+    expect(JSON.parse(calls[4]?.body ?? "")).toEqual({ total_chunks: 3, accept_missing: true });
+  });
+
+  it("上传出错时把错误码带给上传器", async () => {
+    const { api } = setup(() => json(errorBody("segment_closed", "这一段已经合并，不能再传"), 409));
+    const segment = { track: "camera" as const, segmentId: "0b1c2d3e-0000-4000-8000-000000000001" };
+    const error = await api
+      .putChunk(segment, 0, new Uint8Array([1]).buffer, "abc")
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UploadError);
+    expect(error).toMatchObject({ retryable: false, status: 409, code: "segment_closed" });
   });
 
   it("把后端的错误归类，带上错误码和提示", async () => {
@@ -170,15 +197,18 @@ describe("候选人侧接口客户端", () => {
       timeoutMs: 10,
       fetch: (request) =>
         new Promise((_resolve, reject) => {
-          request.signal.addEventListener("abort", () =>
-            reject(new DOMException("aborted", "AbortError")),
-          );
+          inFlight.add(request);
+          request.signal.addEventListener("abort", () => {
+            inFlight.delete(request);
+            reject(new DOMException("aborted", "AbortError"));
+          });
         }),
     });
     expect(await slow.getSession().catch((caught: unknown) => caught)).toMatchObject({
       kind: "network",
       message: "请求超时",
     });
+    expect(inFlight.size).toBe(0);
   });
 
   it("反向代理返回的不是 JSON 时也能给出错误", async () => {
@@ -204,6 +234,67 @@ describe("候选人侧接口客户端", () => {
       .putChunk(segment, 0, new ArrayBuffer(1), "x")
       .catch((caught: unknown) => caught);
     expect(fatal).toMatchObject({ retryable: false, status: 410 });
+  });
+
+  it("每个请求都带着这个页面的标识，换一个页面就换一个", async () => {
+    const { api, calls } = setup((call) => {
+      if (call.path.endsWith("/session")) return json({ stage: "in_progress" });
+      if (call.path.endsWith("/audio")) return new Response(new ArrayBuffer(2));
+      return new Response(null, { status: 204 });
+    });
+    await api.getSession();
+    await api.putChunk({ track: "camera", segmentId: "s1" }, 0, new ArrayBuffer(1), "x");
+    await api.fetchAudio("/api/v1/room/utterances/q1/audio");
+    const ids = calls.map((call) => call.headers.get("X-Room-Page"));
+    expect(ids).toHaveLength(3);
+    expect(ids[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(new Set(ids).size).toBe(1);
+    // 标识和令牌一样不进地址；上传分片时别的请求头还在
+    for (const call of calls) expect(call.request.url).not.toContain(ids[0]);
+    expect(calls[1]?.headers.get("Authorization")).toBe(`Bearer ${token}`);
+    expect(calls[1]?.headers.get("X-Chunk-Sha256")).toBe("x");
+
+    const other = setup(() => json({ stage: "in_progress" }));
+    await other.api.getSession();
+    expect(other.calls[0]?.headers.get("X-Room-Page")).not.toBe(ids[0]);
+  });
+
+  it("服务端说面试正在另一个页面里进行时报一声，请求成功还是失败都报", async () => {
+    let told = 0;
+    const elsewhere = { "X-Room-Active-Elsewhere": "1" };
+    const { api } = setup(
+      (call) => {
+        if (call.path.endsWith("/session")) return json({ stage: "in_progress" });
+        if (call.path.endsWith("/advance")) {
+          return new Response(JSON.stringify(errorBody("active_elsewhere", "在别处进行")), {
+            status: 409,
+            headers: { "Content-Type": "application/json", ...elsewhere },
+          });
+        }
+        return new Response(null, { status: 204, headers: elsewhere });
+      },
+      { onActiveElsewhere: () => (told += 1) },
+    );
+
+    await api.getSession();
+    expect(told).toBe(0);
+    // 录像照样收下了
+    await api.putChunk({ track: "camera", segmentId: "s1" }, 0, new ArrayBuffer(1), "x");
+    expect(told).toBe(1);
+    const refused = await api
+      .advance({
+        seq: 2,
+        utterance_key: "q1",
+        playback_start_ms: 0,
+        playback_end_ms: 2_000,
+        answer_start_ms: null,
+        answer_end_ms: null,
+        end_reason: null,
+        replays: 0,
+      })
+      .catch((caught: unknown) => caught);
+    expect(refused).toMatchObject({ kind: "conflict", status: 409, code: ACTIVE_ELSEWHERE });
+    expect(told).toBe(2);
   });
 
   it("错误归类规则", () => {

@@ -56,6 +56,7 @@ function setup(store: ChunkStore = new MemoryChunkStore()) {
     onError: (error) => errors.push(error),
     timelineNow: () => 12_345,
     newId: () => "seg-1",
+    now: () => 1_700_000_000_000,
   });
   return { fake, recorder, store, errors, storedCount: () => stored };
 }
@@ -78,6 +79,7 @@ describe("SegmentRecorder", () => {
       mimeType: "video/webm;codecs=vp8,opus",
       startMs: 12_345,
       totalChunks: null,
+      createdAt: 1_700_000_000_000,
     });
     expect(await store.listSegments(SESSION)).toEqual([meta]);
   });

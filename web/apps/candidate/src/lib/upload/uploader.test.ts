@@ -15,7 +15,8 @@ const SESSION = "session-a";
 class FakeApi implements UploadApi {
   readonly opened: string[] = [];
   readonly chunks = new Map<string, Map<number, { bytes: ArrayBuffer; sha256: string }>>();
-  readonly completed: Array<{ segmentId: string; totalChunks: number }> = [];
+  readonly completed: Array<{ segmentId: string; totalChunks: number; acceptMissing?: boolean }> =
+    [];
   readonly calls: string[] = [];
   /** 每次调用前执行，抛错就模拟失败。 */
   beforeCall: (call: string) => void | Promise<void> = () => {};
@@ -41,9 +42,17 @@ class FakeApi implements UploadApi {
     this.chunks.get(segmentId)?.set(seq, { bytes, sha256 });
   }
 
-  async completeSegment({ segmentId }: SegmentRef, totalChunks: number): Promise<void> {
-    await this.record(`complete:${segmentId}`);
-    this.completed.push({ segmentId, totalChunks });
+  async completeSegment(
+    { segmentId }: SegmentRef,
+    totalChunks: number,
+    options: { acceptMissing?: boolean } = {},
+  ): Promise<void> {
+    await this.record(options.acceptMissing ? `complete!:${segmentId}` : `complete:${segmentId}`);
+    this.completed.push(
+      options.acceptMissing
+        ? { segmentId, totalChunks, acceptMissing: true }
+        : { segmentId, totalChunks },
+    );
   }
 
   private async record(call: string): Promise<void> {
@@ -337,6 +346,92 @@ describe("Uploader", () => {
     });
     expect(await store.listChunks(SESSION, "seg-1")).toHaveLength(1);
     await expect(uploader.drain()).rejects.toThrow("链接已失效");
+  });
+
+  it("服务端已经不收这一段了：本机留着的丢掉，后面的段照常传", async () => {
+    const { store, api, uploader } = setup();
+    await store.putSegment(segment("seg-1", 1000, 3));
+    await addChunk(store, "seg-1", 1);
+    await addChunk(store, "seg-1", 2);
+    await store.putSegment(segment("seg-2", 5000, 1));
+    await addChunk(store, "seg-2", 0);
+    api.beforeCall = (call) => {
+      if (call.startsWith("put:seg-1:")) {
+        throw new UploadError("这一段已经合并，不能再传", false, 409, "segment_closed");
+      }
+    };
+
+    uploader.start();
+    await uploader.drain();
+
+    // 第一片被拒之后不再试这一段剩下的，也不再通知合并
+    expect(api.calls.filter((call) => call.includes("seg-1"))).toEqual([
+      "open:seg-1",
+      "received:seg-1",
+      "put:seg-1:1",
+    ]);
+    expect(await store.listSegments(SESSION)).toEqual([]);
+    expect(await store.listChunks(SESSION, "seg-1")).toEqual([]);
+    expect(api.seqs("seg-2")).toEqual([0]);
+    expect(api.completed).toEqual([{ segmentId: "seg-2", totalChunks: 1 }]);
+    expect(uploader.getStatus()).toMatchObject({ state: "idle", pendingChunks: 0 });
+  });
+
+  it("同样是 409，别的原因照旧算传不上去", async () => {
+    const { store, api, uploader } = setup();
+    await store.putSegment(segment("seg-1", 1000, 1));
+    await addChunk(store, "seg-1", 0);
+    api.beforeCall = (call) => {
+      if (call.startsWith("put:")) throw new UploadError("面试还没开始", false, 409);
+    };
+
+    uploader.start();
+    await expect(uploader.drain()).rejects.toThrow("面试还没开始");
+    expect(await store.listChunks(SESSION, "seg-1")).toHaveLength(1);
+  });
+
+  it("服务端缺的分片本机也没有了：让服务端有多少合并多少，不卡在这一段", async () => {
+    const { store, api, uploader } = setup();
+    // 一共 3 片，第 1 片当时没存下来
+    await store.putSegment(segment("seg-1", 1000, 3));
+    await addChunk(store, "seg-1", 0);
+    await addChunk(store, "seg-1", 2);
+    api.beforeCall = (call) => {
+      if (call === "complete:seg-1") {
+        throw new UploadError("还缺 1 个分片", false, 409, "chunks_missing");
+      }
+    };
+
+    uploader.start();
+    await uploader.drain();
+
+    expect(api.seqs("seg-1")).toEqual([0, 2]);
+    expect(api.calls.slice(-2)).toEqual(["complete:seg-1", "complete!:seg-1"]);
+    expect(api.completed).toEqual([{ segmentId: "seg-1", totalChunks: 3, acceptMissing: true }]);
+    expect(await store.listSegments(SESSION)).toEqual([]);
+    expect(uploader.getStatus().state).toBe("idle");
+  });
+
+  it("让服务端有多少合并多少的那一次请求断了：重试时再来一遍", async () => {
+    const { store, api, uploader } = setup();
+    await store.putSegment(segment("seg-1", 1000, 2));
+    await addChunk(store, "seg-1", 1);
+    let dropped = false;
+    api.beforeCall = (call) => {
+      if (call === "complete:seg-1") {
+        throw new UploadError("还缺 1 个分片", false, 409, "chunks_missing");
+      }
+      if (call === "complete!:seg-1" && !dropped) {
+        dropped = true;
+        throw new UploadError("网络连接失败", true);
+      }
+    };
+
+    uploader.start();
+    await uploader.drain();
+
+    expect(api.completed).toEqual([{ segmentId: "seg-1", totalChunks: 2, acceptMissing: true }]);
+    expect(await store.listSegments(SESSION)).toEqual([]);
   });
 
   it("只处理自己这场面试的分片", async () => {

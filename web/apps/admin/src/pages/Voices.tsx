@@ -9,7 +9,6 @@ import {
   Dropzone,
   Field,
   Input,
-  PageHeader,
   Segmented,
   Select,
   Slider,
@@ -53,6 +52,8 @@ import type {
   VoiceSettings,
 } from "../api/types";
 import { Confirm, Empty, QueryView } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
+import { sameForm } from "../lib/form";
 import { duration, emotionLabel, fileSize, languageLabel, relativeTime } from "../lib/format";
 
 const MAX_REFERENCE_BYTES = 20 * 1024 * 1024;
@@ -429,6 +430,7 @@ function VoiceDialog({
     <Dialog
       open={open}
       onClose={onClose}
+      unsaved={file !== null || !sameForm(draft, voice ? draftOf(voice) : emptyDraft(engines))}
       wide
       title={voice ? `修改音色：${voice.name}` : "添加音色"}
       footer={

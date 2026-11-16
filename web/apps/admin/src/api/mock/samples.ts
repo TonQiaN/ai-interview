@@ -350,7 +350,8 @@ export function sampleInterview(
         size_bytes: Math.round(duration * (track === "camera" ? 95 : 6)),
         start_ms: span.start,
         duration_ms: duration,
-        error: null,
+        // 断网前那一段没来得及传完：能播，但结尾缺一点，回看页上要说明
+        error: cut && segment === 0 ? "候选人那边没有传完这一段录像，结尾可能缺一小段" : null,
         // 演示数据里没有真的录像文件
         media_url: null,
         created_at: at(span.start),

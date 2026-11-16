@@ -698,6 +698,8 @@
 
   /* ───────── 表格 ───────── */
   .oil-table-wrap {
+    /* 表格里只给读屏软件看的文字是绝对定位的，不加这一句它会把整个页面撑出横向滚动条 */
+    position: relative;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
@@ -825,6 +827,15 @@
   .oil-dialog__body {
     padding: var(--oil-space-2) var(--oil-space-6) var(--oil-space-5);
     overflow-y: auto;
+  }
+  /* 里面的内容没保存、按 Esc 或点遮罩没关成时的那句提示 */
+  .oil-dialog__hint {
+    margin: 0;
+    padding: var(--oil-space-3) var(--oil-space-6);
+    border-top: 1px solid var(--oil-line);
+    color: var(--oil-warning-ink);
+    background: var(--oil-warning-soft);
+    font-size: var(--oil-text-sm);
   }
   .oil-dialog__foot {
     display: flex;

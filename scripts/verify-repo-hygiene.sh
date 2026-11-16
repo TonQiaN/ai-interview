@@ -38,24 +38,35 @@ while IFS= read -r -d '' file; do
 
   case "$base" in
     .env.example) ;;
-    .env | .env.*) report "$file：环境变量文件不进 Git（只提交 .env.example）" ;;
+    .env | .env.*) report "${file}：环境变量文件不进 Git（只提交 .env.example）" ;;
   esac
   case "$base" in
     *.wav | *.mp3 | *.m4a | *.flac | *.aiff | *.ogg | *.opus | *.mp4 | *.mov)
-      report "$file：音频和视频不进 Git（真人音色属于个人信息）" ;;
+      report "${file}：音频和视频不进 Git（真人音色属于个人信息）" ;;
     *.safetensors | *.pth | *.pt | *.npz | *.onnx | *.gguf | *.bin)
-      report "$file：模型权重不进 Git" ;;
+      report "${file}：模型权重不进 Git" ;;
     *.pem | *.key | *.p12 | *.pfx | id_rsa* | id_ed25519*)
-      report "$file：私钥或证书不进 Git" ;;
+      report "${file}：私钥或证书不进 Git" ;;
   esac
 
   is_lock_or_pin "$file" && continue
 
   size=$(wc -c <"$file")
   if [ "$size" -gt "$MAX_BYTES" ]; then
-    report "$file：超过 1 MiB（$size 字节），大文件不进 Git"
+    report "${file}：超过 1 MiB（$size 字节），大文件不进 Git"
     continue
   fi
+
+  # macOS 自带的 bash 3.2 在 UTF-8 环境下（终端默认就是），会把变量名后面紧跟的中文或全角标点的
+  # 第一个字节算进变量名，脚本报「unbound variable」退出。这种地方要用花括号把变量名括起来
+  case "$base" in
+    *.sh)
+      while IFS= read -r line_no; do
+        [ -n "$line_no" ] || continue
+        report "$file:${line_no}：变量名后面紧跟中文或全角标点，macOS 的 bash 3.2 会出错，用花括号把变量名括起来"
+      done < <(LC_ALL=C grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^[:print:][:space:]]' -- "$file" | cut -d: -f1 || true)
+      ;;
+  esac
 
   for rule in "${RULES[@]}"; do
     name="${rule%%|*}"

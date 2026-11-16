@@ -4,8 +4,8 @@
 
 ## 需要什么
 
-- **一台 Apple Silicon 的 Mac**。面试官的声音（三个 TTS 引擎）只能在上面跑。内存：只起 IndexTTS 的 worker 时实际占用最高约 11 GB（进程自己约 4 GB，其余是显存）；连 BreezeTTS2 的一起起，用起来以后常驻 16 GB 左右，合成时峰值 18 GB。实测见 [tts/worker/README.md](../tts/worker/README.md) 的「加载和内存」。只想先看流程、不在乎面试官的声音是测试音的话，Linux 也能跑。
-- 工具：Rust（`rustup` 会按 `rust-toolchain.toml` 自动装）、Node 22 以上和 pnpm 10、PostgreSQL 16、ffmpeg、poppler。macOS 上：
+- **一台 Apple Silicon 的 Mac**。面试官的声音（三个 TTS 引擎）只能在上面跑。内存：只起 IndexTTS 的 worker 时实际占用最高约 11 GB（进程自己约 4 GB，其余是显存）；连 BreezeTTS2 的一起起，刚起来约 8 GB，用起来以后常驻 14 到 17 GB，合成时峰值 18 GB。实测见 [tts/worker/README.md](../tts/worker/README.md) 的「加载和内存」。只想先看流程、不在乎面试官的声音是测试音的话，Linux 也能跑。
+- 工具：Rust（`rustup` 会按 `rust-toolchain.toml` 自动装）、Node 22 以上和 pnpm 10、PostgreSQL 16、ffmpeg、poppler。brew 现在装的是 pnpm 11，也能用：第一次运行时它会按仓库里写的版本联网换成 10.28.0。macOS 上：
 
   ```bash
   brew install node pnpm postgresql@16 ffmpeg poppler
@@ -40,9 +40,11 @@
    scripts/serve.sh
    ```
 
-   它依次做这些事：起数据库（没设 `DATABASE_URL` 时用仓库里的 `.runtime/pg`）、下载语音识别的模型（约 170 MB，只下一次）、构建前端、编译后端（第一次十分钟左右）、起语音合成的 worker 并等模型加载完（每个 7 到 11 秒）、启动服务。按 Ctrl-C 停，worker 跟着一起停。
+   它依次做这些事：起数据库（没设 `DATABASE_URL` 时用仓库里的 `.runtime/pg`）、下载语音识别的模型（约 170 MB，只下一次）、构建前端、编译后端、起语音合成的 worker 并等模型加载完（每个 7 到 11 秒）、启动服务。M3 Max 上实测：第一次装前端依赖约 1 分钟，构建前端约半分钟，后端从头编译约 1 分钟，之后每次从运行到能打开页面约 1 分钟。
 
-   之后重启不想重新构建：`scripts/serve.sh --no-build`。
+   按 Ctrl-C 停。用 `kill` 或者进程管理工具停这个脚本也一样：它会先让服务收尾退出，再停掉这次由它起的 worker。关掉终端窗口、SSH 断开也算停：服务同样会正常收尾。想让它在你退出登录以后接着跑，放在 `tmux` 里或者交给进程管理工具。启动前就已经在跑的 worker（比如自己用 `tts/worker/run.sh start` 起的）它直接拿来用，退出时不去停。
+
+   之后重启不想重新构建：`scripts/serve.sh --no-build`（实测约 16 秒能打开页面，主要在等 worker 加载模型）。
 
 5. 打开 <http://127.0.0.1:8080/admin/> 登录。没在 `.env` 里设管理员账号时，账号是 `admin@example.com`，密码在 `.runtime/dev-admin-password` 里（和 `scripts/dev.sh` 用的是同一个账号）。管理员只在库里一个账号都没有时建一次：库里已经有账号的话，用原来的密码登录。
 
@@ -116,6 +118,7 @@ HR 后台和候选人页是同一个服务出的。地址对外以后，后台�
 候选人要求把个人信息也删掉时，先把他的每一场面试（归档的也算）这样删掉，再删这个人：`POST /api/v1/candidates/{id}/purge`，同样只有管理员能用，在 `/api/docs` 里找「彻底删除候选人」，填上候选人 ID（候选人详情页地址里的那一串）。它把姓名、联系方式、画像、备注和他的每一份简历（原件和解析结果）一起删掉，不能恢复。名下还有面试时它会拒绝，并告诉你还剩几场。从 RAAS 导入的候选人，以后再从 RAAS 导入会重新出现。
 
 两处它们管不到：之前做的备份里还有这场面试和这位候选人；`AI_INTERVIEW_DATA_DIR` 下的 `tts-cache/` 是合成语音的缓存，里面只有面试官说的话，没有候选人的声音，但题目里可能带着简历上的内容，想清就把整个目录删掉，下次用到会重新合成。
+
 `scripts/dev-db.sh reset` 会删掉整个数据库，正式使用以后不要跑它。
 
 ## 升级

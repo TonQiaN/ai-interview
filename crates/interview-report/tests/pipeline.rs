@@ -868,6 +868,61 @@ async fn raw_room_events_are_merged_and_shown_to_the_model() {
 }
 
 #[tokio::test]
+async fn switching_to_another_page_is_explained_and_listed_as_a_limitation() {
+    // 候选人在 2 分 05 秒换到另一个页面接着面：新的页面接上，原来的页面报停下来
+    let mut record = sample_record();
+    record.events = ProctorEvent::from_raw(vec![
+        RawEvent {
+            id: "evt-resumed".to_owned(),
+            kind: "interview_started".to_owned(),
+            at_ms: Some(125_000),
+            payload: serde_json::json!({"resumed": true}),
+        },
+        RawEvent {
+            id: "evt-taken-over".to_owned(),
+            kind: "page_taken_over".to_owned(),
+            at_ms: Some(125_400),
+            payload: serde_json::json!({}),
+        },
+    ]);
+    let integrity = r#"{"risk_level": "none", "summary": "候选人在 02:05 换到另一个页面接着面试，没有别的迹象。", "signals": []}"#;
+    let model = RoutedModel::new()
+        .on("question:q1", Q1)
+        .on("question:q2", Q2)
+        .on("requirements", REQUIREMENTS)
+        .on("resume", RESUME)
+        .on("integrity", integrity)
+        .on("communication", COMMUNICATION)
+        .on("synthesis", SYNTHESIS);
+    let report = analyze(&record, &model, &once()).await.unwrap();
+
+    // 模型看得到这条事件，也看得到它是什么意思
+    let prompt = model.requests()[0].1.messages[1].content.as_text();
+    assert!(prompt.contains("[e2 | 02:05 | page_taken_over | -]"));
+    assert!(prompt.contains("page_taken_over 是候选人在另一个页面"));
+
+    // 换页面本身不提高风险，也不触发复核提示
+    assert_eq!(report.integrity.unwrap().risk_level, RiskLevel::None);
+    assert!(
+        !report
+            .review_flags
+            .iter()
+            .any(|flag| flag.code == ReviewFlagCode::IntegrityRisk)
+    );
+    // 「前后是不是同一个人看不出来」由程序写进局限，模型写的那一条还在
+    assert_eq!(report.limitations.len(), 2);
+    assert_eq!(report.limitations[0], "有一道题没来得及问");
+    assert!(report.limitations[1].contains("02:05"));
+    assert!(report.limitations[1].contains("不比对人脸"));
+
+    // 没换过页面的面试没有这一条
+    let plain = analyze(&sample_record(), &full_model(), &once())
+        .await
+        .unwrap();
+    assert_eq!(plain.limitations, ["有一道题没来得及问"]);
+}
+
+#[tokio::test]
 async fn long_ids_are_shown_as_short_ones_and_mapped_back() {
     // 库里的片段编号是 UUID。提示里用 s1、s2 这样的短编号，报告里写回原来的编号
     let mut record = sample_record();

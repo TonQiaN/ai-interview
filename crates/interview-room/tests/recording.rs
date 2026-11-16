@@ -299,9 +299,11 @@ async fn chunks_are_checked_and_idempotent(pool: PgPool) {
 }
 
 /// 一个写得慢的文件存储：内容是 `slow` 的那一次写入要多等一会儿。
+/// 给了 `purge_on_put` 的话，每次写入之前先把库里的录制全删掉，像是正好有人在彻底删除这场面试。
 struct SlowStore {
     inner: MemoryBlobStore,
     slow: &'static [u8],
+    purge_on_put: Option<PgPool>,
 }
 
 #[async_trait]
@@ -309,6 +311,12 @@ impl BlobStore for SlowStore {
     async fn put(&self, key: &str, data: Bytes) -> Result<(), BlobError> {
         if data == self.slow {
             tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        if let Some(pool) = &self.purge_on_put {
+            sqlx::query("DELETE FROM interview_recordings")
+                .execute(pool)
+                .await
+                .expect("删录制失败");
         }
         self.inner.put(key, data).await
     }
@@ -342,6 +350,37 @@ impl BlobStore for SlowStore {
     }
 }
 
+/// 分片是先写文件、再在库里登记的。正好在两步之间这场面试被彻底删除了，登记不上，
+/// 写下的文件要收回来，不然它不属于任何一场面试，没有人会再去删。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_chunk_that_cannot_be_registered_leaves_no_file_behind(pool: PgPool) {
+    let blobs = SlowStore {
+        inner: MemoryBlobStore::new(),
+        slow: b"",
+        purge_on_put: Some(pool.clone()),
+    };
+    let ctx = AppContext::new(pool, Arc::new(blobs), PlatformConfig::for_tests());
+    let app = app_on(ctx, RoomConfig::default()).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+    assert_eq!(
+        open_segment(&app, &token, "camera", segment).await.status,
+        204
+    );
+
+    let response = put_chunk(&app, &token, "camera", segment, 0, b"orphan").await;
+    assert_eq!(response.status, 404, "{}", response.text());
+    assert_eq!(error_code(&response.json()), "segment_not_found");
+
+    let left = app
+        .ctx
+        .blobs
+        .list(&format!("interviews/{interview_id}/recordings"))
+        .await
+        .expect("列文件失败");
+    assert!(left.is_empty(), "留下了没有登记的文件：{left:?}");
+}
+
 /// 页面重试和上一次请求撞在一起时，同一个分片会同时到两次。
 /// 不管谁先谁后，库里登记的大小、校验和，和存下来的内容必须是同一次请求的。
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
@@ -349,6 +388,7 @@ async fn the_same_chunk_arriving_at_once_is_stored_once(pool: PgPool) {
     let blobs = SlowStore {
         inner: MemoryBlobStore::new(),
         slow: b"slow-bytes",
+        purge_on_put: None,
     };
     let ctx = AppContext::new(pool, Arc::new(blobs), PlatformConfig::for_tests());
     let app = app_on(ctx, RoomConfig::default()).await;
@@ -582,10 +622,13 @@ async fn assemble_gives_up_after_retries_and_keeps_the_chunks(pool: PgPool) {
 
     let mut runs = 0;
     for _ in 0..5 {
-        sqlx::query("UPDATE tasks SET run_at = now() WHERE status = 'queued'")
-            .execute(&app.ctx.db)
-            .await
-            .expect("改任务失败");
+        sqlx::query(
+            "UPDATE tasks SET run_at = now()
+              WHERE status = 'queued' AND kind = 'recording.assemble'",
+        )
+        .execute(&app.ctx.db)
+        .await
+        .expect("改任务失败");
         runs += run_tasks(&app).await;
     }
     assert_eq!(runs, 3, "默认重试到第 3 次为止");
@@ -929,4 +972,415 @@ async fn unreadable_media_is_kept_as_is(pool: PgPool) {
         .send(&app.hr)
         .await;
     assert_eq!(&media.body[..], b"not a video");
+}
+
+// ───────────────────────── 候选人没传完的录像 ─────────────────────────
+
+/// 面试在 `minutes` 分钟前结束，录像的登记和分片也都是那之前的事。
+async fn ended_minutes_ago(app: &TestApp, interview_id: Uuid, minutes: i32) {
+    for sql in [
+        "UPDATE interviews SET status = 'completed', ended_at = now() - make_interval(mins => $2)
+          WHERE id = $1",
+        "UPDATE interview_recordings SET created_at = now() - make_interval(mins => $2)
+          WHERE interview_id = $1",
+        "UPDATE interview_recording_chunks SET received_at = now() - make_interval(mins => $2)
+          WHERE recording_id IN (SELECT id FROM interview_recordings WHERE interview_id = $1)",
+    ] {
+        sqlx::query(sql)
+            .bind(interview_id)
+            .bind(minutes)
+            .execute(&app.ctx.db)
+            .await
+            .expect("改时间失败");
+    }
+}
+
+/// 把约好的收尾检查提到现在，跑完能跑的任务，返回跑了几条。
+async fn run_salvage(app: &TestApp) -> usize {
+    sqlx::query(
+        "UPDATE tasks SET run_at = now() WHERE kind = 'room.recording_salvage' AND status = 'queued'",
+    )
+    .execute(&app.ctx.db)
+    .await
+    .expect("改任务时间失败");
+    run_tasks(app).await
+}
+
+/// 还排着队的收尾检查有几条。
+async fn pending_salvage(app: &TestApp) -> i64 {
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM tasks WHERE kind = 'room.recording_salvage' AND status = 'queued'",
+    )
+    .fetch_one(&app.ctx.db)
+    .await
+    .expect("查任务失败");
+    count
+}
+
+/// 候选人没等传完就关了页面，再也没回来：过了一阵，已经收到的部分合并出来，HR 能看，
+/// 也知道这一段不完整。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_segment_nobody_completes_is_assembled_from_what_arrived(pool: PgPool) {
+    let app = app(pool).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+    assert_eq!(
+        open_segment(&app, &token, "camera", segment).await.status,
+        204
+    );
+    for (seq, body) in [(0, "AAAA"), (1, "BBB")] {
+        assert_eq!(
+            put_chunk(&app, &token, "camera", segment, seq, body.as_bytes())
+                .await
+                .status,
+            204
+        );
+    }
+    // 没有调 complete
+    ended_minutes_ago(&app, interview_id, 45).await;
+
+    // 一条是收尾检查，一条是合并
+    assert_eq!(run_salvage(&app).await, 2);
+
+    let list = recordings(&app, interview_id).await;
+    let recording = &list[0];
+    assert_eq!(recording["status"], "ready", "{recording}");
+    assert_eq!(recording["size_bytes"], 7);
+    let note = recording["error"].as_str().expect("应该说明这一段不完整");
+    assert!(note.contains("没有传完"), "{note}");
+    let media = TestRequest::get(recording["media_url"].as_str().expect("应该有地址"))
+        .send(&app.hr)
+        .await;
+    assert_eq!(&media.body[..], b"AAAABBB");
+
+    // 这一段已经定下来了：候选人这时候才回来，剩下的传不进来，页面靠 code 认出来
+    let late = put_chunk(&app, &token, "camera", segment, 2, b"CC").await;
+    assert_eq!(late.status, 409);
+    assert_eq!(error_code(&late.json()), "segment_closed");
+    // 重复的分片和 complete 照旧没有副作用
+    assert_eq!(
+        put_chunk(&app, &token, "camera", segment, 1, b"BBB")
+            .await
+            .status,
+        204
+    );
+    assert_eq!(
+        complete(&app, &token, "camera", segment, 3).await.status,
+        204
+    );
+    assert_eq!(recordings(&app, interview_id).await[0]["status"], "ready");
+}
+
+/// 中间缺了一片（候选人本机的分片丢了）：只合并缺口之前的，后面接不上的分片不留在磁盘上。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_gap_keeps_only_the_chunks_before_it(pool: PgPool) {
+    let app = app(pool).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+    assert_eq!(
+        open_segment(&app, &token, "camera", segment).await.status,
+        204
+    );
+    for (seq, body) in [(0, "AAAA"), (1, "BBB"), (3, "DD"), (4, "E")] {
+        assert_eq!(
+            put_chunk(&app, &token, "camera", segment, seq, body.as_bytes())
+                .await
+                .status,
+            204
+        );
+    }
+    // 页面说一共 5 片，服务端缺第 2 片，一直是 409
+    let response = complete(&app, &token, "camera", segment, 5).await;
+    assert_eq!(error_code(&response.json()), "chunks_missing");
+    ended_minutes_ago(&app, interview_id, 45).await;
+
+    assert_eq!(run_salvage(&app).await, 2);
+
+    let list = recordings(&app, interview_id).await;
+    let recording = &list[0];
+    assert_eq!(recording["status"], "ready", "{recording}");
+    let note = recording["error"].as_str().expect("应该说明这一段不完整");
+    assert!(note.contains("中间缺了"), "{note}");
+    let media = TestRequest::get(recording["media_url"].as_str().expect("应该有地址"))
+        .send(&app.hr)
+        .await;
+    assert_eq!(&media.body[..], b"AAAABBB");
+    let keys = app.ctx.blobs.list("interviews").await.expect("列文件失败");
+    assert_eq!(keys.len(), 1, "{keys:?}");
+}
+
+/// 开头那一片没有（文件头在里面），或者一片都没有：这一段播不了，标成失败并说明原因。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_segment_without_its_beginning_is_marked_failed(pool: PgPool) {
+    let app = app(pool).await;
+    let (interview_id, token) = started(&app).await;
+    let (headless, empty) = (interview_core::new_id(), interview_core::new_id());
+    for segment in [headless, empty] {
+        assert_eq!(
+            open_segment(&app, &token, "camera", segment).await.status,
+            204
+        );
+    }
+    assert_eq!(
+        put_chunk(&app, &token, "camera", headless, 1, b"BBB")
+            .await
+            .status,
+        204
+    );
+    ended_minutes_ago(&app, interview_id, 45).await;
+
+    assert_eq!(run_salvage(&app).await, 1);
+
+    let list = recordings(&app, interview_id).await;
+    assert_eq!(list.len(), 2);
+    for recording in &list {
+        assert_eq!(recording["status"], "failed", "{recording}");
+        assert!(
+            recording["error"]
+                .as_str()
+                .is_some_and(|text| !text.is_empty())
+        );
+    }
+    assert_ne!(list[0]["error"], list[1]["error"]);
+    assert_eq!(queued_tasks(&app).await, 0);
+}
+
+/// 面试还在进行、或者刚结束页面还在传：不动它，约好下次再看。候选人照常传完。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn uploads_still_in_progress_are_left_alone(pool: PgPool) {
+    let app = app(pool).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+    assert_eq!(
+        open_segment(&app, &token, "camera", segment).await.status,
+        204
+    );
+    assert_eq!(
+        put_chunk(&app, &token, "camera", segment, 0, b"AAAA")
+            .await
+            .status,
+        204
+    );
+    // 同一场面试再开一段，约的还是同一次检查
+    assert_eq!(
+        open_segment(&app, &token, "microphone", interview_core::new_id())
+            .await
+            .status,
+        204
+    );
+    assert_eq!(pending_salvage(&app).await, 1);
+
+    // 面试还在进行
+    assert_eq!(run_salvage(&app).await, 1);
+    assert_eq!(
+        recordings(&app, interview_id).await[0]["status"],
+        "uploading"
+    );
+    assert_eq!(pending_salvage(&app).await, 1);
+
+    // 面试 45 分钟前结束了，但页面一直在传，刚刚还收到一片
+    ended_minutes_ago(&app, interview_id, 45).await;
+    assert_eq!(
+        put_chunk(&app, &token, "camera", segment, 1, b"BBB")
+            .await
+            .status,
+        204
+    );
+    assert_eq!(run_salvage(&app).await, 1);
+    assert_eq!(
+        recordings(&app, interview_id).await[0]["status"],
+        "uploading"
+    );
+    assert_eq!(pending_salvage(&app).await, 1);
+
+    assert_eq!(
+        complete(&app, &token, "camera", segment, 2).await.status,
+        204
+    );
+    assert_eq!(run_tasks(&app).await, 1);
+    let list = recordings(&app, interview_id).await;
+    assert_eq!(list[0]["status"], "ready");
+    assert_eq!(list[0]["error"], Value::Null);
+}
+
+/// 面试取消了，链接马上不能用，候选人传不了了：不用等，有多少合并多少，之后不再来看。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_cancelled_interview_is_wrapped_up_at_once(pool: PgPool) {
+    let app = app(pool).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+    assert_eq!(
+        open_segment(&app, &token, "camera", segment).await.status,
+        204
+    );
+    assert_eq!(
+        put_chunk(&app, &token, "camera", segment, 0, b"AAAA")
+            .await
+            .status,
+        204
+    );
+    common::set_status(&app.ctx, interview_id, "cancelled").await;
+
+    assert_eq!(run_salvage(&app).await, 2);
+    assert_eq!(recordings(&app, interview_id).await[0]["status"], "ready");
+    assert_eq!(pending_salvage(&app).await, 0);
+}
+
+/// 过了补传的期限，链接不能用了：哪怕刚刚还有动静也不再等。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn nothing_waits_past_the_upload_deadline(pool: PgPool) {
+    let app = app(pool).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+    assert_eq!(
+        open_segment(&app, &token, "camera", segment).await.status,
+        204
+    );
+    assert_eq!(
+        put_chunk(&app, &token, "camera", segment, 0, b"AAAA")
+            .await
+            .status,
+        204
+    );
+    sqlx::query(
+        "UPDATE interviews SET status = 'abandoned', ended_at = now() - interval '25 hours'
+          WHERE id = $1",
+    )
+    .bind(interview_id)
+    .execute(&app.ctx.db)
+    .await
+    .expect("改面试状态失败");
+
+    assert_eq!(run_salvage(&app).await, 2);
+    assert_eq!(recordings(&app, interview_id).await[0]["status"], "ready");
+    assert_eq!(pending_salvage(&app).await, 0);
+}
+
+/// 真的录像少了结尾：WebM 和分段 MP4 截掉最后一片，合并出来还是能播的文件，读得出时长。
+/// 没装 ffmpeg 的机器上跳过。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn real_media_missing_its_tail_still_plays(pool: PgPool) {
+    let dir = tempfile::tempdir().expect("建临时目录失败");
+    let (Some(webm), Some(mp4)) = (sample_webm(dir.path()), sample_fragmented_mp4(dir.path()))
+    else {
+        eprintln!("没有可用的 ffmpeg，跳过");
+        return;
+    };
+    let blobs = LocalBlobStore::open(dir.path().join("blobs"))
+        .await
+        .expect("打不开文件存储");
+    let ctx = AppContext::new(pool, Arc::new(blobs), PlatformConfig::for_tests());
+    let app = app_on(ctx, RoomConfig::default()).await;
+    let (interview_id, token) = started(&app).await;
+
+    for (content_type, bytes) in [(WEBM, &webm), (MP4, &mp4)] {
+        let segment = interview_core::new_id();
+        let opened = TestRequest::put(segment_url("camera", segment))
+            .bearer(&token)
+            .json(&json!({ "content_type": content_type, "start_ms": 0 }))
+            .send(&app.public)
+            .await;
+        assert_eq!(opened.status, 204, "{}", opened.text());
+        let chunks: Vec<&[u8]> = bytes.chunks(bytes.len() / 4 + 1).collect();
+        // 最后一片没传上来
+        for (seq, chunk) in chunks.iter().enumerate().take(chunks.len() - 1) {
+            let seq = u32::try_from(seq).expect("分片数很小");
+            assert_eq!(
+                put_chunk(&app, &token, "camera", segment, seq, chunk)
+                    .await
+                    .status,
+                204
+            );
+        }
+    }
+    ended_minutes_ago(&app, interview_id, 45).await;
+    assert_eq!(run_salvage(&app).await, 3);
+
+    let list = recordings(&app, interview_id).await;
+    assert_eq!(list.len(), 2);
+    for recording in &list {
+        assert_eq!(recording["status"], "ready", "{recording}");
+        let note = recording["error"].as_str().expect("应该说明这一段不完整");
+        assert!(
+            note.contains("没有传完") && !note.contains("重新封装"),
+            "{note}"
+        );
+        let duration = recording["duration_ms"].as_i64().expect("应该读得出时长");
+        assert!((500..3_000).contains(&duration), "时长 {duration} 毫秒");
+    }
+}
+
+/// 缺的那一片页面手里也没有了（本机没存下来）：页面说不用等了，服务端马上把连得上的部分合并出来，
+/// 不用等到面试结束之后。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_page_can_say_the_missing_chunks_are_gone(pool: PgPool) {
+    let app = app(pool).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+    assert_eq!(
+        open_segment(&app, &token, "camera", segment).await.status,
+        204
+    );
+    for (seq, body) in [(0, "AAAA"), (1, "BBB"), (3, "DD")] {
+        assert_eq!(
+            put_chunk(&app, &token, "camera", segment, seq, body.as_bytes())
+                .await
+                .status,
+            204
+        );
+    }
+    let accept = |accept_missing: bool| {
+        TestRequest::post(format!("{}/complete", segment_url("camera", segment)))
+            .bearer(&token)
+            .json(&json!({ "total_chunks": 4, "accept_missing": accept_missing }))
+            .send(&app.public)
+    };
+    assert_eq!(error_code(&accept(false).await.json()), "chunks_missing");
+    assert_eq!(accept(true).await.status, 204);
+    // 重复调用没有副作用
+    assert_eq!(accept(true).await.status, 204);
+    assert_eq!(queued_tasks(&app).await, 1);
+    assert_eq!(run_tasks(&app).await, 1);
+
+    let list = recordings(&app, interview_id).await;
+    let recording = &list[0];
+    assert_eq!(recording["status"], "ready", "{recording}");
+    assert!(
+        recording["error"]
+            .as_str()
+            .is_some_and(|note| note.contains("没有传完")),
+        "{recording}"
+    );
+    let media = TestRequest::get(recording["media_url"].as_str().expect("应该有地址"))
+        .send(&app.hr)
+        .await;
+    assert_eq!(&media.body[..], b"AAAABBB");
+}
+
+/// 分片是齐的时候，带不带 `accept_missing` 都一样：照常合并，不标成不完整。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn accept_missing_changes_nothing_when_all_chunks_are_there(pool: PgPool) {
+    let app = app(pool).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+    assert_eq!(
+        open_segment(&app, &token, "camera", segment).await.status,
+        204
+    );
+    assert_eq!(
+        put_chunk(&app, &token, "camera", segment, 0, b"AAAA")
+            .await
+            .status,
+        204
+    );
+    let response = TestRequest::post(format!("{}/complete", segment_url("camera", segment)))
+        .bearer(&token)
+        .json(&json!({ "total_chunks": 1, "accept_missing": true }))
+        .send(&app.public)
+        .await;
+    assert_eq!(response.status, 204);
+    assert_eq!(run_tasks(&app).await, 1);
+    let list = recordings(&app, interview_id).await;
+    assert_eq!(list[0]["status"], "ready");
+    assert_eq!(list[0]["error"], Value::Null);
 }

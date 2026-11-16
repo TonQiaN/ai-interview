@@ -2,6 +2,7 @@
 import {
   Avatar,
   Badge,
+  Banner,
   Button,
   Card,
   CardBody,
@@ -27,14 +28,10 @@ import {
   turnNote,
 } from "../lib/format";
 import { isFrameEvent, type TimelineEvent } from "../lib/frames";
+import { recordingName, recordingNotes } from "../lib/recordings";
 import { FrameThumbs } from "./FrameThumbs";
 
 const rates = [0.75, 1, 1.25, 1.5, 2];
-const trackLabel: Record<Recording["track"], string> = {
-  camera: "录像",
-  microphone: "录音",
-  screen: "屏幕",
-};
 
 export interface ReplayPlayerProps {
   turns: Turn[];
@@ -101,6 +98,13 @@ export function ReplayPlayer({
   const pieces = recordings
     .filter((r) => r.status === "ready")
     .sort((a, b) => a.start_ms - b.start_ms);
+  // 没有能播的内容时，「还在上传和整理」已经写在画面上了，下面不再说一遍
+  const notes = useMemo(
+    () => recordingNotes(recordings).filter((x) => x.tone === "warning" || segments.length > 0),
+    [recordings, segments],
+  );
+  const problems = notes.filter((x) => x.tone === "warning");
+  const waiting = notes.filter((x) => x.tone === "info");
 
   useEffect(() => {
     if (seekTo) seek(seekTo.ms);
@@ -288,6 +292,25 @@ export function ReplayPlayer({
           )}
         </div>
 
+        {problems.length > 0 && (
+          <Banner tone="warning" title="录像不完整" className="adm-section">
+            {problems.length === 1 ? (
+              problems[0]?.text
+            ) : (
+              <ul className="adm-plain-list">
+                {problems.map((x) => (
+                  <li key={x.key}>{x.text}</li>
+                ))}
+              </ul>
+            )}
+          </Banner>
+        )}
+        {waiting.map((x) => (
+          <Banner key={x.key} className="adm-section">
+            {x.text}
+          </Banner>
+        ))}
+
         {(events.length > 0 || recordings.length > 0) && (
           <Card className="adm-section" flat>
             <CardHeader title="过程记录" />
@@ -326,9 +349,7 @@ export function ReplayPlayer({
               {pieces.length > 0 && (
                 <div className="oil-row oil-row--wrap" style={{ marginTop: "var(--oil-space-3)" }}>
                   {pieces.map((r) => {
-                    const same = pieces.filter((p) => p.track === r.track);
-                    const nth = same.length > 1 ? `第 ${same.indexOf(r) + 1} 段` : "";
-                    const label = `${trackLabel[r.track]}${nth} ${duration(r.duration_ms)}${
+                    const label = `${recordingName(recordings, r)} ${duration(r.duration_ms)}${
                       typeof r.size_bytes === "number" ? ` · ${fileSize(r.size_bytes)}` : ""
                     }`;
                     return r.media_url ? (
@@ -347,11 +368,6 @@ export function ReplayPlayer({
                     );
                   })}
                 </div>
-              )}
-              {recordings.some((r) => r.status === "failed") && (
-                <p className="adm-item__sub" style={{ margin: "var(--oil-space-3) 0 0" }}>
-                  有一段录制没有保存下来，那一段只能看逐字稿。
-                </p>
               )}
             </CardBody>
           </Card>

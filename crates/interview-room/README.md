@@ -34,6 +34,7 @@
 - **面试官语音**只给当前这一句、服务端让提前取的那几句和已经播过的。还没问到的题取不到，候选人没法提前听题。没合成出语音的句子 `audio_url` 是空的，页面只显示文字。
 - **结束**：引擎说结束时，同一个事务里把状态改成 `completed`、记下原因，并排一个 `interview.finalize` 任务（转写和出报告由它接手）。候选人中途点了结束是 `abandoned`，原因 `candidate_left`。
 - **候选人不回来了**：开始面试时排一个 `room.watchdog` 任务。它看最近一次动静（状态变化、录像分片、过程事件），超过 `AI_INTERVIEW_ROOM_ABANDON_MINUTES`（默认 15 分钟）没有动静就结束面试，状态 `abandoned`，原因 `connection_lost`；还有动静就约好下次再看。结束语已经发出去的不算中途离开，记成正常结束。
+- **同一条链接开在两个页面里**（`src/access.rs`）：页面每次载入给自己起一个标识，随每个请求放在 `X-Room-Page` 里。调 `start` 的页面记在 `interview_invites.active_page` 上（这场面试的每一条链接都记，换一条链接打开也算），它就是在面试的页面。面试进行中，别的页面来推进、问说完没有、结束面试都返回 409（`active_elsewhere`），它的每个响应都带 `X-Room-Active-Elsewhere: 1`，页面据此停下来；它录下的分片和过程事件照样收，不然那一段录像就丢了。不带标识的请求不参与。只是打开链接、做设备检测不算接走：刷新页面之后，记着的还是刷新前那个已经不在了的页面，这时候提醒候选人「面试在别处进行」是错的，所以页面只在自己正在面试时才理会这个提醒。测试在 `tests/takeover.rs`。
 - 页面报上来的时刻不能比服务端的时钟快 5 秒以上，超出的按服务端的算。
 
 ## 实时对话
@@ -157,6 +158,7 @@
 - 页面边录边传，一片一个请求；分片存在 `interviews/{面试}/recordings/{轨道}/{第几段}/chunks/{序号}`。
 - 同一个分片传几次结果都一样，留第一次的。重试和上一次请求同时到的时候，后到的等前一个写完（按段和序号加数据库的咨询锁），所以登记的大小、校验和和存下来的内容一定是同一次请求的。第二次传来的内容和第一次不一样时（页面那边出了问题才会这样）照样返回成功，因为页面拿到别的回答也补救不了，但会在日志里留一条警告，带着面试、录制段的 ID 和序号。
 - 一段传完后排一个后台任务 `recording.assemble`：按序号把分片接成 `recording.webm`（或 `.mp4`），用 ffmpeg 原样重新封装补上时长，读出时长写进 `interview_recordings.duration_ms`，然后删掉分片。
+- **候选人没传完就走了**：登记一段录制时约一个 `room.recording_salvage` 任务。面试还在进行就约下次再看；面试结束后，这场面试的录像最后一次有动静（登记新的一段、收到分片）之后过了 `AI_INTERVIEW_ROOM_UPLOAD_IDLE_MINUTES`（默认 30 分钟），还没等来 `complete` 的段就不等了：从第 0 片起连得上的分片有多少合并多少，`error` 里写明不完整；第 0 片都没有（文件头在里面）的记成失败。看的是整场面试的动静而不是每一段各看各的，因为页面是一段一段传的。链接不能用了（过了补传期限、面试取消或归档）就马上收尾，不再约下一次。收尾之后候选人才回来的，剩下的分片传不进来（409，`segment_closed`），这一段缺的就是没传上来的那部分。
 - ffmpeg 是可选的（`AI_INTERVIEW_FFMPEG`、`AI_INTERVIEW_FFPROBE`，默认从 PATH 里找）。没装时录像照样能从头播放，只是拖不了进度条，`error` 里会写一句说明。
 - 合并失败会重试，三次都不行就标成 `failed`，分片留在磁盘上。
 - 一段录制的身份是浏览器生成的 UUID（`client_segment_id`），所以登记、上传、完成都可以放心重试。
@@ -200,6 +202,8 @@ DATABASE_URL=$(scripts/dev-db.sh url) cargo test -p interview-room
 export DATABASE_URL=$(scripts/dev-db.sh url)
 cargo run -p interview-room --example demo -- seed            # 打印面试的 ID 和链接
 cargo run -p interview-room --example demo -- state <面试的 ID>   # 状态、对话记录、过程事件、录像
+cargo run -p interview-room --example demo -- revoke <面试的 ID>  # 撤销这场面试的链接，面试进行到一半也可以
+cargo run -p interview-room --example demo -- walk-away <面试的 ID> <分钟>  # 当作候选人在这么多分钟之前关了页面、再也没回来（测没传完的录像怎么收尾）
 ```
 
 `seed` 可以带 `--silence-sec`、`--min-sec`、`--max-sec`（答题的时间设置）、`--tone-ms`（提示音多长）、`--realtime 1`（配成实时对话）和 `--english 1`（配成英文面试，题目、岗位名、候选人名字也换成英文的）。候选人页面的浏览器端到端测试（`web/apps/candidate/e2e`）就是用它造数据、查结果的。

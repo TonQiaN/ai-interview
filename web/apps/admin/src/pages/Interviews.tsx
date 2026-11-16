@@ -1,4 +1,4 @@
-import { Button, PageHeader, Select, Table } from "@ai-interview/ui";
+import { Badge, Button, Checkbox, Select, Table } from "@ai-interview/ui";
 import { Plus } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useInterviews } from "../api/queries";
@@ -12,6 +12,7 @@ import {
   SearchInput,
   StatusBadge,
 } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { ReportVerdict } from "../components/ReportVerdict";
 import { duration, elapsedMs, relativeTime, statusLabel } from "../lib/format";
 
@@ -25,12 +26,15 @@ export function InterviewsPage() {
   const page = Number(params.get("page") ?? 1) || 1;
   // 默认新安排的在前；按分数排时没有报告的排在最后
   const byScore = params.get("sort") === "score";
+  // 归档的面试平时不列出来；要找回去看，或者管理员要彻底删除其中一场时勾上
+  const archived = params.get("archived") === "1";
   const interviews = useInterviews({
     status: status || undefined,
     q,
     page,
     page_size: 20,
     sort: byScore ? "-score" : undefined,
+    ...(archived ? { include_archived: true } : {}),
   });
   const filtered = Boolean(q || status);
 
@@ -82,6 +86,11 @@ export function InterviewsPage() {
           <option value="">新安排的在前</option>
           <option value="score">综合分高的在前</option>
         </Select>
+        <Checkbox
+          label="带上已归档的"
+          checked={archived}
+          onChange={(e) => update({ archived: e.target.checked ? "1" : "", page: "" })}
+        />
       </div>
       <QueryView query={interviews}>
         {(data) =>
@@ -119,7 +128,10 @@ export function InterviewsPage() {
                       </td>
                       <td>{i.position_title}</td>
                       <td>
-                        <StatusBadge status={i.status} />
+                        <span className="adm-item__tags">
+                          <StatusBadge status={i.status} />
+                          {i.archived_at && <Badge plain>已归档</Badge>}
+                        </span>
                       </td>
                       <td className="oil-num">{duration(elapsedMs(i))}</td>
                       <td>

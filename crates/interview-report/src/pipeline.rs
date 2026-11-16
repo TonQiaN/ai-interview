@@ -31,7 +31,7 @@ use crate::report::{
     ReviewFlagCode, RiskLevel, SCHEMA_VERSION, ScoreRange, StageFailure, Usage, null_as_default,
 };
 use crate::transcript::{
-    Assignment, QuestionGroup, group_by_question, lookup_by_alias, provided_assignment,
+    Assignment, QuestionGroup, clock, group_by_question, lookup_by_alias, provided_assignment,
     question_timing, render_context, segment_alias, timing_overview,
 };
 
@@ -245,7 +245,11 @@ pub async fn analyze(
         next_round: synthesis.next_round,
         timing,
         review_flags,
-        limitations: synthesis.limitations,
+        limitations: {
+            let mut limitations = synthesis.limitations;
+            limitations.extend(page_takeover_limitation(record));
+            limitations
+        },
         meta: ReportMeta {
             model: outcome.models.join("、"),
             thinking: thinking_label(options.thinking),
@@ -556,6 +560,27 @@ struct Synthesis {
     next_round: NextRound,
     #[serde(default, deserialize_with = "null_as_default")]
     limitations: Vec<String>,
+}
+
+/// 候选人中途换到另一个页面接着面的事件，由原来的页面上报。
+const KIND_PAGE_TAKEN_OVER: &str = "page_taken_over";
+
+/// 候选人中途换到另一个页面接着面（多半是换了一台设备）时，报告要说明的局限：
+/// 换页面前后是不是同一个人，这份分析看不出来。这一条由程序给，不靠模型记得写。
+fn page_takeover_limitation(record: &InterviewRecord) -> Option<String> {
+    let times: Vec<String> = record
+        .events
+        .iter()
+        .filter(|event| event.kind == KIND_PAGE_TAKEN_OVER)
+        .map(|event| event.at_ms.map_or_else(|| "面试中途".to_owned(), clock))
+        .collect();
+    if times.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "候选人在 {} 换到另一个页面接着面试（多半是换了一台设备）。这份报告不比对人脸，换页面前后是不是同一个人，请对照这个时间前后的录像确认。",
+        times.join("、")
+    ))
 }
 
 /// 分段这一步模型的输出。

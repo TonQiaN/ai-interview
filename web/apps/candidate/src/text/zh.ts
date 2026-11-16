@@ -285,14 +285,21 @@ export const zh = {
     offlineBody: "恢复后会自动继续，请保持页面打开。",
     saving: "保存中",
     remaining: (size: string): string => `还剩 ${size}`,
+    movedTitle: "面试已经在另一个页面里继续了",
+    movedDescription: "这个页面已经停止录制，正在保存它录下的部分。请先不要关闭这个页面。",
   },
 
   done: {
     aborted: {
       title: "面试已中止",
-      description:
-        "这条面试链接已经失效，面试没能继续。已经录下的内容已保存。如有疑问，请联系招聘人员。",
+      description: "这条面试链接已经失效，面试没能继续。如有疑问，请联系招聘人员。",
     },
+    moved: {
+      title: "面试已经在另一个页面里继续了",
+      description:
+        "同一条面试链接又在别的页面打开了，面试换到了那边。这个页面已经停止录制，它录下的部分已经保存。请回到那个页面继续面试，这个页面可以关掉了。",
+    },
+    resumeHere: "回到这个页面继续面试",
     left: { title: "面试已结束", description: `${SAVED}现在可以关闭这个页面了。` },
     noResponse: {
       title: "面试已结束",

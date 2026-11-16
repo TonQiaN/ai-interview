@@ -267,6 +267,10 @@ describe("录像上传和屏幕常亮的事件", () => {
     expect(text("upload_finished", { uploaded_bytes: 2048, wait_ms: 300 })).toBe(
       "录像传完了（共 2 KB）",
     );
+    // 一个字节都没传的那一次不说「传完了」
+    expect(text("upload_finished", { uploaded_bytes: 0, wait_ms: null })).toBe(
+      "这一次打开页面没有再传录像",
+    );
   });
 
   it("一次停顿在时间轴上只有一个点，停了多久记在传不上去那条上", () => {
@@ -314,5 +318,20 @@ describe("录像上传和屏幕常亮的事件", () => {
     // 没有开始那一条时不知道先后，照旧当成开始前
     const lone = { kind: "device_check", occurred_at: "2026-01-05T09:59:00Z" };
     expect(eventWhen(lone, [lone])).toBe("开始前");
+  });
+});
+
+describe("面试换到另一个页面继续", () => {
+  const text = (kind: string, payload: Record<string, unknown>) => eventText({ kind, payload });
+
+  it("原来的页面停下来那一条有中文说法，提示 HR 看一眼", () => {
+    expect(text("page_taken_over", {})).toBe("面试换到另一个页面继续了，这个页面停了下来");
+    expect(eventSeverity("page_taken_over")).toBe("notice");
+  });
+
+  it("中断以后接着面的那一条不再写成「面试开始」", () => {
+    expect(text("interview_started", { resumed: true })).toBe("回来接着面试");
+    expect(text("interview_started", { resumed: false })).toBe("面试开始");
+    expect(text("interview_started", {})).toBe("面试开始");
   });
 });

@@ -2,10 +2,10 @@ import {
   Badge,
   Banner,
   Button,
+  Checkbox,
   Dialog,
   Field,
   Input,
-  PageHeader,
   Segmented,
   Table,
   Textarea,
@@ -29,7 +29,9 @@ import type {
   RaasPosition,
 } from "../api/types";
 import { Empty, Pager, QueryView, SearchInput } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { RaasImportDialog } from "../components/RaasImportDialog";
+import { sameForm } from "../lib/form";
 import { positionStatusLabel, positionStatusTone, relativeTime } from "../lib/format";
 
 export const emptyExtra: PositionExtra = {
@@ -262,6 +264,7 @@ function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     <Dialog
       open={open}
       onClose={onClose}
+      unsaved={!sameForm(value, emptyPosition)}
       wide
       title="新建岗位"
       footer={
@@ -335,8 +338,15 @@ export function PositionsPage() {
   const status = (Object.keys(positionStatusLabel) as PositionStatus[]).find(
     (s) => s === statusParam,
   );
+  const archived = params.get("archived") === "1";
   const page = Number(params.get("page") ?? 1) || 1;
-  const positions = usePositions({ q, status, page, page_size: 20 });
+  const positions = usePositions({
+    q,
+    status,
+    page,
+    page_size: 20,
+    ...(archived ? { include_archived: true } : {}),
+  });
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
 
@@ -386,6 +396,11 @@ export function PositionsPage() {
           ]}
           onChange={(value) => update({ status: value === "all" ? "" : value, page: "" })}
         />
+        <Checkbox
+          label="带上已归档的"
+          checked={archived}
+          onChange={(e) => update({ archived: e.target.checked ? "1" : "", page: "" })}
+        />
       </div>
       <QueryView query={positions}>
         {(data) =>
@@ -417,9 +432,12 @@ export function PositionsPage() {
                       style={{ cursor: "pointer" }}
                     >
                       <td>
-                        <Link to={`/positions/${p.id}`} className="adm-link">
-                          {p.title}
-                        </Link>
+                        <div className="oil-row">
+                          <Link to={`/positions/${p.id}`} className="adm-link">
+                            {p.title}
+                          </Link>
+                          {p.archived_at && <Badge plain>已归档</Badge>}
+                        </div>
                         {(p.department || p.extra.client_name) && (
                           <div className="adm-person__sub">
                             {[p.extra.client_name, p.department].filter(Boolean).join(" · ")}

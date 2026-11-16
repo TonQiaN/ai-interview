@@ -255,14 +255,23 @@ export const en: Texts = {
     offlineBody: "It continues by itself once you are back online. Please keep this page open.",
     saving: "Saving",
     remaining: (size) => `${size} left`,
+    movedTitle: "The interview continues in another page",
+    movedDescription:
+      "This page has stopped recording and is saving what it recorded. Please keep it open for now.",
   },
 
   done: {
     aborted: {
       title: "Interview stopped",
       description:
-        "This interview link is no longer valid, so the interview could not continue. What was recorded has been saved. If you have questions, please contact the recruiter.",
+        "This interview link is no longer valid, so the interview could not continue. If you have questions, please contact the recruiter.",
     },
+    moved: {
+      title: "The interview continues in another page",
+      description:
+        "The same interview link was opened in another page and the interview moved there. This page has stopped recording and what it recorded is saved. Please go back to that page to continue. You can close this one.",
+    },
+    resumeHere: "Continue the interview in this page",
     left: { title: "Interview ended", description: `${SAVED} You can close this page now.` },
     noResponse: {
       title: "Interview ended",

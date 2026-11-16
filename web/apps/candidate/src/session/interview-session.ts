@@ -4,7 +4,13 @@
  * 页面只做两件事：订阅这里的快照来画界面，把按钮点击转成这里的方法调用。
  * 摄像头、音频、录制、上传、过程事件这些资源都由它创建和释放。
  */
-import { HttpRoomApi, type RoomApi, RoomApiError } from "../lib/api/room-api";
+import {
+  ACTIVE_ELSEWHERE,
+  HttpRoomApi,
+  type RoomApi,
+  RoomApiError,
+  type RoomApiHooks,
+} from "../lib/api/room-api";
 import type { NextStep, RoomSession } from "../lib/api/room-types";
 import {
   bindPageEvents,
@@ -36,7 +42,11 @@ import {
   sha256Hex,
 } from "../lib/upload/chunk-store";
 import { IndexedDbChunkStore } from "../lib/upload/idb-chunk-store";
+import { discardSession, discardStale } from "../lib/upload/leftovers";
 import { closeOrphanSegments } from "../lib/upload/orphans";
+import { OwnedChunkStore } from "../lib/upload/owned-chunk-store";
+import { announcePage, isPageOpen } from "../lib/upload/page-presence";
+import { SpillChunkStore } from "../lib/upload/spill-chunk-store";
 import { UploadEventTracker } from "../lib/upload/upload-events";
 import { retryDelayMs, Uploader, type UploadStatus } from "../lib/upload/uploader";
 import { EnergyVad } from "../lib/vad/energy-vad";
@@ -104,9 +114,12 @@ export interface SessionSnapshot {
   audioHalted: boolean;
   /** 录像分片只能放在内存里（没有 IndexedDB），刷新会丢。 */
   volatileStorage: boolean;
-  /** 面试是怎么结束的。 */
+  /** 面试是怎么结束的。`taken_over` 是面试没有结束，只是换到另一个页面里继续了。 */
   finishReason: string | null;
 }
+
+/** 面试换到另一个页面里继续了，这个页面停了下来。 */
+export const TAKEN_OVER = "taken_over";
 
 const INITIAL_DEVICE: DeviceState = {
   permission: "idle",
@@ -120,12 +133,14 @@ export interface InterviewSessionOptions {
   /** location.hash。 */
   hash: string;
   /** 测试时可以换掉接口实现。 */
-  createApi?: (token: string) => RoomApi;
+  createApi?: (token: string, hooks: RoomApiHooks) => RoomApi;
+  /** 这个页面的标识。默认随机生成。 */
+  pageId?: string;
 }
 
 export class InterviewSession {
   private readonly hash: string;
-  private readonly createApi: (token: string) => RoomApi;
+  private readonly createApi: (token: string, hooks: RoomApiHooks) => RoomApi;
   private readonly listeners = new Set<() => void>();
   private readonly levelListeners = new Set<(level: number) => void>();
   private readonly vad = new EnergyVad();
@@ -147,6 +162,8 @@ export class InterviewSession {
     finishReason: null,
   };
 
+  /** 这个页面的标识，每次载入换一个：服务端靠它分清是哪个页面在面试，本机的录像队列靠它分清一段是谁录的。 */
+  private readonly pageId: string;
   private api: RoomApi | null = null;
   private sessionKey = "";
   private store: ChunkStore | null = null;
@@ -172,7 +189,8 @@ export class InterviewSession {
 
   constructor(options: InterviewSessionOptions) {
     this.hash = options.hash;
-    this.createApi = options.createApi ?? ((token) => new HttpRoomApi({ token }));
+    this.createApi = options.createApi ?? ((token, hooks) => new HttpRoomApi({ token, ...hooks }));
+    this.pageId = options.pageId ?? crypto.randomUUID();
   }
 
   getSnapshot = (): SessionSnapshot => this.snapshot;
@@ -209,7 +227,10 @@ export class InterviewSession {
     if (!capability.ok) return this.fail("unsupported");
 
     if (!this.api) {
-      this.api = this.createApi(token);
+      this.api = this.createApi(token, {
+        pageId: this.pageId,
+        onActiveElsewhere: this.handleActiveElsewhere,
+      });
       // 本地队列按面试区分。用令牌的摘要做键，令牌本身不落盘
       this.sessionKey = (
         await sha256Hex(new TextEncoder().encode(token).buffer as ArrayBuffer)
@@ -262,13 +283,22 @@ export class InterviewSession {
 
     let store: ChunkStore;
     try {
-      store = await IndexedDbChunkStore.open();
+      // 面试到一半本机存不下了（磁盘满了、配额用完了），写不进去的分片先留在内存里接着传
+      store = new SpillChunkStore(await IndexedDbChunkStore.open(), {
+        onSpill: (error) =>
+          collector.record("recording_error", { message: error.name, kept_in_memory: true }),
+      });
     } catch {
       // 隐私模式等情况下 IndexedDB 不可用：分片放内存，能录能传，只是刷新会丢没传完的
       store = new MemoryChunkStore();
       this.patch({ volatileStorage: true });
     }
+    // 同一个浏览器里别的标签页也在用这份队列：先说一声这个页面开着，再只管归自己的那些段
+    this.cleanups.push(announcePage(this.pageId));
+    store = new OwnedChunkStore(store, { pageId: this.pageId, isPageOpen });
     this.store = store;
+    // 别的面试在这台设备上留下的旧录像已经传不上去了，顺手清掉
+    await discardStale(store, { keep: this.sessionKey, now: Date.now() }).catch(() => {});
 
     const uploader = new Uploader({
       sessionKey: this.sessionKey,
@@ -499,11 +529,21 @@ export class InterviewSession {
       const reason = await runner.run(first);
       if (reason !== null) await this.finish(reason, false);
     } catch (error) {
-      // 链接被撤销、面试被取消：停止录制，把已经录下的传完
+      // 链接被撤销、面试被取消：停止录制。已经录下的服务端不再收，收尾时从本机删掉
       this.patch({ problem: problemOf(error) });
       await this.finish("aborted", false);
     }
   }
+
+  /**
+   * 服务端说面试正在另一个页面里进行（同一条链接又在别处打开，并且在那边点了继续）。
+   * 这个页面正在面试的话就停下来：不再播、不再录，把已经录下的传完。面试本身没有结束。
+   */
+  private handleActiveElsewhere = (): void => {
+    if (this.snapshot.stage !== "interview") return;
+    this.runner?.stop();
+    void this.finish(TAKEN_OVER, false);
+  };
 
   /** 面试中不让屏幕自己熄灭。要在按钮点击里调用；申请不到不影响面试。 */
   private async keepScreenOn(): Promise<void> {
@@ -521,6 +561,9 @@ export class InterviewSession {
     const { store, stream, graph } = this;
     const room = this.snapshot.room;
     if (!store || !stream || !graph || !room) return;
+    // 打开页面之后才关掉的别的标签页留下的段，趁这一段还没开始录先收尾。
+    // 开始录了就不能再收尾了（分不清哪一段是正在录的），得等到面试结束
+    await this.closeOrphans();
     const track: RecordingTrack = stream.getVideoTracks().length > 0 ? "camera" : "microphone";
     const recorder = new SegmentRecorder({
       sessionKey: this.sessionKey,
@@ -691,7 +734,9 @@ export class InterviewSession {
       interrupted: false,
       audioHalted: false,
     });
-    this.collector?.record("interview_finished", { reason });
+    // 换到别的页面继续的不算结束，另记一种事件：报告里能看出来中途换过页面
+    if (reason === TAKEN_OVER) this.collector?.record("page_taken_over");
+    else this.collector?.record("interview_finished", { reason });
     this.outputWatch?.stop();
     this.outputWatch = null;
     this.outputHaltedAt = null;
@@ -719,6 +764,11 @@ export class InterviewSession {
         await this.api?.finish("candidate_left");
         return;
       } catch (error) {
+        // 这个页面已经不是在面试的那个了，结束不了面试：面试还在另一个页面里继续
+        if (error instanceof RoomApiError && error.code === ACTIVE_ELSEWHERE) {
+          this.collector?.record("page_taken_over");
+          this.patch({ finishReason: TAKEN_OVER });
+        }
         if (error instanceof RoomApiError && !error.retryable) return;
         await new Promise((resolve) =>
           setTimeout(resolve, retryDelayMs(failures, 1_000, 10_000, Math.random())),
@@ -740,7 +790,47 @@ export class InterviewSession {
       window.removeEventListener("beforeunload", this.warnBeforeUnload);
       this.patch({ stage: "done", actionError: null });
     } catch (error) {
-      this.patch({ actionError: error instanceof Error ? error.message : String(error) });
+      const dead = await this.deadLinkProblem();
+      if (dead === null) {
+        this.patch({ actionError: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+      // 链接已经不能用了，剩下的录像谁也传不上去：不让候选人一直点「重试」
+      window.removeEventListener("beforeunload", this.warnBeforeUnload);
+      if (this.snapshot.finishReason === "aborted") {
+        // 面试进行到一半链接失效的：告诉候选人面试中止了
+        await this.discardLocalRecordings();
+        this.patch({ stage: "done", problem: dead, actionError: null });
+      } else {
+        this.fail(dead);
+      }
+    }
+  }
+
+  /** 录像传不上去时问一下服务端：是不是这条链接已经不能用了。还能用、或者问不到，返回 null。 */
+  private async deadLinkProblem(): Promise<ProblemKind | null> {
+    if (!this.api) return null;
+    try {
+      await this.api.getSession();
+      return null;
+    } catch (error) {
+      const problem = problemOf(error);
+      return isDeadLink(problem) ? problem : null;
+    }
+  }
+
+  /**
+   * 链接再也用不了了（过期、被撤销、面试被取消或删除）：留在本机的录像谁也传不上去，删掉。
+   * 录像里是候选人的脸和声音，不该留在可能是借来的设备上。
+   */
+  private async discardLocalRecordings(): Promise<void> {
+    this.uploader?.stop();
+    try {
+      this.store ??= await IndexedDbChunkStore.open();
+      await discardSession(this.store, this.sessionKey);
+      await discardStale(this.store, { keep: this.sessionKey, now: Date.now() });
+    } catch {
+      // 本地存储打不开，也就没有东西留在里面
     }
   }
 
@@ -821,6 +911,7 @@ export class InterviewSession {
 
   private fail(problem: ProblemKind): void {
     this.patch({ stage: "problem", problem });
+    if (isDeadLink(problem)) void this.discardLocalRecordings();
   }
 
   private patch(patch: Partial<SessionSnapshot>): void {
@@ -828,6 +919,11 @@ export class InterviewSession {
     this.snapshot = { ...this.snapshot, ...patch };
     for (const listener of this.listeners) listener();
   }
+}
+
+/** 服务端明确说这条链接不能用了。网络不通、服务端出错不算：那些等一等还能接着传。 */
+function isDeadLink(problem: ProblemKind): boolean {
+  return problem === "invalid_link" || problem === "expired" || problem === "revoked";
 }
 
 function problemOf(error: unknown): ProblemKind {

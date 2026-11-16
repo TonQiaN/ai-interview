@@ -37,7 +37,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::access::RoomAccess;
+use crate::access::{RoomAccess, claim_page};
 use crate::events::{self, EventSource, NewEvent};
 use crate::protocol::{
     AnswerSettings, NextStep, PauseCheckRequest, PauseCheckResponse, PauseVerdict, Progress,
@@ -413,6 +413,8 @@ async fn start_interview(
     if row.is_finished() {
         return Ok(Json(row.finish_step()));
     }
+    // 从现在起这场面试归这个页面面。之前在面的页面（如果还开着）会被告知停下来
+    claim_page(&mut tx, &access).await?;
     if row.status == InterviewStatus::InProgress && row.is_realtime() {
         // 实时对话的续面
         tx.commit().await?;
@@ -591,6 +593,7 @@ async fn advance_interview(
     access: RoomAccess,
     Json(request): Json<AdvanceRequest>,
 ) -> ApiResult<Json<NextStep>> {
+    access.require_active_page()?;
     let interview_id = access.interview_id;
     if is_realtime(&deps, interview_id).await? {
         return Ok(Json(
@@ -649,6 +652,7 @@ async fn check_pause(
     access: RoomAccess,
     Json(request): Json<PauseCheckRequest>,
 ) -> ApiResult<Json<PauseCheckResponse>> {
+    access.require_active_page()?;
     let verdict = if is_realtime(&deps, access.interview_id).await? {
         realtime::check_pause(&deps, access.interview_id, &request).await?
     } else {
@@ -1333,6 +1337,8 @@ async fn finish_interview(
     if row.is_finished() {
         return Ok(StatusCode::NO_CONTENT);
     }
+    // 面试已经在另一个页面继续了：留在后面的这个页面不能把它结束掉
+    access.require_active_page()?;
     if row.status != InterviewStatus::InProgress {
         return Err(ApiError::conflict("面试还没有开始"));
     }

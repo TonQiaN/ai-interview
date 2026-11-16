@@ -1,9 +1,10 @@
-import { Banner, Card, CardBody, CardHeader, KeyValue, PageHeader } from "@ai-interview/ui";
+import { Banner, Card, CardBody, CardHeader, KeyValue } from "@ai-interview/ui";
 import { Link } from "react-router";
 import { isMock } from "../api/http";
 import { useConfigDefaults, useSystemStatus } from "../api/queries";
 import { configSummary } from "../components/ConfigForm";
 import { QueryView } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { SystemStatusList } from "../components/SystemStatusList";
 
 /** 系统：各个依赖是不是就绪，和面试设置的默认值、可调范围。 */

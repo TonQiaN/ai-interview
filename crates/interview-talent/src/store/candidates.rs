@@ -368,6 +368,16 @@ pub async fn archive(db: &PgPool, id: Uuid) -> sqlx::Result<bool> {
     Ok(done.rows_affected() == 1)
 }
 
+/// 把归档的候选人恢复回来。返回 `None` 表示候选人不存在；没归档的再恢复一次也算成功。
+pub async fn restore(db: &PgPool, id: Uuid) -> sqlx::Result<Option<Candidate>> {
+    sqlx::query_as(&format!(
+        "UPDATE candidates SET archived_at = NULL WHERE id = $1 RETURNING {COLUMNS}"
+    ))
+    .bind(id)
+    .fetch_optional(db)
+    .await
+}
+
 /// 彻底删除前先把这位候选人锁住，返回他的简历有哪些。没有这个人返回 `None`。
 ///
 /// 锁到事务结束：这期间别处给他传简历、安排面试都得等，等来的是「候选人不存在」，

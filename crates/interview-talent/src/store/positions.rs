@@ -375,3 +375,13 @@ pub async fn archive(db: &PgPool, id: Uuid) -> sqlx::Result<bool> {
     .await?;
     Ok(done.rows_affected() == 1)
 }
+
+/// 把归档的岗位恢复回来。返回 `None` 表示岗位不存在；没归档的再恢复一次也算成功。
+pub async fn restore(db: &PgPool, id: Uuid) -> sqlx::Result<Option<Position>> {
+    sqlx::query_as(&format!(
+        "UPDATE positions SET archived_at = NULL WHERE id = $1 RETURNING {COLUMNS}"
+    ))
+    .bind(id)
+    .fetch_optional(db)
+    .await
+}

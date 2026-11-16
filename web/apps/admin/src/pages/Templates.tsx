@@ -1,4 +1,4 @@
-import { Button, buttonClass, Card, CardBody, PageHeader, useToast } from "@ai-interview/ui";
+import { Button, buttonClass, Card, CardBody, useToast } from "@ai-interview/ui";
 import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
@@ -7,6 +7,7 @@ import { useDeleteTemplate, useTemplates } from "../api/queries";
 import type { InterviewTemplate } from "../api/types";
 import { configSummary } from "../components/ConfigForm";
 import { Confirm, Empty, QueryView } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { relativeTime } from "../lib/format";
 
 /** 卡片上列几条最能说明这个模板的要求 */

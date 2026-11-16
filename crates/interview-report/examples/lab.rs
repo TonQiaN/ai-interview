@@ -114,6 +114,18 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// 给样例加上候选人中途换到另一个页面接着面的过程事件，另存一份，用来检验报告怎么写这件事。不调用模型
+    Takeover {
+        /// 只处理这几个场景（场景 id），不填就处理全部
+        only: Vec<String>,
+        #[arg(long, default_value = "crates/interview-report/scenarios")]
+        scenarios: PathBuf,
+        #[arg(long, default_value = "crates/interview-report/samples")]
+        samples: PathBuf,
+        /// 加了事件的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// 从录像里抽帧，让模型看画面，打印整理出来的过程事件和每一帧的结果
     Frames {
         /// 摄像头录像文件（WebM 或 MP4）
@@ -224,10 +236,19 @@ async fn main() -> Result<()> {
     {
         return network_all(scenarios, samples, out, only, *unrecovered);
     }
+    if let Command::Takeover {
+        only,
+        scenarios,
+        samples,
+        out,
+    } = &cli.command
+    {
+        return takeover_all(scenarios, samples, out, only);
+    }
     let model =
         ReportUnfinished(DeepSeekClient::from_env().context("需要设置环境变量 DEEPSEEK_API_KEY")?);
     match cli.command {
-        Command::Network { .. } => Ok(()),
+        Command::Network { .. } | Command::Takeover { .. } => Ok(()),
         Command::Simulate {
             only,
             scenarios,
@@ -793,11 +814,20 @@ fn add_network_events(record: &mut InterviewRecord, unrecovered: bool) -> usize 
             json!({"uploaded_bytes": 58_000_000, "wait_ms": 41_000}),
         ));
     }
+    add_raw_events(record, "n", raw)
+}
+
+/// 把面试间那样上报的事件整理好，加进记录里。返回加了几条。
+fn add_raw_events(
+    record: &mut InterviewRecord,
+    id_prefix: &str,
+    raw: Vec<(&str, Option<u64>, serde_json::Value)>,
+) -> usize {
     let raw = raw
         .into_iter()
         .enumerate()
         .map(|(index, (kind, at_ms, payload))| RawEvent {
-            id: format!("n{}", index + 1),
+            id: format!("{id_prefix}{}", index + 1),
             kind: kind.to_owned(),
             at_ms,
             payload,
@@ -811,6 +841,62 @@ fn add_network_events(record: &mut InterviewRecord, unrecovered: bool) -> usize 
         .events
         .sort_by_key(|event| event.at_ms.map_or(0, |at| at + 1));
     count
+}
+
+// ---------- 中途换到另一个页面 ----------
+
+fn takeover_all(scenarios: &Path, samples: &Path, out: &Path, only: &[String]) -> Result<()> {
+    let scenarios = load_scenarios(scenarios, only)?;
+    std::fs::create_dir_all(out)?;
+    for scenario in &scenarios {
+        let mut record: InterviewRecord =
+            read_json(&samples.join(format!("{}.json", scenario.id)))?;
+        let at = add_takeover_events(&mut record);
+        let path = out.join(format!("{}.json", scenario.id));
+        std::fs::write(&path, serde_json::to_string_pretty(&record)? + "\n")?;
+        println!(
+            "{}：在 {} 换了页面 → {}",
+            scenario.id,
+            clock(at),
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+/// 加上候选人中途换到另一个页面接着面时面试间会报的事件：原来的页面报 `page_taken_over`，
+/// 新的页面报 `page_opened` 和 `interview_started`（`resumed: true`）。换页面的时间取面试过半之后
+/// 面试官开口问下一个问题之前。返回换页面的时间。
+fn add_takeover_events(record: &mut InterviewRecord) -> u64 {
+    let half = record.duration_ms / 2;
+    let at = record
+        .transcript
+        .iter()
+        .find(|segment| segment.speaker == Speaker::Interviewer && segment.start_ms >= half)
+        .map_or(half, |segment| segment.start_ms.saturating_sub(800));
+    let signals = json!({
+        "signals": {"visibility": true, "fullscreen": true, "device_change": true, "network": true, "clipboard": true},
+        "in_app_browser": null
+    });
+    let mut raw = Vec::new();
+    if !record
+        .events
+        .iter()
+        .any(|event| event.kind == "page_opened")
+    {
+        raw.push(("page_opened", None, signals.clone()));
+        raw.push(("interview_started", Some(0), json!({"resumed": false})));
+    }
+    raw.push(("page_opened", None, signals));
+    raw.push(("interview_started", Some(at), json!({"resumed": true})));
+    raw.push(("page_taken_over", Some(at + 400), json!({})));
+    add_raw_events(record, "t", raw);
+    at
+}
+
+/// 毫秒写成「分:秒」。
+fn clock(ms: u64) -> String {
+    format!("{}:{:02}", ms / 60_000, ms / 1000 % 60)
 }
 
 /// 让模型把候选人的话改写成带识别错误的样子。返回新的记录、改动的字数（编辑距离）和候选人的总字数。

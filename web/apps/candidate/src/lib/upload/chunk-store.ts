@@ -26,6 +26,16 @@ export interface SegmentMeta {
   startMs: number;
   /** 这一段一共多少个分片。还在录的时候是 null，停止录制后写入。 */
   totalChunks: number | null;
+  /**
+   * 这一段是什么时候开始录的（Date.now()）。用来清掉放了太久、已经传不上去的录像。
+   * 没有这一项的按很久以前录的算。
+   */
+  createdAt?: number;
+  /**
+   * 录这一段的页面的标识。同一个浏览器里几个标签页共用这份队列，靠它分清一段是谁的
+   * （owned-chunk-store.ts）。没有这一项的是加这个标记之前留下的。
+   */
+  owner?: string;
 }
 
 export interface ChunkKey {
@@ -51,8 +61,12 @@ export interface ChunkStore {
   putSegment(meta: SegmentMeta): Promise<void>;
   /** 某场面试的所有段，按开始时间排序。 */
   listSegments(sessionKey: string): Promise<SegmentMeta[]>;
+  /** 这台设备上所有面试留下的段。 */
+  listAllSegments(): Promise<SegmentMeta[]>;
   /** 删除一段的登记。调用前应确保它的分片都已删除。 */
   deleteSegment(sessionKey: string, segmentId: string): Promise<void>;
+  /** 把一段连同它还留在本地的分片一起删掉。传不上去的录像不留在设备上。 */
+  discardSegment(sessionKey: string, segmentId: string): Promise<void>;
 
   putChunk(chunk: StoredChunk): Promise<void>;
   /** 某段还留在本地的分片，按序号排序。只返回序号和大小，不读内容。 */
@@ -80,7 +94,18 @@ export class MemoryChunkStore implements ChunkStore {
       .map((segment) => ({ ...segment }));
   }
 
+  async listAllSegments(): Promise<SegmentMeta[]> {
+    return [...this.segments.values()].map((segment) => ({ ...segment }));
+  }
+
   async deleteSegment(sessionKey: string, segmentId: string): Promise<void> {
+    this.segments.delete(`${sessionKey}/${segmentId}`);
+  }
+
+  async discardSegment(sessionKey: string, segmentId: string): Promise<void> {
+    for (const [id, chunk] of this.chunks) {
+      if (chunk.sessionKey === sessionKey && chunk.segmentId === segmentId) this.chunks.delete(id);
+    }
     this.segments.delete(`${sessionKey}/${segmentId}`);
   }
 
