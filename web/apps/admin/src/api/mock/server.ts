@@ -8,11 +8,14 @@
 import { estimateBudget } from "../../lib/budget";
 import { replanReasons } from "../../lib/replan";
 import type {
+  Account,
   AdminUser,
   Candidate,
   CandidateDetail,
   CandidateInput,
   CandidateListItem,
+  ChangePasswordInput,
+  CreateAccountInput,
   CreatedInvite,
   CreateVoice,
   Decision,
@@ -38,6 +41,7 @@ import type {
   ResumeDetail,
   SystemStatus,
   TemplateInput,
+  UpdateAccountInput,
   UpdateVoice,
   Utterance,
   Voice,
@@ -496,6 +500,43 @@ export function createMockServer(options: MockOptions = {}) {
     role: "admin",
   };
 
+  /** 能登录后台的账号。第一个是现在登录的这个人 */
+  const accounts: Account[] = [
+    {
+      id: me.id,
+      email: me.email,
+      display_name: me.display_name,
+      role: "admin",
+      disabled: false,
+      created_at: iso(-90 * 24 * 3600_000),
+    },
+    {
+      id: "0193a000-0000-7000-8000-0000000000a2",
+      email: "recruiter@example.com",
+      display_name: "陈雨桐",
+      role: "recruiter",
+      disabled: false,
+      created_at: iso(-30 * 24 * 3600_000),
+    },
+    {
+      id: "0193a000-0000-7000-8000-0000000000a3",
+      email: "former@example.com",
+      display_name: "周启明",
+      role: "recruiter",
+      disabled: true,
+      created_at: iso(-200 * 24 * 3600_000),
+    },
+  ];
+  /** 演示数据里现在登录的人的密码。登录时填什么都行，改密码时要对得上 */
+  let myPassword = "demo";
+  const passwordIssue = (password: string | null | undefined): string | null => {
+    const length = password?.length ?? 0;
+    return length < 8 || length > 200 ? "密码要 8 到 200 位" : null;
+  };
+  const requireAdmin = () => {
+    if (me.role !== "admin") throw new HttpError(403, "forbidden", "只有管理员可以做这个操作");
+  };
+
   const routes: Route[] = [];
   const on = (method: string, path: string, handler: Handler, isPublic = false) => {
     const pattern = new RegExp(`^${path.replace(/:[a-z_]+/g, "([^/]+)")}$`);
@@ -512,6 +553,9 @@ export function createMockServer(options: MockOptions = {}) {
         throw new HttpError(422, "validation_failed", "请输入邮箱和密码");
       if (password === "wrong") throw new HttpError(401, "invalid_credentials", "邮箱或密码不对");
       me.email = email.trim();
+      const self = accounts[0];
+      if (self) self.email = me.email;
+      myPassword = password;
       loggedIn = true;
       try {
         sessionStorage.setItem(SESSION_KEY, "1");
@@ -537,6 +581,84 @@ export function createMockServer(options: MockOptions = {}) {
     true,
   );
   on("GET", "/auth/me", () => me);
+  on("PUT", "/auth/password", ({ body }) => {
+    const input = body as ChangePasswordInput;
+    const issue = passwordIssue(input.new_password);
+    if (issue) throw new HttpError(422, "validation_failed", issue, { new_password: issue });
+    if (input.current_password !== myPassword)
+      throw new HttpError(422, "validation_failed", "现在的密码不对", {
+        current_password: "现在的密码不对",
+      });
+    if (input.new_password === myPassword)
+      throw new HttpError(422, "validation_failed", "新密码不能和现在的一样", {
+        new_password: "新密码不能和现在的一样",
+      });
+    myPassword = input.new_password;
+    return null;
+  });
+
+  // ───────── HR 账号 ─────────
+  on("GET", "/accounts", ({ query }): Page<Account> => {
+    requireAdmin();
+    const list = accounts.filter((a) => matches(query.get("q"), a.email, a.display_name));
+    if (query.get("sort") === "email") list.sort((a, b) => a.email.localeCompare(b.email));
+    else list.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return paginate(list, query);
+  });
+  on("POST", "/accounts", ({ body }): Account => {
+    requireAdmin();
+    const input = body as CreateAccountInput;
+    const email = input.email?.trim() ?? "";
+    if (!/^[^@\s]+@[^@\s]+$/.test(email))
+      throw new HttpError(422, "validation_failed", "邮箱格式不对", { email: "邮箱格式不对" });
+    if (!input.display_name?.trim())
+      throw new HttpError(422, "validation_failed", "名字不能为空", { display_name: "不能为空" });
+    const issue = passwordIssue(input.password);
+    if (issue) throw new HttpError(422, "validation_failed", issue, { password: issue });
+    if (accounts.some((a) => a.email.toLowerCase() === email.toLowerCase()))
+      throw new HttpError(409, "conflict", "这个邮箱已经有账号了");
+    const account: Account = {
+      id: newId(),
+      email,
+      display_name: input.display_name.trim(),
+      role: input.role === "admin" ? "admin" : "recruiter",
+      disabled: false,
+      created_at: iso(0),
+    };
+    accounts.push(account);
+    return account;
+  });
+  on("PATCH", "/accounts/:id", ({ params, body }): Account => {
+    requireAdmin();
+    const account = accounts.find((a) => a.id === params[0]);
+    if (!account) throw notFound("这个账号");
+    const patch = body as UpdateAccountInput;
+    if (patch.password != null) {
+      const issue = passwordIssue(patch.password);
+      if (issue) throw new HttpError(422, "validation_failed", issue, { password: issue });
+    }
+    if (account.id === me.id) {
+      if (patch.disabled === true) throw new HttpError(409, "conflict", "不能停用自己的账号");
+      if (patch.role != null && patch.role !== "admin")
+        throw new HttpError(409, "conflict", "不能把自己改成普通账号");
+      if (patch.password != null)
+        throw new HttpError(409, "conflict", "改自己的密码请用「修改密码」，要先输入现在的密码");
+    }
+    const next: Account = {
+      ...account,
+      display_name: patch.display_name?.trim() || account.display_name,
+      role: patch.role ?? account.role,
+      disabled: patch.disabled ?? account.disabled,
+    };
+    const adminsLeft = accounts
+      .map((a) => (a.id === next.id ? next : a))
+      .filter((a) => a.role === "admin" && !a.disabled).length;
+    if (adminsLeft === 0)
+      throw new HttpError(409, "conflict", "这样改完就没有能登录的管理员了，至少留一个");
+    Object.assign(account, next);
+    if (account.id === me.id) me.display_name = account.display_name;
+    return account;
+  });
 
   on(
     "GET",
