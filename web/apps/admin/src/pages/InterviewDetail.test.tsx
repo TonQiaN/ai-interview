@@ -369,6 +369,99 @@ describe("面试详情", () => {
     });
   });
 
+  describe("安排下一轮", () => {
+    function reported() {
+      const target = server.db.interviews.find(
+        (i) => i.status === "completed" && i.report?.status === "done" && !i.archived_at,
+      );
+      if (!target) throw new Error("演示数据里没有出了报告的面试");
+      return target;
+    }
+
+    /** 给同一位候选人、同一个岗位再放一场更晚安排的面试 */
+    function addLater(target: Interview, status: Interview["status"]) {
+      const later: Interview = {
+        ...structuredClone(target),
+        id: crypto.randomUUID(),
+        status,
+        decision: "pending",
+        report: null,
+        created_at: new Date(Date.parse(target.created_at) + 3_600_000).toISOString(),
+      };
+      server.db.interviews.push(later);
+      return later;
+    }
+
+    it("决定是「进入下一轮」：最上面的提示接着让安排下一轮", async () => {
+      const target = reported();
+      target.decision = "advance";
+      open(target.id);
+
+      expect(await screen.findByText("定了进入下一轮")).toBeTruthy();
+      const [first] = screen.getAllByRole("button", { name: "安排下一轮" });
+      if (!first) throw new Error("应该有「安排下一轮」");
+      fireEvent.click(first);
+      expect(await screen.findByText(`安排面试页?from=${target.id}&round=next`)).toBeTruthy();
+    });
+
+    it("下一轮已经安排了：不再催，告诉 HR 那一场现在到哪了", async () => {
+      const target = reported();
+      target.decision = "advance";
+      addLater(target, "ready");
+      open(target.id);
+
+      expect(await screen.findByText("下一轮已经安排了")).toBeTruthy();
+      expect(screen.getByText(/安排的那一场，现在是「待发送」/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "去看那一场" })).toBeTruthy();
+      expect(screen.queryByText("定了进入下一轮")).toBeNull();
+    });
+
+    it("后来安排的那一场取消了：不算，照样提示安排下一轮", async () => {
+      const target = reported();
+      target.decision = "advance";
+      addLater(target, "cancelled");
+      open(target.id);
+
+      expect(await screen.findByText("定了进入下一轮")).toBeTruthy();
+    });
+
+    it("决定还没定、或者不推进：不提示安排下一轮", async () => {
+      const target = reported();
+      target.decision = "reject";
+      open(target.id);
+
+      await screen.findByRole("button", { name: "安排下一轮" });
+      expect(screen.queryByText("定了进入下一轮")).toBeNull();
+    });
+
+    it("出了报告的面试：概览上有「安排下一轮」，点了带着这一场和「下一轮」去安排面试页", async () => {
+      const target = reported();
+      target.decision = "pending";
+      open(target.id);
+
+      fireEvent.click(await screen.findByRole("button", { name: "安排下一轮" }));
+      expect(await screen.findByText(`安排面试页?from=${target.id}&round=next`)).toBeTruthy();
+    });
+
+    it("报告里「下一轮可以接着问」下面也能点", async () => {
+      const target = reported();
+      open(target.id);
+
+      fireEvent.click(await screen.findByRole("tab", { name: "报告" }));
+      fireEvent.click(await screen.findByRole("button", { name: "按这些安排下一轮" }));
+      expect(await screen.findByText(`安排面试页?from=${target.id}&round=next`)).toBeTruthy();
+    });
+
+    it("报告还没出来、或者候选人中途离开的，没有这个按钮", async () => {
+      const target = reported();
+      target.status = "abandoned";
+      open(target.id);
+
+      await screen.findAllByRole("button", { name: "再安排一场" });
+      expect(screen.queryByRole("button", { name: "安排下一轮" })).toBeNull();
+    });
+  });
+
   describe("可以直接发给候选人的话", () => {
     /** 给一场待发送的面试生成链接，返回那段话 */
     async function message(stage: Interview["config"]["stage"]) {

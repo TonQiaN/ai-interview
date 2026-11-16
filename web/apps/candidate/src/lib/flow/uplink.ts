@@ -17,8 +17,6 @@ const LARGE_BYTES = 512 * 1024;
 const TOO_QUICK_MS = 400;
 /** 结果的上限（千比特每秒）。本机测试时会量出很大的数，没有意义。 */
 const MAX_KBPS = 1_000_000;
-/** 上行至少要是录像码率的多少倍才算够用。留出余量给重传、别的请求和网速波动。 */
-const HEADROOM = 1.5;
 
 export interface UplinkOptions {
   /** 把一段字节发给服务端，发完（收到响应）才返回。 */
@@ -66,11 +64,4 @@ function fillWithCrypto(bytes: Uint8Array<ArrayBuffer>): void {
   for (let offset = 0; offset < bytes.length; offset += step) {
     crypto.getRandomValues(bytes.subarray(offset, Math.min(offset + step, bytes.length)));
   }
-}
-
-export type UplinkVerdict = "ok" | "slow";
-
-/** 量出来的上行够不够传录像。recordingBitsPerSecond 是录像每秒产生多少比特。 */
-export function judgeUplink(kbps: number, recordingBitsPerSecond: number): UplinkVerdict {
-  return kbps * 1000 >= recordingBitsPerSecond * HEADROOM ? "ok" : "slow";
 }

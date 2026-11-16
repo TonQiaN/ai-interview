@@ -5,6 +5,9 @@ import {
   expectQuestion,
   expectRecordingsReady,
   LOCAL_DB,
+  open,
+  roomState,
+  seedInterview,
   sessionKeyOf,
 } from "./helpers";
 
@@ -13,6 +16,8 @@ import {
  * 面试照常往下走；页面上说的「还剩多少没传」要和本机真的留着的对得上，不能传着传着又跳回去。
  */
 
+/** 限速限到多少：录像码率的七分之一左右，半分钟的面试攒下的录像要传两三分钟。 */
+const SLOW_KBPS = 48;
 const SLOW_HINT = "网络较慢，部分录像还在上传。面试可以正常进行。";
 
 /** 本机这场面试还留着多少录像：几片、多少字节，还有没有正在录的段。 */
@@ -50,15 +55,23 @@ const localBacklog = (page: Page, sessionKey: string) =>
     [LOCAL_DB, sessionKey] as const,
   );
 
-/** 结束页上写的「还剩 1.4 MB」是多少字节；这时候没显示就是 null。 */
-async function shownRemaining(page: Page): Promise<number | null> {
+/**
+ * 结束页上写的「还剩 1.4 MB，大约还要 3 分钟」：还剩多少字节、大约还要几分钟。
+ * 这时候没显示就是 null；没写时间、或者写的是「不到一分钟」，分钟数是 null。
+ */
+async function shownRemaining(
+  page: Page,
+): Promise<{ bytes: number; minutes: number | null } | null> {
   const text = await page
     .getByText(/^还剩 /)
     .textContent({ timeout: 1000 })
     .catch(() => null);
-  const match = text?.match(/^还剩 ([\d.]+) (KB|MB)$/);
+  const match = text?.match(/^还剩 ([\d.]+) (KB|MB)(?:，大约还要 (\d+) 分钟|，不到一分钟)?$/);
   if (!match) return null;
-  return Number(match[1]) * (match[2] === "MB" ? 1024 * 1024 : 1024);
+  return {
+    bytes: Number(match[1]) * (match[2] === "MB" ? 1024 * 1024 : 1024),
+    minutes: match[3] === undefined ? null : Number(match[3]),
+  };
 }
 
 /** 页面现在拦着屏幕熄灭的有几个（申请了还没松开的屏幕常亮）。 */
@@ -70,7 +83,7 @@ const screenLocksHeld = (page: Page) =>
       ).length,
   );
 
-test("上传比录像慢：面试照常往下走，结束页上「还剩多少」和本机真的留着的对得上，只减不增", async ({
+test("上传比录像慢：面试照常往下走，结束页上「还剩多少」和本机真的留着的对得上，只减不增，还说了大约要等几分钟", async ({
   page,
 }) => {
   // 没有界面的浏览器不给屏幕常亮，换一个假的：记下页面申请的每一个，后面看它什么时候松开
@@ -103,8 +116,8 @@ test("上传比录像慢：面试照常往下走，结束页上「还剩多少�
       downloadThroughput: -1,
       uploadThroughput: kbps > 0 ? (kbps * 1000) / 8 : -1,
     });
-  // 录像大约每秒 40 KB，这里每秒只传得出去 10 KB
-  await uplink(80);
+  // 录像大约每秒 40 KB，这里每秒只传得出去 6 KB
+  await uplink(SLOW_KBPS);
 
   // 本机攒了几片之后提醒一句，面试不停
   await expect(page.getByText(SLOW_HINT)).toBeVisible({ timeout: 30_000 });
@@ -125,27 +138,39 @@ test("上传比录像慢：面试照常往下走，结束页上「还剩多少�
 
   // 结束页上的数和本机真的留着的差不了多少（以前只算了手上这一轮开始时的那几片，不到一半）
   const settled: number[] = [];
+  const waits: number[] = [];
   for (let second = 0; second < 8; second += 1) {
     const local = await localBacklog(page, sessionKey);
     const remaining = await shownRemaining(page);
     if (remaining !== null) {
-      expect(remaining).toBeGreaterThan(local.bytes * 0.8);
-      expect(remaining).toBeLessThan(local.bytes * 1.2 + 100 * 1024);
+      expect(remaining.bytes).toBeGreaterThan(local.bytes * 0.8);
+      expect(remaining.bytes).toBeLessThan(local.bytes * 1.2 + 100 * 1024);
       // 最后一片落到本机之后不会再有新的：从这时候起这个数只减不增
-      if (!local.recording) settled.push(remaining);
+      if (!local.recording) settled.push(remaining.bytes);
+      // 说的时间和「剩下的除以限的速度」差不了太多
+      if (remaining.minutes !== null) {
+        const expected = local.bytes / (SLOW_KBPS * 125) / 60;
+        expect(remaining.minutes).toBeGreaterThan(expected * 0.7);
+        expect(remaining.minutes).toBeLessThan(expected * 2 + 1);
+        waits.push(remaining.minutes);
+      }
     }
     // 录像还没传完：手机这时候自己锁屏的话上传就停了，所以屏幕常亮要留到传完
     expect(await screenLocksHeld(page)).toBe(1);
     await page.waitForTimeout(1000);
   }
   expect(settled.length).toBeGreaterThan(3);
+  // 要等好几分钟：写了大约多久，上面那句也不再说「一般不到一分钟」
+  expect(waits.length).toBeGreaterThan(3);
+  await expect(page.getByText(/你的网络上传比较慢/)).toBeVisible();
+  await expect(page.getByText(/一般不到一分钟/)).toBeHidden();
 
   // 网络好了：剩下的很快传完，这期间的数也只减不增
   await uplink(0);
   const done = page.getByText("面试已结束");
   while (!(await done.isVisible())) {
     const remaining = await shownRemaining(page);
-    if (remaining !== null) settled.push(remaining);
+    if (remaining !== null) settled.push(remaining.bytes);
     await done.waitFor({ timeout: 500 }).catch(() => undefined);
   }
   for (let index = 1; index < settled.length; index += 1) {
@@ -155,4 +180,52 @@ test("上传比录像慢：面试照常往下走，结束页上「还剩多少�
   expect((await localBacklog(page, sessionKey)).chunks).toBe(0);
   // 传完了，不用再拦着屏幕熄灭
   await expect.poll(() => screenLocksHeld(page)).toBe(0);
+});
+
+test("上行装不下配置的录像码率：画面的码率降下来，录像不在本机越攒越多", async ({ page }) => {
+  // 上行 260 kbps：配置的录像（画面 500 加声音 48）装不下，画面降到 125 左右就装得下
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Network.enable");
+  await cdp.send("Network.emulateNetworkConditions", {
+    offline: false,
+    latency: 50,
+    downloadThroughput: -1,
+    uploadThroughput: (260 * 1000) / 8,
+  });
+
+  const interview = seedInterview({ silenceSec: 30 });
+  await open(page, interview.token);
+  await button(page, "开始准备").click();
+  for (const box of await page.getByRole("checkbox").all()) await box.check();
+  await button(page, "同意并继续").click();
+  // 设备检测时量出上行偏慢，告诉候选人画面会糊一些，不说「结束后要多等」
+  await expect(page.getByText(/录像的画面会录得模糊一些/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/结束后要多等一会儿/)).toBeHidden();
+  await button(page, "允许使用摄像头和麦克风").click();
+  await button(page, "播放提示音").click();
+  await button(page, "听到了").click();
+  await button(page, "下一步").click();
+  await button(page, "开始面试").click();
+  await expect(page.getByText("录制中")).toBeVisible();
+  const sessionKey = await sessionKeyOf(page, interview.token);
+
+  // 录半分钟：本机留着的一直只有刚录下的一两片，没有「网络较慢」的提醒
+  let most = 0;
+  for (let second = 0; second < 30; second += 1) {
+    most = Math.max(most, (await localBacklog(page, sessionKey)).chunks);
+    await expect(page.getByText(SLOW_HINT)).toBeHidden();
+    await page.waitForTimeout(1000);
+  }
+  expect(most).toBeLessThanOrEqual(3);
+
+  await button(page, "结束").click();
+  await button(page, "结束面试").click();
+  await expect(page.getByText("面试已结束")).toBeVisible({ timeout: 30_000 });
+  await expectRecordingsReady(interview, 1);
+
+  // 实际用的码率记了下来，报告能知道画面为什么糊
+  const started = roomState(interview).events.find((event) => event.kind === "interview_started");
+  expect(started?.payload).toMatchObject({ video_reduced: true });
+  expect(Number(started?.payload.video_kbps)).toBeGreaterThanOrEqual(120);
+  expect(Number(started?.payload.video_kbps)).toBeLessThan(200);
 });

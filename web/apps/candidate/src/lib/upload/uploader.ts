@@ -79,7 +79,25 @@ export interface UploadStatus {
   /** 连续失败了几次；成功一次就清零。 */
   consecutiveFailures: number;
   lastError: string | null;
+  /**
+   * 现在每秒传得上去多少字节：最近几片的大小加起来除以它们花的时间。还没传过是 null。
+   * 分片小、网络快的时候主要花在一来一回上，算出来比实际带宽小；要用它估时间的是攒了很多
+   * 没传的时候，那时候网络是慢的，这个数就接近实际的上行速度。
+   */
+  bytesPerSecond: number | null;
 }
+
+/** 按现在的速度，剩下的还要传多少秒。不知道速度就估不出来，返回 null。 */
+export function uploadEtaSeconds(
+  status: Pick<UploadStatus, "pendingBytes" | "bytesPerSecond">,
+): number | null {
+  const rate = status.bytesPerSecond;
+  if (rate === null || rate <= 0) return null;
+  return Math.ceil(status.pendingBytes / rate);
+}
+
+/** 估速度时看最近几片。太少的话一片传得慢就大起大落，太多的话网络变了跟不上。 */
+const PACE_WINDOW = 6;
 
 export interface UploaderOptions {
   sessionKey: string;
@@ -95,6 +113,8 @@ export interface UploaderOptions {
   maxDelayMs?: number;
   /** 0 到 1 的随机数，用来给重试间隔加抖动。 */
   random?: () => number;
+  /** 现在的时间（毫秒），只用来量一片传了多久。 */
+  now?: () => number;
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -119,6 +139,7 @@ export class Uploader {
   private readonly baseDelayMs: number;
   private readonly maxDelayMs: number;
   private readonly random: () => number;
+  private readonly now: () => number;
 
   private status: UploadStatus = {
     state: "idle",
@@ -127,7 +148,10 @@ export class Uploader {
     uploadedBytes: 0,
     consecutiveFailures: 0,
     lastError: null,
+    bytesPerSecond: null,
   };
+  /** 最近传上去的几片各有多大、花了多久。 */
+  private recent: Array<{ bytes: number; ms: number }> = [];
   private readonly listeners = new Set<(status: UploadStatus) => void>();
   /** 已向服务端登记并查过已收序号的段。 */
   private readonly opened = new Map<string, Set<number>>();
@@ -151,6 +175,7 @@ export class Uploader {
     this.baseDelayMs = options.baseDelayMs ?? 1_000;
     this.maxDelayMs = options.maxDelayMs ?? 30_000;
     this.random = options.random ?? Math.random;
+    this.now = options.now ?? (() => performance.now());
   }
 
   getStatus(): UploadStatus {
@@ -211,6 +236,16 @@ export class Uploader {
   private setStatus(patch: Partial<UploadStatus>): void {
     this.status = { ...this.status, ...patch };
     for (const listener of this.listeners) listener(this.status);
+  }
+
+  private pace(): number | null {
+    let bytes = 0;
+    let ms = 0;
+    for (const transfer of this.recent) {
+      bytes += transfer.bytes;
+      ms += transfer.ms;
+    }
+    return ms > 0 ? (bytes / ms) * 1000 : null;
   }
 
   /** 把本机的清单读一遍，量出还剩多少没传。只读每一片的大小，不读内容。 */
@@ -291,6 +326,7 @@ export class Uploader {
           // 列清单之后被别处删掉了（例如另一个标签页），跳过
           if (!chunk) continue;
           this.setStatus({ state: "uploading" });
+          const startedAt = this.now();
           try {
             await this.api.putChunk(ref, info.seq, chunk.bytes, chunk.sha256);
           } catch (error) {
@@ -301,6 +337,8 @@ export class Uploader {
             break;
           }
           received.add(info.seq);
+          this.recent.push({ bytes: info.size, ms: this.now() - startedAt });
+          if (this.recent.length > PACE_WINDOW) this.recent.shift();
         }
         // 删之前、删之后各记一次：正好在这期间量的那一遍不知道这一片算没算进去，让它重新量
         this.revision += 1;
@@ -313,6 +351,7 @@ export class Uploader {
           pendingBytes: Math.max(0, this.status.pendingBytes - info.size),
           consecutiveFailures: 0,
           lastError: null,
+          bytesPerSecond: this.pace(),
         });
       }
 

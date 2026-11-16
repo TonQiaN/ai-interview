@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RoomApiError } from "../api/room-api";
+import { type AudioFormat, RoomApiError } from "../api/room-api";
 import type {
   AdvanceRequest,
   AnswerSettings,
@@ -86,7 +86,7 @@ class FakeApi {
     return this.steps.shift() ?? finish;
   };
 
-  fetchAudio = async (url: string): Promise<ArrayBuffer> => {
+  fetchAudio = async (url: string, _format?: AudioFormat): Promise<ArrayBuffer> => {
     const ms = Number(new URL(url, "http://x").searchParams.get("ms"));
     if (Number.isNaN(ms)) throw new Error("取不到");
     return new ArrayBuffer(ms);
@@ -364,6 +364,55 @@ describe("逐题面试编排", () => {
     expect(runner.getSnapshot().phase).toBe("preparing");
     await vi.advanceTimersByTimeAsync(200);
     expect(runner.getSnapshot().phase).toBe("reading");
+    runner.stop();
+  });
+
+  it("取语音时先要压缩过的；解不了就改取没压缩的，这一场之后都取没压缩的", async () => {
+    const api = new FakeApi([say("q2", { audioMs: 1_500 }), finish]);
+    const asked: string[] = [];
+    // 压缩过的那一份这个浏览器解不了（零字节在假播放器里就是解码失败）
+    api.fetchAudio = async (url, format = "wav") => {
+      asked.push(`${new URL(url, "http://x").pathname} ${format}`);
+      const ms = Number(new URL(url, "http://x").searchParams.get("ms"));
+      return new ArrayBuffer(format === "compressed" ? 0 : ms);
+    };
+    const audio = new FakeAudio();
+    let fallbacks = 0;
+    const runner = new InterviewRunner({
+      api,
+      audio,
+      now: () => Date.now(),
+      onAudioFallback: () => {
+        fallbacks += 1;
+      },
+    });
+    void runner.run(say("q1", { expectsAnswer: false }));
+    await vi.advanceTimersByTimeAsync(0);
+    // 第一句：压缩的解不了，马上改取没压缩的，照常播出来
+    expect(asked).toEqual(["/audio/q1 compressed", "/audio/q1 wav"]);
+    expect(runner.getSnapshot().phase).toBe("asking");
+    expect(audio.played).toEqual([2_000]);
+    expect(fallbacks).toBe(1);
+    // 第二句不再试压缩的
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked.slice(2)).toEqual(["/audio/q2 wav"]);
+    expect(fallbacks).toBe(1);
+    runner.stop();
+  });
+
+  it("压缩过的语音解得了就不再取第二次", async () => {
+    const api = new FakeApi([finish]);
+    const asked: string[] = [];
+    const original = api.fetchAudio;
+    api.fetchAudio = (url, format) => {
+      asked.push(String(format));
+      return original(url);
+    };
+    const runner = new InterviewRunner({ api, audio: new FakeAudio(), now: () => Date.now() });
+    void runner.run(say("q1"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked).toEqual(["compressed"]);
     runner.stop();
   });
 

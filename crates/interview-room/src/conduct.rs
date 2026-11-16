@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::Response;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use interview_core::status::{InterviewStatus, UtteranceKind};
 use interview_core::task_kind;
@@ -44,7 +44,7 @@ use crate::protocol::{
     Utterance,
 };
 use crate::session::{consent_agreed, parse_config};
-use crate::{AnswerTranscript, Deps, realtime};
+use crate::{AnswerTranscript, Deps, compress, realtime};
 
 /// 候选人中途离开的面试由这个任务收掉。
 pub const WATCHDOG_TASK: &str = "room.watchdog";
@@ -1219,7 +1219,7 @@ struct AudioQuery {
         ("part" = Option<u32>, Query, description = "现场生成的话是其中的第几句；提前合成的句子不带"),
     ),
     responses(
-        (status = 200, description = "音频", content_type = "audio/wav"),
+        (status = 200, description = "音频。请求头带 `Accept: audio/mpeg` 时是压缩过的 MP3（`audio/mpeg`），不带是原样的 WAV", content_type = "audio/wav"),
         (status = 404, description = "没有这句话的语音，或者现在还不能取", body = ErrorBody),
         (status = 409, description = "面试不在进行中", body = ErrorBody),
     )
@@ -1246,7 +1246,7 @@ async fn room_utterance_audio(
             let Some(blob_key) = found.flatten() else {
                 return Err(ApiError::not_found("语音"));
             };
-            return serve_blob(deps.ctx.blobs.as_ref(), blob_key, "audio/wav", &headers).await;
+            return serve_audio(&deps, blob_key, "audio/wav", &headers).await;
         }
         found.is_some()
     } else {
@@ -1284,13 +1284,56 @@ async fn room_utterance_audio(
     let Some((blob_key, content_type)) = audio else {
         return Err(ApiError::not_found("语音"));
     };
-    serve_blob(
-        deps.ctx.blobs.as_ref(),
+    serve_audio(
+        &deps,
         &blob_key,
         content_type.as_deref().unwrap_or("audio/wav"),
         &headers,
     )
     .await
+}
+
+/// 把一句语音发给页面。页面说了接受 MP3 的（`Accept: audio/mpeg`），存着的又是 WAV，就压缩后再发；
+/// 压不了、没说接受、要的是其中一段（带 `Range`）的，发存着的原样文件。
+async fn serve_audio(
+    deps: &Deps,
+    blob_key: &str,
+    content_type: &str,
+    headers: &HeaderMap,
+) -> ApiResult<Response> {
+    let accept = headers.get(header::ACCEPT).and_then(|v| v.to_str().ok());
+    let compress = deps.config.audio_kbps > 0
+        && content_type.eq_ignore_ascii_case("audio/wav")
+        && !headers.contains_key(header::RANGE)
+        && compress::accepts_mp3(accept);
+    if compress {
+        let blobs = deps.ctx.blobs.as_ref();
+        let small_enough = blobs
+            .head(blob_key)
+            .await?
+            .is_some_and(|meta| meta.size <= compress::MAX_SOURCE_BYTES);
+        if small_enough {
+            let wav = blobs.get(blob_key).await?;
+            let mp3 = compress::wav_to_mp3(&deps.config.ffmpeg, &wav, deps.config.audio_kbps).await;
+            if let Some(mp3) = mp3 {
+                let mut response = mp3.into_response();
+                let out = response.headers_mut();
+                out.insert(header::CONTENT_TYPE, HeaderValue::from_static("audio/mpeg"));
+                // 和原样的文件一样：带令牌才能取的内容，不让中间的缓存留副本
+                out.insert(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("private, max-age=300"),
+                );
+                out.insert(header::VARY, HeaderValue::from_static("Accept"));
+                return Ok(response);
+            }
+        }
+    }
+    let mut response = serve_blob(deps.ctx.blobs.as_ref(), blob_key, content_type, headers).await?;
+    response
+        .headers_mut()
+        .insert(header::VARY, HeaderValue::from_static("Accept"));
+    Ok(response)
 }
 
 // ───────────────────────── 结束 ─────────────────────────

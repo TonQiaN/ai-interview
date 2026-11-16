@@ -67,8 +67,11 @@ export interface RoomApi extends UploadApi {
   advance(request: AdvanceRequest): Promise<NextStep>;
   /** 候选人停顿时问服务端这段话说完没有（实时对话）。 */
   checkPause(request: PauseCheckRequest): Promise<PauseCheckVerdict>;
-  /** 取面试官语音的字节。地址来自「下一步」里的 audio_url。 */
-  fetchAudio(audioUrl: string): Promise<ArrayBuffer>;
+  /**
+   * 取面试官语音的字节。地址来自「下一步」里的 audio_url。
+   * `format` 是 `compressed` 时告诉服务端可以给压缩过的（MP3），小得多；不给就是没压缩的 WAV。
+   */
+  fetchAudio(audioUrl: string, format?: AudioFormat): Promise<ArrayBuffer>;
   postEvents(events: ClientEvent[], options?: { keepalive?: boolean }): Promise<void>;
   finish(reason: FinishKind): Promise<void>;
 }
@@ -77,6 +80,15 @@ export interface RoomApi extends UploadApi {
 export const ACTIVE_ELSEWHERE = "active_elsewhere";
 
 const PAGE_HEADER = "X-Room-Page";
+
+/** 面试官的语音要哪种：`compressed` 是服务端压缩过的（MP3），`wav` 是没压缩的。 */
+export type AudioFormat = "compressed" | "wav";
+
+/** 取语音时的 `Accept`。服务端看到 `audio/mpeg` 才压缩；压不了的时候给的还是 WAV，所以两种都要认。 */
+const AUDIO_ACCEPT: Record<AudioFormat, string> = {
+  compressed: "audio/mpeg, audio/wav;q=0.9",
+  wav: "audio/wav",
+};
 const ACTIVE_ELSEWHERE_HEADER = "X-Room-Active-Elsewhere";
 
 export interface RoomApiHooks {
@@ -206,11 +218,15 @@ export class HttpRoomApi implements RoomApi {
     return response.verdict;
   }
 
-  async fetchAudio(audioUrl: string): Promise<ArrayBuffer> {
+  async fetchAudio(audioUrl: string, format: AudioFormat = "wav"): Promise<ArrayBuffer> {
     // 语音的地址是服务端在「下一步」里给的（站内路径），照着取就行，不自己拼；取的时候同样带令牌
     return this.json(async (signal) => {
       const request = new Request(`${this.baseUrl}${audioUrl}`, {
-        headers: { Authorization: `Bearer ${this.token}`, [PAGE_HEADER]: this.pageId },
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          [PAGE_HEADER]: this.pageId,
+          Accept: AUDIO_ACCEPT[format],
+        },
         credentials: "omit",
         signal,
       });

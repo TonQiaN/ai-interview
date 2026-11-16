@@ -5,7 +5,7 @@ import { Route, Routes } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setFetch } from "../api/http";
 import { createMockServer } from "../api/mock/server";
-import type { CandidateListItem, InterviewSummary, Page } from "../api/types";
+import type { CandidateListItem, InterviewReport, InterviewSummary, Page } from "../api/types";
 import { TestRouter } from "../test/router";
 import { InterviewNewPage } from "./InterviewNew";
 
@@ -427,6 +427,129 @@ describe("安排面试", () => {
       fireEvent.click(screen.getByRole("button", { name: "上一步" }));
       fireEvent.click(await screen.findByRole("link", { name: "去上传简历" }));
       expect(await screen.findByText("候选人列表页")).toBeTruthy();
+    });
+  });
+
+  describe("从报告点「安排下一轮」过来", () => {
+    /** 演示数据里一场出了报告的面试，候选人没归档、岗位在招。连它的报告一起返回 */
+    async function reported() {
+      const target = server.db.interviews.find((i) => {
+        const candidate = server.db.candidates.find((c) => c.id === i.candidate.id);
+        const position = server.db.positions.find((p) => p.id === i.position.id);
+        return (
+          i.status === "completed" &&
+          i.report?.status === "done" &&
+          candidate &&
+          !candidate.archived_at &&
+          position?.status === "open"
+        );
+      });
+      if (!target) throw new Error("演示数据里没有出了报告、还能再安排的面试");
+      target.config = {
+        ...target.config,
+        stage: "screening",
+        screening_checks: ["合成的硬条件：能不能接受出差"],
+        must_ask_questions: ["合成的题：上一轮问过的"],
+      };
+      const response = await server.fetch(`/api/v1/interviews/${target.id}/report`);
+      const report = ((await response.json()) as { content: InterviewReport }).content;
+      if (report.next_round.questions.length === 0 || report.next_round.focus_areas.length === 0)
+        throw new Error("演示数据的报告里没有下一轮的建议");
+      return { target, report };
+    }
+
+    it("设置按报告改成深入面试：建议的方向和问题都填好了，上一轮的硬条件和必问题不带过来", async () => {
+      const { target, report } = await reported();
+      open(`/interviews/new?from=${target.id}&round=next`);
+
+      const question = report.next_round.questions[0]?.question ?? "";
+      expect(await screen.findByDisplayValue(question)).toBeTruthy();
+      expect(screen.getByDisplayValue(report.next_round.focus_areas[0] ?? "")).toBeTruthy();
+      expect(screen.queryByDisplayValue("合成的题：上一轮问过的")).toBeNull();
+      const start = screen.getByLabelText(/^从哪份设置开始/) as HTMLSelectElement;
+      expect(start.selectedOptions[0]?.textContent).toBe("上一场的设置，按报告的建议面下一轮");
+      expect(screen.getByText(/报告建议的方向放进了「重点考察」/)).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "先存草稿" }));
+      await screen.findByText("面试详情页");
+      const made = server.db.interviews.find(
+        (i) => i.id !== target.id && i.status === "draft" && i.candidate.id === target.candidate.id,
+      );
+      expect(made?.config.stage).toBe("in_depth");
+      expect(made?.config.must_ask_questions).toEqual(
+        report.next_round.questions.map((q) => q.question),
+      );
+      expect(made?.config.screening_checks).toEqual([]);
+      expect(made?.config.process_note).toBe(
+        "这是初筛之后的深入面试，候选人之前做过一轮 AI 初筛面试。",
+      );
+      expect(made?.config.prior_notes).toContain(report.recommendation.headline);
+    });
+
+    it("题目数量定死了、报告建议的问题放不下：写明还有几个没放", async () => {
+      const { target, report } = await reported();
+      const suggested = report.next_round.questions.length;
+      if (suggested < 2) throw new Error("演示数据的报告里建议的问题不到两个");
+      target.config = { ...target.config, question_count: suggested - 1 };
+      open(`/interviews/new?from=${target.id}&round=next`);
+
+      expect(
+        await screen.findByText(
+          new RegExp(
+            `题目数量是 ${suggested - 1} 道，报告建议的问题只放进了前面几个，还有 1 个没放`,
+          ),
+        ),
+      ).toBeTruthy();
+      expect(
+        screen.queryByDisplayValue(report.next_round.questions[suggested - 1]?.question ?? ""),
+      ).toBeNull();
+    });
+
+    it("没动设置就点到别的页面，直接走，不拦", async () => {
+      const { target, report } = await reported();
+      open(`/interviews/new?from=${target.id}&round=next`);
+      await screen.findByDisplayValue(report.next_round.questions[0]?.question ?? "");
+
+      fireEvent.click(screen.getByRole("button", { name: "上一步" }));
+      fireEvent.click(await screen.findByRole("link", { name: "去上传简历" }));
+      expect(await screen.findByText("候选人列表页")).toBeTruthy();
+    });
+
+    it("那一场没有报告：原样沿用那一场的设置，也没有按报告来的选项", async () => {
+      const { target } = await reported();
+      target.report = null;
+      open(`/interviews/new?from=${target.id}&round=next`);
+
+      expect(await screen.findByDisplayValue("合成的题：上一轮问过的")).toBeTruthy();
+      const start = screen.getByLabelText(/^从哪份设置开始/) as HTMLSelectElement;
+      expect(start.selectedOptions[0]?.textContent).toBe("上一场面试的设置");
+      expect(Array.from(start.options).map((o) => o.textContent)).not.toContain(
+        "上一场的设置，按报告的建议面下一轮",
+      );
+    });
+
+    it("点「再安排一场」过来的，也可以改选按报告面下一轮，再选回原样沿用", async () => {
+      const { target, report } = await reported();
+      open(`/interviews/new?from=${target.id}`);
+      await screen.findByDisplayValue("合成的题：上一轮问过的");
+
+      const start = screen.getByLabelText(/^从哪份设置开始/) as HTMLSelectElement;
+      const pickOption = (label: string) => {
+        const option = Array.from(start.options).find((o) => o.textContent === label);
+        fireEvent.change(start, { target: { value: option?.value } });
+      };
+      await waitFor(() =>
+        expect(Array.from(start.options).map((o) => o.textContent)).toContain(
+          "上一场的设置，按报告的建议面下一轮",
+        ),
+      );
+      pickOption("上一场的设置，按报告的建议面下一轮");
+      expect(
+        await screen.findByDisplayValue(report.next_round.questions[0]?.question ?? ""),
+      ).toBeTruthy();
+      expect(screen.queryByDisplayValue("合成的题：上一轮问过的")).toBeNull();
+      pickOption("上一场面试的设置");
+      expect(await screen.findByDisplayValue("合成的题：上一轮问过的")).toBeTruthy();
     });
   });
 

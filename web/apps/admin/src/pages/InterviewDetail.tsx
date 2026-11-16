@@ -22,6 +22,7 @@ import {
   ArchiveRestore,
   Ban,
   CalendarPlus,
+  CircleArrowRight,
   Link2,
   Pencil,
   RefreshCw,
@@ -39,6 +40,7 @@ import {
   useEvents,
   useFrameEvents,
   useInterview,
+  useInterviews,
   useInvites,
   useMe,
   usePlan,
@@ -95,12 +97,14 @@ import {
   scoreRangeText,
   stageLabelOf,
   statusHint,
+  statusLabel,
   styleLabel,
   synthStatusLabel,
   synthStatusTone,
   thinkingLabel,
 } from "../lib/format";
 import { framesByEvent, withFrameEvents } from "../lib/frames";
+import { inviteMessage } from "../lib/invite";
 import { updateOutcome } from "../lib/replan";
 
 type Tab = "overview" | "questions" | "invites" | "replay" | "report";
@@ -116,6 +120,10 @@ const ended = (i: Interview) => i.status === "completed" || i.status === "abando
 const over = (i: Interview) => ended(i) || i.status === "cancelled" || i.status === "expired";
 /** 给同一位候选人、同一个岗位再安排一场，设置沿用这一场的 */
 const againPath = (i: Interview) => `/interviews/new?from=${i.id}`;
+/** 出了报告、候选人面完了的，可以按报告的建议安排下一轮（设置页会把建议填好） */
+const canNextRound = (i: Interview) =>
+  !archived(i) && i.status === "completed" && i.report?.status === "done";
+const nextRoundPath = (i: Interview) => `/interviews/new?from=${i.id}&round=next`;
 const reportBusy = (i: Interview) =>
   i.report?.status === "running" || i.report?.status === "pending";
 const gap = (size: number) => ({ "--oil-gap": `var(--oil-space-${size})` }) as React.CSSProperties;
@@ -303,6 +311,8 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
       </Banner>
     );
   }
+  if (canNextRound(interview) && interview.decision === "advance")
+    return <AdvanceStep interview={interview} />;
   // 没面完就结束了的，多半要再来一次：给一个一步到位的入口
   const unfinished = status === "abandoned" || status === "cancelled" || status === "expired";
   return (
@@ -322,6 +332,60 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
     >
       {statusHint[status]}
       {unfinished && !archived(interview) && "想让候选人重新面，可以再安排一场，设置沿用这一场的。"}
+    </Banner>
+  );
+}
+
+/**
+ * 面完了、决定是「进入下一轮」：接着提示安排下一轮。
+ * 这位候选人在这个岗位上已经有更晚安排的一场时不再催，改成说下一轮现在到哪了。
+ */
+function AdvanceStep({ interview }: { interview: Interview }) {
+  const navigate = useNavigate();
+  const others = useInterviews({
+    candidate_id: interview.candidate.id,
+    position_id: interview.position.id,
+    page_size: 50,
+  });
+  // 还没查到有没有下一轮时先不催，免得闪一下
+  if (others.isPending) return <Banner tone="info">{statusHint.completed}</Banner>;
+
+  // 新的在前：最近安排的那一场。取消了的不算
+  const later = (others.data?.items ?? [])
+    .filter(
+      (i) =>
+        i.id !== interview.id && i.status !== "cancelled" && i.created_at > interview.created_at,
+    )
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+  if (later)
+    return (
+      <Banner
+        tone="info"
+        title="下一轮已经安排了"
+        actions={
+          <Button size="sm" onClick={() => navigate(`/interviews/${later.id}`)}>
+            去看那一场
+          </Button>
+        }
+      >
+        {`${fullTime(later.created_at)} 安排的那一场，现在是「${statusLabel[later.status]}」。`}
+      </Banner>
+    );
+  return (
+    <Banner
+      tone="success"
+      title="定了进入下一轮"
+      actions={
+        <Button
+          size="sm"
+          icon={<CircleArrowRight aria-hidden="true" />}
+          onClick={() => navigate(nextRoundPath(interview))}
+        >
+          安排下一轮
+        </Button>
+      }
+    >
+      下一轮还用 AI 面的话可以直接安排：报告建议的方向和问题会填进设置里，都可以再改。
     </Banner>
   );
 }
@@ -720,6 +784,16 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
             </CardBody>
           </Card>
           <div className="oil-row oil-row--wrap">
+            {canNextRound(interview) && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<CircleArrowRight aria-hidden="true" />}
+                onClick={() => navigate(nextRoundPath(interview))}
+              >
+                安排下一轮
+              </Button>
+            )}
             {over(interview) && (
               <Button
                 variant="secondary"
@@ -1263,28 +1337,6 @@ function QuestionsTab({ interview }: { interview: Interview }) {
 
 // ───────── 链接 ─────────
 
-/**
- * 给候选人的话。要和候选人页实际的要求对得上：电脑和手机都能面，
- * 聊天软件自带的浏览器录不了音和像（候选人页会拦住，让人复制链接换浏览器），所以这里先说。
- */
-function inviteMessage(interview: Interview, url: string, expiresAt: string): string {
-  // 只有第一轮初筛才说「第一轮」，深入面试前面可能已经面过
-  const round = interview.config.stage === "screening" ? "第一轮" : "这一轮";
-  return `${interview.candidate.name}你好：
-
-感谢你应聘「${interview.position.title}」。${round}是线上的 AI 面试，大约 ${interview.config.target_duration_minutes} 分钟，不用下载软件，也不用登录。
-
-面试链接：${url}
-
-请在 ${fullTime(expiresAt)} 之前完成。开始前请准备好：
-1. 一台带摄像头和麦克风的电脑（用手机也可以），用最新版的 Chrome、Edge 或 Safari 打开链接；
-2. 请不要在微信、钉钉这类聊天软件里直接点开，那里面录不了音和像：复制链接，到浏览器里粘贴打开；
-3. 一个安静、网络稳定的地方；
-4. 打开链接后按提示允许使用摄像头和麦克风。
-
-面试过程会录像，只用于这次招聘。祝顺利。`;
-}
-
 function InvitesTab({ interview }: { interview: Interview }) {
   const invites = useInvites(interview.id);
   const create = useCreateInvite(interview.id);
@@ -1516,6 +1568,7 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
     [interview.id, frameEvents.data],
   );
   const regenerate = useRegenerateReport(interview.id);
+  const navigate = useNavigate();
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
   const busy = reportBusy(interview);
@@ -1591,6 +1644,11 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
                 report={data.content}
                 onSeek={onSeek}
                 onRegenerate={busy ? undefined : () => setConfirming(true)}
+                onNextRound={
+                  canNextRound(interview) && picked === undefined
+                    ? () => navigate(nextRoundPath(interview))
+                    : undefined
+                }
                 frames={frames}
               />
             ) : null
