@@ -16,6 +16,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api/http";
 import {
   useDeletePosition,
+  useInterviewCounts,
   useInterviews,
   usePosition,
   useRestorePosition,
@@ -30,7 +31,13 @@ import { PrepareAll } from "../components/PrepareAll";
 import { RaasApplicantsDialog } from "../components/RaasApplicantsDialog";
 import { hasVerdict, InterviewTags } from "../components/ReportVerdict";
 import { sameForm } from "../lib/form";
-import { fullTime, positionStatusLabel, positionStatusTone, relativeTime } from "../lib/format";
+import {
+  fullTime,
+  inviteExpired,
+  positionStatusLabel,
+  positionStatusTone,
+  relativeTime,
+} from "../lib/format";
 import { PositionFields, type PositionForm } from "./Positions";
 
 const pick = (p: Position): PositionForm => ({
@@ -167,6 +174,14 @@ function Detail({ position }: { position: Position }) {
   const ready = useInterviews({ position_id: position.id, status: "ready", page_size: 100 });
   const readyTotal = ready.data?.total ?? 0;
   const [inviting, setInviting] = useState(false);
+  // 发了链接、链接已经过期、候选人还没面的。链接到期后面试的状态不变，要自己拿到期时间看。
+  // 一批链接常常一起到期，一场一场点进去换太慢，可以一起换
+  const invited = useInterviews({ position_id: position.id, status: "invited", page_size: 100 });
+  const expired = (invited.data?.items ?? []).filter((i) => inviteExpired(i));
+  // 发了链接的超过一页时，上面数出来的会少，一共几场问后端
+  const counts = useInterviewCounts({ position_id: position.id });
+  const expiredTotal = Math.max(expired.length, counts.data?.invite_expired ?? 0);
+  const [renewing, setRenewing] = useState(false);
   const remove = useDeletePosition();
   const restore = useRestorePosition();
   const [editing, setEditing] = useState(false);
@@ -344,6 +359,23 @@ function Detail({ position }: { position: Position }) {
                   {readyTotal} 场的题目准备好了，还没发链接。
                 </Banner>
               )}
+              {expired.length > 0 && !archived && (
+                <Banner
+                  tone="warning"
+                  className="adm-gap-below"
+                  actions={
+                    <Button
+                      size="sm"
+                      icon={<Send aria-hidden="true" />}
+                      onClick={() => setRenewing(true)}
+                    >
+                      {expired.length > 1 ? "一起换新链接" : "换新链接"}
+                    </Button>
+                  }
+                >
+                  {expiredTotal} 场的链接过期了，候选人还没有面试。
+                </Banner>
+              )}
               <QueryView query={interviews}>
                 {({ items, total, page_size }) =>
                   total === 0 ? (
@@ -399,6 +431,13 @@ function Detail({ position }: { position: Position }) {
         total={readyTotal}
         open={inviting}
         onClose={() => setInviting(false)}
+      />
+      <BatchInvitesDialog
+        renew
+        interviews={expired}
+        total={expiredTotal}
+        open={renewing}
+        onClose={() => setRenewing(false)}
       />
       {fromRaas && (
         <RaasApplicantsDialog
