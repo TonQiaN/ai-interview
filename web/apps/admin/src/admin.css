@@ -207,6 +207,31 @@
   .adm-item--wrap {
     flex-wrap: wrap;
   }
+  /* 「使用说明」页：成段的说明文字，一行不要太长 */
+  .adm-help p,
+  .adm-help dd,
+  .adm-help__text {
+    margin: var(--oil-space-1) 0 0;
+    max-width: 46em;
+    color: var(--oil-ink-2);
+    line-height: 1.7;
+  }
+  .adm-help__step {
+    align-items: flex-start;
+  }
+  /* 窄屏上按钮换到文字下面，不挤文字 */
+  .adm-help__step .adm-item__main {
+    flex-basis: 16rem;
+  }
+  .adm-help__topics {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--oil-space-4);
+  }
+  .adm-help__topics dt {
+    font-weight: 600;
+  }
   /* 总览上「三步安排第一场面试」每一步前面的序号，做完的换成对勾 */
   .adm-step__dot {
     flex: 0 0 auto;
