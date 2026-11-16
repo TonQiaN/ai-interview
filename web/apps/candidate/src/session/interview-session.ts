@@ -542,6 +542,8 @@ export class InterviewSession {
             );
           }
         },
+        // 这个浏览器解不了压缩过的语音：记下来，真机上出现了能查到是哪种浏览器
+        onAudioFallback: () => this.collector?.record("audio_format_fallback", { from: "mp3" }),
         // 答完一题马上切一片录像传上去：服务端要用这段声音转写，判断接下来问什么
         onAnswerEnded: () => this.recorder?.flush(),
         // 停顿时也切一片：服务端趁这会儿先转写、先想怎么接

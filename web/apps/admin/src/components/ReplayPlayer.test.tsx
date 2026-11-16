@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Recording } from "../api/types";
+import type { TimelineEvent } from "../lib/frames";
 import { ReplayPlayer } from "./ReplayPlayer";
 
 afterEach(cleanup);
@@ -24,11 +25,11 @@ function recording(patch: Partial<Recording>): Recording {
   };
 }
 
-function show(recordings: Recording[]) {
+function show(recordings: Recording[], events: TimelineEvent[] = []) {
   render(
     <ReplayPlayer
       turns={[]}
-      events={[]}
+      events={events}
       recordings={recordings}
       candidateName="林晓"
       elapsedMs={600_000}
@@ -77,5 +78,26 @@ describe("回看", () => {
   it("录像都正常时不多说", () => {
     show([recording({})]);
     expect(screen.queryByText("录像不完整")).toBeNull();
+  });
+
+  it("画面降过清晰度时说明不是摄像头的问题；只有录音时不说", () => {
+    const reduced: TimelineEvent = {
+      id: "0193a000-0000-7000-8000-0000000000e1",
+      kind: "interview_started",
+      at_ms: 0,
+      occurred_at: "2026-11-16T00:00:00Z",
+      source: "client",
+      payload: { video_kbps: 300, video_reduced: true },
+    };
+    show([recording({})], [reduced]);
+    expect(screen.getByText(/画面比平时糊，不是候选人的摄像头有问题/)).toBeTruthy();
+    cleanup();
+
+    show([recording({ track: "microphone", content_type: "audio/webm" })], [reduced]);
+    expect(screen.queryByText(/画面比平时糊/)).toBeNull();
+    cleanup();
+
+    show([recording({})]);
+    expect(screen.queryByText(/画面比平时糊/)).toBeNull();
   });
 });

@@ -2,7 +2,7 @@ import { ToastProvider } from "@ai-interview/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Link, MemoryRouter, Route, Routes } from "react-router";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setFetch } from "../api/http";
 import { createMockServer } from "../api/mock/server";
 import type { InterviewSummary, Page } from "../api/types";
@@ -198,6 +198,265 @@ describe("岗位详情", () => {
       await waitFor(() => expect(rows()).toBeGreaterThanOrEqual(3));
       expect(screen.queryByRole("button", { name: "下一页" })).toBeNull();
       expect(screen.queryByText(/^共 \d+ 条/)).toBeNull();
+    });
+  });
+
+  describe("一起生成链接", () => {
+    /** 给这个岗位安排几场题目已经准备好的面试，一位候选人一场 */
+    async function ready(positionId: string, count: number) {
+      const made = [];
+      for (const candidate of server.db.candidates.filter((c) => !c.archived_at).slice(0, count)) {
+        const response = await server.fetch("/api/v1/interviews", {
+          method: "POST",
+          body: JSON.stringify({ candidate_id: candidate.id, position_id: positionId }),
+        });
+        const { id } = (await response.json()) as { id: string };
+        const interview = server.db.interviews.find((i) => i.id === id);
+        if (!interview) throw new Error("没建成");
+        interview.status = "ready";
+        made.push({ interview, candidate });
+      }
+      if (made.length < count) throw new Error("演示数据里的候选人不够");
+      return made;
+    }
+    /** 这个岗位下原来就准备好的先挪开，数得清楚 */
+    function clearReady(positionId: string) {
+      for (const i of server.db.interviews)
+        if (i.position.id === positionId && i.status === "ready") i.status = "draft";
+    }
+    function clipboard() {
+      const copied: string[] = [];
+      vi.stubGlobal("navigator", {
+        ...navigator,
+        clipboard: { writeText: async (text: string) => void copied.push(text) },
+      });
+      return copied;
+    }
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("没有准备好的面试时不提示", async () => {
+      const position = firstPosition();
+      clearReady(position.id);
+      open(position.id);
+
+      await screen.findByText("这个岗位的面试");
+      await waitFor(() => expect(screen.queryByText("加载中")).toBeNull());
+      expect(screen.queryByText(/题目准备好了，还没发链接/)).toBeNull();
+      expect(screen.queryByRole("button", { name: /生成链接/ })).toBeNull();
+    });
+
+    it("选一次有效期，每位候选人各生成一个链接，一行一位，能复制给他的整段话", async () => {
+      const position = firstPosition();
+      clearReady(position.id);
+      const made = await ready(position.id, 3);
+      const copied = clipboard();
+      open(position.id);
+
+      expect(await screen.findByText("3 场的题目准备好了，还没发链接。")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "一起生成链接" }));
+      const picking = within(await screen.findByRole("dialog", { name: "一起生成面试链接" }));
+      for (const { candidate } of made) expect(picking.getByText(new RegExp(candidate.name)));
+      fireEvent.change(picking.getByLabelText("有效期"), { target: { value: "3" } });
+      fireEvent.click(picking.getByRole("button", { name: "生成 3 个链接" }));
+
+      const done = within(await screen.findByRole("dialog", { name: "生成了 3 个链接" }));
+      expect(done.getByText(/完整链接只显示这一次/)).toBeTruthy();
+      const rows = within(done.getByRole("list", { name: "生成好的链接" })).getAllByRole(
+        "listitem",
+      );
+      expect(rows).toHaveLength(3);
+      // 每场都真的发了链接，有效期是选的 3 天
+      for (const { interview } of made) {
+        expect(interview.status).toBe("invited");
+        const [invite] = server.db.invites.get(interview.id) ?? [];
+        const hours = (Date.parse(invite?.expires_at ?? "") - Date.now()) / 3_600_000;
+        expect(Math.round(hours)).toBe(72);
+      }
+
+      const [first] = made;
+      if (!first) throw new Error("没有第一位");
+      fireEvent.click(done.getByRole("button", { name: `复制给 ${first.candidate.name} 的话` }));
+      await waitFor(() => expect(copied).toHaveLength(1));
+      expect(copied[0]).toContain(`${first.candidate.name}你好`);
+      expect(copied[0]).toContain(`「${position.title}」`);
+      expect(copied[0]).toMatch(/面试链接：\S+\/i\/#demo/);
+      // 复制过的做了记号
+      expect(
+        (await done.findByRole("button", { name: `复制给 ${first.candidate.name} 的话` }))
+          .textContent,
+      ).toBe("再复制一次");
+    });
+
+    it("还有没复制过的就关：先提醒是哪几位，再点一次才关", async () => {
+      const position = firstPosition();
+      clearReady(position.id);
+      const made = await ready(position.id, 2);
+      clipboard();
+      open(position.id);
+
+      fireEvent.click(await screen.findByRole("button", { name: "一起生成链接" }));
+      fireEvent.click(await screen.findByRole("button", { name: "生成 2 个链接" }));
+      const dialog = (await screen.findByRole("dialog", {
+        name: "生成了 2 个链接",
+      })) as HTMLDialogElement;
+      const done = within(dialog);
+      // 生成以后按 Esc 不关：链接只显示这一次
+      fireEvent(dialog, new Event("cancel", { cancelable: true }));
+      expect(dialog.open).toBe(true);
+
+      const [first, second] = made;
+      if (!first || !second) throw new Error("没有两位");
+      fireEvent.click(done.getByRole("button", { name: `复制给 ${first.candidate.name} 的话` }));
+      await done.findByText("再复制一次");
+      fireEvent.click(done.getByRole("button", { name: "关闭" }));
+      const warning = await done.findByText("还有 1 位的链接没复制过");
+      expect(warning.closest(".oil-banner")?.textContent).toContain(second.candidate.name);
+      expect(dialog.open).toBe(true);
+
+      fireEvent.click(done.getByRole("button", { name: "仍然关闭" }));
+      expect(dialog.open).toBe(false);
+      // 都发了链接，岗位页上不再提示
+      await waitFor(() => expect(screen.queryByText(/题目准备好了，还没发链接/)).toBeNull());
+    });
+
+    it("全部复制成表格以后可以直接关", async () => {
+      const position = firstPosition();
+      clearReady(position.id);
+      const made = await ready(position.id, 2);
+      const copied = clipboard();
+      open(position.id);
+
+      fireEvent.click(await screen.findByRole("button", { name: "一起生成链接" }));
+      fireEvent.click(await screen.findByRole("button", { name: "生成 2 个链接" }));
+      const dialog = (await screen.findByRole("dialog", {
+        name: "生成了 2 个链接",
+      })) as HTMLDialogElement;
+      fireEvent.click(within(dialog).getByRole("button", { name: "全部复制成表格" }));
+      await waitFor(() => expect(copied).toHaveLength(1));
+      const lines = copied[0]?.split("\n") ?? [];
+      expect(lines).toHaveLength(3);
+      for (const { candidate } of made)
+        expect(lines.some((line) => line.startsWith(`${candidate.name}\t`))).toBe(true);
+
+      fireEvent.click(await within(dialog).findByRole("button", { name: "发完了，关闭" }));
+      expect(dialog.open).toBe(false);
+    });
+
+    it("中间有一场没成：别的照常生成，没成的写明原因", async () => {
+      const position = firstPosition();
+      clearReady(position.id);
+      const made = await ready(position.id, 3);
+      clipboard();
+      open(position.id);
+
+      fireEvent.click(await screen.findByRole("button", { name: "一起生成链接" }));
+      await screen.findByRole("button", { name: "生成 3 个链接" });
+      // 打开窗口以后，有一场在别处被取消了
+      const [, gone] = made;
+      if (!gone) throw new Error("没有第二位");
+      gone.interview.status = "cancelled";
+      fireEvent.click(screen.getByRole("button", { name: "生成 3 个链接" }));
+
+      const done = within(await screen.findByRole("dialog", { name: "生成了 2 个链接" }));
+      const failed = (await done.findByText("1 场没有生成出来")).closest(".oil-banner");
+      expect(failed?.textContent).toContain(gone.candidate.name);
+      expect(failed?.textContent).toContain("题目和语音准备好之后才能生成链接");
+      expect(
+        within(done.getByRole("list", { name: "生成好的链接" })).getAllByRole("listitem"),
+      ).toHaveLength(2);
+    });
+  });
+
+  describe("一起重试、一起准备", () => {
+    /** 这个岗位下原来的草稿和准备失败的先挪开，数得清楚 */
+    function clearUnprepared(positionId: string) {
+      for (const i of server.db.interviews)
+        if (i.position.id === positionId && (i.status === "draft" || i.status === "prepare_failed"))
+          i.status = "cancelled";
+    }
+    /** 给这个岗位安排几场停在某个状态的面试，一位候选人一场 */
+    async function stuck(positionId: string, count: number, status: "draft" | "prepare_failed") {
+      const made = [];
+      for (const candidate of server.db.candidates.filter((c) => !c.archived_at).slice(0, count)) {
+        const response = await server.fetch("/api/v1/interviews", {
+          method: "POST",
+          body: JSON.stringify({ candidate_id: candidate.id, position_id: positionId }),
+        });
+        const { id } = (await response.json()) as { id: string };
+        const interview = server.db.interviews.find((i) => i.id === id);
+        if (!interview) throw new Error("没建成");
+        interview.status = status;
+        made.push({ interview, candidate });
+      }
+      if (made.length < count) throw new Error("演示数据里的候选人不够");
+      return made;
+    }
+
+    it("没有草稿也没有准备失败的：不提示", async () => {
+      const position = firstPosition();
+      clearUnprepared(position.id);
+      open(position.id);
+
+      await screen.findByText("这个岗位的面试");
+      await waitFor(() => expect(screen.queryByText("加载中")).toBeNull());
+      expect(screen.queryByText(/没准备好/)).toBeNull();
+      expect(screen.queryByText(/还是草稿/)).toBeNull();
+    });
+
+    it("准备失败的一起重试：每一场都重新开始准备，提示跟着消失", async () => {
+      const position = firstPosition();
+      clearUnprepared(position.id);
+      const made = await stuck(position.id, 3, "prepare_failed");
+      open(position.id);
+
+      expect(await screen.findByText(/^3 场的题目或语音没准备好。/)).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "一起重试" }));
+
+      expect(await screen.findByText("3 场开始准备题目和语音")).toBeTruthy();
+      for (const { interview } of made) expect(interview.status).toBe("preparing");
+      await waitFor(() => expect(screen.queryByText(/题目或语音没准备好/)).toBeNull());
+    });
+
+    it("草稿一起准备：先问一句，确认了才开始", async () => {
+      const position = firstPosition();
+      clearUnprepared(position.id);
+      const made = await stuck(position.id, 2, "draft");
+      open(position.id);
+
+      expect(await screen.findByText("2 场还是草稿，题目和语音还没准备。")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "一起准备" }));
+      const dialog = within(
+        await screen.findByRole("dialog", { name: "给 2 场草稿准备题目和语音？" }),
+      );
+      // 还没确认，什么都没动
+      for (const { interview } of made) expect(interview.status).toBe("draft");
+      fireEvent.click(dialog.getByRole("button", { name: "开始准备" }));
+
+      expect(await screen.findByText("2 场开始准备题目和语音")).toBeTruthy();
+      for (const { interview } of made) expect(interview.status).toBe("preparing");
+      await waitFor(() => expect(screen.queryByText(/还是草稿/)).toBeNull());
+    });
+
+    it("中间有一场没成：别的照常开始，没成的写明是谁、为什么", async () => {
+      const position = firstPosition();
+      clearUnprepared(position.id);
+      const made = await stuck(position.id, 3, "prepare_failed");
+      open(position.id);
+
+      await screen.findByText(/^3 场的题目或语音没准备好。/);
+      // 打开页面以后，有一场在别处开始面试了
+      const [, gone] = made;
+      if (!gone) throw new Error("没有第二位");
+      gone.interview.status = "in_progress";
+      fireEvent.click(screen.getByRole("button", { name: "一起重试" }));
+
+      const problem = (await screen.findByText("1 场没能开始准备")).closest(".oil-banner");
+      expect(problem?.textContent).toContain(gone.candidate.name);
+      expect(await screen.findByText("2 场开始准备题目和语音")).toBeTruthy();
+      expect(made.filter((m) => m.interview.status === "preparing")).toHaveLength(2);
+
+      fireEvent.click(within(problem as HTMLElement).getByRole("button", { name: "知道了" }));
+      expect(screen.queryByText("1 场没能开始准备")).toBeNull();
     });
   });
 

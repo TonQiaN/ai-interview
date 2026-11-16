@@ -10,7 +10,7 @@
  * 断网时 advance 会一直重试（录制不受影响，分片先存在本地），候选人看到的是「正在重新连接」。
  * 只有链接失效、面试被取消这类重试没用的错误才会让 run 失败。
  */
-import { RoomApiError } from "../api/room-api";
+import { type AudioFormat, RoomApiError } from "../api/room-api";
 import type {
   AdvanceRequest,
   AnswerEndReason,
@@ -48,7 +48,7 @@ export interface RunnerApi {
   advance(request: AdvanceRequest): Promise<NextStep>;
   /** 候选人停顿时问服务端「说完了吗」。没有这个方法就不问。 */
   checkPause?(request: PauseCheckRequest): Promise<PauseCheckVerdict>;
-  fetchAudio(audioUrl: string): Promise<ArrayBuffer>;
+  fetchAudio(audioUrl: string, format?: AudioFormat): Promise<ArrayBuffer>;
 }
 
 export interface RunnerOptions<B> {
@@ -67,6 +67,8 @@ export interface RunnerOptions<B> {
   random?: () => number;
   /** 每次状态机发生有意义的变化时调用，用来记过程事件。 */
   onTurnEvent?: (event: TurnEvent, state: TurnState) => void;
+  /** 压缩过的语音这个浏览器解不了、改取没压缩的时候调用，一场面试最多一次。 */
+  onAudioFallback?: () => void;
   /** 候选人答完一题、还没上报之前调用。 */
   onAnswerEnded?: () => void;
   /** 候选人停顿了、要去问服务端说完没有之前调用。 */
@@ -193,6 +195,9 @@ export class InterviewRunner<B> {
   private readonly random: () => number;
   private readonly onTurnEvent: ((event: TurnEvent, state: TurnState) => void) | undefined;
   private readonly onAnswerEnded: (() => void) | undefined;
+  private readonly onAudioFallback: (() => void) | undefined;
+  /** 压缩过的语音解不了，这一场都取没压缩的。 */
+  private plainAudio = false;
   private readonly onAnswerPaused: (() => void) | undefined;
 
   private readonly listeners = new Set<(snapshot: RunnerSnapshot) => void>();
@@ -247,6 +252,7 @@ export class InterviewRunner<B> {
     this.random = options.random ?? Math.random;
     this.onTurnEvent = options.onTurnEvent;
     this.onAnswerEnded = options.onAnswerEnded;
+    this.onAudioFallback = options.onAudioFallback;
     this.onAnswerPaused = options.onAnswerPaused;
     this.snapshot = this.buildSnapshot();
   }
@@ -551,17 +557,32 @@ export class InterviewRunner<B> {
   private loadAudio(url: string): Promise<B | null> {
     let pending = this.audioCache.get(url);
     if (!pending) {
-      pending = this.api
-        .fetchAudio(url)
-        .then((bytes) => this.audio.decode(bytes))
-        .catch(() => {
-          // 失败的不留在缓存里，重听或下次还能再试
-          this.audioCache.delete(url);
-          return null;
-        });
+      pending = this.fetchDecoded(url).catch(() => {
+        // 失败的不留在缓存里，重听或下次还能再试
+        this.audioCache.delete(url);
+        return null;
+      });
       this.audioCache.set(url, pending);
     }
     return Promise.race([pending, this.sleep(this.audioTimeoutMs).then(() => null)]);
+  }
+
+  /**
+   * 取一句语音并解码。先要压缩过的（小得多，网络慢的时候少等几秒）；
+   * 这个浏览器解不了，就改取没压缩的再试一次，这一场之后都取没压缩的。
+   */
+  private async fetchDecoded(url: string): Promise<B> {
+    if (!this.plainAudio) {
+      const bytes = await this.api.fetchAudio(url, "compressed");
+      try {
+        return await this.audio.decode(bytes);
+      } catch {
+        // 同时在取的几句可能都走到这里，只报一次
+        if (!this.plainAudio) this.onAudioFallback?.();
+        this.plainAudio = true;
+      }
+    }
+    return this.audio.decode(await this.api.fetchAudio(url, "wav"));
   }
 
   private dispatch(event: TurnEvent): void {

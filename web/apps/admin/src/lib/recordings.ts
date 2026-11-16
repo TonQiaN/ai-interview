@@ -92,3 +92,20 @@ export function recordingNotes(recordings: Recording[]): RecordingNote[] {
     });
   return notes;
 }
+
+/**
+ * 候选人的上行网速装不下平时的码率时，面试页会把录像的画面降下来（`interview_started` 里
+ * `video_reduced` 为 true）。回看时画面比平时糊，要让 HR 知道这不是摄像头的问题。没降过就是 null。
+ */
+export function reducedVideoNote(
+  events: { kind: string; at_ms?: number | null; payload: Record<string, unknown> }[],
+): string | null {
+  const started = events.filter((e) => e.kind === "interview_started");
+  const reduced = started.filter((e) => e.payload?.video_reduced === true);
+  if (reduced.length === 0) return null;
+  const which =
+    reduced.length === started.length
+      ? "这场面试"
+      : `从 ${reduced.map((e) => clock(e.at_ms ?? 0)).join("、")} 开始的那一段`;
+  return `候选人的上行网速慢，面试页把${which}录像的画面降了清晰度（声音没有降）。画面比平时糊，不是候选人的摄像头有问题。`;
+}

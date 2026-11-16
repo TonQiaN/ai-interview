@@ -223,7 +223,7 @@ HR 侧：
 | `POST /api/v1/room/start` | 开始面试，返回第一句话。已经开始的面试再调一次，返回当前该播的那一句（刷新后续面用）；已经结束的返回 `finish`。还没同意返回 409（`consent_required`） |
 | `POST /api/v1/room/advance` | 每播完一句调一次，要听回答的那一句等候选人答完再调（带起止毫秒、结束原因），返回下一步。逐题和实时对话都用它。实时对话里候选人插话打断了这一句的，等他说完再调，多带一项 `interrupted_played_ms` |
 | `POST /api/v1/room/pause-check` | 实时对话里，候选人停顿了一下、还没到算答完的时长时问一次：这段话说完没有。返回 `{ "verdict": "done" \| "wait" \| "unknown" }`，见下面的「实时对话」 |
-| `GET /api/v1/room/utterances/{key}/audio` | 面试官语音，支持 Range。只能取当前这一句、`preload_audio_urls` 里的和已经播过的，别的返回 404。实时对话里现场生成的话带 `?part=N`（第几句） |
+| `GET /api/v1/room/utterances/{key}/audio` | 面试官语音，支持 Range。只能取当前这一句、`preload_audio_urls` 里的和已经播过的，别的返回 404。实时对话里现场生成的话带 `?part=N`（第几句）。请求头带 `Accept: audio/mpeg` 时返回压缩过的 MP3（`audio/mpeg`，体积是 WAV 的五分之一左右，不支持 Range）；不带，或者服务端压不了（没装 ffmpeg），返回存着的 WAV，所以带了这个请求头的调用方两种都要认 |
 | `POST /api/v1/room/events` | 批量上报过程事件 |
 | `PUT /api/v1/room/recordings/{track}/{segment}` | 登记一段录制（幂等）。`{segment}` 是浏览器生成的 UUID，请求体是 `{ "content_type", "start_ms" }` |
 | `PUT /api/v1/room/recordings/{track}/{segment}/chunks/{seq}` | 上传一个录制分片（幂等），`X-Chunk-Sha256` 带内容的校验和 |
@@ -365,10 +365,11 @@ HR 侧：
 - `device_report` 是 `POST /room/device-check` 记下的：`camera`、`microphone`、`speaker`（`ok`、`failed`、`skipped`）、`uplink_kbps`（页面测出来的上行网速，千比特每秒；没测出来是 null）、`recording_mime`、`user_agent`。
 - `recording_gap` 是面试中录像缺了一段，带 `device` 和 `cause`：`device` 是 `audio` 或 `video` 时是麦克风或摄像头断了（`cause` 为 `ended` 设备没了、`muted` 被系统静音，比如来电话）；`device` 是 `audio_output` 时是页面的声音被系统整个停掉了（`cause` 为 `suspended`、`interrupted`，或者 `stalled` 状态正常但声音不走），这一段面试官的话播不出来，录像里也没有声音。恢复了报 `device_recovered`；声音被停掉的那一种带 `device: "audio_output"` 和 `duration_ms`（停了多久）。这两种情况面试都会停下来等，不会把这段时间算成候选人没说话。
 - `interview_started` 在开始面试、刷新后续面、换到另一个页面接着面时各报一次：`resumed`（是不是接着之前的面）、`video_kbps`（这一段录像的画面实际用的码率，千比特每秒；没有摄像头是 0）、`video_reduced`（是不是因为量出来的上行网速装不下配置的码率，把画面降了下来）。`video_reduced` 为 true 的那一段画面比平时糊，是页面有意降的，不是摄像头的问题。
+- `audio_format_fallback` 是这个浏览器解不了压缩过的面试官语音（`from: "mp3"`），页面改取没压缩的，一场面试最多报一次。面试不受影响，只是之后每句语音取得慢一些；排查真机问题时用。
 - `screen_wake_lock` 在开始面试时报一次：`supported`（浏览器有没有屏幕常亮的能力）和 `held`（有没有申请到）。没申请到时手机可能中途自动锁屏，录像会断。
 - `upload_stalled` 是录像传不动了：`cause`（`retrying` 请求失败在重试、`offline` 浏览器报告断网、`failed` 重试也没用）和当时还没传的分片数 `pending_chunks`。又传动了报 `upload_recovered`：`stalled_ms`（停了多久）、`failures`（中间连续失败了几次）、`pending_chunks`。一次停顿不管重试多少次只报这一对。
 - `upload_finished` 是面试结束后录像全部传完：`uploaded_bytes`（这次打开页面以来传了多少字节）和 `wait_ms`（面试结束后候选人等了多久；刷新后回来补传的是 null）。
 - `page_taken_over` 是面试换到另一个页面里继续了（见上面「同一条链接同时开在两个页面里」），由停下来的那个页面报，没有别的内容。这之后到下一条 `interview_started` 之间的录像在另一段里，不是候选人离开了。刷新页面续面不报这一条。
 - `kind` 只能用小写字母、数字和下划线；`payload` 是一个 JSON 对象，序列化后不超过 4096 字节；一次最多报 200 条。格式不对的单条事件会被丢掉，不影响同一批里的其他事件。
 
-`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`upload_stalled`、`upload_recovered`、`upload_finished`、`device_check`、`device_report`、`screen_wake_lock`、`page_opened`、`interview_started`、`interview_finished`、`page_taken_over`、`question_replayed`、`answer_continued`、`events_dropped`、`interview_abandoned`（服务端记的：候选人离开后一直没回来，面试被结束）、`face_count_changed`、`phone_visible`、`frames_checked`（这三种由 ⑦ 面试后从录像抽帧产出，浏览器不报，含义见 `crates/interview-report/README.md` 的「录像画面检查」）。
+`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`upload_stalled`、`upload_recovered`、`upload_finished`、`device_check`、`device_report`、`screen_wake_lock`、`audio_format_fallback`、`page_opened`、`interview_started`、`interview_finished`、`page_taken_over`、`question_replayed`、`answer_continued`、`events_dropped`、`interview_abandoned`（服务端记的：候选人离开后一直没回来，面试被结束）、`face_count_changed`、`phone_visible`、`frames_checked`（这三种由 ⑦ 面试后从录像抽帧产出，浏览器不报，含义见 `crates/interview-report/README.md` 的「录像画面检查」）。

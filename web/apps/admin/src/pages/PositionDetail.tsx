@@ -10,7 +10,7 @@ import {
   KeyValue,
   useToast,
 } from "@ai-interview/ui";
-import { Archive, ArchiveRestore, Download, Pencil, Plus, Scale } from "lucide-react";
+import { Archive, ArchiveRestore, Download, Pencil, Plus, Scale, Send } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api/http";
@@ -22,8 +22,10 @@ import {
   useSavePosition,
 } from "../api/queries";
 import type { Position, PositionExtra } from "../api/types";
+import { BatchInvitesDialog } from "../components/BatchInvitesDialog";
 import { Confirm, Pager, Person, QueryView } from "../components/common";
 import { PageHeader } from "../components/PageHeader";
+import { PrepareAll } from "../components/PrepareAll";
 import { RaasApplicantsDialog } from "../components/RaasApplicantsDialog";
 import { hasVerdict, InterviewTags } from "../components/ReportVerdict";
 import { sameForm } from "../lib/form";
@@ -160,6 +162,10 @@ function Detail({ position }: { position: Position }) {
   const interviews = useInterviews({ ...listed, page });
   // 有报告的都排在前面，够不够两份拿来对比只用看第一页（在第一页时和上面是同一个请求）
   const topInterviews = useInterviews({ ...listed, page: 1 });
+  // 题目准备好、还没发链接的。一批安排下来常常有十几二十场，一场一场点进去发太慢，可以一起生成
+  const ready = useInterviews({ position_id: position.id, status: "ready", page_size: 100 });
+  const readyTotal = ready.data?.total ?? 0;
+  const [inviting, setInviting] = useState(false);
   const remove = useDeletePosition();
   const restore = useRestorePosition();
   const [editing, setEditing] = useState(false);
@@ -312,6 +318,24 @@ function Detail({ position }: { position: Position }) {
               }
             />
             <CardBody>
+              {!archived && <PrepareAll positionId={position.id} />}
+              {readyTotal > 0 && !archived && (
+                <Banner
+                  tone="info"
+                  className="adm-gap-below"
+                  actions={
+                    <Button
+                      size="sm"
+                      icon={<Send aria-hidden="true" />}
+                      onClick={() => setInviting(true)}
+                    >
+                      {readyTotal > 1 ? "一起生成链接" : "生成链接"}
+                    </Button>
+                  }
+                >
+                  {readyTotal} 场的题目准备好了，还没发链接。
+                </Banner>
+              )}
               <QueryView query={interviews}>
                 {({ items, total, page_size }) =>
                   total === 0 ? (
@@ -362,6 +386,12 @@ function Detail({ position }: { position: Position }) {
       </div>
 
       <EditDialog position={position} open={editing} onClose={() => setEditing(false)} />
+      <BatchInvitesDialog
+        interviews={ready.data?.items ?? []}
+        total={readyTotal}
+        open={inviting}
+        onClose={() => setInviting(false)}
+      />
       {fromRaas && (
         <RaasApplicantsDialog
           position={position}
