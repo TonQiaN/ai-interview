@@ -1541,3 +1541,204 @@ async fn a_voice_that_cannot_speak_does_not_get_in_the_way_of_starting(pool: PgP
     let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
     assert_eq!(key(&q1), "q1");
 }
+
+// ───────────────────────── 面到一半服务重启 ─────────────────────────
+
+/// 服务重启之后的样子：同一个库和文件，进程内存里的东西（谁在等、哪场面试正在想、先备的那一轮）
+/// 都没了。原来那个进程里没想完的任务就那么挂着，像进程没了一样不会再往库里写。
+fn restarted(app: &TestApp, model: ScriptedModel) -> (TestApp, Arc<ScriptedModel>) {
+    let model = Arc::new(model);
+    let deps = Deps::new(app.ctx.clone(), no_warm_up())
+        .with_llm(Some(model.clone()))
+        .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
+        .with_voice(Arc::new(FakeVoice::default()));
+    let (router, _api) = interview_room::router(deps.clone()).split_for_parts();
+    let app = TestApp {
+        hr: testing::as_admin(router.clone(), app.admin.clone()),
+        public: router,
+        admin: app.admin.clone(),
+        deps,
+        ctx: app.ctx.clone(),
+    };
+    (app, model)
+}
+
+/// 候选人答了哪几句（对话记录里候选人的那几条）。
+async fn answered(app: &TestApp, interview_id: Uuid) -> Vec<String> {
+    turns(app, interview_id)
+        .await
+        .into_iter()
+        .filter(|(speaker, ..)| speaker == "candidate")
+        .filter_map(|(_, key, _)| key)
+        .collect()
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn after_a_restart_the_conversation_picks_up_with_what_was_lined_up(pool: PgPool) {
+    let Setup { app: before, .. } = setup(pool, ScriptedModel::new().reply(probe())).await;
+    let (interview_id, token) = prepared(&before, conversational()).await;
+
+    let opening = start(&before, &token).await;
+    let q1 = advance(&before, &token, &report(&opening, 100, "silence")).await;
+    let ack = advance(&before, &token, &report(&q1, 200, "silence")).await;
+    assert_eq!(text(&ack), probe_ack());
+    // 等这一轮想完：追问的问句排在接话后面，还没发给页面
+    let mut current = ack.clone();
+    for _ in 0..100 {
+        if current["preload_audio_urls"] != json!([]) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        current = start(&before, &token).await;
+    }
+    assert_eq!(
+        current["preload_audio_urls"],
+        json!(["/api/v1/room/utterances/q1.p1/audio?part=2"])
+    );
+
+    // 服务重启，页面重新连上来：还是正在播的那一句接话，它和排着的问句的语音都还取得到
+    let (after, model) = restarted(
+        &before,
+        ScriptedModel::new().reply("next adequate\n负责库存。"),
+    );
+    let seen = session(&after, &token).await;
+    assert_eq!(seen["mode"], "realtime");
+    assert_eq!(seen["resume"]["seq"], ack["seq"]);
+    let resumed = start(&after, &token).await;
+    assert_eq!(
+        (resumed["seq"].clone(), text(&resumed)),
+        (ack["seq"].clone(), probe_ack())
+    );
+    for url in [
+        ack["utterance"]["audio_url"].as_str().unwrap(),
+        "/api/v1/room/utterances/q1.p1/audio?part=2",
+    ] {
+        assert_eq!(audio(&after, &token, url).await.status, 200, "{url}");
+    }
+
+    // 接着往下：问句照常问、听回答；引擎记着这道题已经追问过，候选人答完进入下一题
+    let ask = advance(&after, &token, &report(&resumed, 300, "silence")).await;
+    assert_eq!(
+        (text(&ask), ask["expects_answer"] == true),
+        (QUESTION, true)
+    );
+    let next = advance(&after, &token, &report(&ask, 400, "silence")).await;
+    assert_eq!(key(&next), "ack.1");
+    let q2 = advance(&after, &token, &report(&next, 500, "silence")).await;
+    assert_eq!(
+        (key(&q2), q2["progress"]["index"].as_i64()),
+        ("q2", Some(2))
+    );
+    assert_eq!(model.requests().len(), 1);
+    assert_eq!(answered(&after, interview_id).await, ["q1", "q1.p1"]);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn after_a_restart_a_reply_that_was_being_thought_up_is_thought_up_again(pool: PgPool) {
+    // 模型刚开始写就卡住：这一轮一句话都还没排出来
+    let slow = Arc::new(SlowWriter::new(&[("probe weak\n", "后面的写不出来了")]));
+    let deps = Deps::new(testing::test_context(pool), no_warm_up())
+        .with_llm(Some(slow))
+        .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
+        .with_voice(Arc::new(FakeVoice::default()));
+    let before = common::app_from(deps).await;
+    let (interview_id, token) = prepared(&before, conversational()).await;
+
+    let opening = start(&before, &token).await;
+    let q1 = advance(&before, &token, &report(&opening, 100, "silence")).await;
+    let answer = report(&q1, 200, "silence");
+    // 页面报了回答在等面试官接话，这时候服务没了，请求断了
+    let lost = tokio::time::timeout(
+        Duration::from_millis(300),
+        advance(&before, &token, &answer),
+    );
+    assert!(lost.await.is_err(), "模型卡着，这次上报不该有结果");
+
+    // 重启后页面把同一段回答再报一次：重新想一遍，回答只记一次
+    let (after, model) = restarted(
+        &before,
+        ScriptedModel::new()
+            .reply(probe())
+            .reply("next adequate\n负责库存。"),
+    );
+    let seen = session(&after, &token).await;
+    assert_eq!(seen["resume"]["seq"], q1["seq"], "刷新的话从刚才那道题接着");
+    let ack = advance(&after, &token, &answer).await;
+    assert_eq!(text(&ack), probe_ack());
+    let ask = advance(&after, &token, &report(&ack, 300, "silence")).await;
+    assert_eq!(
+        (text(&ask), ask["expects_answer"] == true),
+        (QUESTION, true)
+    );
+    let next = advance(&after, &token, &report(&ask, 400, "silence")).await;
+    assert_eq!(key(&next), "ack.1");
+    assert_eq!(model.requests().len(), 2);
+    assert_eq!(answered(&after, interview_id).await, ["q1", "q1.p1"]);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn after_a_restart_mid_turn_the_interview_still_reaches_the_end(pool: PgPool) {
+    // 模型定了往下走，下一题已经先发给页面了，这道题的概括还没写完，服务没了
+    let slow = Arc::new(SlowWriter::new(&[("next adequate\n", "负责库存服务。")]));
+    let deps = Deps::new(testing::test_context(pool), no_warm_up())
+        .with_llm(Some(slow))
+        .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
+        .with_voice(Arc::new(FakeVoice::default()));
+    let before = common::app_from(deps).await;
+    let (interview_id, token) = prepared(&before, conversational()).await;
+
+    let opening = start(&before, &token).await;
+    let q1 = advance(&before, &token, &report(&opening, 100, "silence")).await;
+    let ack = advance(&before, &token, &report(&q1, 200, "silence")).await;
+    let q2 = advance(&before, &token, &report(&ack, 300, "silence")).await;
+    assert_eq!((key(&q2), q2["expects_answer"] == true), ("q2", true));
+
+    // 重启后候选人答完第二题报上来。上一轮没想完，要重新想一遍，面试不能卡住，也不能报错
+    let (after, _model) = restarted(
+        &before,
+        ScriptedModel::new()
+            .reply("next adequate\n负责库存服务。")
+            .reply("next adequate\n二")
+            .reply("next adequate\n三")
+            .reply("next adequate\n没有问题要问。"),
+    );
+    let next = tokio::time::timeout(
+        Duration::from_secs(10),
+        advance(&after, &token, &report(&q2, 400, "silence")),
+    )
+    .await
+    .expect("重启后这次上报不该一直等");
+    let steps = walk(&after, &token, next, "silence").await;
+    let said: Vec<&str> = steps
+        .iter()
+        .filter(|step| step["action"] == "say")
+        .map(key)
+        .collect();
+    assert_eq!(steps.last().unwrap()["reason"], "completed", "{said:?}");
+    assert_eq!(
+        interview_status(&after.ctx, interview_id).await,
+        "completed"
+    );
+    // 每道题都问到了，候选人的每段回答都记在它回答的那一句下面
+    let answers = answered(&after, interview_id).await;
+    for key in ["q1", "q2", "q3", "candidate_questions"] {
+        assert!(
+            answers.iter().any(|answer| answer == key),
+            "{key}：{answers:?}"
+        );
+    }
+    // 重新想是从头想：上一轮已经发给页面的接话和第二题会再说一遍，候选人要把第二题再答一次。
+    // 重启正好落在面试官想的那一两秒里才会这样
+    assert_eq!(
+        said,
+        [
+            "ack.1",
+            "q2",
+            "ack.2",
+            "q3",
+            "ack.1",
+            "candidate_questions",
+            "closing"
+        ]
+    );
+}
