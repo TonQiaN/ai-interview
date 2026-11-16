@@ -42,6 +42,16 @@ const json = (body: unknown, status = 200) =>
 
 const errorBody = (code: string, message: string) => ({ error: { code, message, details: null } });
 
+/**
+ * 假的 fetch 一直不返回时，把请求留在这里。
+ *
+ * 真的 fetch 在请求发出去以后一直拿着它。假的不拿的话，整条等待链上没有一头是被别处引用着的：
+ * 超时的计时器只连着外面那个 AbortController，它到 `request.signal` 是 Node 里的一条弱引用。
+ * 这期间来一次垃圾回收，请求连同等它的代码一起被收走，超时到了也没人知道，测试就卡到 5 秒
+ * 超时（#274）。
+ */
+const inFlight = new Set<Request>();
+
 describe("候选人侧接口客户端", () => {
   it("令牌只放在请求头里，不进地址，也不带 cookie", async () => {
     const { api, calls } = setup(() => json({ stage: "not_started" }));
@@ -183,15 +193,18 @@ describe("候选人侧接口客户端", () => {
       timeoutMs: 10,
       fetch: (request) =>
         new Promise((_resolve, reject) => {
-          request.signal.addEventListener("abort", () =>
-            reject(new DOMException("aborted", "AbortError")),
-          );
+          inFlight.add(request);
+          request.signal.addEventListener("abort", () => {
+            inFlight.delete(request);
+            reject(new DOMException("aborted", "AbortError"));
+          });
         }),
     });
     expect(await slow.getSession().catch((caught: unknown) => caught)).toMatchObject({
       kind: "network",
       message: "请求超时",
     });
+    expect(inFlight.size).toBe(0);
   });
 
   it("反向代理返回的不是 JSON 时也能给出错误", async () => {
