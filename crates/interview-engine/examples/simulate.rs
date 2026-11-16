@@ -9,6 +9,12 @@
 //!   `lost`（基本答不上来）、`quitter`（答两题就不想面了）。
 //!
 //! 读环境变量 `DEEPSEEK_API_KEY`，会产生少量费用。
+//!
+//! 设了 `AI_INTERVIEW_EVAL_HEARD_CMD` 时，候选人的话先读出来再识别回去，引擎拿到的是带识别错误的
+//! 文字（见 `scripts/asr_roundtrip.py`）。
+
+#[path = "support/heard.rs"]
+mod heard;
 
 use std::path::Path;
 use std::time::Instant;
@@ -49,11 +55,12 @@ async fn candidate_reply(
     model: &dyn ChatModel,
     input: &PlanInput,
     persona: &str,
+    style: &str,
     history: &[(String, String)],
     asked: &[Utterance],
 ) -> Result<(String, Usage)> {
     let system = format!(
-        "你在扮演一位正在参加语音面试的候选人，用来测试面试系统。\n\n你的简历：\n{}\n\n你的人设：{}\n\n要求：只输出你口头回答的话，像真人说话一样，不要加括号、动作描写或解释。不要替面试官说话。",
+        "你在扮演一位正在参加语音面试的候选人，用来测试面试系统。\n\n你的简历：\n{}\n\n你的人设：{}\n\n要求：只输出你口头回答的话，像真人说话一样，不要加括号、动作描写或解释。不要替面试官说话。{style}",
         input.candidate.resume_text, persona
     );
     let mut messages = vec![Message::system(system)];
@@ -84,6 +91,7 @@ async fn main() -> Result<()> {
         .with_context(|| format!("{input_path} 不是合法的 PlanInput"))?;
     let config = &input.config;
     let model = DeepSeekClient::from_env()?;
+    let mut ears = heard::Ears::from_env()?;
 
     let plan: InterviewPlan = if Path::new(plan_path).exists() {
         serde_json::from_str(&std::fs::read_to_string(plan_path)?)?
@@ -100,6 +108,10 @@ async fn main() -> Result<()> {
     let mut assess_usage = Usage::default();
     let mut candidate_usage = Usage::default();
     let mut latencies = Vec::new();
+    let mut compare_usage = Usage::default();
+    let mut compared = 0u32;
+    let mut same_quality = 0u32;
+    let mut same_follow_up = 0u32;
 
     loop {
         for item in &step.utterances {
@@ -112,29 +124,71 @@ async fn main() -> Result<()> {
         }
         let listen = step.listen.clone().context("这一步既不听回答也没有结束")?;
 
-        let (answer, usage) =
-            candidate_reply(&model, &input, persona, &history, &step.utterances).await?;
+        let (answer, usage) = candidate_reply(
+            &model,
+            &input,
+            persona,
+            ears.style(),
+            &history,
+            &step.utterances,
+        )
+        .await?;
         candidate_usage += usage;
         println!("候选人 {answer}");
         let answer_ms = speak_ms(&answer);
+        // 候选人记得的是自己说的话，引擎拿到的是识别出来的
+        let heard = ears.hear(&answer)?;
+        if heard != answer {
+            println!("  识别成 {heard}");
+        }
         elapsed_ms += answer_ms + u64::from(listen.silence_sec) * 1000;
         let asked: Vec<&str> = step
             .utterances
             .iter()
             .map(|item| item.text.as_str())
             .collect();
-        history.push((asked.join("\n"), answer.clone()));
+        let said = answer.clone();
+        history.push((asked.join("\n"), answer));
 
+        // 识别改过字的回答，原样的字也判断一遍，看识别错误会不会让判断变样。面试照识别出来的往下走
+        let clean = if heard == said {
+            None
+        } else {
+            let report = StepInput {
+                seq: step.seq,
+                elapsed_ms,
+                end_reason: AnswerEnd::Silence,
+                answer_ms,
+                transcript: Some(said),
+            };
+            let result = advance(&model, &plan, config, &state, &report).await?;
+            compare_usage += result.usage;
+            result.note
+        };
         let report = StepInput {
             seq: step.seq,
             elapsed_ms,
             end_reason: AnswerEnd::Silence,
             answer_ms,
-            transcript: Some(answer),
+            transcript: Some(heard),
         };
         let started = Instant::now();
         let result = advance(&model, &plan, config, &state, &report).await?;
         let latency = started.elapsed();
+        if let (Some(clean), Some(note)) = (&clean, &result.note) {
+            compared += 1;
+            if clean.quality == note.quality {
+                same_quality += 1;
+            } else {
+                println!(
+                    "  原样的字判成 {:?}，识别出来的判成 {:?}",
+                    clean.quality, note.quality
+                );
+            }
+            if clean.follow_up.is_some() == note.follow_up.is_some() {
+                same_follow_up += 1;
+            }
+        }
         if let Some(note) = &result.note {
             latencies.push(latency.as_millis() as u64);
             println!(
@@ -174,6 +228,12 @@ async fn main() -> Result<()> {
             assess_usage.prompt_tokens,
             assess_usage.completion_tokens,
             Pricing::FLASH_OFF_PEAK.cost_cny(&assess_usage)
+        );
+    }
+    if compared > 0 {
+        println!(
+            "同一段回答，原样的字和识别出来的字各判断一次，一共 {compared} 段：质量判得一样 {same_quality} 段，追不追问一样 {same_follow_up} 段（多花 {:.4} 元）",
+            Pricing::FLASH_OFF_PEAK.cost_cny(&compare_usage)
         );
     }
     println!(

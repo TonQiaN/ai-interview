@@ -113,6 +113,8 @@ cargo run -p interview-engine --example turn_taking -- crates/interview-engine/f
 
 `simulate` 让模型扮演候选人，人设有 `strong`（经验扎实）、`vague`（说话空泛）、`faker`（简历注水）、`lost`（大多答不上来）、`quitter`（中途不想面了）。`converse` 是实时对话模式的同一件事，多一个人设 `curious`（爱反问、最后会提问），最后一个参数可以写 `off`、`low`、`high`、`max` 指定思考强度。`turn_taking` 测实时对话里候选人停顿时「说完了没有」和被打断以后怎么接，一组有标准答案的例子，打印判对了多少、用了多久。`fixtures/` 里的岗位和简历都是编的。
 
+这三个命令默认把模拟候选人写的字原样交给引擎。设了 `AI_INTERVIEW_EVAL_HEARD_CMD`，候选人的话会先读出来再用服务进程同一个识别模型识别回去，引擎拿到的是带识别错字的文字，同一段回答两种文字各判断一次并打印差别。怎么准备写在 `scripts/asr_roundtrip.py` 开头，测出来的结果见 [docs/asr-text.md](docs/asr-text.md)。
+
 2026-11-13 用 deepseek-flash 实测：
 
 | 项目 | 结果 |
