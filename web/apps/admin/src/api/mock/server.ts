@@ -1186,7 +1186,8 @@ export function createMockServer(options: MockOptions = {}) {
     const issues = configIssues(config);
     if (issues) throw new HttpError(422, "validation_failed", "面试设置不合要求", issues);
     const resumeId = patch.resume_id ?? i.resume_id ?? null;
-    const voiceId = patch.voice_id ?? i.voice_id ?? null;
+    // 没带 voice_id 是不改，带 null 是改回默认音色
+    const voiceId = "voice_id" in patch ? (patch.voice_id ?? null) : (i.voice_id ?? null);
     // 题目已经出好时，看这次改动让不让它作废（规则和后端一样，见 lib/replan.ts）
     const reasons = i.has_plan
       ? [

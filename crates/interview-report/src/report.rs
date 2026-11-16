@@ -560,7 +560,11 @@ pub struct ReportMeta {
 }
 
 /// 模型调用的用量。
+///
+/// 接口文档里叫 `ReportUsage`：单次调用的用量（`interview_llm::Usage`，没有调用次数）也叫 `Usage`，
+/// 文档里类型按名字放，重名的只会留下一个。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+#[schema(as = ReportUsage)]
 pub struct Usage {
     pub calls: u32,
     pub prompt_tokens: u64,
