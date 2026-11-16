@@ -8,6 +8,10 @@ use utoipa::ToSchema;
 
 use crate::engine::{EngineId, EngineSpec, Language};
 
+/// 声学生成的步数允许的范围。worker 那边的范围（`tts/worker/worker.py`）要和这里一致。
+pub const DIFFUSION_STEPS_MIN: u32 = 4;
+pub const DIFFUSION_STEPS_MAX: u32 = 50;
+
 /// 参考录音允许的时长范围。研究阶段的结论是 2 到 30 秒，5 到 15 秒最好。
 pub const REFERENCE_MIN_MS: u64 = 2_000;
 pub const REFERENCE_MAX_MS: u64 = 30_000;
@@ -232,6 +236,11 @@ pub struct SynthesisRequest {
     pub voice: Voice,
     pub style: Style,
     pub options: SynthesisOptions,
+    /// 声学生成（IndexTTS 的 flow matching）走几步。`None` 是引擎默认的 25 步。
+    ///
+    /// 步数少了合成快、音质会有变化，只给实时对话里现场合成的句子用
+    /// （见 [`crate::Synthesizer::synthesize_live`]）。不支持的引擎忽略它。
+    pub diffusion_steps: Option<u32>,
 }
 
 impl SynthesisRequest {
@@ -249,7 +258,14 @@ impl SynthesisRequest {
             voice,
             style: Style::natural(),
             options: SynthesisOptions::default(),
+            diffusion_steps: None,
         }
+    }
+
+    /// 这次请求实际生效的步数：引擎不支持指定步数时是 `None`。
+    pub fn effective_diffusion_steps(&self) -> Option<u32> {
+        self.diffusion_steps
+            .filter(|_| self.engine.spec().supports_diffusion_steps)
     }
 
     /// 检查这次请求满不满足它选的引擎的要求。文本超长不算错（合成时会自动分段）。
@@ -281,19 +297,27 @@ impl SynthesisRequest {
             .supports_emotion
             .then_some(self.style.emotion)
             .flatten();
-        let canonical = serde_json::json!([
-            VERSION,
-            self.engine,
-            self.text,
-            self.language,
+        let mut canonical = vec![
+            serde_json::json!(VERSION),
+            serde_json::json!(self.engine),
+            serde_json::json!(self.text),
+            serde_json::json!(self.language),
             voice,
-            emotion,
-            emotion.map(|_| (self.style.emotion_strength * 100.0).round() as i64),
-            self.style.instruction_for(spec),
-            self.options.seed,
-            self.options.segment_pause_ms,
-        ]);
-        hex(&Sha256::digest(canonical.to_string().as_bytes()))
+            serde_json::json!(emotion),
+            serde_json::json!(
+                emotion.map(|_| (self.style.emotion_strength * 100.0).round() as i64)
+            ),
+            serde_json::json!(self.style.instruction_for(spec)),
+            serde_json::json!(self.options.seed),
+            serde_json::json!(self.options.segment_pause_ms),
+        ];
+        // 只在指定了步数时才进哈希：没指定的请求，哈希和加这个字段之前一样，旧缓存照常命中
+        if let Some(steps) = self.effective_diffusion_steps() {
+            canonical.push(serde_json::json!({ "diffusion_steps": steps }));
+        }
+        hex(&Sha256::digest(
+            serde_json::Value::Array(canonical).to_string().as_bytes(),
+        ))
     }
 }
 
@@ -315,6 +339,10 @@ pub enum RequestError {
     EmptyVoiceDescription,
     #[error("情绪强度要在 0 到 1 之间，现在是 {0}")]
     EmotionStrengthOutOfRange(String),
+    #[error(
+        "声学生成的步数要在 {DIFFUSION_STEPS_MIN} 到 {DIFFUSION_STEPS_MAX} 之间，现在是 {steps}"
+    )]
+    DiffusionStepsOutOfRange { steps: u32 },
     #[error("参考录音读不出来：{0}")]
     InvalidReference(String),
     #[error("参考录音要 2 到 30 秒，这段是 {:.1} 秒", *duration_ms as f64 / 1000.0)]
@@ -354,6 +382,11 @@ impl EngineSpec {
             return Err(RequestError::EmotionStrengthOutOfRange(
                 strength.to_string(),
             ));
+        }
+        if let Some(steps) = request.diffusion_steps
+            && !(DIFFUSION_STEPS_MIN..=DIFFUSION_STEPS_MAX).contains(&steps)
+        {
+            return Err(RequestError::DiffusionStepsOutOfRange { steps });
         }
         Ok(())
     }
@@ -559,6 +592,54 @@ mod tests {
             transcript: Some("参考录音的原话。".to_owned()),
         };
         assert_ne!(base.content_hash(), other.content_hash());
+    }
+
+    #[test]
+    fn diffusion_steps_only_count_when_they_are_set_and_the_engine_uses_them() {
+        // 没指定步数时，哈希和加这个字段之前一样（这个值是加字段之前算出来的），旧缓存不失效
+        let design = SynthesisRequest::new(
+            EngineId::Breeze2,
+            "你好。",
+            Language::Zh,
+            Voice::Design {
+                description: "温和的女声".to_owned(),
+            },
+        );
+        assert_eq!(
+            design.content_hash(),
+            "74db1942489b98c9b9475c4f98d435f38c4af35799718c7909187f9e2f5a5e1d"
+        );
+
+        let base = request(EngineId::Index2, "请先做一个简单的自我介绍。");
+        let mut fewer = base.clone();
+        fewer.diffusion_steps = Some(16);
+        assert_eq!(fewer.effective_diffusion_steps(), Some(16));
+        assert_ne!(base.content_hash(), fewer.content_hash());
+        let mut fewest = base.clone();
+        fewest.diffusion_steps = Some(12);
+        assert_ne!(fewer.content_hash(), fewest.content_hash());
+
+        // Breeze 没有这一步，指定了也不影响结果
+        let mut ignored = design.clone();
+        ignored.diffusion_steps = Some(16);
+        assert_eq!(ignored.effective_diffusion_steps(), None);
+        assert_eq!(design.content_hash(), ignored.content_hash());
+    }
+
+    #[test]
+    fn diffusion_steps_out_of_range_are_rejected() {
+        let mut request = request(EngineId::Index2, "你好。");
+        for steps in [DIFFUSION_STEPS_MIN, 16, DIFFUSION_STEPS_MAX] {
+            request.diffusion_steps = Some(steps);
+            assert_eq!(request.check(), Ok(()));
+        }
+        for steps in [0, DIFFUSION_STEPS_MIN - 1, DIFFUSION_STEPS_MAX + 1] {
+            request.diffusion_steps = Some(steps);
+            assert_eq!(
+                request.check(),
+                Err(RequestError::DiffusionStepsOutOfRange { steps })
+            );
+        }
     }
 
     #[test]

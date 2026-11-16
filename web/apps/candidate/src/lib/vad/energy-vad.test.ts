@@ -101,6 +101,20 @@ describe("EnergyVad", () => {
     expect(feed(vad, -65, 1000)).toEqual([]);
   });
 
+  it("说话时声音低下去多久了看得到，接着出声就归零", () => {
+    const vad = new EnergyVad();
+    feed(vad, -65, 500);
+    expect(vad.snapshot().quietMs).toBe(0);
+    feed(vad, -25, 500);
+    expect(vad.snapshot().quietMs).toBe(0);
+    feed(vad, -65, 200);
+    expect(vad.snapshot()).toMatchObject({ speaking: true, quietMs: 200 });
+    feed(vad, -25, 20);
+    expect(vad.snapshot().quietMs).toBe(0);
+    feed(vad, -65, 400);
+    expect(vad.snapshot()).toMatchObject({ speaking: false, quietMs: 0 });
+  });
+
   it("reset 之后要重新满足持续时间才会再次触发", () => {
     const vad = new EnergyVad();
     feed(vad, -65, 500);

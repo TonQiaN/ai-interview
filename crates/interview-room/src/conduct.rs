@@ -39,7 +39,10 @@ use uuid::Uuid;
 
 use crate::access::RoomAccess;
 use crate::events::{self, EventSource, NewEvent};
-use crate::protocol::{AnswerSettings, NextStep, Progress, Utterance};
+use crate::protocol::{
+    AnswerSettings, NextStep, PauseCheckRequest, PauseCheckResponse, PauseVerdict, Progress,
+    Utterance,
+};
 use crate::session::{consent_agreed, parse_config};
 use crate::{AnswerTranscript, Deps, realtime};
 
@@ -53,6 +56,7 @@ pub(crate) fn router() -> OpenApiRouter<Deps> {
     OpenApiRouter::new()
         .routes(routes!(start_interview))
         .routes(routes!(advance_interview))
+        .routes(routes!(check_pause))
         .routes(routes!(room_utterance_audio))
         .routes(routes!(finish_interview))
 }
@@ -290,6 +294,7 @@ async fn decorate(deps: &Deps, interview_id: Uuid, step: &RoomStep) -> ApiResult
             silence_sec: window.silence_sec,
             max_sec: window.max_sec,
             min_sec: window.min_sec,
+            pause_check: None,
         }),
         progress: Progress {
             index: beat.progress.index,
@@ -303,6 +308,7 @@ async fn decorate(deps: &Deps, interview_id: Uuid, step: &RoomStep) -> ApiResult
             .filter(|key| duration_of(key).is_some())
             .map(|key| audio_url(key))
             .collect(),
+        barge_in: None,
     })
 }
 
@@ -360,6 +366,7 @@ pub(crate) fn at_elapsed(step: NextStep, elapsed_ms: i64) -> NextStep {
             answer,
             progress,
             preload_audio_urls,
+            barge_in,
         } => NextStep::Say {
             seq,
             utterance,
@@ -370,6 +377,7 @@ pub(crate) fn at_elapsed(step: NextStep, elapsed_ms: i64) -> NextStep {
                 ..progress
             },
             preload_audio_urls,
+            barge_in,
         },
         finish @ NextStep::Finish { .. } => finish,
     }
@@ -416,6 +424,8 @@ async fn start_interview(
         };
     }
     let mut resumed_at = None;
+    // 刚开始的实时对话：用什么语言。提交之后拿它去把接话提前合成好
+    let mut warm_up = None;
     let step = match (row.status, stored_state(interview_id, &row)?) {
         (InterviewStatus::InProgress, Some(state)) => {
             resumed_at = Some(row.elapsed_ms(Utc::now()));
@@ -427,6 +437,7 @@ async fn start_interview(
             let opened = if realtime::enabled(&deps, &config).await {
                 let state = realtime::open(&deps, &plan, &config)?;
                 realtime::save(&mut tx, interview_id, &state).await?;
+                warm_up = Some(config.language);
                 Opened::Realtime(Box::new(state))
             } else {
                 let (state, step) = room::open(&plan, &config).map_err(engine_error)?;
@@ -464,6 +475,9 @@ async fn start_interview(
         }
     };
     tx.commit().await?;
+    if let Some(language) = warm_up {
+        realtime::warm_up(&deps, interview_id, language);
+    }
     let step = match step {
         Opened::Scripted(step) => decorate(&deps, interview_id, &step).await?,
         Opened::Realtime(state) => realtime::current_step(&deps, interview_id, &state).await?,
@@ -535,6 +549,11 @@ pub struct AdvanceRequest {
     /// 候选人重听了几次
     #[serde(default)]
     pub replays: u32,
+    /// 候选人插话打断了这一句（实时对话，见「下一步」里的 `barge_in`）：断的时候这一句播了
+    /// 多少毫秒。带这一项时，不管这一句本来要不要听回答，都要带上候选人这段话的起止时刻和
+    /// `end_reason`；`playback_end_ms` 是停下不播的那一刻。没被打断是 null
+    #[serde(default)]
+    pub interrupted_played_ms: Option<i64>,
 }
 
 /// 一次推进的结果。
@@ -604,6 +623,38 @@ async fn advance_interview(
         }
     }
     Err(ApiError::unavailable("上一段回答还在处理，请稍后再试").with_code("answer_pending"))
+}
+
+/// 候选人停顿了一下
+///
+/// 实时对话里，候选人的声音停下来、还没到算答完的时长时调一次（「下一步」的 `answer.pause_check`
+/// 不是 null 才调，多久之后调、一段回答最多调几次都在里面）。服务端这时就把这段话转成文字，让模型看
+/// 说完没有：`done` 是说完了，页面不用等满静音时长，停顿满 `done_silence_ms` 就照常调「推进面试」；
+/// `wait` 是还没说完，这次停顿等到 `wait_silence_ms`；`unknown` 照原来的静音时长算。候选人接着说了，
+/// 这次的结果就作废。
+///
+/// 只是提前打个招呼，不改变面试的进度，调不通、不调都不影响面试。逐题模式下总是返回 `unknown`。
+#[utoipa::path(
+    post,
+    path = "/api/v1/room/pause-check",
+    tag = "room",
+    security(("invite_token" = [])),
+    request_body = PauseCheckRequest,
+    responses(
+        (status = 200, description = "这段话说完没有", body = PauseCheckResponse),
+    )
+)]
+async fn check_pause(
+    State(deps): State<Deps>,
+    access: RoomAccess,
+    Json(request): Json<PauseCheckRequest>,
+) -> ApiResult<Json<PauseCheckResponse>> {
+    let verdict = if is_realtime(&deps, access.interview_id).await? {
+        realtime::check_pause(&deps, access.interview_id, &request).await?
+    } else {
+        PauseVerdict::Unknown
+    };
+    Ok(Json(PauseCheckResponse { verdict }))
 }
 
 /// 这场面试是不是按实时对话进行的。开始的时候定下来，之后不变，所以不用拿锁。
@@ -707,11 +758,17 @@ pub(crate) struct BeatTimes {
 impl BeatTimes {
     pub(crate) fn from_request(request: &AdvanceRequest, now_ms: i64) -> Self {
         let clamp = |value: Option<i64>| value.map(|ms| ms.clamp(0, now_ms + CLOCK_SLACK_MS));
+        // 插话的：页面是听出有人说话才停的播放，候选人其实更早一点就开口了
+        let lead_ms = if request.interrupted_played_ms.is_some() {
+            BARGE_IN_LEAD_MS
+        } else {
+            0
+        };
         Self {
             now_ms,
             playback_start_ms: clamp(request.playback_start_ms),
             playback_end_ms: clamp(request.playback_end_ms),
-            answer_start_ms: clamp(request.answer_start_ms),
+            answer_start_ms: clamp(request.answer_start_ms.map(|ms| ms - lead_ms)),
             answer_end_ms: clamp(request.answer_end_ms),
         }
     }
@@ -729,6 +786,12 @@ impl BeatTimes {
             _ => 0,
         }
     }
+
+    /// 候选人这段回答要转写哪一段。和这段回答记进对话之后 [`latest_answer_span`] 给出来的一样。
+    pub(crate) fn answer_range(&self) -> Option<(i64, i64)> {
+        let (start_ms, end_ms) = (self.answer_start_ms?, self.answer_end_ms?);
+        Some((answer_from_ms(self.playback_end_ms, start_ms), end_ms))
+    }
 }
 
 /// 面试官这一句在对话记录里的序号。每一拍占两个位置：面试官的话在前，候选人的回答在后。
@@ -736,7 +799,7 @@ fn interviewer_turn_seq(beat_seq: u32) -> i32 {
     i32::try_from(beat_seq.saturating_mul(2).saturating_sub(1)).unwrap_or(i32::MAX)
 }
 
-fn candidate_turn_seq(beat_seq: u32) -> i32 {
+pub(crate) fn candidate_turn_seq(beat_seq: u32) -> i32 {
     i32::try_from(beat_seq.saturating_mul(2)).unwrap_or(i32::MAX)
 }
 
@@ -1007,18 +1070,51 @@ pub(crate) struct AnswerText {
     transcript: AnswerTranscript,
 }
 
+/// 候选人的一段话转出来的文字。
+#[derive(Debug)]
+pub(crate) struct Heard {
+    pub(crate) text: String,
+    transcript: AnswerTranscript,
+}
+
+impl Heard {
+    /// 这段话在对话记录里是第 `beat_seq` 拍的回答。
+    pub(crate) fn into_answer(self, beat_seq: u32) -> AnswerText {
+        AnswerText {
+            turn_seq: candidate_turn_seq(beat_seq),
+            text: self.text,
+            transcript: self.transcript,
+        }
+    }
+}
+
+/// 候选人最近一段回答在对话记录里的序号，和要转写的范围（面试时间轴上的毫秒）。
+pub(crate) struct AnswerSpan {
+    pub(crate) turn_seq: i32,
+    pub(crate) from_ms: i64,
+    pub(crate) end_ms: i64,
+}
+
 /// 候选人开口比页面察觉到的要早一点。不知道面试官那句话什么时候播完时，往前多取这么多。
 const ANSWER_LEAD_MS: i64 = 1_000;
 
-/// 把候选人最近的一段回答转成文字。没接语音识别、这一段没有起止时刻、识别不出来，都是 `None`。
-pub(crate) async fn transcribe_answer(
+/// 候选人插话时，页面要听到一小段声音才察觉、才停下播放。这段话的开头按早这么多算，
+/// 转写时头一个字才不会丢。再往前就是面试官自己的声音了（录下来的音轨里两边的声音都有）。
+const BARGE_IN_LEAD_MS: i64 = 200;
+
+/// 一段回答从哪里开始转写。`start_ms` 是页面听出有人说话的那一刻，头一两个字已经说出去了，
+/// 所以从面试官那句话播完算起。
+fn answer_from_ms(question_end_ms: Option<i64>, start_ms: i64) -> i64 {
+    question_end_ms
+        .map_or(start_ms - ANSWER_LEAD_MS, |played| played.min(start_ms))
+        .max(0)
+}
+
+/// 候选人最近的一段回答要转写哪一段。这一段没有起止时刻时是 `None`。
+pub(crate) async fn latest_answer_span(
     deps: &Deps,
     interview_id: Uuid,
-    deadline: tokio::time::Instant,
-) -> ApiResult<Option<AnswerText>> {
-    let Some(transcriber) = &deps.transcriber else {
-        return Ok(None);
-    };
+) -> ApiResult<Option<AnswerSpan>> {
     // 连同面试官那句话播完的时刻一起取：候选人的话从那之后算起
     let latest: Option<(i32, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
         "SELECT c.seq, c.start_ms, c.end_ms, i.end_ms
@@ -1032,25 +1128,52 @@ pub(crate) async fn transcribe_answer(
     .bind(interview_id)
     .fetch_optional(&deps.ctx.db)
     .await?;
-    let Some((turn_seq, start_ms, Some(end_ms), question_end_ms)) = latest else {
-        return Ok(None);
-    };
-    // 记下来的开始时刻是页面听出有人说话的那一刻，头一两个字已经说出去了
-    let from_ms = question_end_ms
-        .map_or(start_ms - ANSWER_LEAD_MS, |played| played.min(start_ms))
-        .max(0);
-    let answer =
+    Ok(
+        latest.and_then(|(turn_seq, start_ms, end_ms, question_end_ms)| {
+            Some(AnswerSpan {
+                turn_seq,
+                from_ms: answer_from_ms(question_end_ms, start_ms),
+                end_ms: end_ms?,
+            })
+        }),
+    )
+}
+
+/// 把面试时间轴上的一段转成文字。没接语音识别、到时间还没转出来、什么都没识别出来，都是 `None`。
+pub(crate) async fn transcribe_span(
+    deps: &Deps,
+    interview_id: Uuid,
+    from_ms: i64,
+    end_ms: i64,
+    deadline: tokio::time::Instant,
+) -> Option<Heard> {
+    let transcriber = deps.transcriber.as_ref()?;
+    let transcript =
         tokio::time::timeout_at(deadline, transcriber.answer(interview_id, from_ms, end_ms))
             .await
             .ok()
-            .flatten();
-    Ok(answer.and_then(|transcript| {
-        let text = transcript.transcript.text().trim().to_owned();
-        (!text.is_empty()).then_some(AnswerText {
-            turn_seq,
-            text,
-            transcript,
-        })
+            .flatten()?;
+    let text = transcript.transcript.text().trim().to_owned();
+    (!text.is_empty()).then_some(Heard { text, transcript })
+}
+
+/// 把候选人最近的一段回答转成文字。没接语音识别、这一段没有起止时刻、识别不出来，都是 `None`。
+pub(crate) async fn transcribe_answer(
+    deps: &Deps,
+    interview_id: Uuid,
+    deadline: tokio::time::Instant,
+) -> ApiResult<Option<AnswerText>> {
+    if deps.transcriber.is_none() {
+        return Ok(None);
+    }
+    let Some(span) = latest_answer_span(deps, interview_id).await? else {
+        return Ok(None);
+    };
+    let heard = transcribe_span(deps, interview_id, span.from_ms, span.end_ms, deadline).await;
+    Ok(heard.map(|heard| AnswerText {
+        turn_seq: span.turn_seq,
+        text: heard.text,
+        transcript: heard.transcript,
     }))
 }
 
@@ -1320,6 +1443,7 @@ mod tests {
             answer_end_ms: end,
             end_reason: Some(AnswerEndReason::Silence),
             replays: 0,
+            interrupted_played_ms: None,
         }
     }
 

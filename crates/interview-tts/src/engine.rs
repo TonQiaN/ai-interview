@@ -117,6 +117,8 @@ pub struct EngineSpec {
     pub supports_emotion: bool,
     /// 能不能用一句自然语言的导演指令控制演绎（Breeze）。
     pub supports_instruction: bool,
+    /// 声学生成走几步能不能在请求里指定（IndexTTS 的 flow matching）。不能的引擎会忽略这个设置。
+    pub supports_diffusion_steps: bool,
 }
 
 const INDEX2: EngineSpec = EngineSpec {
@@ -130,6 +132,7 @@ const INDEX2: EngineSpec = EngineSpec {
     supports_voice_design: false,
     supports_emotion: true,
     supports_instruction: false,
+    supports_diffusion_steps: true,
 };
 
 const INDEX25: EngineSpec = EngineSpec {
@@ -149,6 +152,7 @@ const INDEX25: EngineSpec = EngineSpec {
     supports_voice_design: false,
     supports_emotion: true,
     supports_instruction: false,
+    supports_diffusion_steps: true,
 };
 
 const BREEZE2: EngineSpec = EngineSpec {
@@ -162,6 +166,7 @@ const BREEZE2: EngineSpec = EngineSpec {
     supports_voice_design: true,
     supports_emotion: false,
     supports_instruction: true,
+    supports_diffusion_steps: false,
 };
 
 #[cfg(test)]

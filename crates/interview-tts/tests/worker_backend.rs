@@ -321,3 +321,19 @@ async fn the_synthesizer_works_on_top_of_the_worker_backend() {
         .unwrap();
     assert!(synthesized.duration_ms() > 120_000);
 }
+
+#[tokio::test]
+async fn the_worker_accepts_a_step_count_and_rejects_a_bad_one() {
+    let worker = FakeWorker::start("index2,index25,breeze2", None);
+    let backend = WorkerBackend::new(&[&worker.url], None).unwrap();
+
+    let mut request = clone_request(EngineId::Index2, "好的，这部分我了解了。");
+    request.diffusion_steps = Some(16);
+    let audio = backend.synthesize(&request).await.unwrap();
+    assert!(audio.duration_ms() > 1_000);
+
+    // 后端自己的检查在 Synthesizer 里；直接发给 worker 的越界步数，worker 也要拦下来
+    request.diffusion_steps = Some(99);
+    let error = backend.synthesize(&request).await.unwrap_err();
+    assert!(error.to_string().contains("diffusion_steps"), "{error}");
+}

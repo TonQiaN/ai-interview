@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! probe weak                      ← 第一行：动作，加上对这道题到目前为止的判断
-//! 明白。那个方案里你本人负责哪一块？  ← 追问或回应：要念出来的话，按句子流式给出
+//! 好的，我想再多问一点。你本人负责哪一块？  ← 追问或回应：要念出来的话，按句子流式给出
 //! ```
 //!
 //! ```text
@@ -17,6 +17,9 @@
 //! ```
 //!
 //! 第一行一到，动作就定了：是下一题的话马上可以播，不用等模型把话说完。
+//!
+//! 追问和回应的第一句（接话）只会是 [`openers`] 里的几句之一：调用方提前合成好，候选人一答完就能
+//! 听到声音，后面的问句在接话播的时候接着合成。
 //!
 //! 候选人只是停顿了一下的时候也可以先来问（[`respond_with`] 加 [`TurnContext::paused`]）：模型觉得
 //! 话还没说完就回答 `wait`，面试官接着听；觉得说完了就照常给出怎么接。「说完没有」和「怎么接」是
@@ -68,6 +71,11 @@ const CONFIRM_END_TIMEOUT: Duration = Duration::from_secs(8);
 /// 现场生成的一段话最多念几句、多少个字。超出的部分丢掉。
 const MAX_SPOKEN_SENTENCES: u32 = 4;
 const MAX_SPOKEN_CHARS: usize = 160;
+/// 一句话念出来超过这么长（按字算，一个英文单词算两个字）还没到句末，就在逗号或冒号处先断开，
+/// 让前半句先去合成。语音合成要整句合成完才出声，句子越长候选人等得越久
+const LONG_SENTENCE: usize = 30;
+/// 断开以后前后两半都不能比这个短，免得切出零碎的几个字
+const MIN_PIECE: usize = 8;
 /// 候选人一段话最多带多少个字进上下文。
 const MAX_LINE_CHARS: usize = 3000;
 
@@ -628,8 +636,8 @@ impl<'a> Run<'a> {
                 }
             }
             Stage::Speaking { splitter, .. } => {
-                for sentence in splitter.push(piece) {
-                    self.speak(sentence);
+                for piece in splitter.push(piece) {
+                    self.speak(piece);
                 }
             }
             Stage::Closing { body, .. } => body.push_str(piece),
@@ -824,7 +832,84 @@ impl<'a> Run<'a> {
         self.emit(LiveEvent::Play { utterance });
     }
 
-    fn speak(&mut self, sentence: String) {
+    /// 模型写出来一段要说的话。每一轮的第一段必须是清单里的接话（见 [`openers`]）。
+    fn speak(&mut self, piece: Piece) {
+        let first = matches!(
+            &self.stage,
+            Stage::Speaking { text, done, .. } if text.is_empty() && !*done
+        );
+        if !first {
+            return self.say(piece);
+        }
+        let language = self.config.language;
+        let matched = leading_opener(language, &piece.text)
+            .or_else(|| near_opener(language, &piece).map(|opener| (opener, "")));
+        if let Some((opener, rest)) = matched {
+            let opener = self.vary_opener(opener);
+            let rest = (!rest.is_empty()).then(|| Piece {
+                text: rest.to_owned(),
+                ends_sentence: piece.ends_sentence,
+            });
+            self.say(Piece {
+                text: opener.to_owned(),
+                ends_sentence: true,
+            });
+            // 模型把接话和后面的话连成了一句：拆开，接话照样用现成的
+            if let Some(rest) = rest {
+                self.say(rest);
+            }
+            return;
+        }
+        // 模型没按清单说：替它补一句，候选人照样马上能听到声音
+        let (probe, reply) = opener_lists(language);
+        let opener = if self.action == Some(LiveAction::Reply) {
+            reply[0].0
+        } else {
+            self.vary_opener(probe[0])
+        };
+        self.say(Piece {
+            text: opener.to_owned(),
+            ends_sentence: true,
+        });
+        // 它自己写的那句「明白。」「好的。」就不用再说了
+        if is_bare_ack(&piece) {
+            return;
+        }
+        // 补的接话已经说了「好的」，它那句开头的「好的，」去掉，免得连说两遍
+        let text = match without_lead_in(opener, &piece.text) {
+            Some(rest) => rest.to_owned(),
+            None => piece.text,
+        };
+        self.say(Piece {
+            text,
+            ends_sentence: piece.ends_sentence,
+        });
+    }
+
+    /// 同一道题上追问的接话不重样：这句在这道题上说过了，就换一句还没说过的。
+    ///
+    /// 模型偏爱其中一两句，连着追问时听起来像复读。回应的接话各有各的用处，不换。
+    fn vary_opener(&self, opener: &'static str) -> &'static str {
+        let (probe, _) = opener_lists(self.config.language);
+        if !probe.contains(&opener) {
+            return opener;
+        }
+        let used = |candidate: &str| {
+            self.state.dialogue.iter().any(|line| {
+                line.speaker == Speaker::Interviewer && line.text.starts_with(candidate)
+            })
+        };
+        if !used(opener) {
+            return opener;
+        }
+        probe
+            .iter()
+            .copied()
+            .find(|candidate| !used(candidate))
+            .unwrap_or(opener)
+    }
+
+    fn say(&mut self, piece: Piece) {
         let Stage::Speaking {
             key,
             text,
@@ -838,17 +923,26 @@ impl<'a> Run<'a> {
         if *done {
             return;
         }
-        text.push_str(&sentence);
-        *sentences += 1;
-        // 问完一个问题就停。模型偶尔会在追问后面接着写概括，那些不能念给候选人
-        *done = sentence.contains(['？', '?'])
-            || *sentences >= MAX_SPOKEN_SENTENCES
+        // 英文的两段之间补回切句时去掉的空格
+        if text.ends_with(|c: char| c.is_ascii() && !c.is_whitespace())
+            && piece.text.starts_with(|c: char| c.is_ascii_alphanumeric())
+        {
+            text.push(' ');
+        }
+        text.push_str(&piece.text);
+        if piece.ends_sentence {
+            *sentences += 1;
+        }
+        // 问完一个问题就停。模型偶尔会在追问后面接着写概括，那些不能念给候选人。
+        // 句子中间断开的那几段不算一句，免得话说到一半被截掉
+        *done = (piece.ends_sentence
+            && (piece.text.contains(['？', '?']) || *sentences >= MAX_SPOKEN_SENTENCES))
             || text.chars().count() >= MAX_SPOKEN_CHARS;
         let key = key.clone();
         let done = *done;
         self.emit(LiveEvent::Speak {
             key,
-            text: sentence,
+            text: piece.text,
         });
         if done {
             // 话说完了，说完还是接着听这道题
@@ -1046,64 +1140,355 @@ fn clip(text: &str, max_chars: usize) -> &str {
     }
 }
 
-/// 把流式输出按句子切开，切出一句就能送去合成。
+/// 追问前说的接话。第一句后面接什么话都通顺，模型没按清单说的时候补的就是它。
+const ZH_PROBE_OPENERS: &[&str] = &[
+    "好的，这部分我了解了。",
+    "好的，我想再多问一点。",
+    "好的，这里我追问一下。",
+    "好的，这块我想多了解一点。",
+];
+/// 回应前说的接话和各自用在什么时候。第一句是哪种回应都能用的。
+const ZH_REPLY_OPENERS: &[(&str, &str)] = &[
+    (
+        "好的，没问题，我说一下。",
+        "回答候选人的问题、解释题目，或者别的情况",
+    ),
+    ("没问题，我再说一遍。", "候选人没听清你上一句话"),
+    ("好的，咱们回到正题。", "候选人说的话和题目无关"),
+    (
+        "好的，这个我记下来了。",
+        "候选人问的事你答不了，要转给负责招聘的同事",
+    ),
+];
+const EN_PROBE_OPENERS: &[&str] = &[
+    "Alright, I see what you mean.",
+    "Okay, let me dig into that a bit.",
+    "Got it, one more question on this.",
+    "Okay, I want to hear more on this.",
+];
+const EN_REPLY_OPENERS: &[(&str, &str)] = &[
+    (
+        "Sure, no problem at all.",
+        "回答候选人的问题、解释题目，或者别的情况",
+    ),
+    ("Sure, let me say that again.", "候选人没听清你上一句话"),
+    (
+        "Okay, let's get back to the question.",
+        "候选人说的话和题目无关",
+    ),
+    (
+        "Okay, I've noted that.",
+        "候选人问的事你答不了，要转给负责招聘的同事",
+    ),
+];
+
+fn opener_lists(
+    language: Language,
+) -> (
+    &'static [&'static str],
+    &'static [(&'static str, &'static str)],
+) {
+    match language {
+        Language::Zh => (ZH_PROBE_OPENERS, ZH_REPLY_OPENERS),
+        Language::En => (EN_PROBE_OPENERS, EN_REPLY_OPENERS),
+    }
+}
+
+/// 面试官现场开口时说的第一句（接话）只会是这几句之一，文字逐字不变。
+///
+/// 语音合成要整句合成完才出声，现场合成一句短话也要一两秒。调用方可以在面试开始前把这几句用这场
+/// 面试的音色合成好，现场拿到一样的文字就直接播：候选人答完马上能听到声音，后面的问句在接话播的
+/// 时候接着合成。引擎保证每一轮第一个 [`LiveEvent::Speak`] 的文字都在这个清单里。
+pub fn openers(language: Language) -> Vec<&'static str> {
+    let (probe, reply) = opener_lists(language);
+    probe
+        .iter()
+        .copied()
+        .chain(reply.iter().map(|(text, _)| *text))
+        .collect()
+}
+
+/// 模型写的第一段是不是清单里的接话。是的话返回清单里的原文，和这一段里接话后面剩下的话。
+///
+/// 比的时候不看标点和空白：模型可能把句号写成逗号，把接话和后面的话连成一句。
+fn leading_opener(language: Language, text: &str) -> Option<(&'static str, &str)> {
+    openers(language).into_iter().find_map(|opener| {
+        let mut wanted = opener
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .peekable();
+        let mut end = 0;
+        for (index, c) in text.char_indices() {
+            if wanted.peek().is_none() {
+                break;
+            }
+            end = index + c.len_utf8();
+            if !c.is_alphanumeric() {
+                continue;
+            }
+            if c.to_lowercase().next() != wanted.next() {
+                return None;
+            }
+        }
+        if wanted.peek().is_some() {
+            return None;
+        }
+        let rest = &text[end..];
+        // 接话后面紧跟着别的字（「好的，这部分我了解了你们当时的方案」），那就不是这句接话
+        if rest.starts_with(|c: char| c.is_alphanumeric()) {
+            return None;
+        }
+        let rest = rest.trim_start_matches(|c: char| !c.is_alphanumeric());
+        Some((opener, rest))
+    })
+}
+
+/// 模型把清单里的接话改了几个字（「好的，我追问一下。」「好的，我们回到正题。」）：算作清单里最像的那一句。
+///
+/// 只看单独成句、不是问句的一段。像不像按两句共有的字（顺序一致）占长的那句的比例算，七成以上才算。
+fn near_opener(language: Language, piece: &Piece) -> Option<&'static str> {
+    if !piece.ends_sentence || piece.text.contains(['？', '?']) {
+        return None;
+    }
+    let letters = |text: &str| -> Vec<char> {
+        text.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    let written = letters(&piece.text);
+    if written.is_empty() {
+        return None;
+    }
+    openers(language)
+        .into_iter()
+        .map(|opener| {
+            let wanted = letters(opener);
+            let shared = common_subsequence(&written, &wanted);
+            (opener, shared, written.len().max(wanted.len()))
+        })
+        .filter(|(_, shared, longer)| shared * 10 >= longer * 7)
+        .max_by_key(|(_, shared, longer)| shared * 1000 / longer)
+        .map(|(opener, _, _)| opener)
+}
+
+/// 两串字最长的公共子序列有多长。
+fn common_subsequence(a: &[char], b: &[char]) -> usize {
+    let mut row = vec![0usize; b.len() + 1];
+    for x in a {
+        let mut diagonal = 0;
+        for (j, y) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = if x == y {
+                diagonal + 1
+            } else {
+                above.max(row[j])
+            };
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
+/// `text` 开头的应答词和 `opener` 的一样（「好的，」）：返回去掉它以后剩下的话。
+fn without_lead_in<'a>(opener: &str, text: &'a str) -> Option<&'a str> {
+    let (lead, _) = opener.split_once(['，', ','])?;
+    let rest = text.strip_prefix(lead)?;
+    let rest = rest.strip_prefix(['，', ','])?.trim_start();
+    (!rest.is_empty()).then_some(rest)
+}
+
+/// 只是应答（「明白。」「好的。」「好的，我了解了。」），没有别的内容。补了接话以后这一句就多余了。
+///
+/// 按标点分成小句，每个小句都是一声应答才算。「能听到。」「可以的，没问题。」这样有内容的短句不算。
+fn is_bare_ack(piece: &Piece) -> bool {
+    const ACKS: &[&str] = &[
+        "好",
+        "好的",
+        "好了",
+        "嗯",
+        "嗯嗯",
+        "明白",
+        "明白了",
+        "我明白了",
+        "了解",
+        "了解了",
+        "我了解了",
+        "知道了",
+        "我知道了",
+        "收到",
+        "行",
+        "没问题",
+        "ok",
+        "okay",
+        "gotit",
+        "isee",
+        "sure",
+        "alright",
+        "right",
+        "understood",
+    ];
+    if !piece.ends_sentence {
+        return false;
+    }
+    let mut clauses = piece
+        .text
+        .split(|c: char| !c.is_alphanumeric() && !c.is_whitespace())
+        .map(|clause| {
+            clause
+                .chars()
+                .filter(|c| c.is_alphanumeric())
+                .flat_map(char::to_lowercase)
+                .collect::<String>()
+        })
+        .filter(|clause| !clause.is_empty())
+        .peekable();
+    clauses.peek().is_some() && clauses.all(|clause| ACKS.contains(&clause.as_str()))
+}
+
+/// 给提示词用：接话清单和各自什么时候用。
+fn opener_guide(language: Language) -> String {
+    let (probe, reply) = opener_lists(language);
+    let mut text = String::from(
+        "\n\n## 接话\n\n每次开口（probe 和 reply）的第一句必须从下面的句子里逐字选一句，单独成句，不要改字，不要加字，也不要自己另写。这几句是提前合成好的，候选人马上能听到；别的话都要现场合成，候选人得等着。\n\n追问（probe）时任选一句，几句轮着用，不要和你上一次追问用的那句相同：\n",
+    );
+    for opener in probe {
+        text.push_str(&format!("- {opener}\n"));
+    }
+    text.push_str("\n回应（reply）时按情况选：\n");
+    for (opener, when) in reply {
+        text.push_str(&format!("- {when}：{opener}\n"));
+    }
+    text
+}
+
+/// 切出来可以送去合成的一段话。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Piece {
+    text: String,
+    /// 这一段到句末了。长句在逗号、冒号处断开的前几段是 `false`
+    ends_sentence: bool,
+}
+
+/// 把流式输出按句子切开，切出一句就能送去合成。太长的句子在逗号或冒号处再断开。
 #[derive(Debug, Default)]
 struct SentenceSplitter {
     buffer: String,
 }
 
 impl SentenceSplitter {
-    /// 喂进一段文字，返回已经完整的句子。
-    fn push(&mut self, piece: &str) -> Vec<String> {
+    /// 喂进一段文字，返回已经可以送去合成的几段。
+    fn push(&mut self, piece: &str) -> Vec<Piece> {
         self.buffer.push_str(piece);
-        let mut sentences = Vec::new();
+        let mut pieces = Vec::new();
         loop {
-            let mut chars = self.buffer.char_indices().peekable();
-            let mut cut = None;
-            while let Some((index, c)) = chars.next() {
-                let ends = match c {
-                    '。' | '！' | '？' | '!' | '?' | '；' | '\n' => true,
-                    // 英文句号后面跟着空白才算，免得把小数和缩写切开
-                    '.' => chars.peek().is_some_and(|(_, next)| next.is_whitespace()),
-                    _ => false,
-                };
-                if !ends {
-                    continue;
-                }
-                // 连着的标点和引号跟在这一句后面
-                let mut end = index + c.len_utf8();
-                while let Some((next_index, next)) = chars.peek().copied() {
-                    if matches!(next, '。' | '！' | '？' | '!' | '?' | '”' | '」' | '"') {
-                        end = next_index + next.len_utf8();
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                // 后面还没有别的字时先不切：下一段可能还是标点
-                if end < self.buffer.len() {
-                    cut = Some(end);
-                }
-                break;
-            }
-            let Some(end) = cut else {
-                break;
+            // 这一句到哪里结束。还没写到句末，或者句末后面还没有别的字（下一段可能还是标点）时是 None
+            let sentence_end = self.sentence_end();
+            let sentence = &self.buffer[..sentence_end.unwrap_or(self.buffer.len())];
+            let (end, ends_sentence) = match (pause_in_long_sentence(sentence), sentence_end) {
+                (Some(end), _) => (end, false),
+                (None, Some(end)) if end < self.buffer.len() => (end, true),
+                _ => break,
             };
-            let sentence: String = self.buffer.drain(..end).collect();
-            let sentence = sentence.trim();
-            if !sentence.is_empty() {
-                sentences.push(sentence.to_owned());
+            let text: String = self.buffer.drain(..end).collect();
+            let text = text.trim();
+            if !text.is_empty() {
+                pieces.push(Piece {
+                    text: text.to_owned(),
+                    ends_sentence,
+                });
             }
         }
-        sentences
+        pieces
+    }
+
+    /// 缓冲区里第一句话的结尾（含跟在后面的标点和引号）。还没写到句末时是 `None`。
+    fn sentence_end(&self) -> Option<usize> {
+        let mut chars = self.buffer.char_indices().peekable();
+        while let Some((index, c)) = chars.next() {
+            let ends = match c {
+                '。' | '！' | '？' | '!' | '?' | '；' | '\n' => true,
+                // 英文句号后面跟着空白才算，免得把小数和缩写切开
+                '.' => chars.peek().is_some_and(|(_, next)| next.is_whitespace()),
+                _ => false,
+            };
+            if !ends {
+                continue;
+            }
+            // 连着的标点和引号跟在这一句后面
+            let mut end = index + c.len_utf8();
+            while let Some((next_index, next)) = chars.peek().copied() {
+                if matches!(next, '。' | '！' | '？' | '!' | '?' | '”' | '」' | '"') {
+                    end = next_index + next.len_utf8();
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            return Some(end);
+        }
+        None
     }
 
     /// 输出结束，把剩下的当作最后一句。
-    fn finish(&mut self) -> Option<String> {
+    fn finish(&mut self) -> Option<Piece> {
         let rest = std::mem::take(&mut self.buffer);
         let rest = rest.trim();
-        (!rest.is_empty()).then(|| rest.to_owned())
+        (!rest.is_empty()).then(|| Piece {
+            text: rest.to_owned(),
+            ends_sentence: true,
+        })
     }
+}
+
+/// 一句话太长时，找出可以先断开的地方：第一个前后两半都不算太短的逗号或冒号，返回它后面的位置。
+/// 句子不长、没有合适的地方，或者后半句还没写出多少时返回 `None`。
+fn pause_in_long_sentence(sentence: &str) -> Option<usize> {
+    let total = spoken_len(sentence);
+    if total <= LONG_SENTENCE {
+        return None;
+    }
+    let mut chars = sentence.char_indices().peekable();
+    while let Some((index, c)) = chars.next() {
+        let pauses = match c {
+            '，' | '：' => true,
+            // 英文的逗号和冒号后面跟着空白才算，免得把 1,000 和 10:30 切开
+            ',' | ':' => chars.peek().is_some_and(|(_, next)| next.is_whitespace()),
+            _ => false,
+        };
+        if !pauses {
+            continue;
+        }
+        let end = index + c.len_utf8();
+        let before = spoken_len(&sentence[..end]);
+        if before < MIN_PIECE {
+            continue;
+        }
+        // 再往后的停顿处后半句只会更短
+        return (total - before >= MIN_PIECE).then_some(end);
+    }
+    None
+}
+
+/// 一段话念出来大概有多长：一个汉字算一个字，一个英文单词或一串数字算两个字，标点不算。
+fn spoken_len(text: &str) -> usize {
+    let mut len = 0;
+    let mut in_word = false;
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() {
+            if !in_word {
+                len += 2;
+            }
+            in_word = true;
+        } else {
+            in_word = false;
+            if c.is_alphanumeric() {
+                len += 1;
+            }
+        }
+    }
+    len
 }
 
 const LIVE_SYSTEM: &str = r#"你是一场语音面试的 AI 面试官，正在和候选人实时对话。候选人刚说了一段话，你要决定怎么接。
@@ -1128,7 +1513,9 @@ const LIVE_SYSTEM: &str = r#"你是一场语音面试的 AI 面试官，正在�
 
 ## 说话的要求
 
-- 口语，像真人面试官当面说话。先用很短的一句中性的话接住对方，只用「明白。」「好的。」「嗯，这块我想多了解一点。」这一类，再问。接话里不能有对回答的评价：「讲得挺清楚」「思路不错」「口径清楚了」都不要说。接话之后只问一句，问句越短越好，像「这个数字是怎么算出来的？」这样。整段不超过 50 个字。
+- 口语，像真人面试官当面说话。先说一句接话接住对方，再问。接话只能从后面「接话」一节给的句子里逐字选，不要自己写。不要评价回答：「讲得挺清楚」「思路不错」「口径清楚了」都不要说。接话之后只问一句，问句越短越好，像「这个数字是怎么算出来的？」这样。
+- 你的话是一句一句转成语音的，一句没合成完候选人什么都听不到，所以句子要短。接话单独成句，用句号结尾，不要用逗号把它和后面的话连成一句。接话后面每一句不超过 25 个字，整段不超过 50 个字。
+- 直接问，不要先把候选人说过的话复述一遍再问。不说「你刚才提到……，能不能……」，说「那次具体卡在哪个环节？」。
 - 一次只问一个问题，整段话里只有一个问号，不要连着问两件事。问具体的：本人做了什么、为什么这么做、数字怎么来的、遇到什么困难、现在回头看会怎么改。可以参考提纲里的追问方向，但要贴着候选人刚才说的话问。
 - 只追问当前这道题。提纲里后面的题要问的内容留给后面，不要提前问。
 - 不评价回答，不说「很好」「不错」，也不说对或者错，不给提示和答案，不替候选人总结，不重复候选人说过的话。
@@ -1150,7 +1537,7 @@ const LIVE_SYSTEM: &str = r#"你是一场语音面试的 AI 面试官，正在�
 
 候选人说的话和这道题没有关系，像是在说别的事，或者识别出来的根本不是在回答你：
 
-- 这道题上第一次遇到：选 reply，用一句很短的话把他带回这道题。
+- 这道题上第一次遇到：选 reply，先说接话里带回正题的那一句，再用不超过 20 个字点一下这道题问的是什么。不要把题目整个重说一遍，也不要说「我再问一次」。
 - 对话里你已经带回过一次，他说的还是和题目无关：选 next，判断写 no_answer。不要把同一个问题换着说法问第三遍，也不要换一个问题再试。
 - 这不是候选人要求结束，不要选 end。连着几道题都这样，系统会自己结束面试。
 
@@ -1343,7 +1730,11 @@ fn build_request(
     }
     user.push_str("\n按格式输出：第一行是动作和判断。");
 
-    let system = format!("{LIVE_SYSTEM}{}", outline(plan, config));
+    let system = format!(
+        "{LIVE_SYSTEM}{}{}",
+        opener_guide(config.language),
+        outline(plan, config)
+    );
     let max_tokens = if config.live_thinking.enabled {
         2400
     } else {
@@ -1455,7 +1846,7 @@ mod tests {
     async fn probes_then_moves_on_and_keeps_only_a_summary() {
         let (plan, config) = setup();
         let model = ScriptedModel::new()
-            .reply("probe weak\n明白。那个方案里你本人负责哪一块？")
+            .reply("probe weak\n好的，我想再多问一点。那个方案里你本人负责哪一块？")
             .reply("next adequate\n讲了订单系统的拆分，本人负责库存部分。\n- 数字说不出来源")
             .reply("next strong\n讲清楚了排查过程。");
         let (state, first) = open(&plan, &config).unwrap();
@@ -1472,7 +1863,10 @@ mod tests {
         .await;
         assert_eq!(outcome.action, LiveAction::Probe);
         assert_eq!(keys_of(&outcome), ["q1.p1"]);
-        assert_eq!(outcome.said[0].text, "明白。那个方案里你本人负责哪一块？");
+        assert_eq!(
+            outcome.said[0].text,
+            "好的，我想再多问一点。那个方案里你本人负责哪一块？"
+        );
         assert_eq!(
             events,
             [
@@ -1481,7 +1875,7 @@ mod tests {
                 },
                 LiveEvent::Speak {
                     key: "q1.p1".to_owned(),
-                    text: "明白。".to_owned()
+                    text: "好的，我想再多问一点。".to_owned()
                 },
                 LiveEvent::Speak {
                     key: "q1.p1".to_owned(),
@@ -1549,7 +1943,7 @@ mod tests {
     async fn replies_to_the_candidate_and_ends_on_request() {
         let (plan, config) = setup();
         let model = ScriptedModel::new()
-            .reply("reply adequate\n好的，我再说一遍。请介绍一个你做过的项目。")
+            .reply("reply adequate\n没问题，我再说一遍。请介绍一个你做过的项目。")
             .reply("end poor\n候选人表示不想继续面试。")
             .reply("yes");
         let (state, _) = open(&plan, &config).unwrap();
@@ -1581,7 +1975,7 @@ mod tests {
         // 结束之前单独核对了一次，只带面试官最后一句和候选人刚说的话
         let check = model.requests()[2].text();
         assert!(check.contains("候选人：算了，我不想面了。"));
-        assert!(check.contains("面试官：好的，我再说一遍。请介绍一个你做过的项目。"));
+        assert!(check.contains("面试官：没问题，我再说一遍。请介绍一个你做过的项目。"));
         assert!(!check.contains("没听清，再说一遍"));
     }
 
@@ -1739,13 +2133,19 @@ mod tests {
         let mut sink = |event| events.push(event);
         let mut run = Run::new(&plan, &config, state, &turn, false, &mut sink);
         run.can_probe = true;
-        for piece in ["pro", "be we", "ak\n明", "白。那你", "本人做"] {
+        for piece in [
+            "pro",
+            "be we",
+            "ak\n好的，我想",
+            "再多问一点。那你",
+            "本人做",
+        ] {
             run.feed(piece).unwrap();
         }
         // 流在这里断了：已经说出口的照样算数
         assert_eq!(run.finish().unwrap(), LiveAction::Probe);
         let outcome = run.outcome(LiveAction::Probe, Usage::default());
-        assert_eq!(outcome.said[0].text, "明白。那你本人做");
+        assert_eq!(outcome.said[0].text, "好的，我想再多问一点。那你本人做");
         assert_eq!(outcome.state.probes_asked, 1);
         take_done(&outcome, &mut events);
         assert_eq!(
@@ -1756,7 +2156,7 @@ mod tests {
                 },
                 LiveEvent::Speak {
                     key: "q1.p1".to_owned(),
-                    text: "明白。".to_owned()
+                    text: "好的，我想再多问一点。".to_owned()
                 },
                 LiveEvent::Speak {
                     key: "q1.p1".to_owned(),
@@ -1771,16 +2171,19 @@ mod tests {
         let (plan, config) = setup();
         // 真模型出过这种输出：追问后面接着写了这道题的概括
         let model = ScriptedModel::new().reply(
-            "probe weak\n明白。那你们用了多少台服务器？\n一句话概括：候选人说不清数字的口径。\n数字说不出来源",
+            "probe weak\n好的，这部分我了解了。那你们用了多少台服务器？\n一句话概括：候选人说不清数字的口径。\n数字说不出来源",
         );
         let (state, _) = open(&plan, &config).unwrap();
         let (outcome, events) = run(&model, &plan, &config, &state, &said("记不清了。", 60)).await;
         assert_eq!(outcome.action, LiveAction::Probe);
-        assert_eq!(outcome.said[0].text, "明白。那你们用了多少台服务器？");
+        assert_eq!(
+            outcome.said[0].text,
+            "好的，这部分我了解了。那你们用了多少台服务器？"
+        );
         assert_eq!(events.len(), 3, "概括没有被念出来");
         assert_eq!(
             outcome.state.dialogue.last().unwrap().text,
-            "明白。那你们用了多少台服务器？"
+            "好的，这部分我了解了。那你们用了多少台服务器？"
         );
     }
 
@@ -1801,6 +2204,10 @@ mod tests {
         assert_eq!(parse_header("I see. What did you do next?"), (None, None));
     }
 
+    fn texts(pieces: &[Piece]) -> Vec<&str> {
+        pieces.iter().map(|piece| piece.text.as_str()).collect()
+    }
+
     #[test]
     fn splits_streamed_text_into_sentences() {
         let mut splitter = SentenceSplitter::default();
@@ -1816,12 +2223,369 @@ mod tests {
             out.extend(splitter.push(piece));
         }
         out.extend(splitter.finish());
-        assert_eq!(out, ["明白。", "那个 QPS 是 1.5 万吗？？", "当时怎么测的"]);
+        assert_eq!(
+            texts(&out),
+            ["明白。", "那个 QPS 是 1.5 万吗？？", "当时怎么测的"]
+        );
+        assert!(out.iter().all(|piece| piece.ends_sentence));
 
         let mut splitter = SentenceSplitter::default();
         let mut out = splitter.push("Got it. What was v1.2 about? ");
         out.extend(splitter.finish());
-        assert_eq!(out, ["Got it.", "What was v1.2 about?"]);
+        assert_eq!(texts(&out), ["Got it.", "What was v1.2 about?"]);
+    }
+
+    /// 语音线实测：这样的一长句要整句合成完才出声，候选人要干等十秒左右。
+    const LONG_REASK: &str = "不好意思，刚才可能没听清，我再问一次：请你用一两分钟做个自我介绍，重点讲讲最近一段工作里你本人负责的部分。";
+
+    #[test]
+    fn breaks_a_long_sentence_at_a_pause_so_the_first_part_can_be_spoken_early() {
+        // 一次全到
+        let mut splitter = SentenceSplitter::default();
+        let mut whole = splitter.push(LONG_REASK);
+        whole.extend(splitter.finish());
+        assert_eq!(
+            texts(&whole),
+            [
+                "不好意思，刚才可能没听清，",
+                "我再问一次：请你用一两分钟做个自我介绍，",
+                "重点讲讲最近一段工作里你本人负责的部分。",
+            ]
+        );
+        assert_eq!(
+            whole
+                .iter()
+                .map(|piece| piece.ends_sentence)
+                .collect::<Vec<_>>(),
+            [false, false, true]
+        );
+
+        // 一个字一个字地到：切出来的一样，而且前半句不用等整句写完
+        let mut splitter = SentenceSplitter::default();
+        let mut streamed = Vec::new();
+        let mut first_ready_at = None;
+        for (index, c) in LONG_REASK.chars().enumerate() {
+            streamed.extend(splitter.push(&c.to_string()));
+            if first_ready_at.is_none() && !streamed.is_empty() {
+                first_ready_at = Some(index);
+            }
+        }
+        streamed.extend(splitter.finish());
+        assert_eq!(streamed, whole);
+        // 写到三十来个字、看得出是长句的时候就切，这时离句末还有二十个字
+        let total = LONG_REASK.chars().count();
+        assert!(
+            first_ready_at.unwrap() + 15 < total,
+            "{first_ready_at:?} / {total}"
+        );
+    }
+
+    #[test]
+    fn leaves_ordinary_sentences_whole() {
+        for sentence in [
+            // 不长的句子里有逗号也不切
+            "好的，咱们回到正题。",
+            "这个数字是压测出来的，还是线上监控里看到的？",
+            // 长，但是没有能断开的地方
+            "那这一百二十万单折算下来高峰期每秒钟大概要处理多少笔订单才能不出现积压和超时的情况呢？",
+            // 断开以后有一半太短
+            "嗯，那这一百二十万单折算下来高峰期每秒钟大概要处理多少笔订单才不会出现积压呢？",
+            // 数字和时间里的逗号、冒号不是停顿
+            "So the 1,000,000 orders between 10:30 and 11:45 on that one day were all handled by the three services you had just split out?",
+        ] {
+            let mut splitter = SentenceSplitter::default();
+            let mut out = splitter.push(sentence);
+            out.extend(splitter.finish());
+            assert_eq!(texts(&out), [sentence]);
+        }
+
+        let mut splitter = SentenceSplitter::default();
+        let mut out = splitter.push(
+            "You said the peak was about six hundred requests per second, so how many machines and database instances were handling that load?",
+        );
+        out.extend(splitter.finish());
+        assert_eq!(
+            texts(&out),
+            [
+                "You said the peak was about six hundred requests per second,",
+                "so how many machines and database instances were handling that load?",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_long_sentence_broken_into_parts_is_still_one_sentence() {
+        let (plan, config) = setup();
+        // 四句话，其中一句被切成三段：切出来的段数超过了句数上限，但是话不能说到一半被截掉
+        let script = format!(
+            "reply weak\n好的，没问题，我说一下。{LONG_REASK}不着急。慢慢说。这一句不会念。"
+        );
+        let model = ScriptedModel::new().reply(script);
+        let (state, _) = open(&plan, &config).unwrap();
+        let (outcome, events) =
+            run(&model, &plan, &config, &state, &said("今天多云转晴。", 60)).await;
+        assert_eq!(outcome.action, LiveAction::Reply);
+        let spoken: Vec<&str> = events
+            .iter()
+            .filter_map(|event| match event {
+                LiveEvent::Speak { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            spoken,
+            [
+                "好的，没问题，我说一下。",
+                "不好意思，刚才可能没听清，",
+                "我再问一次：请你用一两分钟做个自我介绍，",
+                "重点讲讲最近一段工作里你本人负责的部分。",
+                "不着急。",
+                "慢慢说。",
+            ]
+        );
+        // 记下来的还是连着的一段话
+        assert_eq!(
+            outcome.said[0].text,
+            format!("好的，没问题，我说一下。{LONG_REASK}不着急。慢慢说。")
+        );
+    }
+
+    #[tokio::test]
+    async fn english_parts_are_joined_with_spaces() {
+        let (plan, mut config) = setup();
+        config.language = Language::En;
+        let model = ScriptedModel::new().reply(
+            "probe weak\nGot it, one more question on this. You said the peak was about six hundred requests per second, so how many machines and database instances were handling that load?",
+        );
+        let (state, _) = open(&plan, &config).unwrap();
+        let (outcome, _) = run(&model, &plan, &config, &state, &said("About 600.", 60)).await;
+        assert_eq!(
+            outcome.said[0].text,
+            "Got it, one more question on this. You said the peak was about six hundred requests per second, so how many machines and database instances were handling that load?"
+        );
+    }
+
+    fn spoken(events: &[LiveEvent]) -> Vec<&str> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                LiveEvent::Speak { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stock_openers_are_short_complete_sentences() {
+        for language in [Language::Zh, Language::En] {
+            let list = openers(language);
+            assert_eq!(list.len(), 8);
+            for (index, opener) in list.iter().enumerate() {
+                assert!(!list[..index].contains(opener), "重复了：{opener}");
+                assert!(
+                    (5..=16).contains(&spoken_len(opener)),
+                    "接话要短，又不能短到只有一两个字：{opener}"
+                );
+                assert!(opener.ends_with(['。', '.']), "单独成句：{opener}");
+                assert_eq!(leading_opener(language, opener), Some((*opener, "")));
+            }
+        }
+        // 两种语言各用各的
+        assert!(openers(Language::En).iter().all(|opener| opener.is_ascii()));
+        assert_eq!(leading_opener(Language::En, "好的，这部分我了解了。"), None);
+    }
+
+    #[test]
+    fn recognises_an_opener_even_when_the_punctuation_differs() {
+        // 逗号写成了半角，接话和后面的话连成了一句
+        assert_eq!(
+            leading_opener(
+                Language::Zh,
+                "好的,我想再多问一点，那个方案里你负责哪一块？"
+            ),
+            Some(("好的，我想再多问一点。", "那个方案里你负责哪一块？"))
+        );
+        assert_eq!(
+            leading_opener(
+                Language::En,
+                "got it - one more question on this: what did you own?"
+            ),
+            Some(("Got it, one more question on this.", "what did you own?"))
+        );
+        // 只是开头几个字一样，后面接着别的话：不是这句接话
+        assert_eq!(
+            leading_opener(Language::Zh, "好的，这部分我了解了你们当时的方案。"),
+            None
+        );
+        assert_eq!(leading_opener(Language::Zh, "好的。"), None);
+
+        // 改了一两个字的算清单里最像的那句，差得远的、问句、没说完的半句不算
+        let piece = |text: &str, ends_sentence: bool| Piece {
+            text: text.to_owned(),
+            ends_sentence,
+        };
+        let near = |text: &str| near_opener(Language::Zh, &piece(text, true));
+        assert_eq!(near("好的，我追问一下。"), Some("好的，这里我追问一下。"));
+        assert_eq!(near("好的，我们回到正题。"), Some("好的，咱们回到正题。"));
+        assert_eq!(near("好的，这个我记下了。"), Some("好的，这个我记下来了。"));
+        assert_eq!(near("好的重申一下。"), None);
+        assert_eq!(near("好的，这部分我了解了你们当时的方案。"), None);
+        assert_eq!(near("好的，这部分我了解了吗？"), None);
+        assert_eq!(
+            near_opener(Language::Zh, &piece("好的，我追问一下，", false)),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn the_first_thing_said_is_always_a_stock_opener() {
+        let (plan, config) = setup();
+        let (state, _) = open(&plan, &config).unwrap();
+        let turn = said("我们团队做了一个系统。", 60);
+
+        // 模型自己写了一句应答：换成清单里的，它那句不再说
+        let model = ScriptedModel::new().reply("probe weak\n明白。那个方案里你本人负责哪一块？");
+        let (outcome, events) = run(&model, &plan, &config, &state, &turn).await;
+        assert_eq!(
+            spoken(&events),
+            ["好的，这部分我了解了。", "那个方案里你本人负责哪一块？"]
+        );
+        assert_eq!(
+            outcome.said[0].text,
+            "好的，这部分我了解了。那个方案里你本人负责哪一块？"
+        );
+
+        // 应答是两个小句的也一样（「好的，我了解了。」是模型很爱写的一句）
+        let model =
+            ScriptedModel::new().reply("probe weak\n好的，我了解了。那个方案里你本人负责哪一块？");
+        let (_, events) = run(&model, &plan, &config, &state, &turn).await;
+        assert_eq!(
+            spoken(&events),
+            ["好的，这部分我了解了。", "那个方案里你本人负责哪一块？"]
+        );
+
+        // 模型没写接话，直接问：前面补一句
+        let model = ScriptedModel::new().reply("probe weak\n你说的系统具体是做什么的？");
+        let (_, events) = run(&model, &plan, &config, &state, &turn).await;
+        assert_eq!(
+            spoken(&events),
+            ["好的，这部分我了解了。", "你说的系统具体是做什么的？"]
+        );
+
+        // 模型把清单里的句子改了两个字：还是用清单里的原文
+        let model = ScriptedModel::new().reply("probe weak\n好的，我追问一下。你本人负责哪一块？");
+        let (_, events) = run(&model, &plan, &config, &state, &turn).await;
+        assert_eq!(
+            spoken(&events),
+            ["好的，这里我追问一下。", "你本人负责哪一块？"]
+        );
+
+        // 模型自己写了一句有内容的话：补一句接话，它那句开头的「好的，」不再重复
+        let model = ScriptedModel::new().reply("probe weak\n好的，那我等你算一下具体数。");
+        let (_, events) = run(&model, &plan, &config, &state, &turn).await;
+        assert_eq!(
+            spoken(&events),
+            ["好的，这部分我了解了。", "那我等你算一下具体数。"]
+        );
+
+        // 模型把接话和问句连成了一句：拆开，接话用清单里的原文
+        let model = ScriptedModel::new()
+            .reply("probe weak\n好的，这部分我了解了，那个方案里你本人负责哪一块？");
+        let (_, events) = run(&model, &plan, &config, &state, &turn).await;
+        assert_eq!(
+            spoken(&events),
+            ["好的，这部分我了解了。", "那个方案里你本人负责哪一块？"]
+        );
+
+        // 很短但有内容的话不能丢
+        let model = ScriptedModel::new().reply("reply adequate\n能听到。那我们开始。");
+        let (_, events) = run(&model, &plan, &config, &state, &said("喂，能听到吗？", 60)).await;
+        assert_eq!(
+            spoken(&events),
+            ["好的，没问题，我说一下。", "能听到。", "那我们开始。"]
+        );
+
+        // 回应也一样，补的是回应用的那句
+        let model = ScriptedModel::new().reply("reply adequate\n这道题想听你亲手做过的一个项目。");
+        let (_, events) = run(
+            &model,
+            &plan,
+            &config,
+            &state,
+            &said("这题是想问什么？", 60),
+        )
+        .await;
+        assert_eq!(
+            spoken(&events),
+            [
+                "好的，没问题，我说一下。",
+                "这道题想听你亲手做过的一个项目。"
+            ]
+        );
+
+        // 提示词里列出了这几句
+        let request = model.requests()[0].text();
+        for opener in openers(Language::Zh) {
+            assert!(request.contains(opener), "提示词里没有：{opener}");
+        }
+    }
+
+    #[tokio::test]
+    async fn english_interviews_get_english_openers() {
+        let (plan, mut config) = setup();
+        config.language = Language::En;
+        let (state, _) = open(&plan, &config).unwrap();
+        // 真模型在英文面试里写过中文的应答
+        let model = ScriptedModel::new().reply("probe weak\n明白。Which part did you own?");
+        let (_, events) = run(
+            &model,
+            &plan,
+            &config,
+            &state,
+            &said("We built a system.", 60),
+        )
+        .await;
+        assert_eq!(
+            spoken(&events),
+            ["Alright, I see what you mean.", "Which part did you own?"]
+        );
+        let request = model.requests()[0].text();
+        assert!(request.contains("Okay, let me dig into that a bit."));
+        assert!(!request.contains("好的，我想再多问一点。"));
+    }
+
+    #[tokio::test]
+    async fn does_not_repeat_an_opener_on_the_same_question() {
+        let (plan, mut config) = setup();
+        config.follow_ups.max_per_question = 3;
+        let model = ScriptedModel::new()
+            .reply("probe weak\n好的，我想再多问一点。你本人负责哪一块？")
+            .reply("probe weak\n好的，我想再多问一点。当时的数据量有多大？")
+            .reply("probe weak\n这个数字是怎么测出来的？");
+        let (state, _) = open(&plan, &config).unwrap();
+        let (first, events) =
+            run(&model, &plan, &config, &state, &said("做了一个系统。", 60)).await;
+        assert_eq!(spoken(&events)[0], "好的，我想再多问一点。");
+        // 模型又选了同一句：换成这道题上还没说过的
+        let (second, events) = run(
+            &model,
+            &plan,
+            &config,
+            &first.state,
+            &said("库存那块。", 90),
+        )
+        .await;
+        assert_eq!(spoken(&events)[0], "好的，这部分我了解了。");
+        // 模型没写接话：补的那句也不重样
+        let (_, events) = run(
+            &model,
+            &plan,
+            &config,
+            &second.state,
+            &said("挺大的。", 120),
+        )
+        .await;
+        assert_eq!(spoken(&events)[0], "好的，这里我追问一下。");
     }
 
     const PAUSED: TurnContext = TurnContext {
@@ -1902,7 +2666,7 @@ mod tests {
         let mut sink = move |event| seen.lock().unwrap().push(event);
         let mut run = Run::new(&plan, &config, state, &turn, false, &mut sink);
         run.can_probe = true;
-        run.feed("probe weak\n明白。").unwrap();
+        run.feed("probe weak\n好的，这部分我了解了。").unwrap();
         assert_eq!(done_events(&events.lock().unwrap()), 0, "话还没说完");
         run.feed("具体是哪一块？\n概括：").unwrap();
         let early = events.lock().unwrap().clone();
@@ -1928,7 +2692,7 @@ mod tests {
         let model = ScriptedModel::new()
             .reply("wait")
             .fail(LlmError::Timeout(LIVE_TIMEOUT))
-            .reply("probe weak\n明白。你本人负责哪一块？");
+            .reply("probe weak\n好的，这部分我了解了。你本人负责哪一块？");
         let (state, _) = open(&plan, &config).unwrap();
 
         // 还没认出字：不调模型
@@ -2072,7 +2836,7 @@ mod tests {
             .reply("repeat")
             .reply("next adequate\n一")
             .reply("next adequate\n二")
-            .reply("probe weak\n明白。这个系统的日活大概是多少，是你自己统计的吗？")
+            .reply("probe weak\n好的，这部分我了解了。这个系统的日活大概是多少，是你自己统计的吗？")
             .reply("next adequate\n三");
         let (state, _) = open(&plan, &config).unwrap();
 
@@ -2124,11 +2888,11 @@ mod tests {
         )
         .await;
         assert_eq!(outcome.action, LiveAction::Probe);
-        let context = cut("q2.p1", 2200, None);
+        let context = cut("q2.p1", 3960, None);
         let turn = said("日活大概十万。", 120);
         let (_, _) = run_with(&model, &plan, &config, &outcome.state, &turn, &context).await;
         assert!(model.requests()[4].text().contains(
-            "面试官：明白。这个系统的日活【说到这里被候选人打断，没说出来的部分：大概是多少，是你自己统计的吗？】"
+            "面试官：好的，这部分我了解了。这个系统的日活【说到这里被候选人打断，没说出来的部分：大概是多少，是你自己统计的吗？】"
         ));
     }
 

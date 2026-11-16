@@ -7,6 +7,7 @@
  *
  * 流程：
  *   asking（播放题目）→ listening（听作答）→ ended（这道题结束，带原因）
+ * 实时对话里候选人可以插话：asking 时听出候选人开口并且接着说，直接进 listening。
  * 题目语音放不出来时走 reading（只显示文字，候选人点「开始回答」后进入 listening）。
  */
 
@@ -27,7 +28,23 @@ export interface TurnConfig {
   maxAnswerWarningMs: number;
   /** 可以重听题目几次。 */
   maxReplays: number;
+  /** 候选人停顿时先问服务端「说完了吗」（实时对话）。没有就只按 silenceMs 算。 */
+  pauseCheck?: PauseCheckConfig;
 }
+
+export interface PauseCheckConfig {
+  /** 声音停了多久去问（毫秒）。 */
+  afterMs: number;
+  /** 服务端觉得说完了：这次停顿静音满这么久就算答完（毫秒），比 silenceMs 短。 */
+  doneSilenceMs: number;
+  /** 服务端觉得没说完：这次停顿多等一会儿，静音满这么久才算答完（毫秒），比 silenceMs 长。 */
+  waitSilenceMs: number;
+  /** 一段回答里最多问几次。 */
+  maxChecks: number;
+}
+
+/** 服务端对一次停顿的判断：说完了，还是没说完。 */
+export type PauseVerdict = "done" | "wait";
 
 export const DEFAULT_TURN_CONFIG: TurnConfig = {
   silenceMs: 5_000,
@@ -76,6 +93,11 @@ export type TurnState =
       silenceSince: number | null;
       /** 最后一次听出「停止说话」的时刻；在说话或还没开过口时是 null。回答的结束时刻用它。 */
       speechEndedAt: number | null;
+      /**
+       * 服务端对某次停顿的判断，`silenceSince` 记的是哪一次停顿。候选人接着说了，或者点了
+       * 「继续回答」，停顿就不是那一次了，这个判断自然作废。
+       */
+      pauseVerdict: { verdict: PauseVerdict; silenceSince: number } | null;
       /** 是否已经提示过「请开始回答」。 */
       promptShown: boolean;
       /** 暂停开始的时刻（设备被打断等）；没有暂停是 null。 */
@@ -97,6 +119,11 @@ export type TurnEvent =
   | { type: "question_ended"; at: number }
   /** 题目语音放不出来，改为让候选人自己读。 */
   | { type: "question_failed"; at: number }
+  /**
+   * 面试官还在说，候选人插话了（实时对话）：不再往下播，直接听候选人说。
+   * `speechAt` 是听出候选人开口的时刻，这时候选人还在说。
+   */
+  | { type: "barge_in"; at: number; speechAt: number }
   /** reading 状态下候选人点了「开始回答」。 */
   | { type: "user_ready"; at: number }
   | { type: "speech_start"; at: number }
@@ -107,6 +134,11 @@ export type TurnEvent =
   | { type: "speech_end"; at: number; quietMs?: number }
   /** 候选人点了「我答完了」。 */
   | { type: "user_done"; at: number }
+  /**
+   * 服务端判断完了一次停顿。`silenceSince` 是问的时候那次停顿开始的时刻：
+   * 结果回来时候选人要是已经接着说了，就不是同一次停顿，不算数。
+   */
+  | { type: "pause_verdict"; at: number; verdict: PauseVerdict; silenceSince: number }
   /** 倒计时期间候选人点了「继续回答」。 */
   | { type: "user_continue"; at: number }
   /** 候选人点了「重听题目」。 */
@@ -121,7 +153,7 @@ export function startTurn(at: number): TurnState {
   return { phase: "asking", replaysUsed: 0, askStartedAt: at };
 }
 
-function startListening(at: number, replaysUsed: number): TurnState {
+function startListening(at: number, replaysUsed: number): Listening {
   return {
     phase: "listening",
     replaysUsed,
@@ -130,6 +162,7 @@ function startListening(at: number, replaysUsed: number): TurnState {
     speaking: false,
     silenceSince: null,
     speechEndedAt: null,
+    pauseVerdict: null,
     promptShown: false,
     pausedAt: null,
   };
@@ -149,6 +182,19 @@ function end(state: Listening, reason: TurnEndReason, at: number): TurnState {
   };
 }
 
+/**
+ * 这次停顿静音多久算答完。一般是 silenceMs；服务端判断过这次停顿的话，
+ * 说完了就短一些，没说完就长一些。
+ */
+function silenceLimitMs(state: Listening, config: TurnConfig): number {
+  const check = config.pauseCheck;
+  const judged = state.pauseVerdict;
+  if (!check || !judged || judged.silenceSince !== state.silenceSince) return config.silenceMs;
+  return judged.verdict === "done"
+    ? Math.min(config.silenceMs, check.doneSilenceMs)
+    : Math.max(config.silenceMs, check.waitSilenceMs);
+}
+
 /** 检查各种超时。只在没有暂停时调用。 */
 function checkTimeouts(state: Listening, at: number, config: TurnConfig): TurnState {
   if (at - state.listenStartedAt >= config.maxAnswerMs) {
@@ -164,7 +210,7 @@ function checkTimeouts(state: Listening, at: number, config: TurnConfig): TurnSt
   }
   if (
     state.silenceSince !== null &&
-    at - state.silenceSince >= config.silenceMs &&
+    at - state.silenceSince >= silenceLimitMs(state, config) &&
     at - state.listenStartedAt >= config.minAnswerMs
   ) {
     return end(state, "silence", at);
@@ -181,6 +227,14 @@ export function reduceTurn(
     case "asking":
       if (event.type === "question_ended") return startListening(event.at, state.replaysUsed);
       if (event.type === "question_failed") return { ...state, phase: "reading" };
+      if (event.type === "barge_in") {
+        const speechAt = Math.min(event.speechAt, event.at);
+        return {
+          ...startListening(speechAt, state.replaysUsed),
+          firstSpeechAt: speechAt,
+          speaking: true,
+        };
+      }
       return state;
 
     case "reading":
@@ -232,6 +286,17 @@ export function reduceTurn(
             config,
           );
         }
+
+        case "pause_verdict":
+          if (state.speaking || state.silenceSince !== event.silenceSince) return state;
+          return checkTimeouts(
+            {
+              ...state,
+              pauseVerdict: { verdict: event.verdict, silenceSince: event.silenceSince },
+            },
+            event.at,
+            config,
+          );
 
         case "user_continue":
           // 只有在静音计时期间才有意义：重新开始计静音。
@@ -296,7 +361,7 @@ export function viewTurn(
       ? null
       : Math.max(
           0,
-          config.silenceMs - (at - state.silenceSince),
+          silenceLimitMs(state, config) - (at - state.silenceSince),
           config.minAnswerMs - (at - state.listenStartedAt),
         );
   const answerRemainingMs = Math.max(0, config.maxAnswerMs - (at - state.listenStartedAt));

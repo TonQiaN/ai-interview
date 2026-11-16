@@ -110,15 +110,12 @@ fn answer_settings(deps: &Deps, config: &InterviewConfig, mode: RoomMode) -> Ans
             silence_sec: answer.silence_sec,
             max_sec: answer.max_sec,
             min_sec: answer.min_sec,
+            pause_check: None,
         },
         RoomMode::Realtime => {
             let window =
                 realtime::answer_window(deps, answer.silence_sec, answer.max_sec, answer.min_sec);
-            AnswerSettings {
-                silence_sec: window.silence_sec,
-                max_sec: window.max_sec,
-                min_sec: window.min_sec,
-            }
+            realtime::answer_settings(deps, window)
         }
     }
 }

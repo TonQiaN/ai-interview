@@ -24,6 +24,8 @@ export interface Playback {
   /** 播完（ended）或被 stop 打断（stopped）时兑现。 */
   done: Promise<"ended" | "stopped">;
   stop(): void;
+  /** 这段音频现在播到了哪（毫秒，从这段音频的开头算）。停下之后是停下时的位置。 */
+  positionMs(): number;
 }
 
 export interface AudioGraphOptions {
@@ -95,9 +97,14 @@ export class AudioGraph {
     return this.context.decodeAudioData(data.slice(0));
   }
 
-  /** 播放面试官的一句话。同一时刻只播一句，新的会打断旧的。 */
-  play(buffer: AudioBuffer): Playback {
+  /**
+   * 播放面试官的一句话。同一时刻只播一句，新的会打断旧的。
+   * `fromMs` 是从这段音频的哪里开始播（被疑似插话打断之后接着播用）。
+   */
+  play(buffer: AudioBuffer, fromMs = 0): Playback {
     this.current?.stop();
+    const durationMs = Math.round(buffer.duration * 1000);
+    const offsetMs = Math.min(Math.max(0, fromMs), durationMs);
 
     const source = this.context.createBufferSource();
     source.buffer = buffer;
@@ -108,9 +115,19 @@ export class AudioGraph {
       settle = resolve;
     });
     let stopped = false;
+    let startedAt = this.context.currentTime;
+    /** 停下或播完时的位置；还在播是 null。 */
+    let endedAtMs: number | null = null;
+    const positionMs = () =>
+      endedAtMs ??
+      Math.min(
+        durationMs,
+        offsetMs + Math.max(0, Math.round((this.context.currentTime - startedAt) * 1000)),
+      );
     const stop = () => {
       if (stopped) return;
       stopped = true;
+      endedAtMs = positionMs();
       try {
         source.stop();
       } catch {
@@ -120,12 +137,14 @@ export class AudioGraph {
     source.onended = () => {
       if (this.current?.source === source) this.current = null;
       source.disconnect();
+      endedAtMs ??= durationMs;
       settle(stopped ? "stopped" : "ended");
     };
 
     this.current = { source, stop };
-    source.start();
-    return { durationMs: Math.round(buffer.duration * 1000), done, stop };
+    startedAt = this.context.currentTime;
+    source.start(0, offsetMs / 1000);
+    return { durationMs, done, stop, positionMs };
   }
 
   /** 生成一段提示音，用来测试扬声器。 */

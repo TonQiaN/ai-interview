@@ -466,6 +466,8 @@ export class InterviewSession {
         },
         // 答完一题马上切一片录像传上去：服务端要用这段声音转写，判断接下来问什么
         onAnswerEnded: () => this.recorder?.flush(),
+        // 停顿时也切一片：服务端趁这会儿先转写、先想怎么接
+        onAnswerPaused: () => this.recorder?.flush(),
       });
       this.runner = runner;
       this.cleanups.push(

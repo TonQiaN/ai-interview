@@ -41,6 +41,22 @@ test("真模型：候选人说的话被听出来，面试走到结束", async ({
  * 所以量出来的数字不含合成的时间。
  */
 test("真模型：实时对话，面试官现场接话", async ({ page }) => {
+  // 候选人停顿时页面会先问服务端「说完了吗」，把每次的结论记下来
+  const verdicts: string[] = [];
+  page.on("response", (response) => {
+    if (!response.url().endsWith("/api/v1/room/pause-check")) return;
+    response.json().then(
+      (body: { verdict?: string }) => verdicts.push(body.verdict ?? "failed"),
+      () => verdicts.push("failed"),
+    );
+  });
+  // 面试官说话时候选人插话了几次（假麦克风是循环播放的，说话那一段碰上面试官在说就是插话）
+  const cuts: number[] = [];
+  page.on("request", (request) => {
+    if (!request.url().endsWith("/api/v1/room/advance")) return;
+    const body = request.postDataJSON() as { interrupted_played_ms?: number | null } | null;
+    if (typeof body?.interrupted_played_ms === "number") cuts.push(body.interrupted_played_ms);
+  });
   const interview = await enterInterview(page, { silenceSec: 3, minSec: 2, realtime: true });
   await expect(page.getByText("面试完成，谢谢你")).toBeVisible({ timeout: 8 * 60_000 });
 
@@ -68,6 +84,14 @@ test("真模型：实时对话，面试官现场接话", async ({ page }) => {
   console.log(
     `候选人说完到面试官开口：${waits.length} 轮，中位数 ${percentile(waits, 0.5)} 毫秒，` +
       `p95 ${percentile(waits, 0.95)} 毫秒，最长 ${Math.max(...waits)} 毫秒`,
+  );
+  const count = (verdict: string) => verdicts.filter((value) => value === verdict).length;
+  console.log(
+    `停顿时先问了 ${verdicts.length} 次：说完了 ${count("done")}，没说完 ${count("wait")}，` +
+      `不知道 ${count("unknown")}，没问到 ${count("failed")}`,
+  );
+  console.log(
+    `候选人插话 ${cuts.length} 次，面试官的话断在第 ${cuts.join("、") || "无"} 毫秒（重试的上报也算在内）`,
   );
   // 面试官现场说的话：key 是「题号.p几」（追问）或「题号.r几」（回应）
   const improvised = spokenKeys(state).filter((key) => key !== null && /\.[pr]\d+$/.test(key));

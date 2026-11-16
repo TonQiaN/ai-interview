@@ -49,6 +49,8 @@ export interface VadSnapshot {
   levelDb: number;
   /** 当前底噪估计（dBFS）。 */
   floorDb: number;
+  /** 正在说话、但声音已经低下去多久了（毫秒）。字和字之间的空隙也会让它大于 0；没在说话是 0。 */
+  quietMs: number;
 }
 
 /** 静音时 RMS 为 0，取对数会得到负无穷，这里给个下限。 */
@@ -151,6 +153,11 @@ export class EnergyVad {
   }
 
   snapshot(): VadSnapshot {
-    return { speaking: this.speaking, levelDb: this.levelDb, floorDb: this.floorDb };
+    return {
+      speaking: this.speaking,
+      levelDb: this.levelDb,
+      floorDb: this.floorDb,
+      quietMs: this.speaking ? this.belowMs : 0,
+    };
   }
 }

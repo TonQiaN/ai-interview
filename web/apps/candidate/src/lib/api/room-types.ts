@@ -15,6 +15,8 @@ export type InterviewMode = Schemas["RoomMode"];
 export type ConsentItem = Schemas["ConsentItem"];
 export type RecordingSettings = Schemas["RecordingSettings"];
 export type AnswerSettings = Schemas["AnswerSettings"];
+/** 面试官说这一句的时候候选人可以插话（实时对话）：声音持续多久算插话、插话之后怎么听。 */
+export type BargeInSettings = Schemas["BargeInSettings"];
 
 /** 服务端告诉页面的「下一步」：说一句话，或者面试结束。 */
 export type NextStep = Schemas["NextStep"];
@@ -28,6 +30,10 @@ export type Progress = Schemas["Progress"];
 export type AnswerEndReason = Schemas["AnswerEndReason"];
 /** 上报刚完成的这一句（以及候选人的回答）。时间都是面试时间轴上的毫秒。 */
 export type AdvanceRequest = Schemas["AdvanceRequest"];
+/** 候选人停顿时问服务端「说完了吗」。时间和之后上报这段回答时用的是同一组。 */
+export type PauseCheckRequest = Schemas["PauseCheckRequest"];
+/** 服务端的判断：说完了、没说完、不知道（按原来的静音时长算）。 */
+export type PauseCheckVerdict = Schemas["PauseVerdict"];
 /** 候选人这边结束面试的原因。 */
 export type FinishKind = Schemas["FinishKind"];
 

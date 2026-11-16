@@ -14,6 +14,8 @@ import type {
   DeviceCheckReport,
   FinishKind,
   NextStep,
+  PauseCheckRequest,
+  PauseCheckVerdict,
   RoomSession,
 } from "./room-types";
 
@@ -60,6 +62,8 @@ export interface RoomApi extends UploadApi {
   probeUplink(bytes: ArrayBuffer): Promise<void>;
   start(): Promise<NextStep>;
   advance(request: AdvanceRequest): Promise<NextStep>;
+  /** 候选人停顿时问服务端这段话说完没有（实时对话）。 */
+  checkPause(request: PauseCheckRequest): Promise<PauseCheckVerdict>;
   /** 取面试官语音的字节。地址来自「下一步」里的 audio_url。 */
   fetchAudio(audioUrl: string): Promise<ArrayBuffer>;
   postEvents(events: ClientEvent[], options?: { keepalive?: boolean }): Promise<void>;
@@ -79,6 +83,8 @@ export interface HttpRoomApiOptions {
    * 所以比别的请求放得长。
    */
   advanceTimeoutMs?: number;
+  /** 问「说完了吗」的超时。等久了结果也用不上了，所以很短。 */
+  pauseCheckTimeoutMs?: number;
 }
 
 /** 把后端的错误响应归类。导出是为了单测。 */
@@ -107,6 +113,7 @@ export class HttpRoomApi implements RoomApi {
   private readonly timeoutMs: number;
   private readonly uploadTimeoutMs: number;
   private readonly advanceTimeoutMs: number;
+  private readonly pauseCheckTimeoutMs: number;
 
   constructor(options: HttpRoomApiOptions) {
     this.token = options.token;
@@ -115,6 +122,7 @@ export class HttpRoomApi implements RoomApi {
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.uploadTimeoutMs = options.uploadTimeoutMs ?? 60_000;
     this.advanceTimeoutMs = options.advanceTimeoutMs ?? 35_000;
+    this.pauseCheckTimeoutMs = options.pauseCheckTimeoutMs ?? 5_000;
     this.client = createRoomClient(options.token, {
       baseUrl: this.baseUrl,
       fetch: this.fetchImpl,
@@ -164,6 +172,14 @@ export class HttpRoomApi implements RoomApi {
       (signal) => this.client.POST("/api/v1/room/advance", { body: request, signal }),
       this.advanceTimeoutMs,
     );
+  }
+
+  async checkPause(request: PauseCheckRequest): Promise<PauseCheckVerdict> {
+    const response = await this.json(
+      (signal) => this.client.POST("/api/v1/room/pause-check", { body: request, signal }),
+      this.pauseCheckTimeoutMs,
+    );
+    return response.verdict;
   }
 
   async fetchAudio(audioUrl: string): Promise<ArrayBuffer> {

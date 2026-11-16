@@ -98,6 +98,43 @@ impl LiveVoice for FakeVoice {
     }
 }
 
+/// 一次只念一句的假声音，像真的合成服务：记下每一句是什么时候排上队的，放行一句念一句。
+struct QueuedVoice {
+    gate: Semaphore,
+    asked: Mutex<Vec<String>>,
+}
+
+impl QueuedVoice {
+    /// 等到排过队的正好是这么多句，最多等两秒。
+    async fn wait_asked(&self, count: usize) -> Vec<String> {
+        for _ in 0..100 {
+            if self.asked.lock().unwrap().len() == count {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl LiveVoice for QueuedVoice {
+    async fn speak(
+        &self,
+        _voice_id: Option<VoiceId>,
+        _language: Language,
+        text: &str,
+    ) -> Result<SpokenAudio, String> {
+        self.asked.lock().unwrap().push(text.to_owned());
+        let permit = self.gate.acquire().await.map_err(|err| err.to_string())?;
+        permit.forget();
+        Ok(SpokenAudio {
+            wav: format!("现场合成：{text}").into_bytes(),
+            duration_ms: 1_200,
+        })
+    }
+}
+
 /// 假模型：第一行（怎么接）马上给，后面的（这道题的概括）等放行了才写完。
 struct SlowWriter {
     gate: Arc<Semaphore>,
@@ -152,6 +189,14 @@ impl ChatModel for SlowWriter {
     }
 }
 
+/// 不提前合成接话：别的测试要数现场合成了哪几句，不想把备的那几句算进去。
+fn no_warm_up() -> RoomConfig {
+    RoomConfig {
+        realtime_warm_up: false,
+        ..RoomConfig::default()
+    }
+}
+
 struct Setup {
     app: TestApp,
     model: Arc<ScriptedModel>,
@@ -166,7 +211,7 @@ async fn setup_with(
 ) -> Setup {
     let model = Arc::new(model);
     let voice = Arc::new(voice);
-    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+    let deps = Deps::new(testing::test_context(pool), no_warm_up())
         .with_llm(Some(model.clone()))
         .with_transcriber(transcriber)
         .with_voice(voice.clone());
@@ -277,12 +322,28 @@ async fn turns(app: &TestApp, interview_id: Uuid) -> Vec<(String, Option<String>
     .unwrap()
 }
 
-const PROBE: &str = "probe weak\n明白。那个方案里你本人负责哪一块？";
+const QUESTION: &str = "那个方案里你本人负责哪一块？";
+
+/// 追问前的接话。引擎规定现场开口的第一句只能是 `interview_engine::openers` 里的句子，
+/// 前四句是追问前说的，后四句是回应时说的。具体是哪几个字引擎线会调，所以从清单里取，不写死。
+fn probe_ack() -> &'static str {
+    interview_engine::openers(Language::Zh)[0]
+}
+
+/// 回应时的接话。
+fn reply_ack() -> &'static str {
+    interview_engine::openers(Language::Zh)[4]
+}
+
+/// 模型选了追问：先接一句，再问。
+fn probe() -> String {
+    format!("probe weak\n{}{QUESTION}", probe_ack())
+}
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn probes_on_the_spot_then_moves_on_until_the_end(pool: PgPool) {
     let model = ScriptedModel::new()
-        .reply(PROBE)
+        .reply(probe())
         .reply("next adequate\n讲了订单系统的拆分，本人负责库存部分。")
         .reply("next adequate\n二")
         .reply("next adequate\n三")
@@ -336,10 +397,7 @@ async fn probes_on_the_spot_then_moves_on_until_the_end(pool: PgPool) {
 
     // 追问的两拍：各自的文字、各自的语音
     let (ack, ask) = (&steps[2], &steps[3]);
-    assert_eq!(
-        (text(ack), text(ask)),
-        ("明白。", "那个方案里你本人负责哪一块？")
-    );
+    assert_eq!((text(ack), text(ask)), (probe_ack(), QUESTION));
     assert_eq!(ask["utterance"]["kind"], "follow_up");
     assert_eq!(
         ack["utterance"]["audio_url"],
@@ -353,7 +411,7 @@ async fn probes_on_the_spot_then_moves_on_until_the_end(pool: PgPool) {
     assert_eq!(ask["answer"]["silence_sec"], 2);
     assert_eq!(
         *voice.spoken.lock().unwrap(),
-        ["明白。", "那个方案里你本人负责哪一块？"],
+        [probe_ack(), QUESTION],
         "只有现场生成的话要现场合成"
     );
     // 提前合成的句子还是用原来的语音
@@ -393,7 +451,7 @@ async fn probes_on_the_spot_then_moves_on_until_the_end(pool: PgPool) {
         .filter(|(speaker, key, _)| speaker == "interviewer" && key.as_deref() == Some("q1.p1"))
         .map(|(.., text)| text.as_str())
         .collect();
-    assert_eq!(probe, ["明白。", "那个方案里你本人负责哪一块？"]);
+    assert_eq!(probe, [probe_ack(), QUESTION]);
 
     // 现场生成的追问登记成这场面试的一句话，整理记录和出报告时按 key 找得到
     let live: Vec<(String, String, String, String)> = sqlx::query_as(
@@ -409,7 +467,7 @@ async fn probes_on_the_spot_then_moves_on_until_the_end(pool: PgPool) {
         [(
             "q1.p1".to_owned(),
             "follow_up".to_owned(),
-            "明白。那个方案里你本人负责哪一块？".to_owned(),
+            format!("{}{QUESTION}", probe_ack()),
             "skipped".to_owned()
         )]
     );
@@ -425,18 +483,18 @@ async fn probes_on_the_spot_then_moves_on_until_the_end(pool: PgPool) {
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn live_audio_is_served_only_while_it_is_due(pool: PgPool) {
-    let Setup { app, .. } = setup(pool, ScriptedModel::new().reply(PROBE)).await;
+    let Setup { app, .. } = setup(pool, ScriptedModel::new().reply(probe())).await;
     let (_, token) = prepared(&app, conversational()).await;
 
     let opening = start(&app, &token).await;
     let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
     let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
-    assert_eq!(text(&ack), "明白。");
+    assert_eq!(text(&ack), probe_ack());
 
     let url = ack["utterance"]["audio_url"].as_str().unwrap();
     let response = audio(&app, &token, url).await;
     assert_eq!(response.status, 200);
-    assert_eq!(response.text(), "现场合成：明白。");
+    assert_eq!(response.text(), format!("现场合成：{}", probe_ack()));
     // 问句在接话播的时候准备，排好之后可以提前取
     let mut current = ack.clone();
     for _ in 0..100 {
@@ -471,7 +529,7 @@ async fn live_audio_is_served_only_while_it_is_due(pool: PgPool) {
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn a_repeated_report_does_not_answer_twice(pool: PgPool) {
-    let Setup { app, model, .. } = setup(pool, ScriptedModel::new().reply(PROBE)).await;
+    let Setup { app, model, .. } = setup(pool, ScriptedModel::new().reply(probe())).await;
     let (interview_id, token) = prepared(&app, conversational()).await;
 
     let opening = start(&app, &token).await;
@@ -493,7 +551,7 @@ async fn a_repeated_report_does_not_answer_twice(pool: PgPool) {
     // 刷新页面：从正在播的这一句接着面
     let resumed = start(&app, &token).await;
     assert_eq!(resumed["seq"], ack["seq"]);
-    assert_eq!(text(&resumed), "明白。");
+    assert_eq!(text(&resumed), probe_ack());
     let seen = session(&app, &token).await;
     assert_eq!(seen["mode"], "realtime");
     assert_eq!(seen["resume"]["seq"], ack["seq"]);
@@ -544,7 +602,7 @@ async fn the_next_question_does_not_wait_for_the_model_to_finish_writing(pool: P
         ("next adequate\n", "负责库存服务。"),
         ("next adequate\n", "二"),
     ]));
-    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+    let deps = Deps::new(testing::test_context(pool), no_warm_up())
         .with_llm(Some(model.clone()))
         .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
         .with_voice(Arc::new(FakeVoice::default()));
@@ -624,7 +682,10 @@ async fn an_unheard_answer_is_told_to_the_model_as_such(pool: PgPool) {
     });
     let Setup { app, model, .. } = setup_with(
         pool,
-        ScriptedModel::new().reply("reply adequate\n不好意思，刚才没听清，能再说一遍吗？"),
+        ScriptedModel::new().reply(format!(
+            "reply adequate\n{}刚才没听清，能再说一遍吗？",
+            reply_ack()
+        )),
         transcriber,
         FakeVoice::default(),
     )
@@ -633,8 +694,10 @@ async fn an_unheard_answer_is_told_to_the_model_as_such(pool: PgPool) {
 
     let opening = start(&app, &token).await;
     let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
-    let reply = advance(&app, &token, &report(&q1, 200, "silence")).await;
-    assert_eq!(text(&reply), "不好意思，刚才没听清，能再说一遍吗？");
+    let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
+    assert_eq!(text(&ack), reply_ack());
+    let reply = advance(&app, &token, &report(&ack, 300, "silence")).await;
+    assert_eq!(text(&reply), "刚才没听清，能再说一遍吗？");
     assert_eq!(reply["utterance"]["kind"], "other");
     assert_eq!(reply["expects_answer"], true);
     assert!(model.requests()[0].text().contains("没有听清"));
@@ -644,7 +707,7 @@ async fn an_unheard_answer_is_told_to_the_model_as_such(pool: PgPool) {
 async fn a_sentence_that_cannot_be_synthesized_is_shown_as_text(pool: PgPool) {
     let Setup { app, .. } = setup_with(
         pool,
-        ScriptedModel::new().reply(PROBE),
+        ScriptedModel::new().reply(probe()),
         FakeTranscriber::says("做了一些事。"),
         FakeVoice {
             broken: true,
@@ -657,7 +720,7 @@ async fn a_sentence_that_cannot_be_synthesized_is_shown_as_text(pool: PgPool) {
     let opening = start(&app, &token).await;
     let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
     let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
-    assert_eq!(text(&ack), "明白。");
+    assert_eq!(text(&ack), probe_ack());
     assert_eq!(ack["utterance"]["audio_url"], Value::Null);
     let response = audio(&app, &token, "/api/v1/room/utterances/q1.p1/audio?part=1").await;
     assert_eq!(response.status, 404);
@@ -725,7 +788,7 @@ async fn a_scripted_interview_stays_scripted(pool: PgPool) {
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn leaving_midway_abandons_and_leaving_after_the_closing_completes(pool: PgPool) {
-    let Setup { app, .. } = setup(pool, ScriptedModel::new().reply(PROBE)).await;
+    let Setup { app, .. } = setup(pool, ScriptedModel::new().reply(probe())).await;
     let (interview_id, token) = prepared(&app, conversational()).await;
     let opening = start(&app, &token).await;
     let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
@@ -759,4 +822,657 @@ async fn leaving_midway_abandons_and_leaving_after_the_closing_completes(pool: P
     .await;
     assert_eq!(left.status, 204, "{}", left.text());
     assert_eq!(interview_status(&app.ctx, interview_id).await, "completed");
+}
+
+// ───────────────────────── 候选人停顿时先想 ─────────────────────────
+
+/// 候选人在这一步上停顿了一下。时刻和 `report(step, at_ms, ..)` 里的那段回答是同一组。
+fn pause(step: &Value, at_ms: i64) -> Value {
+    json!({
+        "seq": step["seq"],
+        "utterance_key": step["utterance"]["key"],
+        "playback_end_ms": at_ms + 30,
+        "answer_start_ms": at_ms + 40,
+        "answer_end_ms": at_ms + 90,
+    })
+}
+
+async fn check_pause(app: &TestApp, token: &str, body: &Value) -> String {
+    let response = post(app, token, "pause-check", body).await;
+    assert_eq!(response.status, 200, "{}", response.text());
+    response.json()["verdict"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// 取这一步的语音，返回内容。
+async fn spoken_audio(app: &TestApp, token: &str, step: &Value) -> String {
+    let url = step["utterance"]["audio_url"].as_str().unwrap();
+    let response = audio(app, token, url).await;
+    assert_eq!(response.status, 200, "{url}");
+    response.text()
+}
+
+/// 走到第一道题，返回它。
+async fn first_question(app: &TestApp, token: &str) -> Value {
+    let opening = start(app, token).await;
+    advance(app, token, &report(&opening, 100, "silence")).await
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_pause_is_judged_ahead_and_the_reply_is_ready_when_the_answer_ends(pool: PgPool) {
+    let Setup { app, model, voice } = setup(pool, ScriptedModel::new().reply(probe())).await;
+    let (interview_id, token) = prepared(&app, conversational()).await;
+
+    let q1 = first_question(&app, &token).await;
+    assert_eq!(
+        q1["answer"]["pause_check"],
+        json!({ "after_ms": 500, "done_silence_ms": 1000, "wait_silence_ms": 3000, "max_checks": 8 }),
+        "告诉页面候选人停顿时可以先来问"
+    );
+
+    // 候选人停了一下：模型觉得说完了，怎么接这时就备好了
+    assert_eq!(check_pause(&app, &token, &pause(&q1, 200)).await, "done");
+    assert_eq!(model.requests().len(), 1);
+    assert!(
+        turns(&app, interview_id)
+            .await
+            .iter()
+            .all(|(speaker, ..)| speaker != "candidate"),
+        "这段话还没答完，对话记录里先不记"
+    );
+
+    // 这段话答完了（还是停在同一个地方）：直接用备好的，不再问模型
+    // 备的时候合成的语音，页面照常取得到
+    let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
+    assert_eq!((key(&ack), text(&ack)), ("q1.p1", probe_ack()));
+    assert_eq!(
+        spoken_audio(&app, &token, &ack).await,
+        format!("现场合成：{}", probe_ack())
+    );
+    let ask = advance(&app, &token, &report(&ack, 300, "silence")).await;
+    assert_eq!(text(&ask), QUESTION);
+    assert_eq!(ask["expects_answer"], true);
+    assert_eq!(
+        spoken_audio(&app, &token, &ask).await,
+        "现场合成：那个方案里你本人负责哪一块？"
+    );
+    assert_eq!(model.requests().len(), 1, "同一段话只问了模型一次");
+    assert_eq!(
+        *voice.spoken.lock().unwrap(),
+        [probe_ack(), QUESTION],
+        "每句只合成了一遍"
+    );
+
+    let said = turns(&app, interview_id).await;
+    let heard: Vec<&str> = said
+        .iter()
+        .filter(|(speaker, ..)| speaker == "candidate")
+        .map(|(_, _, text)| text.as_str())
+        .collect();
+    assert_eq!(
+        heard,
+        ["我们团队做了很多事情。"],
+        "备的时候转写的文字记进了对话"
+    );
+    // 最后一句是这一轮收尾之前先放出来的，句子表稍后才写
+    let mut probe_text: Option<String> = None;
+    for _ in 0..100 {
+        probe_text = sqlx::query_scalar(
+            "SELECT text FROM interview_utterances WHERE interview_id = $1 AND key = 'q1.p1'",
+        )
+        .bind(interview_id)
+        .fetch_optional(&app.ctx.db)
+        .await
+        .unwrap();
+        if probe_text.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        probe_text.as_deref(),
+        Some(format!("{}{QUESTION}", probe_ack()).as_str())
+    );
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_pause_judged_unfinished_asks_the_page_to_wait(pool: PgPool) {
+    let model = ScriptedModel::new().reply("wait").reply(probe());
+    let Setup { app, model, voice } = setup(pool, model).await;
+    let (_, token) = prepared(&app, conversational()).await;
+
+    let q1 = first_question(&app, &token).await;
+    assert_eq!(check_pause(&app, &token, &pause(&q1, 200)).await, "wait");
+    assert!(voice.spoken.lock().unwrap().is_empty());
+
+    // 候选人还是没接着说，这段话到底算答完了：这时再照常问模型怎么接
+    let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
+    assert_eq!(text(&ack), probe_ack());
+    assert_eq!(model.requests().len(), 2);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_prepared_reply_is_dropped_when_the_candidate_goes_on(pool: PgPool) {
+    let model = ScriptedModel::new()
+        .reply(probe())
+        .reply("next adequate\n负责库存服务。");
+    let Setup { app, model, .. } = setup(pool, model).await;
+    let (interview_id, token) = prepared(&app, conversational()).await;
+
+    let q1 = first_question(&app, &token).await;
+    assert_eq!(check_pause(&app, &token, &pause(&q1, 200)).await, "done");
+
+    // 候选人接着又说了一段，答完的时刻和停顿的时候不一样了：备好的追问作废，重新想
+    let mut answer = report(&q1, 200, "silence");
+    answer["answer_end_ms"] = json!(900);
+    let next = advance(&app, &token, &answer).await;
+    assert_eq!(key(&next), "ack.1", "按整段话重新想的结果是进入下一题");
+    assert_eq!(model.requests().len(), 2);
+    let (probes,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM interview_utterances WHERE interview_id = $1 AND key = 'q1.p1'",
+    )
+    .bind(interview_id)
+    .fetch_one(&app.ctx.db)
+    .await
+    .unwrap();
+    assert_eq!(probes, 0, "作废的追问不留痕迹");
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn an_answer_that_ends_while_the_pause_is_still_being_judged_uses_it(pool: PgPool) {
+    let transcriber = Arc::new(FakeTranscriber {
+        gate: Semaphore::new(0),
+        text: Some("我主要负责库存服务。"),
+        ready: true,
+    });
+    let Setup { app, model, .. } = setup_with(
+        pool,
+        ScriptedModel::new().reply(probe()),
+        transcriber.clone(),
+        FakeVoice::default(),
+    )
+    .await;
+    let (_, token) = prepared(&app, conversational()).await;
+
+    let q1 = first_question(&app, &token).await;
+    // 转写还没出来，页面已经等满了静音时长，把这段话报上来了
+    let (pause_body, answer) = (pause(&q1, 200), report(&q1, 200, "silence"));
+    let asking = check_pause(&app, &token, &pause_body);
+    let answering = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        advance(&app, &token, &answer).await
+    };
+    let release = async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        // 只放行一次转写：这段话只转了一遍
+        transcriber.gate.add_permits(1);
+    };
+    let (verdict, ack, ()) = tokio::join!(asking, answering, release);
+    assert_eq!(verdict, "done");
+    assert_eq!(text(&ack), probe_ack());
+    assert_eq!(model.requests().len(), 1);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_pause_the_model_cannot_judge_changes_nothing(pool: PgPool) {
+    let model = ScriptedModel::new()
+        .fail(LlmError::Config("模型连不上".to_owned()))
+        .reply(probe());
+    let Setup { app, .. } = setup(pool, model).await;
+    let (_, token) = prepared(&app, conversational()).await;
+
+    let q1 = first_question(&app, &token).await;
+    assert_eq!(
+        check_pause(&app, &token, &pause(&q1, 200)).await,
+        "unknown",
+        "模型没回话不能当成它觉得没说完"
+    );
+    let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
+    assert_eq!(text(&ack), probe_ack());
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn pause_checks_are_only_answered_for_the_sentence_being_listened_to(pool: PgPool) {
+    let mut model = ScriptedModel::new();
+    for _ in 0..8 {
+        model = model.reply("wait");
+    }
+    let Setup { app, model, .. } = setup(pool, model).await;
+    let (_, token) = prepared(&app, conversational()).await;
+
+    let opening = start(&app, &token).await;
+    assert_eq!(
+        check_pause(&app, &token, &pause(&opening, 100)).await,
+        "unknown",
+        "开场白不听回答"
+    );
+    let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
+    let mut stale = pause(&q1, 200);
+    stale["seq"] = json!(1);
+    assert_eq!(check_pause(&app, &token, &stale).await, "unknown");
+    let mut backwards = pause(&q1, 200);
+    backwards["answer_end_ms"] = json!(10);
+    assert_eq!(check_pause(&app, &token, &backwards).await, "unknown");
+    assert_eq!(model.requests().len(), 0);
+
+    // 一段回答里最多问八次
+    for round in 0..8 {
+        assert_eq!(
+            check_pause(&app, &token, &pause(&q1, 200 + round * 10)).await,
+            "wait"
+        );
+    }
+    assert_eq!(check_pause(&app, &token, &pause(&q1, 400)).await, "unknown");
+    assert_eq!(model.requests().len(), 8);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_scripted_interview_never_judges_pauses(pool: PgPool) {
+    let Setup { app, model, .. } = setup(pool, ScriptedModel::new().reply(probe())).await;
+    let (_, token) = prepared(&app, json!({})).await;
+
+    let opening = start(&app, &token).await;
+    let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
+    assert_eq!(q1["answer"]["pause_check"], Value::Null);
+    assert_eq!(check_pause(&app, &token, &pause(&q1, 200)).await, "unknown");
+    assert_eq!(model.requests().len(), 0);
+}
+
+// ───────────────────────── 候选人插话 ─────────────────────────
+
+/// 候选人在这一步播到 `played_ms` 的时候插话，说了一段。时刻和 `pause(step, at_ms)` 是同一组。
+fn cut_in(step: &Value, at_ms: i64, played_ms: i64) -> Value {
+    json!({
+        "seq": step["seq"],
+        "utterance_key": step["utterance"]["key"],
+        "playback_start_ms": at_ms,
+        "playback_end_ms": at_ms + 30,
+        "answer_start_ms": at_ms + 40,
+        "answer_end_ms": at_ms + 90,
+        "end_reason": "silence",
+        "replays": 0,
+        "interrupted_played_ms": played_ms,
+    })
+}
+
+/// 什么都识别不出来的语音识别。
+fn hears_nothing() -> Arc<FakeTranscriber> {
+    Arc::new(FakeTranscriber {
+        gate: Semaphore::new(Semaphore::MAX_PERMITS),
+        text: None,
+        ready: true,
+    })
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_question_cut_short_is_told_to_the_model_with_what_was_heard(pool: PgPool) {
+    let Setup { app, model, .. } = setup_with(
+        pool,
+        ScriptedModel::new().reply("repeat"),
+        FakeTranscriber::says("不好意思，刚才没听清。"),
+        FakeVoice::default(),
+    )
+    .await;
+    let (interview_id, token) = prepared(&app, conversational()).await;
+
+    let q1 = first_question(&app, &token).await;
+    assert_eq!(
+        q1["barge_in"],
+        json!({ "confirm_ms": 400, "max_holds": 2, "answer": q1["answer"] }),
+        "告诉页面这一句播放时候选人可以插话"
+    );
+
+    // 题目三秒，播到一半候选人开口了
+    let again = advance(&app, &token, &cut_in(&q1, 200, 1_500)).await;
+    assert_eq!(
+        (key(&again), again["expects_answer"] == true),
+        ("repeat", false)
+    );
+    let q1_again = advance(&app, &token, &report(&again, 300, "silence")).await;
+    assert_eq!(
+        (key(&q1_again), q1_again["expects_answer"] == true),
+        ("q1", true)
+    );
+
+    let asked = model.requests()[0].text();
+    assert!(
+        asked.contains("面试官：第 1【说到这里被候选人打断，没说出来的部分：题的题目】"),
+        "模型要知道题目只播了一半：{asked}"
+    );
+    assert!(asked.contains("不好意思，刚才没听清。"));
+    let said = turns(&app, interview_id).await;
+    assert_eq!(
+        said[said.len() - 2..],
+        [
+            (
+                "candidate".to_owned(),
+                Some("q1".to_owned()),
+                "不好意思，刚才没听清。".to_owned()
+            ),
+            (
+                "interviewer".to_owned(),
+                Some("repeat".to_owned()),
+                "好的，我再说一遍。".to_owned()
+            ),
+        ]
+    );
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn cutting_in_before_the_question_drops_what_was_queued_behind(pool: PgPool) {
+    let Setup { app, model, .. } = setup_with(
+        pool,
+        ScriptedModel::new().reply(format!(
+            "reply adequate\n{}那我们开始，请介绍一个你做过的项目。",
+            reply_ack()
+        )),
+        FakeTranscriber::says("喂，能听到吗？"),
+        FakeVoice::default(),
+    )
+    .await;
+    let (interview_id, token) = prepared(&app, conversational()).await;
+
+    // 开场白后面排着第一道题，开场白自己不用听回答，但候选人可以插话
+    let opening = start(&app, &token).await;
+    assert_eq!(opening["expects_answer"], false);
+    assert_eq!(opening["barge_in"]["confirm_ms"], 400);
+    assert_eq!(opening["barge_in"]["answer"]["silence_sec"], 2);
+
+    let reply = advance(&app, &token, &cut_in(&opening, 100, 800)).await;
+    assert_eq!(text(&reply), reply_ack());
+    let ask = advance(&app, &token, &report(&reply, 200, "silence")).await;
+    assert_eq!(text(&ask), "那我们开始，请介绍一个你做过的项目。");
+    assert_eq!(
+        ask["expects_answer"], true,
+        "排在开场白后面的第一道题没有再播"
+    );
+
+    let asked = model.requests()[0].text();
+    assert!(
+        asked.contains("面试官：【刚开口就被候选人打断，没说出来的话：第 1 题的题目】"),
+        "开场白都没播完，后面的题目候选人一个字都没听到：{asked}"
+    );
+    let heard: Vec<(Option<String>, String)> = turns(&app, interview_id)
+        .await
+        .into_iter()
+        .filter(|(speaker, ..)| speaker == "candidate")
+        .map(|(_, key, text)| (key, text))
+        .collect();
+    assert_eq!(
+        heard,
+        [(Some("q1".to_owned()), "喂，能听到吗？".to_owned())],
+        "候选人的话记在正在问的那道题下面"
+    );
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_cut_in_with_nothing_heard_replays_the_sentence(pool: PgPool) {
+    let Setup { app, model, .. } = setup_with(
+        pool,
+        ScriptedModel::new(),
+        hears_nothing(),
+        FakeVoice::default(),
+    )
+    .await;
+    let (_, token) = prepared(&app, conversational()).await;
+
+    let opening = start(&app, &token).await;
+    // 页面说候选人插话了，服务端却一个字都没听出来：开场白重新播一遍，后面排着的第一道题还在
+    let again = advance(&app, &token, &cut_in(&opening, 100, 800)).await;
+    assert_eq!((again["seq"].as_i64(), key(&again)), (Some(2), "opening"));
+    assert_eq!(again["preload_audio_urls"], opening["preload_audio_urls"]);
+    assert!(again["barge_in"].is_object(), "第一回还让插话");
+    // 断网重试同一次插话：拿到的还是重播的这一句，不会再算一回
+    let retried = advance(&app, &token, &cut_in(&opening, 100, 800)).await;
+    assert_eq!(retried, again);
+
+    // 又来一回：这场面试多半是环境太吵或者扬声器漏音，之后不再让插话
+    let third = advance(&app, &token, &cut_in(&again, 200, 800)).await;
+    assert_eq!((third["seq"].as_i64(), key(&third)), (Some(3), "opening"));
+    assert!(third.get("barge_in").is_none(), "{third}");
+
+    // 页面要是还报插话，当作这一句照常播完
+    let q1 = advance(&app, &token, &cut_in(&third, 300, 800)).await;
+    assert_eq!((key(&q1), q1["expects_answer"] == true), ("q1", true));
+    assert!(q1.get("barge_in").is_none());
+    assert!(model.requests().is_empty(), "没听出话来的插话不问模型");
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_cut_in_that_only_picked_up_the_interviewer_replays_the_sentence(pool: PgPool) {
+    // 转写出来的是题目里的字：扬声器的声音漏进了麦克风，不是候选人在说话
+    let Setup { app, model, .. } = setup_with(
+        pool,
+        ScriptedModel::new(),
+        FakeTranscriber::says("题的题目"),
+        FakeVoice::default(),
+    )
+    .await;
+    let (interview_id, token) = prepared(&app, conversational()).await;
+    let q1 = first_question(&app, &token).await;
+
+    // 停顿时先问的那一次不备，也不下结论
+    let mut paused = pause(&q1, 200);
+    paused["interrupted_played_ms"] = json!(1_500);
+    assert_eq!(check_pause(&app, &token, &paused).await, "unknown");
+
+    let again = advance(&app, &token, &cut_in(&q1, 200, 1_500)).await;
+    assert_eq!(
+        (
+            again["seq"].as_i64(),
+            key(&again),
+            again["expects_answer"] == true
+        ),
+        (q1["seq"].as_i64().map(|seq| seq + 1), "q1", true)
+    );
+    assert!(model.requests().is_empty());
+    assert!(
+        turns(&app, interview_id)
+            .await
+            .iter()
+            .filter(|(speaker, ..)| speaker == "candidate")
+            .all(|(_, _, text)| text != "题的题目"),
+        "漏进来的声音不记成候选人说的话"
+    );
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_pause_after_cutting_in_is_judged_with_the_cut_and_reused(pool: PgPool) {
+    let Setup { app, model, .. } = setup(pool, ScriptedModel::new().reply(probe())).await;
+    let (_, token) = prepared(&app, conversational()).await;
+    let q1 = first_question(&app, &token).await;
+
+    // 候选人打断题目说了一段，停了一下：先问的这一次也要知道题目断在了哪
+    let mut paused = pause(&q1, 200);
+    paused["interrupted_played_ms"] = json!(1_500);
+    assert_eq!(check_pause(&app, &token, &paused).await, "done");
+    assert!(
+        model.requests()[0]
+            .text()
+            .contains("【说到这里被候选人打断，没说出来的部分：题的题目】")
+    );
+
+    // 这段话答完了：直接用备好的
+    let ack = advance(&app, &token, &cut_in(&q1, 200, 1_500)).await;
+    assert_eq!(text(&ack), probe_ack());
+    assert_eq!(model.requests().len(), 1, "同一段话只问了模型一次");
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_reply_prepared_without_the_cut_is_not_used_for_a_cut_in(pool: PgPool) {
+    let model = ScriptedModel::new().reply(probe()).reply("repeat");
+    let Setup { app, model, .. } = setup(pool, model).await;
+    let (_, token) = prepared(&app, conversational()).await;
+    let q1 = first_question(&app, &token).await;
+
+    // 先问的那一次没说是插话，答完时却说是：不是一回事，重新问模型
+    assert_eq!(check_pause(&app, &token, &pause(&q1, 200)).await, "done");
+    let again = advance(&app, &token, &cut_in(&q1, 200, 1_500)).await;
+    assert_eq!(key(&again), "repeat");
+    assert_eq!(model.requests().len(), 2);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn cutting_in_on_a_sentence_released_early_waits_for_the_rest_of_the_turn(pool: PgPool) {
+    let model = Arc::new(SlowWriter::new(&[
+        ("next adequate\n", "负责库存服务。"),
+        ("repeat", ""),
+    ]));
+    let deps = Deps::new(testing::test_context(pool), no_warm_up())
+        .with_llm(Some(model.clone()))
+        .with_transcriber(FakeTranscriber::says("等一下，我还没说完。"))
+        .with_voice(Arc::new(FakeVoice::default()));
+    let app = common::app_from(deps).await;
+    let (_, token) = prepared(&app, conversational()).await;
+
+    let q1 = first_question(&app, &token).await;
+    // 模型定了往下走，过渡语先放出来了，上一道题的概括还没写完
+    let ack = advance(&app, &token, &report(&q1, 200, "silence")).await;
+    assert_eq!(key(&ack), "ack.1");
+    assert!(ack["barge_in"].is_object());
+
+    // 候选人打断过渡语：要等上一轮想完，才知道引擎走到了哪、后面排着什么
+    let cut_request = cut_in(&ack, 300, 400);
+    let cut = advance(&app, &token, &cut_request);
+    let release = async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(model.finished.load(Ordering::SeqCst), 0);
+        model.gate.add_permits(100);
+    };
+    let (next, ()) = tokio::join!(cut, release);
+    // 第二道题候选人一个字都没听到，模型让重念：先说「我再说一遍」，再念第二道题
+    assert_eq!(key(&next), "repeat");
+    let q2 = advance(&app, &token, &report(&next, 400, "silence")).await;
+    assert_eq!((key(&q2), q2["expects_answer"] == true), ("q2", true));
+    assert_eq!(model.finished.load(Ordering::SeqCst), 2);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_closing_cannot_be_cut_in_on_and_scripted_interviews_never_offer_it(pool: PgPool) {
+    let model = ScriptedModel::new()
+        .reply("next adequate\n一")
+        .reply("next adequate\n二")
+        .reply("next adequate\n三")
+        .reply("next adequate\n没有问题要问。");
+    let Setup { app, .. } = setup(pool, model).await;
+    let (_, token) = prepared(&app, conversational()).await;
+    let steps = walk(&app, &token, start(&app, &token).await, "silence").await;
+    let closing = steps.iter().find(|step| key(step) == "closing").unwrap();
+    assert!(
+        closing.get("barge_in").is_none(),
+        "结束语不让打断：{closing}"
+    );
+    let offered = steps
+        .iter()
+        .filter(|step| step["barge_in"].is_object())
+        .count();
+    assert_eq!(
+        offered,
+        steps.len() - 2,
+        "除了结束语和最后的结束，每一句都可以插话"
+    );
+
+    let (_, token) = prepared(&app, json!({})).await;
+    let first = start(&app, &token).await;
+    assert!(first.get("barge_in").is_none(), "逐题模式没有插话：{first}");
+}
+
+/// 等到假声音念过的话和 `expected` 一样，最多等两秒。
+async fn wait_spoken(voice: &FakeVoice, expected: &[&str]) -> Vec<String> {
+    for _ in 0..100 {
+        let spoken = voice.spoken.lock().unwrap().clone();
+        if spoken == expected {
+            return spoken;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    voice.spoken.lock().unwrap().clone()
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_openers_are_voiced_as_soon_as_a_conversation_starts(pool: PgPool) {
+    let voice = Arc::new(FakeVoice::default());
+    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+        .with_llm(Some(Arc::new(ScriptedModel::new())))
+        .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
+        .with_voice(voice.clone());
+    let app = common::app_from(deps).await;
+
+    // 实时对话一开始，就把面试官现场开口的头一句念一遍：引擎保证头一句只会是这几句，
+    // 真引擎念一句要两三秒，念过的有缓存，候选人答完马上能听到
+    let openers = interview_engine::openers(Language::Zh);
+    assert_eq!(openers.len(), 8);
+    let (_, token) = prepared(&app, conversational()).await;
+    let opening = start(&app, &token).await;
+    assert_eq!(key(&opening), "opening");
+    assert_eq!(wait_spoken(&voice, &openers).await, openers);
+
+    // 断线重连不是重新开始，不再念一遍
+    start(&app, &token).await;
+    // 逐题模式没有现场说的话，不用备
+    let (_, token) = prepared(&app, json!({})).await;
+    start(&app, &token).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(*voice.spoken.lock().unwrap(), openers);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn warming_up_gives_way_to_what_the_interviewer_says_on_the_spot(pool: PgPool) {
+    let voice = Arc::new(QueuedVoice {
+        gate: Semaphore::new(0),
+        asked: Mutex::default(),
+    });
+    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+        .with_llm(Some(Arc::new(ScriptedModel::new().reply(probe()))))
+        .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
+        .with_voice(voice.clone());
+    let app = common::app_from(deps).await;
+    let openers = interview_engine::openers(Language::Zh);
+    let (_, token) = prepared(&app, conversational()).await;
+
+    // 面试一开始就去备第一句接话，合成服务还在做
+    let opening = start(&app, &token).await;
+    assert_eq!(voice.wait_asked(1).await, [openers[0]]);
+
+    // 候选人很快答完了第一题，面试官现场要说话：接话排在正在做的那一句后面
+    let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
+    let answer = report(&q1, 200, "silence");
+    let (ack, ()) = tokio::join!(advance(&app, &token, &answer), async {
+        assert_eq!(voice.wait_asked(2).await, [openers[0], probe_ack()]);
+        // 备的那一句做完了。现场这一轮还没说完，下一句接话先不备，免得问句排到它后面
+        voice.gate.add_permits(1);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(voice.wait_asked(2).await.len(), 2, "提前合成没有让路");
+        // 现场的接话做完，紧跟着就是问句
+        voice.gate.add_permits(1);
+        assert_eq!(voice.wait_asked(3).await[2], QUESTION);
+        voice.gate.add_permits(1);
+    });
+    assert_eq!(text(&ack), probe_ack());
+
+    // 这一轮说完了，剩下的接话接着备
+    voice.gate.add_permits(100);
+    let asked = voice.wait_asked(openers.len() + 2).await;
+    assert_eq!(asked[3..], openers[1..]);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_voice_that_cannot_speak_does_not_get_in_the_way_of_starting(pool: PgPool) {
+    let voice = Arc::new(FakeVoice {
+        broken: true,
+        ..FakeVoice::default()
+    });
+    let deps = Deps::new(testing::test_context(pool), RoomConfig::default())
+        .with_llm(Some(Arc::new(ScriptedModel::new())))
+        .with_transcriber(FakeTranscriber::says("我主要负责库存服务。"))
+        .with_voice(voice.clone());
+    let app = common::app_from(deps).await;
+
+    let (_, token) = prepared(&app, conversational()).await;
+    let opening = start(&app, &token).await;
+    assert_eq!(key(&opening), "opening");
+    let q1 = advance(&app, &token, &report(&opening, 100, "silence")).await;
+    assert_eq!(key(&q1), "q1");
 }

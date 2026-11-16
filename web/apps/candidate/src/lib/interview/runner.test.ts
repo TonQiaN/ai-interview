@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RoomApiError } from "../api/room-api";
-import type { AdvanceRequest, NextStep } from "../api/room-types";
+import type {
+  AdvanceRequest,
+  AnswerSettings,
+  NextStep,
+  PauseCheckRequest,
+  PauseCheckVerdict,
+} from "../api/room-types";
 import type { Playback } from "../media/audio-graph";
 import { InterviewRunner, levelFromDb, readingTimeMs, turnConfigFor } from "./runner";
 
@@ -11,20 +17,31 @@ class FakeAudio {
     if (data.byteLength === 0) throw new Error("解码失败");
     return data.byteLength; // 字节数当作毫秒数
   };
-  play = (durationMs: number): Playback => {
+  /** 每次播放是从这段语音的哪里开始的。 */
+  startedFrom: number[] = [];
+  play = (durationMs: number, fromMs = 0): Playback => {
     this.played.push(durationMs);
+    this.startedFrom.push(fromMs);
     let settle: (result: "ended" | "stopped") => void = () => {};
     const done = new Promise<"ended" | "stopped">((resolve) => {
       settle = resolve;
     });
-    const timer = setTimeout(() => settle("ended"), durationMs);
+    const startedAt = Date.now();
+    let endedAtMs: number | null = null;
+    const positionMs = () => endedAtMs ?? Math.min(durationMs, fromMs + Date.now() - startedAt);
+    const timer = setTimeout(() => {
+      endedAtMs = durationMs;
+      settle("ended");
+    }, durationMs - fromMs);
     return {
       durationMs,
       done,
       stop: () => {
+        endedAtMs ??= positionMs();
         clearTimeout(timer);
         settle("stopped");
       },
+      positionMs,
     };
   };
 }
@@ -482,7 +499,382 @@ describe("逐题面试编排", () => {
   });
 });
 
+describe("停顿时先问服务端说完没有", () => {
+  /** 实时对话里的一句：静音两秒算答完，停顿半秒时可以先问。 */
+  function live(key: string, maxChecks = 8): NextStep {
+    const step = say(key);
+    if (step.action !== "say") throw new Error("不会发生");
+    return {
+      ...step,
+      answer: {
+        silence_sec: 2,
+        max_sec: 60,
+        min_sec: 1,
+        pause_check: {
+          after_ms: 500,
+          done_silence_ms: 1_000,
+          wait_silence_ms: 3_500,
+          max_checks: maxChecks,
+        },
+      },
+    };
+  }
+
+  /** 会回答「说完了吗」的假接口：每次问都过 300 毫秒才有结果。 */
+  class CheckingApi extends FakeApi {
+    checks: PauseCheckRequest[] = [];
+    constructor(
+      steps: NextStep[],
+      private readonly answers: (PauseCheckVerdict | Error)[],
+    ) {
+      super(steps);
+    }
+
+    checkPause = async (request: PauseCheckRequest): Promise<PauseCheckVerdict> => {
+      this.checks.push(request);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const answer = this.answers.shift() ?? "unknown";
+      if (answer instanceof Error) throw answer;
+      return answer;
+    };
+  }
+
+  function start(first: NextStep, answers: (PauseCheckVerdict | Error)[]) {
+    const api = new CheckingApi([finish], answers);
+    const paused = vi.fn();
+    const runner = new InterviewRunner({
+      api,
+      audio: new FakeAudio(),
+      now: () => Date.now(),
+      random: () => 0.5,
+      onAnswerPaused: paused,
+    });
+    const result = runner.run(first);
+    return { api, runner, paused, result };
+  }
+
+  /** 题目播两秒，候选人接着说三秒。 */
+  async function answerOnce(runner: InterviewRunner<number>) {
+    await vi.advanceTimersByTimeAsync(0);
+    await quiet(runner, 2_000);
+    await feed(runner, 3_000, true);
+  }
+
+  it("说完了：不等满两秒就上报，上报的时刻和问的时候是同一组", async () => {
+    const { api, runner, paused, result } = start(live("q1"), ["done"]);
+    await answerOnce(runner);
+
+    await quiet(runner, 800);
+    expect(api.checks).toHaveLength(1);
+    expect(paused).toHaveBeenCalledTimes(1);
+    expect(api.requests).toHaveLength(0);
+
+    await quiet(runner, 600);
+    expect(api.requests).toHaveLength(1);
+    const answer = api.requests[0] as AdvanceRequest;
+    expect(answer.end_reason).toBe("silence");
+    expect(api.checks[0]).toEqual({
+      seq: answer.seq,
+      utterance_key: "q1",
+      playback_end_ms: answer.playback_end_ms,
+      answer_start_ms: answer.answer_start_ms,
+      answer_end_ms: answer.answer_end_ms,
+    });
+    await expect(result).resolves.toBe("completed");
+  });
+
+  it("没说完：过了两秒也不上报，多等一会儿", async () => {
+    const { api, runner, result } = start(live("q1"), ["wait"]);
+    await answerOnce(runner);
+
+    await quiet(runner, 3_000);
+    expect(api.checks).toHaveLength(1);
+    expect(api.requests).toHaveLength(0);
+    expect(runner.getSnapshot().phase).toBe("listening");
+
+    await quiet(runner, 1_000);
+    expect(api.requests).toHaveLength(1);
+    await expect(result).resolves.toBe("completed");
+  });
+
+  it("判断还没回来候选人就接着说了：这个判断不算数", async () => {
+    const { api, runner, result } = start(live("q1"), ["done", "unknown"]);
+    await answerOnce(runner);
+
+    await quiet(runner, 600); // 停了一下，这时已经去问了
+    expect(api.checks).toHaveLength(1);
+    await feed(runner, 2_000, true); // 判断回来时又在说了
+    expect(api.requests).toHaveLength(0);
+
+    // 第二次停顿另问一次；服务端说不知道，就按两秒算
+    await quiet(runner, 1_800);
+    expect(api.checks).toHaveLength(2);
+    expect(api.checks[1]?.answer_end_ms).toBeGreaterThan(api.checks[0]?.answer_end_ms as number);
+    expect(api.requests).toHaveLength(0);
+    await quiet(runner, 600);
+    expect(api.requests).toHaveLength(1);
+    await expect(result).resolves.toBe("completed");
+  });
+
+  it("问不到就按原来的静音时长；一段回答里问的次数有上限", async () => {
+    const { api, runner, result } = start(live("q1", 2), [new Error("断网了"), "unknown"]);
+    await answerOnce(runner);
+
+    await quiet(runner, 1_000);
+    await feed(runner, 1_000, true);
+    await quiet(runner, 1_000);
+    await feed(runner, 1_000, true);
+    expect(api.checks).toHaveLength(2);
+
+    // 第三次停顿不再问了
+    await quiet(runner, 1_800);
+    expect(api.checks).toHaveLength(2);
+    expect(api.requests).toHaveLength(0);
+    await quiet(runner, 600);
+    expect(api.requests).toHaveLength(1);
+    await expect(result).resolves.toBe("completed");
+  });
+
+  it("逐题面试不问", async () => {
+    const { api, runner, paused, result } = start(say("q1"), ["done"]);
+    await answerOnce(runner);
+    await quiet(runner, 6_000);
+    expect(api.checks).toHaveLength(0);
+    expect(paused).not.toHaveBeenCalled();
+    expect(api.requests).toHaveLength(1);
+    await expect(result).resolves.toBe("completed");
+  });
+});
+
+describe("候选人插话", () => {
+  const listenAfter = { silence_sec: 2, max_sec: 60, min_sec: 1 };
+
+  /** 实时对话里可以插话的一句：出声就停，再持续 400 毫秒算插话，一句里最多停两次。 */
+  function interruptible(
+    key: string,
+    options: { expectsAnswer?: boolean; audioMs?: number } = {},
+    answer: AnswerSettings = listenAfter,
+  ): NextStep {
+    const step = say(key, options);
+    if (step.action !== "say") throw new Error("不会发生");
+    return {
+      ...step,
+      answer: step.expects_answer ? answer : null,
+      barge_in: { confirm_ms: 400, max_holds: 2, answer },
+    };
+  }
+
+  it("面试官说到一半候选人接着说：停下来听，说完上报断在哪", async () => {
+    const { api, audio, runner, phases } = setup([finish]);
+    const result = runner.run(interruptible("q1", { audioMs: 4_000 }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    await quiet(runner, 1_000);
+    await feed(runner, 300, true);
+    // 一听出候选人出声就不播了，这时还不知道是不是插话
+    expect(runner.getSnapshot().phase).toBe("asking");
+    await feed(runner, 1_700, true);
+    expect(runner.getSnapshot()).toMatchObject({ phase: "listening", speaking: true });
+    await quiet(runner, 2_600);
+
+    expect(api.requests).toHaveLength(1);
+    const request = api.requests[0] as AdvanceRequest;
+    // 候选人第 1 秒开口，过 150 毫秒听出来
+    expect(request.interrupted_played_ms).toBeGreaterThanOrEqual(1_100);
+    expect(request.interrupted_played_ms).toBeLessThanOrEqual(1_250);
+    expect(request).toMatchObject({
+      utterance_key: "q1",
+      playback_start_ms: 0,
+      playback_end_ms: request.interrupted_played_ms,
+      answer_start_ms: request.interrupted_played_ms,
+      end_reason: "silence",
+    });
+    expect(request.answer_end_ms).toBeGreaterThanOrEqual(3_000);
+    expect(request.answer_end_ms).toBeLessThanOrEqual(3_500);
+    expect(audio.startedFrom).toEqual([0]); // 没有接着播
+    expect(phases).toEqual(["preparing", "asking", "listening", "submitting", "finished"]);
+    await expect(result).resolves.toBe("completed");
+  });
+
+  it("只是咳嗽一声：从停下的地方往回一点接着播，照常播完", async () => {
+    const { api, audio, runner } = setup([finish]);
+    void runner.run(interruptible("opening", { expectsAnswer: false, audioMs: 4_000 }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    await quiet(runner, 1_000);
+    await feed(runner, 300, true);
+    await quiet(runner, 300);
+    expect(audio.startedFrom).toEqual([0]); // 停着，在等候选人是不是接着说
+    await quiet(runner, 4_000);
+
+    expect(audio.startedFrom).toHaveLength(2);
+    const resumedFrom = audio.startedFrom[1] as number;
+    expect(resumedFrom).toBeGreaterThanOrEqual(850);
+    expect(resumedFrom).toBeLessThanOrEqual(1_000);
+    expect(api.requests).toHaveLength(1);
+    expect(api.requests[0]).toEqual({
+      seq: expect.any(Number),
+      utterance_key: "opening",
+      playback_start_ms: 0,
+      playback_end_ms: expect.any(Number),
+      answer_start_ms: null,
+      answer_end_ms: null,
+      end_reason: null,
+      replays: 0,
+    });
+    runner.stop();
+  });
+
+  it("不用听回答的一句也能被打断", async () => {
+    const { api, runner } = setup([finish]);
+    void runner.run(interruptible("opening", { expectsAnswer: false, audioMs: 4_000 }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    await quiet(runner, 500);
+    await feed(runner, 1_500, true);
+    expect(runner.getSnapshot().phase).toBe("listening");
+    await quiet(runner, 2_600);
+
+    expect(api.requests).toHaveLength(1);
+    const request = api.requests[0] as AdvanceRequest;
+    expect(request.end_reason).toBe("silence");
+    expect(request.interrupted_played_ms).toBeGreaterThanOrEqual(600);
+    expect(request.answer_start_ms).toBe(request.playback_end_ms);
+    runner.stop();
+  });
+
+  it("一句里最多停两次，之后一口气播完", async () => {
+    const { audio, runner } = setup([finish]);
+    void runner.run(interruptible("opening", { expectsAnswer: false, audioMs: 8_000 }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    for (let cough = 0; cough < 3; cough += 1) {
+      await quiet(runner, 1_000);
+      await feed(runner, 300, true);
+      await quiet(runner, 700);
+    }
+    expect(audio.startedFrom).toHaveLength(3); // 开头一次，停了两次各接着播一次；第三声没停
+    runner.stop();
+  });
+
+  it("连着好几次都不是插话：这场面试不再为插话停", async () => {
+    const steps = [1, 2, 3].map((n) =>
+      interruptible(`s${n}`, { expectsAnswer: false, audioMs: n === 3 ? 20_000 : 5_000 }),
+    );
+    const { api, audio, runner } = setup([steps[1] as NextStep, steps[2] as NextStep, finish]);
+    void runner.run(steps[0] as NextStep);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 前两句各有两声咳嗽，一共白停了四次
+    for (let n = 0; n < 2; n += 1) {
+      for (let cough = 0; cough < 2; cough += 1) {
+        await quiet(runner, 800);
+        await feed(runner, 300, true);
+        await quiet(runner, 700);
+      }
+      await quiet(runner, 5_000);
+      expect(api.requests).toHaveLength(n + 1);
+    }
+    const resumes = () => audio.startedFrom.filter((fromMs) => fromMs > 0).length;
+    expect(resumes()).toBe(4);
+
+    // 第三句再有声音也不停了；候选人真的长篇说话也不停，等这一句播完
+    await quiet(runner, 800);
+    await feed(runner, 1_500, true);
+    expect(resumes()).toBe(4);
+    expect(runner.getSnapshot()).toMatchObject({
+      phase: "asking",
+      utterance: { key: "s3" },
+    });
+    runner.stop();
+  });
+
+  it("面试官要开口时候选人正说着话：先不播，接着说就直接听", async () => {
+    const { api, audio, runner } = setup([finish]);
+    await quiet(runner, 1_000);
+    await feed(runner, 600, true); // 上一句答完之后候选人又说了起来
+    void runner.run(interruptible("q1"));
+    await feed(runner, 1_400, true);
+    expect(runner.getSnapshot()).toMatchObject({ phase: "listening", speaking: true });
+    await quiet(runner, 2_600);
+
+    expect(audio.startedFrom).toEqual([]); // 一个字都没播
+    expect(api.requests).toHaveLength(1);
+    expect(api.requests[0]).toMatchObject({ interrupted_played_ms: 0, end_reason: "silence" });
+    runner.stop();
+  });
+
+  it("插话之后停顿时先问服务端，也带上断在哪", async () => {
+    const checks: PauseCheckRequest[] = [];
+    const api = Object.assign(new FakeApi([finish]), {
+      checkPause: async (request: PauseCheckRequest): Promise<PauseCheckVerdict> => {
+        checks.push(request);
+        return "done";
+      },
+    });
+    const runner = new InterviewRunner({ api, audio: new FakeAudio(), now: () => Date.now() });
+    const check = { after_ms: 500, done_silence_ms: 1_000, wait_silence_ms: 3_500, max_checks: 8 };
+    void runner.run(
+      interruptible("opening", { expectsAnswer: false }, { ...listenAfter, pause_check: check }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    await quiet(runner, 500);
+    await feed(runner, 1_500, true);
+    await quiet(runner, 1_500);
+
+    expect(checks).toHaveLength(1);
+    expect(api.requests).toHaveLength(1); // 服务端说说完了，静音满一秒就上报
+    const request = api.requests[0] as AdvanceRequest;
+    expect(request.interrupted_played_ms).toBeGreaterThan(0);
+    expect(checks[0]).toEqual({
+      seq: request.seq,
+      utterance_key: "opening",
+      playback_end_ms: request.playback_end_ms,
+      answer_start_ms: request.answer_start_ms,
+      answer_end_ms: request.answer_end_ms,
+      interrupted_played_ms: request.interrupted_played_ms,
+    });
+    runner.stop();
+  });
+
+  it("麦克风被打断、没有音量可判断时，不会一直停着", async () => {
+    const { api, audio, runner } = setup([finish]);
+    void runner.run(interruptible("opening", { expectsAnswer: false, audioMs: 3_000 }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    await quiet(runner, 500);
+    await feed(runner, 200, true); // 停下来了，然后麦克风没了动静
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(audio.startedFrom).toHaveLength(2);
+    expect(api.requests).toHaveLength(1);
+    runner.stop();
+  });
+});
+
 describe("作答设置", () => {
+  it("停顿时先问的设置：问得比静音时长还晚就不问，两个时长夹在静音时长两边", () => {
+    const check = { after_ms: 500, done_silence_ms: 1_000, wait_silence_ms: 3_500, max_checks: 8 };
+    const answer = { silence_sec: 2, max_sec: 20, min_sec: 1 };
+    expect(turnConfigFor({ ...answer, pause_check: check }).pauseCheck).toEqual({
+      afterMs: 500,
+      doneSilenceMs: 1_000,
+      waitSilenceMs: 3_500,
+      maxChecks: 8,
+    });
+    expect(
+      turnConfigFor({
+        ...answer,
+        pause_check: { ...check, done_silence_ms: 5_000, wait_silence_ms: 1_000 },
+      }).pauseCheck,
+    ).toMatchObject({ doneSilenceMs: 2_000, waitSilenceMs: 2_000 });
+    expect(
+      turnConfigFor({ ...answer, pause_check: { ...check, after_ms: 2_000 } }).pauseCheck,
+    ).toBeUndefined();
+    expect(turnConfigFor({ ...answer, pause_check: null }).pauseCheck).toBeUndefined();
+    expect(turnConfigFor(answer).pauseCheck).toBeUndefined();
+  });
+
   it("把秒换成毫秒，并让各项时间互相合理", () => {
     expect(turnConfigFor({ silence_sec: 2, max_sec: 20, min_sec: 1 })).toMatchObject({
       silenceMs: 2_000,
