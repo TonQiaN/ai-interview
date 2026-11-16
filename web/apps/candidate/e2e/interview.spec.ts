@@ -29,6 +29,9 @@ const SPOKEN_IN_ORDER = [
   "closing",
 ];
 
+/** 取面试官语音的地址。 */
+const AUDIO_PATH = /\/utterances\/[^/]+\/audio/;
+
 function ffprobeAvailable(): boolean {
   try {
     execFileSync("ffprobe", ["-version"], { stdio: "ignore" });
@@ -40,6 +43,13 @@ function ffprobeAvailable(): boolean {
 
 test("从打开链接到面试完成：逐题问答，静音自动进入下一题，录像完整上传", async ({ page }) => {
   const interview = seedInterview();
+  // 面试官的每一句语音是以什么格式发下来的
+  const audioTypes: string[] = [];
+  page.on("response", (response) => {
+    if (AUDIO_PATH.test(new URL(response.url()).pathname)) {
+      audioTypes.push(response.headers()["content-type"] ?? "");
+    }
+  });
   await open(page, interview.token);
   await expect(page.getByText("后端工程师（Rust）")).toBeVisible();
   await button(page, "开始准备").click();
@@ -107,6 +117,10 @@ test("从打开链接到面试完成：逐题问答，静音自动进入下一�
   expect(Number(uploaded?.payload.uploaded_bytes)).toBeGreaterThan(0);
   expect(Number(uploaded?.payload.wait_ms)).toBeGreaterThanOrEqual(0);
   expect(kinds).not.toContain("upload_stalled");
+  // 面试官的语音都是压缩后发下来的（体积是没压缩的五分之一左右），页面解得了
+  expect(audioTypes.length).toBeGreaterThanOrEqual(new Set(SPOKEN_IN_ORDER).size);
+  expect([...new Set(audioTypes)]).toEqual(["audio/mpeg"]);
+  expect(kinds).not.toContain("audio_format_fallback");
 
   // 一段录像；有画面有声音，时长盖住整场面试
   const [recording] = state.recordings;
@@ -125,6 +139,39 @@ test("从打开链接到面试完成：逐题问答，静音自动进入下一�
     expect(streams).toContain("audio");
     expect(recording.duration_ms).toBeGreaterThan((lastTurn?.end_ms ?? 0) - 1500);
   }
+});
+
+test("浏览器解不了压缩过的语音：改取没压缩的，面试官照常出声，记一条过程事件", async ({ page }) => {
+  // 压缩过的那一份换成一段解不了的字节；没压缩的照常放行
+  const asked: string[] = [];
+  await page.route(AUDIO_PATH, async (route) => {
+    const compressed = (route.request().headers().accept ?? "").includes("audio/mpeg");
+    asked.push(compressed ? "compressed" : "wav");
+    if (!compressed) return route.continue();
+    await route.fulfill({ contentType: "audio/mpeg", body: Buffer.from("这不是一段语音") });
+  });
+  const interview = await enterInterview(page, { silenceSec: 30 });
+  await expectQuestion(page, 1);
+  await expect(button(page, "我答完了，下一题")).toBeVisible({ timeout: 30_000 });
+  // 没有变成只显示文字
+  await expect(page.getByText(/语音没有加载出来/)).toBeHidden();
+  // 只有头一句和跟它同时提前取的那一句试过压缩的，之后都直接取没压缩的
+  const tried = asked.filter((format) => format === "compressed").length;
+  expect(tried).toBeGreaterThanOrEqual(1);
+  expect(tried).toBeLessThanOrEqual(2);
+  expect(asked.filter((format) => format === "wav").length).toBeGreaterThan(tried);
+
+  await button(page, "结束").click();
+  await button(page, "结束面试").click();
+  await expect(page.getByText("面试已结束")).toBeVisible({ timeout: 30_000 });
+  const state = await expectRecordingsReady(interview, 1);
+  const fallbacks = state.events.filter((event) => event.kind === "audio_format_fallback");
+  expect(fallbacks).toHaveLength(1);
+  expect(fallbacks[0]?.payload).toMatchObject({ from: "mp3" });
+  // 开场白是按语音播的：有播放的起止时间（第一题还在答就结束了，没记下来）
+  const interviewer = state.turns.filter((turn) => turn.speaker === "interviewer");
+  expect(interviewer.length).toBeGreaterThanOrEqual(1);
+  for (const turn of interviewer) expect(turn.end_ms).toBeGreaterThan(turn.start_ms);
 });
 
 test("网速测不出来或者偏慢时提醒候选人，但不拦着", async ({ page }) => {

@@ -16,7 +16,9 @@ import { useConfigDefaults, useSaveTemplate, useTemplate } from "../api/queries"
 import type { InterviewConfig } from "../api/types";
 import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import { LoadError, Loading } from "../components/common";
+import { useLeaveGuard } from "../components/LeaveGuard";
 import { PageHeader } from "../components/PageHeader";
+import { sameForm } from "../lib/form";
 
 interface Draft {
   name: string;
@@ -33,17 +35,26 @@ export function TemplateEditPage() {
   const defaults = useConfigDefaults();
   const save = useSaveTemplate(id);
   const [draft, setDraft] = useState<Draft | null>(null);
+  // 表单刚填好时的样子，用来看有没有改过
+  const [initial, setInitial] = useState<Draft | null>(null);
+  const leave = useLeaveGuard(draft !== null && !sameForm(draft, initial));
 
   // 数据到了之后填一次表单，之后以用户改的为准
   useEffect(() => {
     if (draft) return;
-    if (id && existing.data)
-      setDraft({
-        name: existing.data.name,
-        description: existing.data.description ?? "",
-        config: existing.data.config,
-      });
-    if (!id && defaults.data) setDraft({ name: "", description: "", config: defaults.data.config });
+    const start: Draft | null =
+      id && existing.data
+        ? {
+            name: existing.data.name,
+            description: existing.data.description ?? "",
+            config: existing.data.config,
+          }
+        : !id && defaults.data
+          ? { name: "", description: "", config: defaults.data.config }
+          : null;
+    if (!start) return;
+    setDraft(start);
+    setInitial(start);
   }, [id, existing.data, defaults.data, draft]);
 
   const failed = id ? existing.error : defaults.error;
@@ -65,6 +76,7 @@ export function TemplateEditPage() {
       {
         onSuccess: () => {
           toast(id ? "模板已保存" : "模板已建好");
+          leave.allow();
           navigate("/templates");
         },
       },
@@ -73,12 +85,17 @@ export function TemplateEditPage() {
 
   return (
     <form onSubmit={submit}>
+      {leave.dialog}
       <PageHeader
         title={id ? "编辑模板" : "新建模板"}
         crumbs={<Link to="/templates">面试设置</Link>}
         actions={
           <>
-            <Link to="/templates" className={buttonClass({ variant: "ghost" })}>
+            <Link
+              to="/templates"
+              className={buttonClass({ variant: "ghost" })}
+              onClick={leave.allow}
+            >
               取消
             </Link>
             <Button type="submit" loading={save.isPending} disabled={!draft.name.trim()}>

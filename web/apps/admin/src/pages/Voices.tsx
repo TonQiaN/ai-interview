@@ -53,6 +53,7 @@ import type {
 } from "../api/types";
 import { Confirm, Empty, QueryView } from "../components/common";
 import { PageHeader } from "../components/PageHeader";
+import { sameForm } from "../lib/form";
 import { duration, emotionLabel, fileSize, languageLabel, relativeTime } from "../lib/format";
 
 const MAX_REFERENCE_BYTES = 20 * 1024 * 1024;
@@ -127,7 +128,18 @@ function PreviewOutput({ preview, engines }: { preview: Preview; engines: Speech
 
 // ───────── 引擎 ─────────
 
-function EngineCard({ engine }: { engine: SpeechEngine }) {
+/**
+ * 不可用的引擎是不是都出于同一个原因（多半是语音合成的服务没连上）。
+ * 是的话原因只在引擎上面说一遍，不在每张卡片上各写一遍。
+ */
+function sharedOutage(items: SpeechEngine[]) {
+  const down = items.filter((e) => !e.available);
+  const reason = down[0]?.unavailable_reason;
+  if (down.length < 2 || !reason || down.some((e) => e.unavailable_reason !== reason)) return null;
+  return { names: down.map((e) => e.name), all: down.length === items.length, reason };
+}
+
+function EngineCard({ engine, hideReason }: { engine: SpeechEngine; hideReason?: boolean }) {
   const can = [
     "克隆一段录音",
     engine.supports_voice_design && "用文字描述设计音色",
@@ -146,7 +158,7 @@ function EngineCard({ engine }: { engine: SpeechEngine }) {
             </Badge>
           </span>
         </div>
-        {!engine.available && engine.unavailable_reason && (
+        {!engine.available && engine.unavailable_reason && !hideReason && (
           <p className="adm-engine__why">{engine.unavailable_reason}</p>
         )}
         <div className="adm-chips adm-engine__caps">
@@ -313,6 +325,8 @@ function VoiceDialog({
 }) {
   const create = useCreateVoice();
   const update = useUpdateVoice();
+  // 试听前单独存逐字稿用的，和「保存」分开，免得两边的出错提示串到一起
+  const saveTranscript = useUpdateVoice();
   const preview = usePreview();
   const toast = useToast();
   const [draft, setDraft] = useState<Draft>(() => (voice ? draftOf(voice) : emptyDraft(engines)));
@@ -339,7 +353,14 @@ function VoiceDialog({
         (!needsTranscript || draft.reference_transcript.trim() !== "")
       : draft.description.trim() !== "");
   // 克隆音色要有录音才能合成，所以添加的时候听不了
-  const canPreview = cloned ? Boolean(voice?.has_reference) : draft.description.trim() !== "";
+  const hasSource = cloned ? Boolean(voice?.has_reference) : draft.description.trim() !== "";
+  const transcript = draft.reference_transcript.trim();
+  const missingTranscript = needsTranscript && transcript === "";
+  // 试听接口能临时换引擎、语言和语气，逐字稿却只认音色上存着的那份：
+  // 现在选的引擎要用逐字稿、填的又和存着的不一样时，得先把它存下来再合成
+  const transcriptUnsaved =
+    voice !== null && needsTranscript && transcript !== (voice.reference_transcript ?? "").trim();
+  const canPreview = hasSource && !missingTranscript;
 
   function changeKind(kind: VoiceKind) {
     const fits = engines.find((e) => e.id === draft.engine)?.supports_voice_design;
@@ -360,7 +381,19 @@ function VoiceDialog({
     set({ engine: id, settings: { ...draft.settings, language } });
   }
 
-  function listen() {
+  async function listen() {
+    saveTranscript.reset();
+    if (voice && transcriptUnsaved) {
+      try {
+        await saveTranscript.mutateAsync({
+          id: voice.id,
+          patch: { reference_transcript: transcript },
+        });
+      } catch {
+        // 原因显示在试听按钮下面
+        return;
+      }
+    }
     preview.run({
       text: line.trim(),
       // 设计音色的描述还没存的时候，直接拿描述临时合成
@@ -429,6 +462,7 @@ function VoiceDialog({
     <Dialog
       open={open}
       onClose={onClose}
+      unsaved={file !== null || !sameForm(draft, voice ? draftOf(voice) : emptyDraft(engines))}
       wide
       title={voice ? `修改音色：${voice.name}` : "添加音色"}
       footer={
@@ -492,7 +526,7 @@ function VoiceDialog({
           error={errors.engine}
           hint={
             engine && !engine.available
-              ? `这个引擎现在不可用：${engine.unavailable_reason ?? "没有连上"}。可以先存着。`
+              ? "这个引擎现在不可用，可以先存着，等它恢复了再试听。"
               : cloned
                 ? "同一段录音可以换引擎，换完听听哪个更像。"
                 : undefined
@@ -697,11 +731,15 @@ function VoiceDialog({
           <Field
             label="先听听效果"
             hint={
-              canPreview
-                ? "用现在填的引擎、语言和语气合成，不用先保存。"
-                : cloned
+              !hasSource
+                ? cloned
                   ? "克隆的音色要先有参考录音才能试听，添加之后再回来听。"
                   : "先写一句想要什么样的声音。"
+                : missingTranscript
+                  ? `${engine?.name} 克隆时要用到逐字稿，先填上录音里说了什么再试听。`
+                  : transcriptUnsaved
+                    ? "用现在填的引擎、语言和语气合成。点试听时会先把逐字稿存下来，别的要点「保存」才生效。"
+                    : "用现在填的引擎、语言和语气合成，不用先保存。"
             }
           >
             {({ id, describedBy }) => (
@@ -717,7 +755,7 @@ function VoiceDialog({
                 <Button
                   variant="secondary"
                   icon={<Play aria-hidden="true" />}
-                  loading={preview.pending}
+                  loading={preview.pending || saveTranscript.isPending}
                   disabled={!canPreview || line.trim() === ""}
                   onClick={listen}
                 >
@@ -726,7 +764,11 @@ function VoiceDialog({
               </div>
             )}
           </Field>
-          <PreviewOutput preview={preview} engines={engines} />
+          {saveTranscript.error && !saveTranscript.isPending ? (
+            <Banner tone="danger">逐字稿没存上：{errorMessage(saveTranscript.error)}</Banner>
+          ) : (
+            <PreviewOutput preview={preview} engines={engines} />
+          )}
         </div>
       </form>
     </Dialog>
@@ -791,7 +833,6 @@ function VoiceRow({
         {engine && !engine.available && (
           <div className="adm-item__sub adm-item__sub--warn">
             <TriangleAlert aria-hidden="true" size={14} /> {engine.name} 现在不可用
-            {engine.unavailable_reason ? `：${engine.unavailable_reason}` : ""}
           </div>
         )}
       </div>
@@ -885,13 +926,34 @@ export function VoicesPage() {
       )}
       <h2 className="oil-title-md adm-h2">语音合成引擎</h2>
       <QueryView query={engines}>
-        {({ items }) => (
-          <div className="adm-templates">
-            {items.map((e) => (
-              <EngineCard key={e.id} engine={e} />
-            ))}
-          </div>
-        )}
+        {({ items }) => {
+          const outage = sharedOutage(items);
+          return (
+            <>
+              {outage && (
+                <Banner
+                  tone="danger"
+                  className="adm-engines__outage"
+                  title={
+                    outage.all
+                      ? "语音合成引擎现在都不可用"
+                      : `${outage.names.join("、")} 现在不可用`
+                  }
+                >
+                  音色照常可以添加和修改，以前合成过的句子还能试听。新的试听和准备面试要等引擎恢复。
+                  <div className="adm-item__sub" style={{ overflowWrap: "anywhere" }}>
+                    原因：{outage.reason}
+                  </div>
+                </Banner>
+              )}
+              <div className="adm-templates">
+                {items.map((e) => (
+                  <EngineCard key={e.id} engine={e} hideReason={outage !== null} />
+                ))}
+              </div>
+            </>
+          );
+        }}
       </QueryView>
 
       <h2 className="oil-title-md adm-h2">音色</h2>

@@ -43,7 +43,7 @@
 5. 点「播放提示音」。
    应该看到（听到）：「叮」的一声。听到后点「听到了」。
 6. 看网络一栏。
-   应该看到：「上传速度够用」，或者提醒网速偏慢（提醒了也能继续）。
+   应该看到：「上传速度够用」，或者提醒网速偏慢（提醒了也能继续；提醒里说「画面会录得模糊一些」的，这一场的录像画面确实会糊一些，属于正常）。
 7. 点「下一步」，再点「开始面试」。
    应该看到：面试官开始说话，**不用再点任何东西就有声音**；页面上方有「录制中」和计时。
 
@@ -169,7 +169,10 @@
 | --- | --- |
 | `page_opened` | `in_app_browser`（认出来是哪个应用的内置浏览器）、`recording_mime`（录像选了哪种容器和编码；安卓和电脑上的 Chrome 是 webm，iPhone 上多半是 mp4，是空的说明浏览器一种都不认）、`signals`（这个浏览器里哪些过程事件采得到） |
 | `device_check`、`device_report` | 设备检测卡在哪一步、失败的原因、测出来的上行网速 |
+| `interview_started` | `video_kbps`、`video_reduced`：这一段录像的画面用了多少码率，是不是因为上行慢降过 |
 | `screen_wake_lock` | `supported`、`held`：屏幕常亮申请到了没有 |
+| `audio_format_fallback` | 出现了说明这个浏览器解不了压缩过的面试官语音（MP3），页面改取了没压缩的。面试能照常进行，但要记下是哪种浏览器 |
+| `page_error` | 页面渲染出错了，候选人看到的是「页面出了点问题，请刷新」。`stage` 是出错时在哪一步，`name` 是错误的类型名。真机上出现了要记下机型和浏览器，这是页面的毛病 |
 | `recording_gap`、`device_recovered` | `device` 是 `camera`、`microphone` 还是 `audio_output`（声音被系统停掉），`cause` 是原因，`duration_ms` 是停了多久 |
 | `recording_error` | 录制器报的错误名；带 `kept_in_memory: true` 的是本机存不下录像、分片改放内存接着传（录像应该还是完整的） |
 | `upload_stalled`、`upload_recovered`、`upload_finished` | 录像传不动的原因、攒了多少片、结束后等了多久才传完 |

@@ -11,6 +11,7 @@
 import { Badge, Banner, Button, Card, CardBody, CardHeader, ScoreBar } from "@ai-interview/ui";
 import {
   ChevronDown,
+  CircleArrowRight,
   FileText,
   Flag,
   ListChecks,
@@ -19,7 +20,6 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import type {
   AspectRating,
   ClaimCheck,
@@ -67,7 +67,7 @@ import {
   stageName,
 } from "../lib/format";
 import type { Frame } from "../lib/frames";
-import { prepareForPrint } from "../lib/print";
+import { usePrinting } from "../lib/print";
 import { FrameThumbs } from "./FrameThumbs";
 
 type Seek = (ms: number) => void;
@@ -77,36 +77,6 @@ const FramesContext = createContext<Map<string, Frame[]>>(new Map());
 
 /** 正在打印。纸上点不了「还有几处出处」，这时候全摆出来 */
 const PrintingContext = createContext(false);
-
-/**
- * 打印这份报告的前后要做的事：收着的出处和段落展开，打印完收回去。
- * 用浏览器自己的打印（Ctrl+P）和点页面上的按钮都走这里。
- */
-function usePrinting(root: React.RefObject<HTMLElement | null>): boolean {
-  const [printing, setPrinting] = useState(false);
-  useEffect(() => {
-    let restore: (() => void) | null = null;
-    const before = () => {
-      if (restore) return;
-      // 浏览器在这个事件处理完之后马上排版，等不到下一次渲染
-      flushSync(() => setPrinting(true));
-      restore = prepareForPrint(root.current ?? document);
-    };
-    const after = () => {
-      restore?.();
-      restore = null;
-      setPrinting(false);
-    };
-    window.addEventListener("beforeprint", before);
-    window.addEventListener("afterprint", after);
-    return () => {
-      window.removeEventListener("beforeprint", before);
-      window.removeEventListener("afterprint", after);
-      restore?.();
-    };
-  }, [root]);
-  return printing;
-}
 
 const matchNote: Partial<Record<NonNullable<Evidence["quote_match"]>, string>> = {
   approximate: "大意，和原话不完全一样",
@@ -488,13 +458,21 @@ export interface ReportViewProps {
   onSeek: Seek;
   /** 有它才显示「重新生成」 */
   onRegenerate?: () => void;
+  /** 有它才在「下一轮可以接着问」下面显示「按这些安排下一轮」 */
+  onNextRound?: () => void;
   /** 画面检查存了图的帧（见 lib/frames 的 framesByEvent）。给了就在引用它的证据旁边显示 */
   frames?: Map<string, Frame[]>;
 }
 
 const noFrames = new Map<string, Frame[]>();
 
-export function ReportView({ report, onSeek, onRegenerate, frames = noFrames }: ReportViewProps) {
+export function ReportView({
+  report,
+  onSeek,
+  onRegenerate,
+  onNextRound,
+  frames = noFrames,
+}: ReportViewProps) {
   const rec = report.recommendation;
   const failed = report.meta.failed_stages;
   const failedStage = (stage: string) => failed.some((f) => f.stage === stage);
@@ -766,6 +744,18 @@ export function ReportView({ report, onSeek, onRegenerate, frames = noFrames }: 
                     </li>
                   ))}
                 </ol>
+              )}
+              {onNextRound && (
+                <div className="adm-meta__actions adm-no-print">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={<CircleArrowRight aria-hidden="true" />}
+                    onClick={onNextRound}
+                  >
+                    按这些安排下一轮
+                  </Button>
+                </div>
               )}
             </Section>
           )}

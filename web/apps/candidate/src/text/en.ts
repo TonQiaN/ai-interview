@@ -116,6 +116,8 @@ export const en: Texts = {
         "The upload speed could not be measured. The connection may be unstable. You can continue, but please check your network first.",
       ok: "Upload speed is good enough.",
       slow: "Upload speed is on the slow side. You can take the interview, but it takes longer to finish uploading the recording afterwards. Consider another network: move closer to the router, or use mobile data.",
+      slowReduced:
+        "Upload speed is on the slow side, so the video will be recorded at a lower quality to keep the interview running smoothly. For a clearer picture, consider another network: move closer to the router, or use mobile data.",
       slowRealtime:
         "Upload speed is on the slow side. The interviewer may respond more slowly, and it takes longer to finish uploading the recording afterwards. Consider another network: move closer to the router, or use mobile data.",
     },
@@ -254,7 +256,14 @@ export const en: Texts = {
     offlineTitle: "Connection lost",
     offlineBody: "It continues by itself once you are back online. Please keep this page open.",
     saving: "Saving",
+    slowDescription:
+      "Your upload speed is slow, so saving the recording will take a while. Please keep this page open. You will see a message when it is saved.",
     remaining: (size) => `${size} left`,
+    remainingWithWait: (size, wait) => `${size} left, ${wait}`,
+    waitUnderMinute: "less than a minute",
+    waitMinutes: (minutes) => `about ${minutes} min`,
+    waitHours: (hours, minutes) =>
+      minutes > 0 ? `about ${hours} h ${minutes} min` : `about ${hours} h`,
     movedTitle: "The interview continues in another page",
     movedDescription:
       "This page has stopped recording and is saving what it recorded. Please keep it open for now.",
@@ -290,6 +299,13 @@ export const en: Texts = {
       description:
         "The recording has been saved. The recruiter will contact you after reviewing it. You can close this page now.",
     },
+  },
+
+  crash: {
+    title: "Something went wrong on this page",
+    description:
+      "Please reload the page. Everything recorded and answered so far is saved. If the interview isn't finished, it continues from where it stopped after a quick device check.",
+    reload: "Reload the page",
   },
 
   problem: {

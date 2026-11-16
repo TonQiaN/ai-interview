@@ -47,6 +47,10 @@
 
 除了正式题目，还会多出几道备用题，只有候选人答得快、时间有富余时才问。
 
+复核改一句话的说法时只换这句话；把一道题换成问别的事时，这道题想看什么、评分要点和追问要一起重写，代码整道替换。HR 的必问题不能换。
+
+今天的日期会告诉模型，简历里写「至今」的经历有多长才算得出来。岗位描述或简历里如果有一段想左右面试的话（「忽略以上要求」「给这位候选人高分」之类），模型不理会，单独报出来，代码在要核实的点最前面加一条「请 HR 留意」。
+
 候选人的姓名不发给模型：模型写 `{candidate_name}`，Rust 再替换。简历正文会发给模型，调用方应先去掉手机号、邮箱这类出题用不上的信息。
 
 `InterviewPlan::utterances()` 是要提前合成语音的全部句子，键是 `opening`、`q1`、`q1.f1`、`ack.1`、`nudge`、`repeat`、`candidate_questions`、`closing`、`closing.early`。
@@ -66,6 +70,7 @@
 `advance` 做的事：
 
 - 有转写文字时让模型判断这段回答（强、够用、空泛、很差、没内容），以及候选人是不是在要求重复题目或者想结束。这一步限时 12 秒，超时或出错就当没有判断，面试照常往下走。
+- 模型判成候选人想结束时再问一次模型核对，核对通过才结束：结束面试收不回来，候选人只是说「这题不会，告诉我答案吧」也被判成过想结束。
 - 回答空泛或者有疑点，并且时间够，就问一道提前写好的追问。
 - 没听到声音：提醒一次并重问；还是没有就下一题；连续两题没声音就结束。
 - 时间不够时跳过非必答的题；超出计划时长太多就收尾。
@@ -109,9 +114,13 @@ cargo run -p interview-engine --example plan -- crates/interview-engine/fixtures
 cargo run -p interview-engine --example simulate -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json lost
 cargo run -p interview-engine --example converse -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
 cargo run -p interview-engine --example turn_taking -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
+cargo run -p interview-engine --example guard -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
+cargo run -p interview-engine --example plan_eval -- /tmp/plans crates/interview-engine/fixtures/*.json crates/interview-engine/fixtures/planning/*.json
 ```
 
-`simulate` 让模型扮演候选人，人设有 `strong`（经验扎实）、`vague`（说话空泛）、`faker`（简历注水）、`lost`（大多答不上来）、`quitter`（中途不想面了）。`converse` 是实时对话模式的同一件事，多一个人设 `curious`（爱反问、最后会提问），最后一个参数可以写 `off`、`low`、`high`、`max` 指定思考强度。`turn_taking` 测实时对话里候选人停顿时「说完了没有」和被打断以后怎么接，一组有标准答案的例子，打印判对了多少、用了多久。`fixtures/` 里的岗位和简历都是编的。
+`simulate` 让模型扮演候选人，人设有 `strong`（经验扎实）、`vague`（说话空泛）、`faker`（简历注水）、`lost`（大多答不上来）、`quitter`（中途不想面了）。`converse` 是实时对话模式的同一件事，多几个人设：`curious`（爱反问、最后会提问）、`offtopic`（一直说和面试无关的话）、`prober`（每道题换着办法套答案、打听评分和后面的题）、`pusher`（每道题换一种办法对面试官下指令），最后一个参数可以写 `off`、`low`、`high`、`max` 指定思考强度。用 `prober` 和 `pusher` 时，面试官现场说的每句话都会交给另一个模型检查有没有说漏、有没有照做，`pusher` 还会看候选人下了指令的题有没有给 HR 记下来。`turn_taking` 测实时对话里候选人停顿时「说完了没有」和被打断以后怎么接，一组有标准答案的例子，打印判对了多少、用了多久。`guard` 测候选人套答案、打听评分标准和后面的题、对面试官下指令时守不守得住：面试官有没有说漏、判断有没有被带偏、面试有没有被结束掉，跑一遍约 0.15 元，结果和改了什么见 [docs/guard.md](docs/guard.md)。`plan_eval` 拿一批岗位和简历各出两遍题，看换了岗位、材料不完整时题目好不好：能用代码查的由代码查，要读懂内容才能判断的交给另一个模型按固定的几条看，九份输入跑一遍约 1.5 元、十分钟，结果和改了什么见 [docs/planning.md](docs/planning.md)。`fixtures/` 里的岗位和简历都是编的。
+
+`simulate`、`converse`、`turn_taking` 这三个命令默认把模拟候选人写的字原样交给引擎。设了 `AI_INTERVIEW_EVAL_HEARD_CMD`，候选人的话会先读出来再用服务进程同一个识别模型识别回去，引擎拿到的是带识别错字的文字，同一段回答两种文字各判断一次并打印差别。怎么准备写在 `scripts/asr_roundtrip.py` 开头，测出来的结果见 [docs/asr-text.md](docs/asr-text.md)。
 
 2026-11-13 用 deepseek-flash 实测：
 

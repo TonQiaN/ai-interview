@@ -31,8 +31,8 @@ use crate::report::{
     ReviewFlagCode, RiskLevel, SCHEMA_VERSION, ScoreRange, StageFailure, Usage, null_as_default,
 };
 use crate::transcript::{
-    Assignment, QuestionGroup, group_by_question, lookup_by_alias, provided_assignment,
-    question_timing, render_context, segment_alias, timing_overview,
+    Assignment, QuestionGroup, clock, group_by_question, held_intervals, lookup_by_alias,
+    provided_assignment, question_timing, render_context, segment_alias, timing_overview,
 };
 
 /// 分析的选项。
@@ -131,6 +131,7 @@ pub async fn analyze(
         )
         .await;
 
+    let held = held_intervals(&record.events);
     let mut questions = Vec::with_capacity(groups.len());
     for (group, outcome) in groups.iter().zip(question_judgements) {
         let judgement = match outcome {
@@ -148,7 +149,7 @@ pub async fn analyze(
             question_text: group.root.text.clone(),
             asked: !group.segments.is_empty(),
             segment_ids: group.segments.iter().map(|s| s.id.clone()).collect(),
-            timing: question_timing(&group.segments),
+            timing: question_timing(&group.segments, &held),
             judgement,
         });
     }
@@ -245,7 +246,12 @@ pub async fn analyze(
         next_round: synthesis.next_round,
         timing,
         review_flags,
-        limitations: synthesis.limitations,
+        limitations: {
+            let mut limitations = synthesis.limitations;
+            limitations.extend(page_takeover_limitation(record));
+            limitations.extend(reduced_video_limitation(record));
+            limitations
+        },
         meta: ReportMeta {
             model: outcome.models.join("、"),
             thinking: thinking_label(options.thinking),
@@ -556,6 +562,84 @@ struct Synthesis {
     next_round: NextRound,
     #[serde(default, deserialize_with = "null_as_default")]
     limitations: Vec<String>,
+}
+
+/// 候选人中途换到另一个页面接着面的事件，由原来的页面上报。
+const KIND_PAGE_TAKEN_OVER: &str = "page_taken_over";
+
+/// 候选人中途换到另一个页面接着面（多半是换了一台设备）时，报告要说明的局限：
+/// 换页面前后是不是同一个人，这份分析看不出来。这一条由程序给，不靠模型记得写。
+fn page_takeover_limitation(record: &InterviewRecord) -> Option<String> {
+    let times: Vec<String> = record
+        .events
+        .iter()
+        .filter(|event| event.kind == KIND_PAGE_TAKEN_OVER)
+        .map(|event| event.at_ms.map_or_else(|| "面试中途".to_owned(), clock))
+        .collect();
+    if times.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "候选人在 {} 换到另一个页面接着面试（多半是换了一台设备）。这份报告不比对人脸，换页面前后是不是同一个人，请对照这个时间前后的录像确认。",
+        times.join("、")
+    ))
+}
+
+const KIND_INTERVIEW_STARTED: &str = "interview_started";
+const KIND_FRAMES_CHECKED: &str = "frames_checked";
+
+/// 候选人的上行网速装不下平时的录像码率时，面试页会把画面的码率降下来（`interview_started` 里
+/// `video_reduced` 为 true），录像的画面比平时糊。HR 回看时要知道这不是候选人的摄像头有问题；
+/// 画面检查过的话，还要知道糊的画面上更容易看错。这一条由程序给，不靠模型记得写。
+fn reduced_video_limitation(record: &InterviewRecord) -> Option<String> {
+    let started: Vec<(Option<u64>, serde_json::Value)> = record
+        .events
+        .iter()
+        .filter(|event| event.kind == KIND_INTERVIEW_STARTED)
+        .map(|event| {
+            let detail = event.detail.as_deref().unwrap_or_default();
+            (
+                event.at_ms,
+                serde_json::from_str(detail).unwrap_or_default(),
+            )
+        })
+        .collect();
+    let reduced: Vec<&(Option<u64>, serde_json::Value)> = started
+        .iter()
+        .filter(|(_, detail)| detail["video_reduced"] == true)
+        .collect();
+    if reduced.is_empty() {
+        return None;
+    }
+    let which = if reduced.len() == started.len() {
+        "这场面试".to_owned()
+    } else {
+        let times: Vec<String> = reduced
+            .iter()
+            .map(|(at_ms, _)| clock(at_ms.unwrap_or(0)))
+            .collect();
+        format!("从 {} 开始的那一段", times.join("、"))
+    };
+    let kbps = reduced
+        .iter()
+        .filter_map(|(_, detail)| detail["video_kbps"].as_u64())
+        .filter(|kbps| *kbps > 0)
+        .min()
+        .map(|kbps| format!("降到了约 {kbps} kbps"))
+        .unwrap_or_else(|| "降了下来".to_owned());
+    let mut text = format!(
+        "候选人的上行网速慢，面试页把{which}录像画面的码率{kbps}（声音没有降），录像的画面比平时糊，不是候选人的摄像头有问题。"
+    );
+    if record
+        .events
+        .iter()
+        .any(|event| event.kind == KIND_FRAMES_CHECKED)
+    {
+        text.push_str(
+            "画面检查在这样的录像上更容易看错，比如把手里的小东西看成手机、把暗的画面说成看不清，只出现一两帧的请对照录像确认。",
+        );
+    }
+    Some(text)
 }
 
 /// 分段这一步模型的输出。

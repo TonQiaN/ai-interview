@@ -174,6 +174,10 @@
     margin: 0;
     font-size: var(--oil-text-sm);
   }
+  /* 跟在列表后面的说明，和列表隔开一点 */
+  .adm-note--after {
+    margin-top: var(--oil-space-3);
+  }
 
   /* 列表里的一行：左边头像或图标，中间两行字，右边状态和操作 */
   .adm-list {
@@ -246,6 +250,18 @@
     align-items: center;
     gap: var(--oil-space-1);
     color: var(--oil-warning-ink);
+  }
+  /* 「声音」页里几个引擎一起不可用时的说明，和下面的引擎卡片隔开 */
+  .adm-engines__outage {
+    margin-bottom: var(--oil-space-4);
+  }
+  /* 字段说明里要提醒的一句，可能折成几行，图标跟着第一行走 */
+  .adm-warn-text {
+    color: var(--oil-warning-ink);
+  }
+  .adm-warn-text svg {
+    display: inline;
+    vertical-align: -2px;
   }
 
   /* 表格里的人 */
@@ -477,6 +493,22 @@
     align-items: center;
     gap: var(--oil-space-2);
     margin-top: var(--oil-space-2);
+  }
+  /* 某一页画不出来时，说明底下收着的那句原话 */
+  .adm-page-error__reason {
+    max-width: 60ch;
+    margin: 0 auto;
+    color: var(--oil-ink-3);
+    font-size: var(--oil-text-sm);
+    text-align: center;
+  }
+  .adm-page-error__reason summary {
+    cursor: pointer;
+  }
+  .adm-page-error__reason code {
+    display: block;
+    margin-top: var(--oil-space-2);
+    overflow-wrap: anywhere;
   }
   .adm-utter__more {
     margin-top: var(--oil-space-2);
@@ -1135,6 +1167,20 @@
     color: var(--oil-ink-3);
     font-size: var(--oil-text-sm);
   }
+  /* 一次生成好几个链接时，每位候选人那一行里的链接：能选中，太长就折行 */
+  /* 窄屏上名字和链接占满一行，有效期和按钮换到下面，不把名字挤成一列 */
+  .adm-invite-row .adm-item__main {
+    flex-basis: 16rem;
+  }
+  .adm-invite-url {
+    display: block;
+    margin-top: var(--oil-space-2);
+    font-family: var(--oil-font-mono);
+    font-size: var(--oil-text-xs);
+    color: var(--oil-ink-3);
+    overflow-wrap: anywhere;
+    user-select: all;
+  }
   .adm-message {
     white-space: pre-wrap;
     font-family: var(--oil-font-body);
@@ -1454,9 +1500,24 @@
       background: none;
       box-shadow: none;
     }
+    .adm-compare {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    /* 纸上不能横向滚动：表格放不下的那几列会被裁掉，改成让第一列的长句子换行 */
+    .oil-table-wrap {
+      overflow: visible;
+    }
+    .adm-compare__table th[scope="row"] {
+      min-width: 0;
+      white-space: normal;
+    }
     .adm-quote,
     .adm-frames,
-    .adm-facts > div {
+    .adm-facts > div,
+    .adm-compare__person,
+    .adm-compare__question,
+    .adm-compare__table tr {
       break-inside: avoid;
     }
     h2,

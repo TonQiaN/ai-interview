@@ -298,6 +298,13 @@ describe("录像上传和屏幕常亮的事件", () => {
       expect(eventSeverity(kind)).toBe("info");
   });
 
+  it("浏览器放不了压缩过的面试官语音时有中文说法，只是排查用，不提示", () => {
+    expect(eventText({ kind: "audio_format_fallback", payload: { from: "mp3" } })).toBe(
+      "这个浏览器放不了压缩过的面试官语音，改用没压缩的（面试不受影响，每句话取得慢一些）",
+    );
+    expect(eventSeverity("audio_format_fallback")).toBe("info");
+  });
+
   it("没有时间轴位置的事件，按发生的时刻说是开始前、面试中还是结束后", () => {
     const events = [
       { kind: "page_opened", occurred_at: "2026-01-05T09:58:00Z" },
@@ -333,5 +340,17 @@ describe("面试换到另一个页面继续", () => {
     expect(text("interview_started", { resumed: true })).toBe("回来接着面试");
     expect(text("interview_started", { resumed: false })).toBe("面试开始");
     expect(text("interview_started", {})).toBe("面试开始");
+  });
+
+  it("上行网速慢、画面降了清晰度的那一段，在开始那一条上说明", () => {
+    expect(text("interview_started", { video_kbps: 300, video_reduced: true })).toBe(
+      "面试开始（上行网速慢，这一段的画面降到约 300 kbps，比平时糊）",
+    );
+    expect(text("interview_started", { resumed: true, video_reduced: true })).toBe(
+      "回来接着面试（上行网速慢，这一段的画面降了清晰度，比平时糊）",
+    );
+    // 没降的不提码率，没有摄像头的（码率是 0）也不提
+    expect(text("interview_started", { video_kbps: 900, video_reduced: false })).toBe("面试开始");
+    expect(text("interview_started", { video_kbps: 0, video_reduced: false })).toBe("面试开始");
   });
 });

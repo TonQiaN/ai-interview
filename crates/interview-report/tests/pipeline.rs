@@ -868,6 +868,142 @@ async fn raw_room_events_are_merged_and_shown_to_the_model() {
 }
 
 #[tokio::test]
+async fn switching_to_another_page_is_explained_and_listed_as_a_limitation() {
+    // 候选人在 2 分 05 秒换到另一个页面接着面：新的页面接上，原来的页面报停下来
+    let mut record = sample_record();
+    record.events = ProctorEvent::from_raw(vec![
+        RawEvent {
+            id: "evt-resumed".to_owned(),
+            kind: "interview_started".to_owned(),
+            at_ms: Some(125_000),
+            payload: serde_json::json!({"resumed": true}),
+        },
+        RawEvent {
+            id: "evt-taken-over".to_owned(),
+            kind: "page_taken_over".to_owned(),
+            at_ms: Some(125_400),
+            payload: serde_json::json!({}),
+        },
+    ]);
+    let integrity = r#"{"risk_level": "none", "summary": "候选人在 02:05 换到另一个页面接着面试，没有别的迹象。", "signals": []}"#;
+    let model = RoutedModel::new()
+        .on("question:q1", Q1)
+        .on("question:q2", Q2)
+        .on("requirements", REQUIREMENTS)
+        .on("resume", RESUME)
+        .on("integrity", integrity)
+        .on("communication", COMMUNICATION)
+        .on("synthesis", SYNTHESIS);
+    let report = analyze(&record, &model, &once()).await.unwrap();
+
+    // 模型看得到这条事件，也看得到它是什么意思
+    let prompt = model.requests()[0].1.messages[1].content.as_text();
+    assert!(prompt.contains("[e2 | 02:05 | page_taken_over | -]"));
+    assert!(prompt.contains("page_taken_over 是候选人在另一个页面"));
+
+    // 换页面本身不提高风险，也不触发复核提示
+    assert_eq!(report.integrity.unwrap().risk_level, RiskLevel::None);
+    assert!(
+        !report
+            .review_flags
+            .iter()
+            .any(|flag| flag.code == ReviewFlagCode::IntegrityRisk)
+    );
+    // 「前后是不是同一个人看不出来」由程序写进局限，模型写的那一条还在
+    assert_eq!(report.limitations.len(), 2);
+    assert_eq!(report.limitations[0], "有一道题没来得及问");
+    assert!(report.limitations[1].contains("02:05"));
+    assert!(report.limitations[1].contains("不比对人脸"));
+
+    // 没换过页面的面试没有这一条
+    let plain = analyze(&sample_record(), &full_model(), &once())
+        .await
+        .unwrap();
+    assert_eq!(plain.limitations, ["有一道题没来得及问"]);
+}
+
+#[tokio::test]
+async fn a_lowered_video_bitrate_is_explained_and_listed_as_a_limitation() {
+    let started = |id: &str, at_ms: u64, payload: serde_json::Value| RawEvent {
+        id: id.to_owned(),
+        kind: "interview_started".to_owned(),
+        at_ms: Some(at_ms),
+        payload,
+    };
+    let limitations = |events: Vec<RawEvent>| async {
+        let mut record = sample_record();
+        record.events = ProctorEvent::from_raw(events);
+        let model = full_model();
+        let report = analyze(&record, &model, &once()).await.unwrap();
+        let prompt = model.requests()[0].1.messages[1].content.as_text();
+        (report.limitations, prompt)
+    };
+
+    // 上行慢，整场面试的画面都降到了 120 kbps，录像画面也检查过
+    let (listed, prompt) = limitations(vec![
+        started(
+            "evt-started",
+            0,
+            serde_json::json!({"resumed": false, "video_kbps": 120, "video_reduced": true}),
+        ),
+        RawEvent {
+            id: "frames-checked".to_owned(),
+            kind: "frames_checked".to_owned(),
+            at_ms: Some(0),
+            payload: serde_json::json!({"frames": 40, "interval_ms": 5000, "flagged": 0, "unreadable": 0}),
+        },
+    ])
+    .await;
+    // 模型看得到这两个字段，也看得到它们是什么意思
+    assert!(prompt.contains(r#""video_reduced":true"#));
+    assert!(prompt.contains("video_reduced 为 true"));
+    // 局限由程序写：画面糊不是摄像头的问题，画面检查更容易看错
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0], "有一道题没来得及问");
+    assert!(listed[1].contains("这场面试录像画面的码率降到了约 120 kbps"));
+    assert!(listed[1].contains("不是候选人的摄像头有问题"));
+    assert!(listed[1].contains("画面检查在这样的录像上更容易看错"));
+
+    // 画面没有检查过：只说画面糊，不提画面检查
+    let (listed, _) = limitations(vec![started(
+        "evt-started",
+        0,
+        serde_json::json!({"resumed": false, "video_kbps": 180, "video_reduced": true}),
+    )])
+    .await;
+    assert!(listed[1].contains("降到了约 180 kbps"));
+    assert!(!listed[1].contains("画面检查"));
+
+    // 开始时网速够，刷新之后才降的：写明是从哪里开始的那一段
+    let (listed, _) = limitations(vec![
+        started(
+            "evt-started",
+            0,
+            serde_json::json!({"resumed": false, "video_kbps": 500, "video_reduced": false}),
+        ),
+        started(
+            "evt-resumed",
+            125_000,
+            serde_json::json!({"resumed": true, "video_kbps": 150, "video_reduced": true}),
+        ),
+    ])
+    .await;
+    assert!(listed[1].contains("从 02:05 开始的那一段录像画面的码率降到了约 150 kbps"));
+
+    // 没降过的、老版本页面不带这两个字段的，都没有这一条
+    let (listed, _) = limitations(vec![
+        started(
+            "evt-started",
+            0,
+            serde_json::json!({"resumed": false, "video_kbps": 500, "video_reduced": false}),
+        ),
+        started("evt-resumed", 125_000, serde_json::json!({"resumed": true})),
+    ])
+    .await;
+    assert_eq!(listed, ["有一道题没来得及问"]);
+}
+
+#[tokio::test]
 async fn long_ids_are_shown_as_short_ones_and_mapped_back() {
     // 库里的片段编号是 UUID。提示里用 s1、s2 这样的短编号，报告里写回原来的编号
     let mut record = sample_record();

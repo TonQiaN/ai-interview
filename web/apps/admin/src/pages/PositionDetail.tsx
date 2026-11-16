@@ -10,7 +10,7 @@ import {
   KeyValue,
   useToast,
 } from "@ai-interview/ui";
-import { Archive, ArchiveRestore, Download, Pencil, Plus, Scale } from "lucide-react";
+import { Archive, ArchiveRestore, Download, Pencil, Plus, Scale, Send } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api/http";
@@ -22,10 +22,14 @@ import {
   useSavePosition,
 } from "../api/queries";
 import type { Position, PositionExtra } from "../api/types";
-import { Confirm, Person, QueryView } from "../components/common";
+import { BatchInvitesDialog } from "../components/BatchInvitesDialog";
+import { Confirm, Pager, Person, QueryView } from "../components/common";
+import { ExportInterviewsButton } from "../components/ExportInterviews";
 import { PageHeader } from "../components/PageHeader";
+import { PrepareAll } from "../components/PrepareAll";
 import { RaasApplicantsDialog } from "../components/RaasApplicantsDialog";
 import { hasVerdict, InterviewTags } from "../components/ReportVerdict";
+import { sameForm } from "../lib/form";
 import { fullTime, positionStatusLabel, positionStatusTone, relativeTime } from "../lib/format";
 import { PositionFields, type PositionForm } from "./Positions";
 
@@ -71,6 +75,7 @@ function EditDialog({
     <Dialog
       open={open}
       onClose={onClose}
+      unsaved={!sameForm(value, pick(position))}
       wide
       title="改岗位"
       footer={
@@ -151,8 +156,17 @@ function ExtraCard({ extra }: { extra: PositionExtra }) {
 function Detail({ position }: { position: Position }) {
   const navigate = useNavigate();
   const toast = useToast();
-  // 一个岗位下的人是要拿来比的：综合分高的在前，还没有报告的排在后面
-  const interviews = useInterviews({ position_id: position.id, page_size: 50, sort: "-score" });
+  // 一个岗位下的人是要拿来比的：综合分高的在前，还没有报告的排在后面。
+  // 从 RAAS 导入一批投递以后一个岗位会有几十上百场，一页 50 场，多了可以翻页
+  const [page, setPage] = useState(1);
+  const listed = { position_id: position.id, page_size: 50, sort: "-score" } as const;
+  const interviews = useInterviews({ ...listed, page });
+  // 有报告的都排在前面，够不够两份拿来对比只用看第一页（在第一页时和上面是同一个请求）
+  const topInterviews = useInterviews({ ...listed, page: 1 });
+  // 题目准备好、还没发链接的。一批安排下来常常有十几二十场，一场一场点进去发太慢，可以一起生成
+  const ready = useInterviews({ position_id: position.id, status: "ready", page_size: 100 });
+  const readyTotal = ready.data?.total ?? 0;
+  const [inviting, setInviting] = useState(false);
   const remove = useDeletePosition();
   const restore = useRestorePosition();
   const [editing, setEditing] = useState(false);
@@ -282,7 +296,7 @@ function Detail({ position }: { position: Position }) {
               actions={
                 <>
                   {/* 有两场以上出了报告才比得起来 */}
-                  {(interviews.data?.items.filter(hasVerdict).length ?? 0) >= 2 && (
+                  {(topInterviews.data?.items.filter(hasVerdict).length ?? 0) >= 2 && (
                     <Link
                       to={`/positions/${position.id}/comparison`}
                       className={buttonClass({ variant: "secondary", size: "sm" })}
@@ -290,6 +304,13 @@ function Detail({ position }: { position: Position }) {
                       <Scale aria-hidden="true" />
                       对比候选人
                     </Link>
+                  )}
+                  {(interviews.data?.total ?? 0) > 0 && (
+                    <ExportInterviewsButton
+                      size="sm"
+                      name={position.title}
+                      query={{ position_id: position.id, sort: "-score" }}
+                    />
                   )}
                   {fromRaas && !archived && (
                     <Button
@@ -305,15 +326,33 @@ function Detail({ position }: { position: Position }) {
               }
             />
             <CardBody>
+              {!archived && <PrepareAll positionId={position.id} />}
+              {readyTotal > 0 && !archived && (
+                <Banner
+                  tone="info"
+                  className="adm-gap-below"
+                  actions={
+                    <Button
+                      size="sm"
+                      icon={<Send aria-hidden="true" />}
+                      onClick={() => setInviting(true)}
+                    >
+                      {readyTotal > 1 ? "一起生成链接" : "生成链接"}
+                    </Button>
+                  }
+                >
+                  {readyTotal} 场的题目准备好了，还没发链接。
+                </Banner>
+              )}
               <QueryView query={interviews}>
-                {({ items }) =>
-                  items.length === 0 ? (
+                {({ items, total, page_size }) =>
+                  total === 0 ? (
                     <p className="oil-muted" style={{ margin: 0 }}>
                       还没有人面过这个岗位。
                     </p>
                   ) : (
                     <>
-                      {items.some(hasVerdict) && (
+                      {(items.some(hasVerdict) || total > page_size) && (
                         <p className="oil-muted adm-note">综合分高的在前，还没有报告的排在后面。</p>
                       )}
                       <ul className="adm-list">
@@ -330,6 +369,9 @@ function Detail({ position }: { position: Position }) {
                           </li>
                         ))}
                       </ul>
+                      {total > page_size && (
+                        <Pager page={page} pageSize={page_size} total={total} onPage={setPage} />
+                      )}
                     </>
                   )
                 }
@@ -352,6 +394,12 @@ function Detail({ position }: { position: Position }) {
       </div>
 
       <EditDialog position={position} open={editing} onClose={() => setEditing(false)} />
+      <BatchInvitesDialog
+        interviews={ready.data?.items ?? []}
+        total={readyTotal}
+        open={inviting}
+        onClose={() => setInviting(false)}
+      />
       {fromRaas && (
         <RaasApplicantsDialog
           position={position}

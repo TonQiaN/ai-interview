@@ -4,6 +4,7 @@
  * 页面只做两件事：订阅这里的快照来画界面，把按钮点击转成这里的方法调用。
  * 摄像头、音频、录制、上传、过程事件这些资源都由它创建和释放。
  */
+
 import {
   ACTIVE_ELSEWHERE,
   HttpRoomApi,
@@ -32,6 +33,8 @@ import { CaptureError, requestCapture, stopStream } from "../lib/media/capture";
 import type { MediaErrorKind } from "../lib/media/errors";
 import type { OutputHalt, OutputWatch } from "../lib/media/output-watch";
 import { ScreenWakeLock } from "../lib/media/wake-lock";
+import { randomId } from "../lib/random-id";
+import { type FittedBitrate, fitRecordingBitrate } from "../lib/recording/bitrate";
 import { recorderFactory } from "../lib/recording/create-recorder";
 import { SegmentRecorder } from "../lib/recording/segment-recorder";
 import { Timeline } from "../lib/timeline";
@@ -44,6 +47,8 @@ import {
 import { IndexedDbChunkStore } from "../lib/upload/idb-chunk-store";
 import { discardSession, discardStale } from "../lib/upload/leftovers";
 import { closeOrphanSegments } from "../lib/upload/orphans";
+import { OwnedChunkStore } from "../lib/upload/owned-chunk-store";
+import { announcePage, isPageOpen } from "../lib/upload/page-presence";
 import { SpillChunkStore } from "../lib/upload/spill-chunk-store";
 import { UploadEventTracker } from "../lib/upload/upload-events";
 import { retryDelayMs, Uploader, type UploadStatus } from "../lib/upload/uploader";
@@ -116,8 +121,14 @@ export interface SessionSnapshot {
   finishReason: string | null;
 }
 
+/** 面试为什么被按住：设备断了、声音被系统停掉了、页面渲染出错了。 */
+type HoldReason = "device" | "audio" | "page";
+
 /** 面试换到另一个页面里继续了，这个页面停了下来。 */
 export const TAKEN_OVER = "taken_over";
+
+/** 点「开始面试」时网速还在量，最多等它这么久（毫秒）。 */
+const NETWORK_CHECK_WAIT_MS = 2_000;
 
 const INITIAL_DEVICE: DeviceState = {
   permission: "idle",
@@ -132,6 +143,8 @@ export interface InterviewSessionOptions {
   hash: string;
   /** 测试时可以换掉接口实现。 */
   createApi?: (token: string, hooks: RoomApiHooks) => RoomApi;
+  /** 这个页面的标识。默认随机生成。 */
+  pageId?: string;
 }
 
 export class InterviewSession {
@@ -158,6 +171,8 @@ export class InterviewSession {
     finishReason: null,
   };
 
+  /** 这个页面的标识，每次载入换一个：服务端靠它分清是哪个页面在面试，本机的录像队列靠它分清一段是谁录的。 */
+  private readonly pageId: string;
   private api: RoomApi | null = null;
   private sessionKey = "";
   private store: ChunkStore | null = null;
@@ -170,11 +185,13 @@ export class InterviewSession {
   private recorder: SegmentRecorder | null = null;
   private runner: InterviewRunner<AudioBuffer> | null = null;
   private wakeLock: ScreenWakeLock | null = null;
+  /** 正在量的那一次上行网速；量完了也留着。 */
+  private networkCheck: Promise<void> = Promise.resolve();
   private outputWatch: OutputWatch | null = null;
   /** 声音是什么时候被系统停掉的（performance.now()）；没停是 null。 */
   private outputHaltedAt: number | null = null;
   /** 面试因为什么被按住了。全都放开了才接着走。 */
-  private readonly holds = new Set<"device" | "audio">();
+  private readonly holds = new Set<HoldReason>();
   /** 面试是什么时候结束的（performance.now()）；这次打开页面时面试已经结束是 null。 */
   private finishedAt: number | null = null;
   private readonly cleanups: Array<() => void> = [];
@@ -184,6 +201,7 @@ export class InterviewSession {
   constructor(options: InterviewSessionOptions) {
     this.hash = options.hash;
     this.createApi = options.createApi ?? ((token, hooks) => new HttpRoomApi({ token, ...hooks }));
+    this.pageId = options.pageId ?? randomId();
   }
 
   getSnapshot = (): SessionSnapshot => this.snapshot;
@@ -220,7 +238,10 @@ export class InterviewSession {
     if (!capability.ok) return this.fail("unsupported");
 
     if (!this.api) {
-      this.api = this.createApi(token, { onActiveElsewhere: this.handleActiveElsewhere });
+      this.api = this.createApi(token, {
+        pageId: this.pageId,
+        onActiveElsewhere: this.handleActiveElsewhere,
+      });
       // 本地队列按面试区分。用令牌的摘要做键，令牌本身不落盘
       this.sessionKey = (
         await sha256Hex(new TextEncoder().encode(token).buffer as ArrayBuffer)
@@ -283,6 +304,9 @@ export class InterviewSession {
       store = new MemoryChunkStore();
       this.patch({ volatileStorage: true });
     }
+    // 同一个浏览器里别的标签页也在用这份队列：先说一声这个页面开着，再只管归自己的那些段
+    this.cleanups.push(announcePage(this.pageId));
+    store = new OwnedChunkStore(store, { pageId: this.pageId, isPageOpen });
     this.store = store;
     // 别的面试在这台设备上留下的旧录像已经传不上去了，顺手清掉
     await discardStale(store, { keep: this.sessionKey, now: Date.now() }).catch(() => {});
@@ -360,12 +384,34 @@ export class InterviewSession {
     const api = this.api;
     if (!api || this.snapshot.network.status === "testing") return;
     this.patch({ network: { status: "testing", uplinkKbps: null } });
-    try {
-      const uplinkKbps = await measureUplinkKbps({ send: (bytes) => api.probeUplink(bytes) });
-      this.patch({ network: { status: "measured", uplinkKbps } });
-    } catch {
-      this.patch({ network: { status: "failed", uplinkKbps: null } });
-    }
+    const measuring = (async () => {
+      try {
+        const uplinkKbps = await measureUplinkKbps({ send: (bytes) => api.probeUplink(bytes) });
+        this.patch({ network: { status: "measured", uplinkKbps } });
+      } catch {
+        this.patch({ network: { status: "failed", uplinkKbps: null } });
+      }
+    })();
+    this.networkCheck = measuring;
+    await measuring;
+  }
+
+  /**
+   * 录像按多大的码率录。上行装不下服务端给的码率时把画面的码率降下来，
+   * 不然候选人的声音到不了服务端，面试官只能按半截回答来判断。
+   */
+  private recordingBitrate(): FittedBitrate {
+    const { room, network } = this.snapshot;
+    return fitRecordingBitrate(
+      {
+        videoBitsPerSecond:
+          (this.stream?.getVideoTracks().length ?? 0) > 0
+            ? (room?.recording.video_bits_per_second ?? 0)
+            : 0,
+        audioBitsPerSecond: room?.recording.audio_bits_per_second ?? 0,
+      },
+      network.uplinkKbps,
+    );
   }
 
   private pageTargets(): PageTargets {
@@ -467,11 +513,22 @@ export class InterviewSession {
 
     await this.action(async () => {
       await graph.resume();
+      // 网速还在量（候选人点得快，或者刷新后回来）：等它一下再定录像的码率，最多等两秒
+      await Promise.race([
+        this.networkCheck,
+        new Promise((resolve) => setTimeout(resolve, NETWORK_CHECK_WAIT_MS)),
+      ]);
       const first = await api.start();
       this.timeline = new Timeline(
         first.action === "say" ? first.progress.elapsed_ms : (room.elapsed_ms ?? 0),
       );
-      this.collector?.record("interview_started", { resumed: room.stage === "in_progress" });
+      const bitrate = this.recordingBitrate();
+      this.collector?.record("interview_started", {
+        resumed: room.stage === "in_progress",
+        // 画面按多大的码率录。上行慢的时候会比配置的低，报告能知道画面为什么糊
+        video_kbps: Math.round(bitrate.videoBitsPerSecond / 1000),
+        video_reduced: bitrate.reduced,
+      });
 
       await this.startRecording();
       void this.keepScreenOn();
@@ -490,6 +547,8 @@ export class InterviewSession {
             );
           }
         },
+        // 这个浏览器解不了压缩过的语音：记下来，真机上出现了能查到是哪种浏览器
+        onAudioFallback: () => this.collector?.record("audio_format_fallback", { from: "mp3" }),
         // 答完一题马上切一片录像传上去：服务端要用这段声音转写，判断接下来问什么
         onAnswerEnded: () => this.recorder?.flush(),
         // 停顿时也切一片：服务端趁这会儿先转写、先想怎么接
@@ -534,29 +593,33 @@ export class InterviewSession {
 
   /** 面试中不让屏幕自己熄灭。要在按钮点击里调用；申请不到不影响面试。 */
   private async keepScreenOn(): Promise<void> {
+    const lock = this.screenLock();
+    const held = await lock.acquire();
+    // 记下来：屏幕中途熄灭导致录像断掉时，HR 能看出是不是因为这个
+    this.collector?.record("screen_wake_lock", { supported: lock.supported, held });
+  }
+
+  private screenLock(): ScreenWakeLock {
     this.wakeLock ??= new ScreenWakeLock(
       "wakeLock" in navigator ? navigator.wakeLock : undefined,
       document,
     );
-    const lock = this.wakeLock;
-    const held = await lock.acquire();
-    // 记下来：屏幕中途熄灭导致录像断掉时，HR 能看出是不是因为这个
-    this.collector?.record("screen_wake_lock", { supported: lock.supported, held });
+    return this.wakeLock;
   }
 
   private async startRecording(): Promise<void> {
     const { store, stream, graph } = this;
     const room = this.snapshot.room;
     if (!store || !stream || !graph || !room) return;
+    // 打开页面之后才关掉的别的标签页留下的段，趁这一段还没开始录先收尾。
+    // 开始录了就不能再收尾了（分不清哪一段是正在录的），得等到面试结束
+    await this.closeOrphans();
     const track: RecordingTrack = stream.getVideoTracks().length > 0 ? "camera" : "microphone";
     const recorder = new SegmentRecorder({
       sessionKey: this.sessionKey,
       track,
       store,
-      createRecorder: recorderFactory(stream, graph.mixedStream, {
-        videoBitsPerSecond: room.recording.video_bits_per_second,
-        audioBitsPerSecond: room.recording.audio_bits_per_second,
-      }),
+      createRecorder: recorderFactory(stream, graph.mixedStream, this.recordingBitrate()),
       timesliceMs: room.recording.timeslice_ms,
       timelineNow: () => this.timeline?.now() ?? 0,
       onStored: () => this.uploader?.notify(),
@@ -657,13 +720,13 @@ export class InterviewSession {
   }
 
   /** 按住面试：计时停下，下一句先不播。 */
-  private hold(reason: "device" | "audio"): void {
+  private hold(reason: HoldReason): void {
     const first = this.holds.size === 0;
     this.holds.add(reason);
     if (first) this.runner?.pause();
   }
 
-  private release(reason: "device" | "audio"): void {
+  private release(reason: HoldReason): void {
     if (!this.holds.delete(reason)) return;
     if (this.holds.size === 0) this.runner?.resume();
   }
@@ -729,7 +792,6 @@ export class InterviewSession {
     const recorder = this.recorder;
     this.recorder = null;
     await recorder?.stop().catch(() => {});
-    void this.wakeLock?.release();
     for (const off of this.trackCleanups) off();
     this.trackCleanups = [];
     stopStream(this.stream);
@@ -762,6 +824,18 @@ export class InterviewSession {
   }
 
   private async drainUploads(): Promise<void> {
+    // 录像传完之前接着拦住屏幕熄灭：候选人这时候放下手机等着，手机自己锁屏的话页面被挂起，
+    // 上传就停了。刷新后回来接着传的也申请一次，申请不到不影响上传
+    const lock = this.screenLock();
+    void lock.acquire();
+    try {
+      await this.drainLocalQueue();
+    } finally {
+      void lock.release();
+    }
+  }
+
+  private async drainLocalQueue(): Promise<void> {
     try {
       await this.closeOrphans();
       await this.uploader?.drain();
@@ -824,6 +898,20 @@ export class InterviewSession {
     this.uploader?.start();
     await this.drainUploads();
   }
+
+  /**
+   * 页面渲染时出错，候选人面前已经换成了「请刷新」那一页（见 CrashBoundary）。
+   * 面试按住，免得在候选人看不见的地方接着问、接着算作答时间；刷新之后按续面接上。
+   * 只记出错时在哪一步、错误是哪一类，不记错误的内容。
+   */
+  pageCrashed = (error: unknown): void => {
+    this.collector?.record("page_error", {
+      stage: this.snapshot.stage,
+      name: error instanceof Error ? error.name : "unknown",
+    });
+    void this.collector?.flush();
+    this.hold("page");
+  };
 
   /** 页面卸载。 */
   dispose(): void {

@@ -206,6 +206,8 @@ export const zh = {
       failed: "没有测出上传速度，可能是网络不稳定。可以继续，建议先确认网络正常。",
       ok: "上传速度够用。",
       slow: "上传速度偏慢，可以面试，但结束后要多等一会儿才能传完录像。建议换一个网络，比如靠近路由器，或者改用手机流量。",
+      slowReduced:
+        "上传速度偏慢，为了不耽误面试，录像的画面会录得模糊一些。想让画面清楚一些，可以换一个网络，比如靠近路由器，或者改用手机流量。",
       slowRealtime:
         "上传速度偏慢，面试官的回应可能会变慢，结束后还要多等一会儿才能传完录像。建议换一个网络，比如靠近路由器，或者改用手机流量。",
     },
@@ -284,7 +286,14 @@ export const zh = {
     offlineTitle: "网络断开了",
     offlineBody: "恢复后会自动继续，请保持页面打开。",
     saving: "保存中",
+    slowDescription:
+      "你的网络上传比较慢，录像还要一些时间才能保存完。请保持这个页面打开，完成后会有提示。",
     remaining: (size: string): string => `还剩 ${size}`,
+    remainingWithWait: (size: string, wait: string): string => `还剩 ${size}，${wait}`,
+    waitUnderMinute: "不到一分钟",
+    waitMinutes: (minutes: number): string => `大约还要 ${minutes} 分钟`,
+    waitHours: (hours: number, minutes: number): string =>
+      minutes > 0 ? `大约还要 ${hours} 小时 ${minutes} 分钟` : `大约还要 ${hours} 小时`,
     movedTitle: "面试已经在另一个页面里继续了",
     movedDescription: "这个页面已经停止录制，正在保存它录下的部分。请先不要关闭这个页面。",
   },
@@ -314,6 +323,14 @@ export const zh = {
       title: "面试完成，谢谢你",
       description: "录像已经保存。招聘人员看过之后会联系你。现在可以关闭这个页面了。",
     },
+  },
+
+  /** 页面渲染到一半出错时换上的那一页。脚本没加载出来时的提示在 index.html 里，两处的说法要对得上。 */
+  crash: {
+    title: "页面出了点问题",
+    description:
+      "请刷新页面。已经录下和回答过的内容都保存着；面试还没结束的话，重新检查设备后会从中断的地方继续。",
+    reload: "刷新页面",
   },
 
   problem: {

@@ -32,6 +32,7 @@ pnpm -C web check                      # 前端全量检查：lint 和格式（�
 pnpm -C web gen:api                    # 由后端的 OpenAPI 文档生成 TypeScript 类型（typecheck 和 build 会自己先跑）
 pnpm -C web --filter <包名> test       # 只测一个包，比如 @ai-interview/api-client
 pnpm -C web/apps/candidate e2e         # 候选人面试页的浏览器测试：真的 Chromium 对着真的后端走完整场面试，自己起后端，两三分钟。CI 里是 candidate-e2e
+E2E_SOAK_MINUTES=15 pnpm -C web/apps/candidate e2e soak   # 一场十几分钟的面试，看内存、录像积压和录像时长。CI 不跑，要 ffprobe
 pnpm -C web format                     # 用 Biome 格式化并整理 import
 ```
 
@@ -41,16 +42,20 @@ pnpm -C web format                     # 用 Biome 格式化并整理 import
 
 真模型测试读 `DEEPSEEK_API_KEY`，会产生少量费用，云端容器里可以直接跑：`cargo test -p interview-llm --test live -- --ignored --nocapture`。
 
-面试引擎用真模型出题和模拟面试（同样读 `DEEPSEEK_API_KEY`，出一份题约 0.1 元，模拟一场不到 0.05 元，最后一个测停顿和打断的约 0.03 元）：
+面试引擎用真模型出题和模拟面试（同样读 `DEEPSEEK_API_KEY`，出一份题约 0.1 元，模拟一场不到 0.05 元，`turn_taking` 测停顿和打断约 0.03 元，`guard` 测候选人套答案、打听评分、对面试官下指令时守不守得住约 0.15 元，`converse` 最后写 `prober` 或 `pusher` 是整场面试里换着办法套话、下指令的候选人，连检查一场不到 0.1 元，`plan_eval` 拿九份岗位和简历各出两遍题再检查约 1.5 元、十分钟）：
 
 ```bash
 cargo run -p interview-engine --example plan -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
 cargo run -p interview-engine --example simulate -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
 cargo run -p interview-engine --example converse -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
 cargo run -p interview-engine --example turn_taking -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
+cargo run -p interview-engine --example guard -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
+cargo run -p interview-engine --example plan_eval -- /tmp/plans crates/interview-engine/fixtures/*.json crates/interview-engine/fixtures/planning/*.json
 ```
 
-改了出题、判断回答或实时对话的提示词，要用这几个命令实际跑一遍看结果，单元测试用的是假模型，测不出提示词的好坏。
+改了出题、判断回答或实时对话的提示词，要用这几个命令实际跑一遍看结果，单元测试用的是假模型，测不出提示词的好坏。改了出题的提示词用 `plan_eval`，它会换着岗位和材料出题（销售、应届生、没有简历、简历和岗位不对口、岗位描述只有一句、45 分钟的深入面试、英文）。
+
+`simulate`、`converse`、`turn_taking` 默认把模拟候选人写的字原样交给引擎。设了 `AI_INTERVIEW_EVAL_HEARD_CMD`，候选人的话会先读出来再用服务进程同一个识别模型识别回去，引擎拿到的是带识别错字的文字，同一段回答两种文字各判一次并打印差别。准备和用法写在 `crates/interview-engine/scripts/asr_roundtrip.py` 开头（用到的合成模型只是评测工具，不是面试官的语音合成）。
 
 语音合成的真模型只能在 Mac 上跑，由 `tts/worker/worker.py` 提供（协议见 `tts/worker/README.md`）。后端通过 `AI_INTERVIEW_TTS_BACKEND=worker` 和 `AI_INTERVIEW_TTS_WORKER_URLS` 连它，默认是输出测试音的假后端。在 Mac 上用 `tts/worker/run.sh start` 起、`stop` 停（`status` 看在不在跑，`eval "$(tts/worker/run.sh env)"` 给后端设好这两个变量；`AI_INTERVIEW_TTS_WORKER_FAKE=1` 时起的是假引擎）。不用 Mac 也能测协议：`python3 tts/worker/worker.py --engines index2,index25,breeze2 --fake --port 7800` 起一个不加载模型的 worker，`cargo test -p interview-tts --test worker_backend` 会自己起一个（需要 python3）。改了协议，`worker.py`、`crates/interview-tts/src/worker.rs` 和 `tts/worker/README.md` 要一起改。在 Mac 上起了真 worker 以后，`cargo test -p interview-tts --test worker_live -- --ignored --nocapture` 用后端把三个真引擎走一遍（要的环境变量见 `tts/worker/README.md` 的「用后端连真引擎走一遍」）。
 

@@ -8,7 +8,9 @@
  * 每个请求还带着这个页面给自己起的标识（X-Room-Page）。同一条链接同时开在两个页面里时，
  * 服务端靠它认出哪个页面在面试；面试正在另一个页面里进行的话，响应里会带 X-Room-Active-Elsewhere。
  */
+
 import { type ApiClient, ApiError, createRoomClient } from "@ai-interview/api-client";
+import { randomId } from "../random-id";
 import type { SegmentRef, UploadApi } from "../upload/uploader";
 import { UploadError } from "../upload/uploader";
 import type {
@@ -67,8 +69,11 @@ export interface RoomApi extends UploadApi {
   advance(request: AdvanceRequest): Promise<NextStep>;
   /** 候选人停顿时问服务端这段话说完没有（实时对话）。 */
   checkPause(request: PauseCheckRequest): Promise<PauseCheckVerdict>;
-  /** 取面试官语音的字节。地址来自「下一步」里的 audio_url。 */
-  fetchAudio(audioUrl: string): Promise<ArrayBuffer>;
+  /**
+   * 取面试官语音的字节。地址来自「下一步」里的 audio_url。
+   * `format` 是 `compressed` 时告诉服务端可以给压缩过的（MP3），小得多；不给就是没压缩的 WAV。
+   */
+  fetchAudio(audioUrl: string, format?: AudioFormat): Promise<ArrayBuffer>;
   postEvents(events: ClientEvent[], options?: { keepalive?: boolean }): Promise<void>;
   finish(reason: FinishKind): Promise<void>;
 }
@@ -77,9 +82,20 @@ export interface RoomApi extends UploadApi {
 export const ACTIVE_ELSEWHERE = "active_elsewhere";
 
 const PAGE_HEADER = "X-Room-Page";
+
+/** 面试官的语音要哪种：`compressed` 是服务端压缩过的（MP3），`wav` 是没压缩的。 */
+export type AudioFormat = "compressed" | "wav";
+
+/** 取语音时的 `Accept`。服务端看到 `audio/mpeg` 才压缩；压不了的时候给的还是 WAV，所以两种都要认。 */
+const AUDIO_ACCEPT: Record<AudioFormat, string> = {
+  compressed: "audio/mpeg, audio/wav;q=0.9",
+  wav: "audio/wav",
+};
 const ACTIVE_ELSEWHERE_HEADER = "X-Room-Active-Elsewhere";
 
 export interface RoomApiHooks {
+  /** 这个页面的标识，每次打开页面换一个。默认随机生成。 */
+  pageId?: string;
   /**
    * 服务端说面试正在另一个页面里进行。只要还是这样，每个响应都会报一次；
    * 这个页面本来就没在面试的话（刚打开、还在检测设备）不用理会。
@@ -89,8 +105,6 @@ export interface RoomApiHooks {
 
 export interface HttpRoomApiOptions extends RoomApiHooks {
   token: string;
-  /** 这个页面的标识，每次打开页面换一个。默认随机生成。 */
-  pageId?: string;
   /** 后端的地址，默认是页面所在的站点。 */
   baseUrl?: string;
   fetch?: (request: Request) => Promise<Response>;
@@ -138,7 +152,7 @@ export class HttpRoomApi implements RoomApi {
 
   constructor(options: HttpRoomApiOptions) {
     this.token = options.token;
-    this.pageId = options.pageId ?? crypto.randomUUID();
+    this.pageId = options.pageId ?? randomId();
     this.onActiveElsewhere = options.onActiveElsewhere;
     this.baseUrl = options.baseUrl ?? "";
     this.fetchImpl = options.fetch ?? ((request) => fetch(request));
@@ -206,11 +220,15 @@ export class HttpRoomApi implements RoomApi {
     return response.verdict;
   }
 
-  async fetchAudio(audioUrl: string): Promise<ArrayBuffer> {
+  async fetchAudio(audioUrl: string, format: AudioFormat = "wav"): Promise<ArrayBuffer> {
     // 语音的地址是服务端在「下一步」里给的（站内路径），照着取就行，不自己拼；取的时候同样带令牌
     return this.json(async (signal) => {
       const request = new Request(`${this.baseUrl}${audioUrl}`, {
-        headers: { Authorization: `Bearer ${this.token}`, [PAGE_HEADER]: this.pageId },
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          [PAGE_HEADER]: this.pageId,
+          Accept: AUDIO_ACCEPT[format],
+        },
         credentials: "omit",
         signal,
       });
@@ -338,12 +356,16 @@ export class HttpRoomApi implements RoomApi {
 
     const { response } = outcome;
     // 成功和失败的响应都可能带着这个提醒：被接走的页面多半是在传录像时知道的
-    if (response.headers.get(ACTIVE_ELSEWHERE_HEADER) === "1") this.onActiveElsewhere?.();
+    const reminded = response.headers.get(ACTIVE_ELSEWHERE_HEADER) === "1";
+    if (reminded) this.onActiveElsewhere?.();
     if (response.ok) return outcome.data;
 
     // 不是约定的错误结构（例如反向代理返回的错误页）时，ApiError 会给一句通用的提示
     const failure = new ApiError(outcome.error, response.status);
     const code = failure.code === "unknown" ? null : failure.code;
+    // 提醒用的响应头可能到不了页面（中间的代理会去掉不认识的头）。服务端因为这件事拒绝请求时，
+    // 原因里写着同一件事，照样报一声：不然往下走的请求被拒，会被当成链接失效
+    if (!reminded && code === ACTIVE_ELSEWHERE) this.onActiveElsewhere?.();
     throw new RoomApiError(
       classifyHttpError(response.status, code),
       failure.message,

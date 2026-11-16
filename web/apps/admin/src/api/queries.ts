@@ -2,6 +2,7 @@
 
 import type { paths } from "@ai-interview/api-client";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { scheduleAll } from "../lib/schedule";
 import { ApiError, api, errorMessage, unwrap, unwrapBlob } from "./http";
 import { clearSessionEnded, markSessionEnded } from "./session";
 import type {
@@ -735,6 +736,31 @@ export function useInterviews(query: InterviewQuery = {}, enabled = true) {
   });
 }
 
+/** 一次导出最多这么多场。再多的话先筛一筛（按岗位、按状态）再导 */
+export const EXPORT_LIMIT = 2000;
+
+/**
+ * 符合条件的面试全部取回来，不只是一页：接口一页最多 100 场，这里一页一页取到取完。
+ * 多于 EXPORT_LIMIT 场时只取前面这么多，`total` 是一共有多少。
+ */
+export async function fetchAllInterviews(
+  query: Omit<InterviewQuery, "page" | "page_size">,
+): Promise<{ items: InterviewSummary[]; total: number }> {
+  const items: InterviewSummary[] = [];
+  let total = 0;
+  for (let page = 1; items.length < EXPORT_LIMIT; page += 1) {
+    const data = await unwrap(
+      api.GET("/api/v1/interviews", { params: { query: { ...query, page, page_size: 100 } } }),
+    );
+    total = data.total;
+    // 取到一半列表变了（有人新安排了一场），同一场可能出现在两页里，只留一行
+    const seen = new Set(items.map((i) => i.id));
+    items.push(...data.items.filter((i) => !seen.has(i.id)));
+    if (data.items.length === 0 || page * 100 >= total) break;
+  }
+  return { items: items.slice(0, EXPORT_LIMIT), total };
+}
+
 export function useInterview(id: string | undefined) {
   return useQuery({
     queryKey: ["interview", id],
@@ -842,6 +868,61 @@ export const useRevokeInvite = (id: string) =>
       ),
     ["invites"],
   );
+/**
+ * 给一场面试生成链接，连同写「给候选人的话」要用的内容一起拿回来。一次给好几场生成时用，
+ * 所以这里不刷新列表（一场刷一次太多），全部生成完由 `useRefreshAfterInvites` 一起刷。
+ *
+ * 先取面试，取到了再生成：链接只返回一次，生成了却写不出那段话就白生成了。
+ * 候选人的联系方式只是让 HR 知道发到哪，取不到不拦着。
+ */
+export function useIssueInvite() {
+  return useMutation({
+    mutationFn: async ({ id, expiresInHours }: { id: string; expiresInHours: number }) => {
+      const interview = await unwrap(api.GET("/api/v1/interviews/{id}", at(id)));
+      const candidate = await unwrap(
+        api.GET("/api/v1/candidates/{id}", at(interview.candidate.id)),
+      ).catch(() => null);
+      const created = await unwrap(
+        api.POST("/api/v1/interviews/{id}/invites", {
+          ...at(id),
+          body: { expires_in_hours: expiresInHours },
+        }),
+      );
+      return { interview, candidate, created };
+    },
+  });
+}
+/**
+ * 让几场面试一起开始准备（草稿，或者准备失败要重试的）。出好的题目不重出，只补没合成好的语音。
+ * 一场一场发，有没成的不影响后面的，结果里分开给出；全部发完再刷新列表和详情。
+ */
+export function usePrepareMany() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (interviews: InterviewSummary[]) =>
+      scheduleAll(interviews, (i) =>
+        unwrap(
+          api.POST("/api/v1/interviews/{id}/prepare", {
+            ...at(i.id),
+            body: { regenerate_plan: false },
+          }),
+        ),
+      ),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["interviews"] });
+      qc.invalidateQueries({ queryKey: ["interview"] });
+    },
+  });
+}
+/** 一批链接生成完以后，把面试的列表、详情和链接记录都刷新一遍 */
+export function useRefreshAfterInvites() {
+  const qc = useQueryClient();
+  return () => {
+    for (const key of ["interviews", "interview", "invites"]) {
+      qc.invalidateQueries({ queryKey: [key] });
+    }
+  };
+}
 /** 保存改过的题目。要把整份计划交回去，改过的句子会重新合成语音 */
 export const useSavePlan = (id: string) =>
   useInterviewAction(
@@ -855,7 +936,24 @@ export function useDeleteInterview() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/interviews/{id}", at(id))),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["interviews"] }),
+    // 这一场自己的详情也要重新取：归档以后还能从列表里再打开，不能还是归档前的样子
+    onSuccess: (_done, id) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["interviews"] }),
+        qc.invalidateQueries({ queryKey: ["interview", id] }),
+      ]),
+  });
+}
+
+/** 把归档的面试恢复回来：回到列表里，没过期、没撤销的链接又能用 */
+export function useRestoreInterview() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => unwrap(api.POST("/api/v1/interviews/{id}/restore", at(id))),
+    onSuccess: (interview) => {
+      qc.setQueryData(["interview", interview.id], interview);
+      return qc.invalidateQueries({ queryKey: ["interviews"] });
+    },
   });
 }
 

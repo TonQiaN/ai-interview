@@ -384,6 +384,7 @@ export const eventLabel: Record<string, string> = {
   phone_visible: "画面里看得到手机",
   frames_checked: "抽查录像画面",
   screen_wake_lock: "屏幕常亮",
+  audio_format_fallback: "这个浏览器放不了压缩过的面试官语音，改用没压缩的",
   upload_stalled: "录像传不上去",
   upload_recovered: "录像又传上去了",
   upload_finished: "录像传完了",
@@ -501,6 +502,12 @@ export function eventNote(event: EventLike): string | null {
     const unreadable = num(p.unreadable);
     if (unreadable) parts.push(`${unreadable} 帧看不清`);
   }
+  // 上行网速装不下平时的码率时，面试页有意把这一段的画面降下来，录像比平时糊
+  if (event.kind === "interview_started" && p.video_reduced === true) {
+    const kbps = num(p.video_kbps);
+    const lowered = kbps ? `降到约 ${Math.round(kbps)} kbps` : "降了清晰度";
+    parts.push(`上行网速慢，这一段的画面${lowered}，比平时糊`);
+  }
   if (event.kind === "interview_finished") {
     const reason = str(p.reason);
     if (reason) parts.push(endReasonLabel[reason] ?? reason);
@@ -510,6 +517,7 @@ export function eventNote(event: EventLike): string | null {
     else if (p.held === false)
       parts.push(`${p.supported === false ? "浏览器不支持" : "没申请到"}，手机可能中途锁屏`);
   }
+  if (event.kind === "audio_format_fallback") parts.push("面试不受影响，每句话取得慢一些");
   if (event.kind === "upload_stalled") {
     const cause = str(p.cause);
     if (cause) parts.push(uploadStallCauseLabel[cause] ?? cause);
