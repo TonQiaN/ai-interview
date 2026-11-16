@@ -1575,8 +1575,13 @@ export function createMockServer(options: MockOptions = {}) {
       if (q.reserve && q.required) details[`questions[${index}].required`] = "备用题不能标成必须问";
       if (!q.reserve && plan.questions.slice(0, index).some((earlier) => earlier.reserve))
         details[`questions[${index}].reserve`] = "备用题要排在所有主问题后面";
+      if ((q.follow_ups ?? []).length > i.config.follow_ups.max_per_question)
+        details[`questions[${index}].follow_ups`] = "追问数量超过了配置的上限";
       (q.follow_ups ?? []).forEach((f, n) => {
         if (!f.text.trim()) details[`questions[${index}].follow_ups[${n}].text`] = "不能为空";
+        if (!f.key.startsWith(`${q.key}.`))
+          details[`questions[${index}].follow_ups[${n}].key`] =
+            "追问的 key 要以所属题目的 key 开头";
       });
     });
     for (const key of ["opening", "closing"] as const)
