@@ -153,6 +153,9 @@ pub struct PlannedQuestion {
     pub follow_ups: Vec<FollowUp>,
 }
 
+/// 材料里有想左右面试的话、或者有不该用在面试里的要求时，记给 HR 的那一条用这几个字开头。
+pub const HR_NOTICE: &str = "请 HR 留意";
+
 /// 出题前对岗位和候选人的理解。HR 能看到，后面主持面试和写报告也会用。
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, ToSchema)]
 #[serde(default)]
@@ -173,6 +176,19 @@ pub struct InterviewBrief {
     pub verify_points: Vec<String>,
     /// 这场面试实际使用的考察维度。HR 配了就用 HR 的，没配由模型根据岗位定。
     pub competencies: Vec<Competency>,
+}
+
+impl InterviewBrief {
+    /// 面试里要核实的点，不带记给 HR 的那几条。
+    ///
+    /// 记给 HR 的话（开头是 [`HR_NOTICE`]）里会转述材料里藏的指令、岗位描述里的内部备注，
+    /// 面试官不需要知道，知道了反而可能说给候选人。
+    pub fn points_to_verify(&self) -> impl Iterator<Item = &str> {
+        self.verify_points
+            .iter()
+            .map(String::as_str)
+            .filter(|point| !point.trim_start().starts_with(HR_NOTICE))
+    }
 }
 
 /// 固定话术。

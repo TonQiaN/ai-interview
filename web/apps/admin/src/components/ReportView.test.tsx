@@ -48,6 +48,24 @@ describe("分析报告", () => {
       expect(screen.getByText(signal.alternative_explanations)).toBeTruthy();
   });
 
+  it("风险不是「无」、迹象却一条没列出来时，不说没有发现迹象", () => {
+    const report = sampleReport("ops-cheating", "i-1", Date.now());
+    if (!report.integrity) throw new Error("样例里没有诚信观察");
+    report.integrity.signals = [];
+    render(<ReportView report={report} onSeek={() => {}} />);
+    expect(screen.queryByText("没有发现值得注意的迹象。")).toBeNull();
+    expect(screen.getByText(/没有把迹象一条一条列出来/)).toBeTruthy();
+  });
+
+  it("风险是「无」、也没有迹象时，说没有发现迹象", () => {
+    const report = sampleReport("backend-strong", "i-1", Date.now());
+    if (!report.integrity) throw new Error("样例里没有诚信观察");
+    report.integrity.risk_level = "none";
+    report.integrity.signals = [];
+    render(<ReportView report={report} onSeek={() => {}} />);
+    expect(screen.getByText("没有发现值得注意的迹象。")).toBeTruthy();
+  });
+
   it("没考察到的能力不显示成 0 分", () => {
     const report = sampleReport("backend-strong", "i-1", Date.now());
     const first = report.competencies[0];
@@ -84,6 +102,22 @@ describe("分析报告", () => {
     expect(container.textContent).not.toContain("（integrity）");
     expect(screen.getByText(/诚信观察没有生成出来/)).toBeTruthy();
     expect(screen.getByText(/简历里有 2 条说法存疑/)).toBeTruthy();
+  });
+
+  it("这道题中间面试停过（设备断开、页面出错）：写出停了多久，说明没算进等待", () => {
+    const report = sampleReport("backend-strong", "i-1", Date.now());
+    const [first, second] = report.questions.filter((q) => q.asked);
+    if (!first || !second) throw new Error("样例里问到的题不够两道");
+    first.timing.held_ms = 85_000;
+    second.timing.held_ms = 0;
+    const { container } = render(<ReportView report={report} onSeek={() => {}} />);
+    const held = screen.getAllByText(/面试中间停了/);
+    expect(held).toHaveLength(1);
+    expect(held[0]?.textContent).toBe(
+      "面试中间停了 1 分 25 秒（设备断开或页面出错），没有算进开口前的等待和停顿",
+    );
+    // 是第一道题的，不是别的题的
+    expect(container.querySelector(".adm-qa")?.contains(held[0] ?? null)).toBe(true);
   });
 
   it("没问到的题目标成没问到", () => {

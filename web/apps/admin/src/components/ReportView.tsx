@@ -365,6 +365,13 @@ function Aspect({ item, onSeek }: { item: AspectRating; onSeek: Seek }) {
   );
 }
 
+/** 面试停了多久，写到秒：HR 要拿它对录像 */
+function heldText(ms: number): string {
+  const sec = Math.max(1, Math.round(ms / 1000));
+  if (sec < 60) return `${sec} 秒`;
+  return sec % 60 === 0 ? `${sec / 60} 分钟` : `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`;
+}
+
 function Question({
   item,
   index,
@@ -398,6 +405,10 @@ function Question({
         typeof t.chars_per_minute === "number" && `每分钟 ${Math.round(t.chars_per_minute)} 字`,
         typeof t.longest_pause_ms === "number" &&
           `中间最长停顿 ${(t.longest_pause_ms / 1000).toFixed(1)} 秒`,
+        // 面试停着的那段已经从上面两个数里扣掉了。不说的话，HR 拿这道题的起止时间对录像会多出一段
+        typeof t.held_ms === "number" &&
+          t.held_ms > 0 &&
+          `面试中间停了 ${heldText(t.held_ms)}（设备断开或页面出错），没有算进开口前的等待和停顿`,
       ].filter(Boolean)
     : [];
 
@@ -676,7 +687,12 @@ export function ReportView({
               intro={report.integrity.summary}
             >
               {report.integrity.signals.length === 0 ? (
-                <p className="oil-muted adm-flat">没有发现值得注意的迹象。</p>
+                // 偶尔模型给了风险等级却没列迹象（#408）。这时候不能说「没有发现」，和旁边的等级对不上
+                <p className="oil-muted adm-flat">
+                  {report.integrity.risk_level === "none"
+                    ? "没有发现值得注意的迹象。"
+                    : "这份报告没有把迹象一条一条列出来，依据都在上面这段话里。请到回看里对着录像核对，或者重新生成报告。"}
+                </p>
               ) : (
                 <>
                   <p className="adm-caution">

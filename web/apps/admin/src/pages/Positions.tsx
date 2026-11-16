@@ -148,7 +148,7 @@ export function PositionFields({
       <Field
         label="岗位职责"
         className="adm-span"
-        hint="面试官会按这里和任职要求出题，写得越具体，题目越贴。"
+        hint="面试官会按这里和任职要求出题，写得越具体，题目越贴。这两栏的文字 AI 面试官都看得到，候选人问起来它可能照着说：预算上限、上一任为什么离开这类不想让候选人知道的话，不要写在这两栏里。上面的「薪资范围」面试官看不到。"
       >
         {({ id, describedBy }) => (
           <Textarea
