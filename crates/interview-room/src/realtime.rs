@@ -72,6 +72,8 @@ const POLL_EVERY: Duration = Duration::from_secs(1);
 const TURN_ATTEMPTS: u32 = 3;
 /// 现场合成一句话最多等这么久，超过了这一句只显示文字。
 const SYNTH_TIMEOUT: Duration = Duration::from_secs(20);
+/// 提前合成的一句接话最多给现场的句子让这么久。一直轮不到说明合成服务忙不过来，就不备了。
+const WARM_UP_PATIENCE: Duration = Duration::from_secs(60);
 /// 实时对话里，至少听这么多秒才允许因为静音结束。候选人的话可以很短（「没有了」）。
 const MIN_ANSWER_SEC: u32 = 1;
 /// 候选人说了话但没转写出来时，交给引擎的文字。引擎会请候选人再说一遍。
@@ -481,8 +483,19 @@ pub(crate) fn warm_up(deps: &Deps, interview_id: Uuid, language: Language) {
             }
         };
         let started = Instant::now();
-        // 一句一句来：合成服务一次只做一句的时候，不把别的面试正等着的那一句挤到后面去
+        let mut waited = Duration::ZERO;
+        // 一句一句来，而且每句开工前先看有没有面试官正在现场接话（这场的或者别的面试的），有就等它
+        // 接完：合成服务一次只做一句，提前合成排在前面的话，候选人正等着的问句要多等一两秒
         for (done, text) in openers.iter().enumerate() {
+            let asked = Instant::now();
+            if tokio::time::timeout(WARM_UP_PATIENCE, deps.realtime.no_live_turn())
+                .await
+                .is_err()
+            {
+                tracing::warn!(%interview_id, done, "现场一直有话要合成，剩下的接话不提前合成了，现场说到再合成");
+                return;
+            }
+            waited += asked.elapsed();
             match tokio::time::timeout(SYNTH_TIMEOUT, voice.speak(voice_id, language, text)).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(reason)) => {
@@ -499,6 +512,7 @@ pub(crate) fn warm_up(deps: &Deps, interview_id: Uuid, language: Language) {
             %interview_id,
             sentences = openers.len(),
             total_ms = started.elapsed().as_millis(),
+            waited_ms = waited.as_millis(),
             "接话提前合成好了"
         );
     });
@@ -1088,6 +1102,8 @@ async fn converse(
     context: &TurnContext,
     speaker: &mut Speaker<'_>,
 ) -> Result<LiveOutcome, EngineError> {
+    // 从开始想到这一轮的话都备好，提前合成先让着：合成服务一次只做一句，不让问句排在它后面
+    let _turn = speaker.deps.realtime.live_turn();
     let (events, mut incoming) = mpsc::unbounded_channel();
     let respond = async move {
         let mut sink = move |event: LiveEvent| {
@@ -1872,9 +1888,33 @@ struct Entry {
 #[derive(Default)]
 pub(crate) struct Hub {
     entries: Mutex<HashMap<Uuid, Entry>>,
+    /// 这个进程里有几场面试的面试官正在现场接话（想加合成）。提前合成看它给现场的句子让路
+    live_turns: watch::Sender<usize>,
+}
+
+/// 面试官正在现场接话。放下的时候算这一轮接完了。
+struct LiveTurn<'a>(&'a Hub);
+
+impl Drop for LiveTurn<'_> {
+    fn drop(&mut self) {
+        self.0.live_turns.send_modify(|count| *count -= 1);
+    }
 }
 
 impl Hub {
+    /// 记下有一场面试的面试官开始现场接话了。
+    fn live_turn(&self) -> LiveTurn<'_> {
+        self.live_turns.send_modify(|count| *count += 1);
+        LiveTurn(self)
+    }
+
+    /// 等到没有面试官在现场接话。
+    async fn no_live_turn(&self) {
+        let mut turns = self.live_turns.subscribe();
+        // 发送端在 `self` 里，等的时候不会没了
+        let _ = turns.wait_for(|count| *count == 0).await;
+    }
+
     fn with<R>(&self, interview_id: Uuid, f: impl FnOnce(&mut Entry) -> R) -> R {
         let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
         f(entries.entry(interview_id).or_insert_with(|| Entry {
