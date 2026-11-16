@@ -76,4 +76,15 @@ describe("浏览器标签页上的标题", () => {
     await screen.findByRole("heading", { name: "登录" });
     await titleIs("AI 面试 · 招聘工作台");
   });
+
+  it("每一页都有一个一级标题，登录页的内容在 main 里：读屏软件知道这一页是什么、正文在哪", async () => {
+    open("/no-such-page");
+    expect(await screen.findByRole("heading", { level: 1, name: "没有这个页面" })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
+    const login = await screen.findByRole("heading", { name: "登录" });
+    expect(screen.getByRole("main").contains(login)).toBe(true);
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
 });

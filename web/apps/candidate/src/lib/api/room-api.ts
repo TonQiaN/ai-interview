@@ -143,6 +143,11 @@ export class HttpRoomApi implements RoomApi {
   private readonly token: string;
   private readonly pageId: string;
   private readonly onActiveElsewhere: (() => void) | undefined;
+  /**
+   * 这个页面接手面试（`start` 成功）了几次。接手之前发出去的请求，响应可能等接手之后才到，
+   * 它带的「面试在另一个页面里」说的是接手之前的事：请求发出时记下这个数，回来时对不上就不报。
+   */
+  private claims = 0;
   private readonly baseUrl: string;
   private readonly fetchImpl: (request: Request) => Promise<Response>;
   private readonly timeoutMs: number;
@@ -201,8 +206,10 @@ export class HttpRoomApi implements RoomApi {
     );
   }
 
-  start(): Promise<NextStep> {
-    return this.json((signal) => this.client.POST("/api/v1/room/start", { signal }));
+  async start(): Promise<NextStep> {
+    const first = await this.json((signal) => this.client.POST("/api/v1/room/start", { signal }));
+    this.claims += 1;
+    return first;
   }
 
   advance(request: AdvanceRequest): Promise<NextStep> {
@@ -344,6 +351,7 @@ export class HttpRoomApi implements RoomApi {
   ): Promise<T | undefined> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const claims = this.claims;
     let outcome: Outcome<T>;
     try {
       outcome = await call(controller.signal);
@@ -357,7 +365,9 @@ export class HttpRoomApi implements RoomApi {
     const { response } = outcome;
     // 成功和失败的响应都可能带着这个提醒：被接走的页面多半是在传录像时知道的
     const reminded = response.headers.get(ACTIVE_ELSEWHERE_HEADER) === "1";
-    if (reminded) this.onActiveElsewhere?.();
+    // 请求发出去之后这个页面接手了面试：服务端是按接手之前的情况答的，这个提醒已经过时
+    const outdated = claims !== this.claims;
+    if (reminded && !outdated) this.onActiveElsewhere?.();
     if (response.ok) return outcome.data;
 
     // 不是约定的错误结构（例如反向代理返回的错误页）时，ApiError 会给一句通用的提示
@@ -365,7 +375,7 @@ export class HttpRoomApi implements RoomApi {
     const code = failure.code === "unknown" ? null : failure.code;
     // 提醒用的响应头可能到不了页面（中间的代理会去掉不认识的头）。服务端因为这件事拒绝请求时，
     // 原因里写着同一件事，照样报一声：不然往下走的请求被拒，会被当成链接失效
-    if (!reminded && code === ACTIVE_ELSEWHERE) this.onActiveElsewhere?.();
+    if (!reminded && !outdated && code === ACTIVE_ELSEWHERE) this.onActiveElsewhere?.();
     throw new RoomApiError(
       classifyHttpError(response.status, code),
       failure.message,

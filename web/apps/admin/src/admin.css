@@ -529,6 +529,10 @@
     gap: var(--oil-space-2);
     white-space: nowrap;
   }
+  .adm-utter__actions {
+    display: flex;
+    gap: var(--oil-space-1);
+  }
   @media (max-width: 640px) {
     .adm-utter {
       grid-template-columns: minmax(0, 1fr);
@@ -579,10 +583,18 @@
     color: var(--oil-ink-2);
     white-space: nowrap;
   }
+  /* 样子跟着所在的地方走的标题：只是告诉读屏软件这里是标题 */
+  .adm-plain-heading {
+    font: inherit;
+    letter-spacing: inherit;
+  }
+  .adm-track-wrap {
+    position: relative;
+    margin-top: var(--oil-space-3);
+  }
   .adm-track {
     position: relative;
     height: 36px;
-    margin-top: var(--oil-space-3);
     cursor: pointer;
     touch-action: none;
   }

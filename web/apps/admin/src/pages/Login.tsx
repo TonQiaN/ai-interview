@@ -24,7 +24,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="adm-login">
+    <main className="adm-login">
       <div className="adm-login__art" style={{ backgroundImage: `url(${paintings.dusk})` }}>
         <div>
           <h1 className="oil-title-xl">AI 面试</h1>
@@ -82,6 +82,6 @@ export function LoginPage() {
           </Button>
         </form>
       </div>
-    </div>
+    </main>
   );
 }

@@ -1569,7 +1569,7 @@ export function createMockServer(options: MockOptions = {}) {
     planOf(i);
     const plan = body as InterviewPlan;
     const details: Record<string, string> = {};
-    if (plan.questions.length === 0) details.questions = "至少要有一道题";
+    if (plan.questions.every((q) => q.reserve)) details.questions = "至少要有一道主问题";
     plan.questions.forEach((q, index) => {
       if (!q.text.trim()) details[`questions[${index}].text`] = "不能为空";
       (q.follow_ups ?? []).forEach((f, n) => {
@@ -1581,6 +1581,8 @@ export function createMockServer(options: MockOptions = {}) {
     if (Object.keys(details).length > 0)
       throw new HttpError(422, "validation_failed", "题目里有没填的内容", details);
     db.plans.set(i.id, plan);
+    // 和后端一样，保存的同时就把每句话对好：文字变了的和新增的马上是「待合成」
+    syncUtterances(i, plan);
     // 改过的句子重新合成，没改的不动
     prepare(i);
     return plan;

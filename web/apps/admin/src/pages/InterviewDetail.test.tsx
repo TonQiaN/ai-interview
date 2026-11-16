@@ -502,4 +502,204 @@ describe("面试详情", () => {
     expect(await screen.findByRole("button", { name: "归档" })).toBeTruthy();
     expect(screen.queryByText("这场面试已经归档")).toBeNull();
   });
+
+  describe("「题目」这一页", () => {
+    /** 把页面发出去的请求记下来 */
+    function watchRequests() {
+      const asked: string[] = [];
+      setFetch((request) => {
+        asked.push(typeof request === "string" ? request : (request as Request).url);
+        return server.fetch(request);
+      });
+      return asked;
+    }
+
+    it("还没出题的面试不去取题目：取了只会是一个 404", async () => {
+      const created = await call<Interview>("POST", "/interviews", {
+        candidate_id: server.db.candidates[0]?.id,
+        position_id: server.db.positions[0]?.id,
+      });
+      const asked = watchRequests();
+      open(created.id);
+
+      fireEvent.click(await screen.findByRole("tab", { name: "题目" }));
+
+      expect(await screen.findByText(/还没生成题目。回到「概览」/)).toBeTruthy();
+      expect(asked.filter((url) => url.endsWith("/plan"))).toEqual([]);
+    });
+
+    it("出好题的面试照常取题目", async () => {
+      const target = server.db.interviews.find((i) => i.status === "ready");
+      if (!target) throw new Error("演示数据里没有待发送的面试");
+      const asked = watchRequests();
+      open(target.id);
+
+      fireEvent.click(await screen.findByRole("tab", { name: "题目" }));
+
+      expect(await screen.findByText(/道主问题/)).toBeTruthy();
+      expect(asked.some((url) => url.endsWith("/plan"))).toBe(true);
+    });
+
+    /** 演示数据里一场待发送的面试，和它现在的题目 */
+    function readyWithPlan() {
+      const target = server.db.interviews.find((i) => i.status === "ready");
+      const plan = target && server.db.plans.get(target.id);
+      if (!target || !plan) throw new Error("演示数据里没有出好题的待发送面试");
+      return { target, plan };
+    }
+
+    async function openQuestions(id: string) {
+      open(id);
+      fireEvent.click(await screen.findByRole("tab", { name: "题目" }));
+      await screen.findByText(/道主问题/);
+    }
+
+    it("去掉一道题：先问一句，确认以后这道题和它的追问一起没了，别的题不动", async () => {
+      const { target, plan } = readyWithPlan();
+      const before = plan.questions.map((q) => q.key);
+      const second = plan.questions[1];
+      if (!second || before.length < 3) throw new Error("演示数据里的题不够三道");
+      await openQuestions(target.id);
+      expect(screen.getByText(new RegExp(`共 ${before.length} 道主问题`))).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "去掉第 2 题" }));
+      // 只是问一句，这时还没有动
+      const dialog = await screen.findByRole("dialog", { name: "去掉第 2 题？" });
+      expect(server.db.plans.get(target.id)?.questions.map((q) => q.key)).toEqual(before);
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "去掉这道题" }));
+
+      await waitFor(() =>
+        expect(server.db.plans.get(target.id)?.questions.map((q) => q.key)).toEqual(
+          before.filter((key) => key !== second.key),
+        ),
+      );
+      expect(await screen.findByText(new RegExp(`共 ${before.length - 1} 道主问题`))).toBeTruthy();
+      expect(screen.queryByText(second.text)).toBeNull();
+    });
+
+    it("去掉一句追问：这道题还在，只少这一句", async () => {
+      const { target, plan } = readyWithPlan();
+      const index = plan.questions.findIndex((q) => (q.follow_ups ?? []).length > 0);
+      const question = plan.questions[index];
+      const followUp = question?.follow_ups?.[0];
+      if (!question || !followUp) throw new Error("演示数据里没有带追问的题");
+      await openQuestions(target.id);
+
+      fireEvent.click(screen.getByRole("button", { name: `去掉 Q${index + 1} 的第 1 句追问` }));
+      const dialog = await screen.findByRole("dialog", { name: "去掉这句追问？" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "去掉这句追问" }));
+
+      await waitFor(() => {
+        const saved = server.db.plans.get(target.id)?.questions[index];
+        expect(saved?.key).toBe(question.key);
+        expect((saved?.follow_ups ?? []).map((f) => f.key)).not.toContain(followUp.key);
+      });
+      expect(server.db.plans.get(target.id)?.questions).toHaveLength(plan.questions.length);
+    });
+
+    it("只剩一道主问题时不给去掉它（后端也不收），备用题还能去掉", async () => {
+      const { target, plan } = readyWithPlan();
+      const [first, second] = plan.questions;
+      if (!first || !second) throw new Error("演示数据里的题不够两道");
+      server.db.plans.set(target.id, {
+        ...plan,
+        questions: [first, { ...second, reserve: true, required: false }],
+      });
+      await openQuestions(target.id);
+
+      expect(screen.queryByRole("button", { name: "去掉第 1 题" })).toBeNull();
+      expect(screen.getByRole("button", { name: "去掉这道备用题" })).toBeTruthy();
+    });
+
+    it("改完一句，等它合成好，这一行显示合成好的语音，不停在「待合成」", async () => {
+      // 让演示数据的后端和真的差不多快：保存以后不到一秒就合成好、回到待发送
+      server = createMockServer({ latencyMs: 0, jobMs: 300 });
+      await call("POST", "/auth/login", { email: "hr@example.com", password: "demo" });
+      setFetch((request) => server.fetch(request));
+      const { target, plan } = readyWithPlan();
+      await openQuestions(target.id);
+
+      const opening = screen.getByText(plan.phrases.opening).closest(".adm-utter") as HTMLElement;
+      fireEvent.click(within(opening).getByRole("button", { name: "改" }));
+      const dialog = await screen.findByRole("dialog", { name: "改开场白" });
+      fireEvent.change(within(dialog).getByLabelText("面试官会这样说"), {
+        target: { value: "你好，我们开始吧。" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "保存并重新合成" }));
+
+      await waitFor(
+        () => {
+          const line = screen
+            .getAllByText("你好，我们开始吧。")
+            .map((el) => el.closest(".adm-utter"))
+            .find((el) => el !== null) as HTMLElement;
+          expect(server.db.interviews.find((i) => i.id === target.id)?.status).toBe("ready");
+          expect(within(line).getByText(/^语音 \d+ 秒$/)).toBeTruthy();
+        },
+        { timeout: 4000 },
+      );
+    });
+
+    it("链接发出以后题目不能改，也没有「去掉」和「加一道题」", async () => {
+      const target = server.db.interviews.find((i) => i.status === "invited" && i.has_plan);
+      if (!target) throw new Error("演示数据里没有已发链接的面试");
+      await openQuestions(target.id);
+
+      expect(screen.queryAllByRole("button", { name: /^去掉/ })).toEqual([]);
+      expect(screen.queryByRole("button", { name: "加一道题" })).toBeNull();
+    });
+
+    it("加一道自己的题：两样都填了才能保存，加在主问题最后，别的题不动", async () => {
+      const { target, plan } = readyWithPlan();
+      const before = plan.questions.map((q) => q.key);
+      await openQuestions(target.id);
+
+      fireEvent.click(screen.getByRole("button", { name: "加一道题" }));
+      const dialog = await screen.findByRole("dialog", { name: "加一道题" });
+      const saveButton = within(dialog).getByRole("button", { name: "加进去并合成语音" });
+      expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.change(within(dialog).getByLabelText("面试官会这样问"), {
+        target: { value: "你能接受每个月出差一周吗？" },
+      });
+      // 只写了要说的话，还没写想考察什么
+      expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.change(within(dialog).getByLabelText(/^想考察什么/), {
+        target: { value: "确认出差安排" },
+      });
+      expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+      fireEvent.change(within(dialog).getByLabelText(/^答得好会提到什么/), {
+        target: { value: "能接受\n说得出顾虑是什么" },
+      });
+      fireEvent.click(saveButton);
+
+      await waitFor(() =>
+        expect(server.db.plans.get(target.id)?.questions).toHaveLength(before.length + 1),
+      );
+      const saved = server.db.plans.get(target.id)?.questions ?? [];
+      expect(saved.slice(0, before.length).map((q) => q.key)).toEqual(before);
+      expect(saved.at(-1)).toMatchObject({
+        text: "你能接受每个月出差一周吗？",
+        intent: "确认出差安排",
+        origin: "must_ask",
+        required: true,
+        scoring: {
+          strong_signals: ["能接受", "说得出顾虑是什么"],
+          weak_signals: [],
+          red_flags: [],
+        },
+      });
+      expect(before).not.toContain(saved.at(-1)?.key);
+      expect(await screen.findByText(new RegExp(`共 ${before.length + 1} 道主问题`))).toBeTruthy();
+      // 题目清单里多了这一句（弹窗里填过的那一格不算）
+      await waitFor(() =>
+        expect(
+          screen
+            .getAllByText("你能接受每个月出差一周吗？")
+            .some((el) => el.className === "adm-utter__text"),
+        ).toBe(true),
+      );
+    });
+  });
 });

@@ -100,4 +100,21 @@ describe("回看", () => {
     show([recording({})]);
     expect(screen.queryByText(/画面比平时糊/)).toBeNull();
   });
+
+  it("进度条上的标记是进度条旁边的按钮，不在滑块里面：滑块里面的东西读屏软件点不到", () => {
+    const left: TimelineEvent = {
+      id: "0193a000-0000-7000-8000-0000000000e2",
+      kind: "visibility_hidden",
+      at_ms: 30_000,
+      occurred_at: "2026-11-16T00:00:30Z",
+      source: "client",
+      payload: {},
+    };
+    show([recording({})], [left]);
+
+    const slider = screen.getByRole("slider", { name: "播放进度" });
+    const mark = screen.getByRole("button", { name: /^跳到 00:30/ });
+    expect(slider.contains(mark)).toBe(false);
+    expect(slider.querySelector("button, a, [tabindex]")).toBeNull();
+  });
 });
