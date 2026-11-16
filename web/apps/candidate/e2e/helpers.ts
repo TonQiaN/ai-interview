@@ -38,6 +38,8 @@ export interface RoomRecording {
   chunks: number[];
   /** 合并好的文件在磁盘上的位置 */
   file: string | null;
+  /** 这一段出了什么问题（比如候选人没传完，只有前面一部分）；没有问题是 null */
+  error: string | null;
 }
 
 /** 后端库里这场面试现在的样子。 */
@@ -100,6 +102,14 @@ export const roomState = (interview: SeededInterview): RoomState =>
 /** 把这场面试的链接都撤销掉，像 HR 在后台撤销了链接。 */
 export const revokeInvites = (interview: SeededInterview): void => {
   demo<{ revoked: number }>("revoke", interview.interview_id);
+};
+
+/**
+ * 当作候选人在 `minutes` 分钟之前关了页面、再也没回来：还在进行的面试按中途离开结束，
+ * 录像最后一次有动静也是那时候。测试不用真的等那么久。
+ */
+export const walkAway = (interview: SeededInterview, minutes: number): void => {
+  demo<{ checks: number }>("walk-away", interview.interview_id, String(minutes));
 };
 
 /** 面试官依次说了哪几句。 */
@@ -173,3 +183,43 @@ export async function expectRecordingsReady(
   }
   return state;
 }
+
+/** 页面存录像分片的本地库。 */
+export const LOCAL_DB = "ai-interview-recording";
+/** 浏览器里现在留着哪些面试的录像：本地键到分片数。页面还没建库时是 null。 */
+export const localRecordings = (page: Page): Promise<Record<string, number> | null> =>
+  page.evaluate(async (name) => {
+    const existing = await indexedDB.databases();
+    if (!existing.some((item) => item.name === name)) return null;
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(name);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      const transaction = db.transaction(["segments", "chunk-index"], "readonly");
+      const all = <T>(store: string) =>
+        new Promise<T[]>((resolve, reject) => {
+          const request = transaction.objectStore(store).getAll();
+          request.onsuccess = () => resolve(request.result as T[]);
+          request.onerror = () => reject(request.error);
+        });
+      const segments = await all<{ sessionKey: string }>("segments");
+      const chunks = await all<{ sessionKey: string }>("chunk-index");
+      const found: Record<string, number> = {};
+      for (const segment of segments) found[segment.sessionKey] = 0;
+      for (const chunk of chunks) found[chunk.sessionKey] = (found[chunk.sessionKey] ?? 0) + 1;
+      return found;
+    } finally {
+      db.close();
+    }
+  }, LOCAL_DB);
+
+/** 页面给一条链接用的本地键：令牌摘要的前 32 位。 */
+export const sessionKeyOf = (page: Page, token: string): Promise<string> =>
+  page.evaluate(async (value) => {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 32);
+  }, token);

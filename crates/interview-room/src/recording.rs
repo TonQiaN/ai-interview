@@ -5,6 +5,10 @@
 //!
 //! 上传是可以断点续传的：分片按序号幂等，页面随时可以问「你收到了哪几片」，缺的补上，
 //! 最后调 `complete`。合并在后台任务里做（`recording.assemble`）。
+//!
+//! 候选人不一定等得到传完：关了页面、换了设备、本机的分片丢了，这一段就永远等不来 `complete`。
+//! 后台任务 `room.recording_salvage` 管这种情况：面试结束后，一段录像隔了一阵没有新的分片传来，
+//! 就把已经收到的、从头连得上的那一部分合并出来，HR 至少能看到前面的内容。
 
 use std::path::Path as FsPath;
 use std::process::Stdio;
@@ -15,7 +19,7 @@ use axum::extract::rejection::BytesRejection;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use interview_core::status::{InterviewStatus, RecordingStatus, RecordingTrack};
 use interview_core::{blob_key, task_kind};
 use interview_platform::auth::AdminUser;
@@ -25,6 +29,7 @@ use interview_platform::{ApiError, ApiResult};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use sqlx::PgConnection;
 use tokio::process::Command;
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
@@ -45,6 +50,8 @@ const MAX_SEGMENTS: i64 = 200;
 const MAX_INTERVIEW_BYTES: i64 = 4 * 1024 * 1024 * 1024;
 /// 等 ffmpeg 最多多久。
 const FFMPEG_TIMEOUT: Duration = Duration::from_secs(600);
+/// 后台任务：候选人没传完的录像，把已经收到的部分合并出来。
+pub const SALVAGE_TASK: &str = "room.recording_salvage";
 
 pub(crate) fn router() -> OpenApiRouter<Deps> {
     OpenApiRouter::new()
@@ -61,9 +68,14 @@ pub(crate) fn router() -> OpenApiRouter<Deps> {
 }
 
 pub(crate) fn register_tasks(registry: &mut TaskRegistry, deps: Deps) {
+    let salvage_deps = deps.clone();
     registry.register_fn(task_kind::RECORDING_ASSEMBLE, move |task| {
         let deps = deps.clone();
         async move { assemble_task(&deps, task).await }
+    });
+    registry.register_fn(SALVAGE_TASK, move |task| {
+        let deps = salvage_deps.clone();
+        async move { salvage_task(&deps, task).await }
     });
 }
 
@@ -213,6 +225,15 @@ async fn open_segment(
     .bind(request.start_ms)
     .execute(&mut *tx)
     .await?;
+    // 这一段要是等不来 complete，到时候有人来收尾
+    let idle = idle_window(&deps);
+    schedule_salvage(
+        &mut tx,
+        access.interview_id,
+        next_round(Utc::now(), idle),
+        None,
+    )
+    .await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -246,7 +267,7 @@ fn sha256_hex(data: &[u8]) -> String {
     responses(
         (status = 204, description = "收到了"),
         (status = 404, description = "这一段还没登记（code 是 segment_not_found）", body = ErrorBody),
-        (status = 409, description = "这一段已经合并，不能再传", body = ErrorBody),
+        (status = 409, description = "这一段已经合并，不能再传（code 是 segment_closed）", body = ErrorBody),
         (status = 413, description = "分片太大，或这场面试的录制总量超了", body = ErrorBody),
         (status = 422, description = "内容和校验和对不上（code 是 checksum_mismatch），或分片是空的", body = ErrorBody),
     )
@@ -312,7 +333,7 @@ async fn put_chunk(
         return Ok(StatusCode::NO_CONTENT);
     }
     if segment.status != RecordingStatus::Uploading {
-        return Err(ApiError::conflict("这一段已经合并，不能再传"));
+        return Err(ApiError::conflict("这一段已经合并，不能再传").with_code("segment_closed"));
     }
 
     let (stored,): (i64,) = sqlx::query_as(
@@ -400,12 +421,16 @@ async fn received_chunks(
 pub struct CompleteSegmentRequest {
     /// 这一段一共多少片（序号 0 到 total_chunks - 1）
     pub total_chunks: u32,
+    /// 缺的分片页面手里也没有了（本机没存下来），不用再等：有多少合并多少。默认 false
+    #[serde(default)]
+    pub accept_missing: bool,
 }
 
 /// 一段录制传完了
 ///
 /// 服务端核对分片齐不齐，齐了就在后台合并。缺片时返回 409（`chunks_missing`），`details.missing`
-/// 里是缺的序号，页面补传后再调。重复调用没有副作用。
+/// 里是缺的序号，页面补传后再调。缺的那几片页面手里也没有了，就带上 `accept_missing` 再调一次：
+/// 服务端把从第 0 片起连得上的部分合并出来，这一段记成不完整。重复调用没有副作用。
 #[utoipa::path(
     post,
     path = "/api/v1/room/recordings/{track}/{segment}/complete",
@@ -417,7 +442,7 @@ pub struct CompleteSegmentRequest {
     ),
     request_body = CompleteSegmentRequest,
     responses(
-        (status = 204, description = "分片齐了，开始合并"),
+        (status = 204, description = "分片齐了（或者页面说缺的不用等了），开始合并"),
         (status = 404, description = "这一段还没登记", body = ErrorBody),
         (status = 409, description = "还缺分片", body = ErrorBody),
     )
@@ -467,6 +492,12 @@ async fn complete_segment(
             missing.push(seq);
         }
     }
+    if !missing.is_empty() && request.accept_missing {
+        let mut tx = deps.ctx.db.begin().await?;
+        salvage_segment(&mut tx, access.interview_id, segment.id).await?;
+        tx.commit().await?;
+        return Ok(StatusCode::NO_CONTENT);
+    }
     if !missing.is_empty() {
         let count = missing.len();
         missing.truncate(100);
@@ -514,6 +545,8 @@ struct AssembleRow {
     content_type: String,
     status: RecordingStatus,
     total_chunks: Option<i32>,
+    /// 合并之前就记下的说明（比如候选人没传完，只有前面一部分）
+    error: Option<String>,
 }
 
 async fn assemble_task(deps: &Deps, task: Task) -> TaskResult {
@@ -540,7 +573,7 @@ async fn assemble_task(deps: &Deps, task: Task) -> TaskResult {
 
 async fn assemble(deps: &Deps, recording_id: Uuid) -> anyhow::Result<()> {
     let row: Option<AssembleRow> = sqlx::query_as(
-        "SELECT interview_id, track, segment, content_type, status, total_chunks
+        "SELECT interview_id, track, segment, content_type, status, total_chunks, error
            FROM interview_recordings WHERE id = $1",
     )
     .bind(recording_id)
@@ -576,12 +609,18 @@ async fn assemble(deps: &Deps, recording_id: Uuid) -> anyhow::Result<()> {
 
     // MediaRecorder 录出来的文件头里没有总时长，播放器拖不了进度条。用 ffmpeg 原样重新封装一遍
     // （不重新编码）补上。没装 ffmpeg 或处理失败时保留原样的文件，照样能从头播放。
-    let (duration_ms, note) = match remux(deps, &target, ext).await {
+    let (duration_ms, remux_note) = match remux(deps, &target, ext).await {
         Ok(duration_ms) => (duration_ms, None),
         Err(err) => {
             tracing::warn!(%recording_id, error = %err, "录像没有重新封装，保留原样");
             (None, Some("录像没有重新封装，可能拖不了进度条"))
         }
+    };
+    // 合并之前记下的说明（只有前面一部分）要留着，HR 得知道这一段不完整
+    let note = match (row.error.as_deref(), remux_note) {
+        (Some(before), Some(after)) => Some(format!("{before}；{after}")),
+        (Some(only), None) | (None, Some(only)) => Some(only.to_owned()),
+        (None, None) => None,
     };
     let size = deps
         .ctx
@@ -603,8 +642,14 @@ async fn assemble(deps: &Deps, recording_id: Uuid) -> anyhow::Result<()> {
     .execute(&deps.ctx.db)
     .await?;
 
-    // 合并好了，分片不用再占一份磁盘。分片的记录留着：迟到的重复上传靠它认出来
-    for key in &sources {
+    // 合并好了，分片不用再占一份磁盘（没用上的那些也一样：只合并了前面一部分时，后面接不上的
+    // 分片留着也没有用）。分片的记录留着：迟到的重复上传靠它认出来
+    let all: Vec<(String,)> =
+        sqlx::query_as("SELECT blob_key FROM interview_recording_chunks WHERE recording_id = $1")
+            .bind(recording_id)
+            .fetch_all(&deps.ctx.db)
+            .await?;
+    for (key,) in &all {
         if let Err(err) = deps.ctx.blobs.delete(key).await {
             tracing::warn!(%recording_id, error = %err, "删除录制分片失败");
         }
@@ -684,6 +729,250 @@ async fn probe_duration_ms(ffprobe: &str, path: &FsPath) -> Option<i64> {
     let stdout = run(command).await.ok()?;
     let seconds: f64 = stdout.trim().parse().ok()?;
     (seconds.is_finite() && seconds >= 0.0).then(|| (seconds * 1000.0).round() as i64)
+}
+
+// ───────────────────────── 后台：候选人没传完的 ─────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct SalvagePayload {
+    interview_id: Uuid,
+}
+
+/// 一段录像多久没有新的分片传来就不再等。
+fn idle_window(deps: &Deps) -> chrono::Duration {
+    chrono::Duration::minutes(i64::from(deps.config.upload_idle_minutes.max(1)))
+}
+
+/// `now` 之后最近的一个整点（按 `window` 对齐）。面试还在进行时用它约下一次检查：
+/// 同一场面试开了好几段，约到的是同一个时刻，去重之后只有一条任务。
+fn next_round(now: DateTime<Utc>, window: chrono::Duration) -> DateTime<Utc> {
+    let step = window.num_seconds().max(60);
+    let next = (now.timestamp().div_euclid(step) + 1) * step;
+    Utc.timestamp_opt(next, 0).single().unwrap_or(now + window)
+}
+
+/// 约一次检查。同一场面试、同一个时刻只留一条。
+///
+/// `running` 是正在跑的这条检查自己：它还占着自己的去重键，要是新约的时刻正好和它是同一个
+/// （它被提前跑了），就往后挪一格，不然等于没约上。
+async fn schedule_salvage(
+    conn: &mut PgConnection,
+    interview_id: Uuid,
+    at: DateTime<Utc>,
+    running: Option<(Uuid, chrono::Duration)>,
+) -> Result<(), sqlx::Error> {
+    let enqueue = async |conn: &mut PgConnection, at: DateTime<Utc>| {
+        TaskQueue::enqueue_in(
+            conn,
+            NewTask::new(SALVAGE_TASK, json!({ "interview_id": interview_id }))
+                .dedupe(format!("{SALVAGE_TASK}:{interview_id}:{}", at.timestamp()))
+                .run_at(at),
+        )
+        .await
+    };
+    let id = enqueue(&mut *conn, at).await?;
+    if let Some((own, step)) = running
+        && id == own
+    {
+        enqueue(&mut *conn, at + step).await?;
+    }
+    Ok(())
+}
+
+async fn salvage_task(deps: &Deps, task: Task) -> TaskResult {
+    let payload: SalvagePayload = task.payload_as()?;
+    let outcome = salvage_interview(deps, payload.interview_id, Utc::now(), task.id)
+        .await
+        .map_err(TaskError::retry)?;
+    Ok(Some(outcome))
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct SalvageInterviewRow {
+    status: InterviewStatus,
+    ended_at: DateTime<Utc>,
+    archived_at: Option<DateTime<Utc>>,
+}
+
+/// 看一场面试里还在等分片的录像，该收尾的收尾。
+///
+/// - 没有在等分片的：不用管，之后登记新的一段会重新约。
+/// - 面试还没结束：候选人还在录，过一阵再来看。
+/// - 面试结束了：这场面试的录像最后一次有动静（登记了新的一段、收到分片、面试结束）之后过了
+///   `upload_idle_minutes`，还没等来 `complete` 的那几段就不等了。
+/// - 链接已经不能用了（过了补传的期限、面试取消或归档）：候选人传不了了，全部收尾。
+async fn salvage_interview(
+    deps: &Deps,
+    interview_id: Uuid,
+    now: DateTime<Utc>,
+    task_id: Uuid,
+) -> Result<serde_json::Value, sqlx::Error> {
+    let mut tx = deps.ctx.db.begin().await?;
+    // 和登记新的一段用同一把锁
+    let row: Option<SalvageInterviewRow> = sqlx::query_as(
+        "SELECT status, COALESCE(ended_at, updated_at) AS ended_at, archived_at
+           FROM interviews WHERE id = $1 FOR UPDATE",
+    )
+    .bind(interview_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(row) = row else {
+        // 面试被删了
+        return Ok(json!({ "outcome": "interview_gone" }));
+    };
+    let waiting: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM interview_recordings
+          WHERE interview_id = $1 AND status = 'uploading' ORDER BY created_at",
+    )
+    .bind(interview_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    if waiting.is_empty() {
+        // 没有在等的。之后再登记新的一段，会重新约
+        return Ok(json!({ "outcome": "nothing_waiting" }));
+    }
+    let idle = idle_window(deps);
+    let cancelled = row.archived_at.is_some()
+        || matches!(
+            row.status,
+            InterviewStatus::Cancelled | InterviewStatus::Expired
+        );
+    let ended = matches!(
+        row.status,
+        InterviewStatus::Completed | InterviewStatus::Abandoned
+    );
+    if !cancelled && !ended {
+        schedule_salvage(
+            &mut tx,
+            interview_id,
+            next_round(now, idle),
+            Some((task_id, idle)),
+        )
+        .await?;
+        tx.commit().await?;
+        return Ok(json!({ "outcome": "interview_running" }));
+    }
+    let link_closes_at =
+        row.ended_at + chrono::Duration::hours(i64::from(deps.config.upload_grace_hours));
+    let link_closed = cancelled || link_closes_at <= now;
+
+    // 页面是一段一段传的：前面一段还在传，后面一段就没有动静。所以看的是整场面试最后一次有动静，
+    // 不是每一段各看各的
+    let (last_activity,): (DateTime<Utc>,) = sqlx::query_as(
+        "SELECT GREATEST(
+                    $2,
+                    COALESCE((SELECT max(r.created_at) FROM interview_recordings r
+                               WHERE r.interview_id = $1), $2),
+                    COALESCE((SELECT max(c.received_at)
+                                FROM interview_recording_chunks c
+                                JOIN interview_recordings r ON r.id = c.recording_id
+                               WHERE r.interview_id = $1), $2))",
+    )
+    .bind(interview_id)
+    .bind(row.ended_at)
+    .fetch_one(&mut *tx)
+    .await?;
+    let give_up_at = last_activity + idle;
+    let give_up = link_closed || give_up_at <= now;
+
+    let mut salvaged = 0_u32;
+    let mut failed = 0_u32;
+    if give_up {
+        for (recording_id,) in &waiting {
+            if salvage_segment(&mut tx, interview_id, *recording_id).await? {
+                salvaged += 1;
+            } else {
+                failed += 1;
+            }
+        }
+    } else {
+        schedule_salvage(
+            &mut tx,
+            interview_id,
+            give_up_at.min(link_closes_at) + chrono::Duration::seconds(5),
+            Some((task_id, idle)),
+        )
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(json!({
+        "outcome": if link_closed {
+            "link_closed"
+        } else if give_up {
+            "gave_up"
+        } else {
+            "waiting"
+        },
+        "salvaged": salvaged,
+        "failed": failed,
+    }))
+}
+
+/// 不再等这一段：从头连得上的分片有多少合并多少。一片都用不上时标成失败，返回 `false`。
+async fn salvage_segment(
+    conn: &mut PgConnection,
+    interview_id: Uuid,
+    recording_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let rows: Vec<(i32,)> = sqlx::query_as(
+        "SELECT seq FROM interview_recording_chunks WHERE recording_id = $1 ORDER BY seq",
+    )
+    .bind(recording_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let received = rows.len();
+    // 文件头在第 0 片里，后面的每一片都要接在前一片后面才读得出来
+    let usable = rows
+        .iter()
+        .zip(0_i32..)
+        .take_while(|((seq,), expected)| seq == expected)
+        .count();
+
+    if usable == 0 {
+        let reason = if received == 0 {
+            "候选人那边没有把这一段录像传上来"
+        } else {
+            "这一段录像的开头没有传上来，没法播放"
+        };
+        sqlx::query(
+            "UPDATE interview_recordings SET status = 'failed', total_chunks = 0, error = $2
+              WHERE id = $1 AND status = 'uploading'",
+        )
+        .bind(recording_id)
+        .bind(reason)
+        .execute(&mut *conn)
+        .await?;
+        tracing::info!(%recording_id, %interview_id, received, "录像没传完，也没有能用的部分");
+        return Ok(false);
+    }
+
+    let note = if received > usable {
+        "候选人那边没有传完这一段录像，中间缺了一部分，只有缺口之前的内容"
+    } else {
+        "候选人那边没有传完这一段录像，结尾可能缺一小段"
+    };
+    let updated = sqlx::query(
+        "UPDATE interview_recordings SET status = 'assembling', total_chunks = $2, error = $3
+          WHERE id = $1 AND status = 'uploading'",
+    )
+    .bind(recording_id)
+    .bind(i32::try_from(usable).unwrap_or(i32::MAX))
+    .bind(note)
+    .execute(&mut *conn)
+    .await?;
+    if updated.rows_affected() == 1 {
+        TaskQueue::enqueue_in(
+            &mut *conn,
+            NewTask::new(
+                task_kind::RECORDING_ASSEMBLE,
+                json!({ "recording_id": recording_id }),
+            )
+            .dedupe(format!("recording.assemble:{recording_id}")),
+        )
+        .await?;
+    }
+    tracing::info!(%recording_id, %interview_id, received, usable, "录像没传完，合并已经收到的部分");
+    Ok(true)
 }
 
 // ───────────────────────── HR 侧：回放 ─────────────────────────
@@ -854,6 +1143,17 @@ mod tests {
         assert_eq!(extension("video/webm;codecs=vp9"), "webm");
         assert_eq!(extension("video/mp4"), "mp4");
         assert_eq!(extension("audio/mp4"), "mp4");
+    }
+
+    #[test]
+    fn checks_for_one_interview_land_on_the_same_moment() {
+        let window = chrono::Duration::minutes(30);
+        let at = |h, m, s| Utc.with_ymd_and_hms(2026, 11, 16, h, m, s).unwrap();
+        // 同一个半小时里登记的几段约到同一个时刻
+        assert_eq!(next_round(at(10, 1, 0), window), at(10, 30, 0));
+        assert_eq!(next_round(at(10, 29, 59), window), at(10, 30, 0));
+        // 正好在整点上的往后约，不约在现在
+        assert_eq!(next_round(at(10, 30, 0), window), at(11, 0, 0));
     }
 
     #[test]

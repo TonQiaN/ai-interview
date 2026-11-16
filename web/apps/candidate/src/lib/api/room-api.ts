@@ -253,11 +253,15 @@ export class HttpRoomApi implements RoomApi {
     );
   }
 
-  async completeSegment(segment: SegmentRef, totalChunks: number): Promise<void> {
+  async completeSegment(
+    segment: SegmentRef,
+    totalChunks: number,
+    options: { acceptMissing?: boolean } = {},
+  ): Promise<void> {
     await this.upload((signal) =>
       this.client.POST("/api/v1/room/recordings/{track}/{segment}/complete", {
         params: { path: segmentPath(segment) },
-        body: { total_chunks: totalChunks },
+        body: { total_chunks: totalChunks, accept_missing: options.acceptMissing ?? false },
         signal,
       }),
     );
@@ -271,7 +275,12 @@ export class HttpRoomApi implements RoomApi {
       return await this.run(call, this.uploadTimeoutMs);
     } catch (error) {
       if (error instanceof RoomApiError)
-        throw new UploadError(error.message, error.retryable, error.status ?? undefined);
+        throw new UploadError(
+          error.message,
+          error.retryable,
+          error.status ?? undefined,
+          error.code ?? undefined,
+        );
       throw error;
     }
   }

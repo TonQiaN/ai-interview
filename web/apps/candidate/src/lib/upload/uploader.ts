@@ -6,6 +6,8 @@
  * - 断网、超时、服务端 5xx 都会自动重试，间隔逐步拉长；恢复后接着传，不需要候选人操作。
  * - 页面刷新后重新启动时，先问服务端已经收到哪些，跳过已传的。
  * - 同一个分片重复上传不会出问题（服务端按段和序号做幂等）。
+ * - 一段录制不会卡住整个队列：服务端已经不收这一段了，就把本机留着的丢掉；服务端缺的分片本机
+ *   也没有了，就让服务端有多少合并多少。
  *
  * 不碰浏览器接口：网络请求、等待、是否在线都从外面传进来，方便单测。
  */
@@ -24,9 +26,21 @@ export interface UploadApi {
   receivedChunks(segment: SegmentRef): Promise<number[]>;
   /** 上传一个分片。重复上传相同内容算成功。 */
   putChunk(segment: SegmentRef, seq: number, bytes: ArrayBuffer, sha256: string): Promise<void>;
-  /** 这一段传完了，告诉服务端一共多少个分片。 */
-  completeSegment(segment: SegmentRef, totalChunks: number): Promise<void>;
+  /**
+   * 这一段传完了，告诉服务端一共多少个分片。
+   * `acceptMissing`：服务端缺的分片本机也没有了，不用再等，有多少合并多少。
+   */
+  completeSegment(
+    segment: SegmentRef,
+    totalChunks: number,
+    options?: { acceptMissing?: boolean },
+  ): Promise<void>;
 }
+
+/** 服务端不再收这一段的分片了（已经合并，或者等不到候选人回来先合并了收到的部分）。 */
+export const SEGMENT_CLOSED = "segment_closed";
+/** 服务端说这一段还缺分片。 */
+export const CHUNKS_MISSING = "chunks_missing";
 
 /** 接口实现用它告诉上传器：这个错误重试有没有用。 */
 export class UploadError extends Error {
@@ -35,6 +49,8 @@ export class UploadError extends Error {
     /** true：网络问题、超时、服务端临时故障，重试可能成功。false：链接失效、内容被拒，重试没用。 */
     readonly retryable: boolean,
     readonly status?: number,
+    /** 后端错误结构里的 code，没有就是 undefined。 */
+    readonly code?: string,
   ) {
     super(message);
     this.name = "UploadError";
@@ -250,6 +266,7 @@ export class Uploader {
       const ref: SegmentRef = { track: segment.track, segmentId: segment.segmentId };
       const received = await this.ensureOpened(segment);
 
+      let closed = false;
       for (const info of await this.store.listChunks(this.sessionKey, segment.segmentId)) {
         if (this.stopped) return worked;
         const key = { sessionKey: this.sessionKey, segmentId: segment.segmentId, seq: info.seq };
@@ -258,7 +275,15 @@ export class Uploader {
           // 列清单之后被别处删掉了（例如另一个标签页），跳过
           if (!chunk) continue;
           this.setStatus({ state: "uploading" });
-          await this.api.putChunk(ref, info.seq, chunk.bytes, chunk.sha256);
+          try {
+            await this.api.putChunk(ref, info.seq, chunk.bytes, chunk.sha256);
+          } catch (error) {
+            if (!(error instanceof UploadError) || error.code !== SEGMENT_CLOSED) throw error;
+            // 候选人隔了太久才回来，服务端已经把收到的部分合并了，这一段不再收分片。
+            // 本机剩下的传不上去了，留着也没有用
+            closed = true;
+            break;
+          }
           received.add(info.seq);
         }
         await this.store.deleteChunk(key);
@@ -272,6 +297,14 @@ export class Uploader {
         });
       }
 
+      if (closed) {
+        await this.store.discardSegment(this.sessionKey, segment.segmentId);
+        this.opened.delete(segment.segmentId);
+        await this.refreshPending();
+        worked = true;
+        continue;
+      }
+
       // 段已经停止录制，而且本地没有剩余分片：通知服务端合并，然后删除本地登记。
       // 这里重新读一次段的信息，因为上传期间录制可能刚好结束。
       const latest = (await this.store.listSegments(this.sessionKey)).find(
@@ -281,7 +314,14 @@ export class Uploader {
         const remaining = await this.store.listChunks(this.sessionKey, segment.segmentId);
         if (remaining.length === 0) {
           this.setStatus({ state: "uploading" });
-          await this.api.completeSegment(ref, latest.totalChunks);
+          try {
+            await this.api.completeSegment(ref, latest.totalChunks);
+          } catch (error) {
+            if (!(error instanceof UploadError) || error.code !== CHUNKS_MISSING) throw error;
+            // 服务端缺的分片本机也没有了（当时没存下来，比如磁盘满了），再试多少次都补不上。
+            // 让服务端把连得上的部分合并出来，HR 至少能看到前面的内容
+            await this.api.completeSegment(ref, latest.totalChunks, { acceptMissing: true });
+          }
           await this.store.deleteSegment(this.sessionKey, segment.segmentId);
           this.opened.delete(segment.segmentId);
           worked = true;

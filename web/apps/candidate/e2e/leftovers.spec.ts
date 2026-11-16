@@ -3,9 +3,12 @@ import {
   button,
   enterInterview,
   expectQuestion,
+  LOCAL_DB,
+  localRecordings,
   open,
   revokeInvites,
   seedInterview,
+  sessionKeyOf,
   UNKNOWN_TOKEN,
 } from "./helpers";
 
@@ -16,46 +19,7 @@ import {
  * 服务端不再收，剩下的分片就得从本机删掉：里面是候选人的脸和声音，设备可能是借来的。
  */
 
-const DB = "ai-interview-recording";
 const DAY = 24 * 60 * 60 * 1000;
-
-/** 浏览器里现在留着哪些面试的录像：本地键到分片数。页面还没建库时是 null。 */
-const localRecordings = (page: Page): Promise<Record<string, number> | null> =>
-  page.evaluate(async (name) => {
-    const existing = await indexedDB.databases();
-    if (!existing.some((item) => item.name === name)) return null;
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(name);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    try {
-      const transaction = db.transaction(["segments", "chunk-index"], "readonly");
-      const all = <T>(store: string) =>
-        new Promise<T[]>((resolve, reject) => {
-          const request = transaction.objectStore(store).getAll();
-          request.onsuccess = () => resolve(request.result as T[]);
-          request.onerror = () => reject(request.error);
-        });
-      const segments = await all<{ sessionKey: string }>("segments");
-      const chunks = await all<{ sessionKey: string }>("chunk-index");
-      const found: Record<string, number> = {};
-      for (const segment of segments) found[segment.sessionKey] = 0;
-      for (const chunk of chunks) found[chunk.sessionKey] = (found[chunk.sessionKey] ?? 0) + 1;
-      return found;
-    } finally {
-      db.close();
-    }
-  }, DB);
-
-/** 页面给一条链接用的本地键：令牌摘要的前 32 位。 */
-const sessionKeyOf = (page: Page, token: string): Promise<string> =>
-  page.evaluate(async (value) => {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0"))
-      .join("")
-      .slice(0, 32);
-  }, token);
 
 /** 往浏览器里放一段别的时候留下的录像：一条段的登记加两片内容（几个字节的假数据）。 */
 const leaveRecording = (page: Page, sessionKey: string, createdAt: number): Promise<void> =>
@@ -89,7 +53,7 @@ const leaveRecording = (page: Page, sessionKey: string, createdAt: number): Prom
       });
       db.close();
     },
-    { name: DB, sessionKey, createdAt },
+    { name: LOCAL_DB, sessionKey, createdAt },
   );
 
 test("面试到一半链接被撤销：告诉候选人面试中止了，没传上去的录像从本机删掉", async ({ page }) => {
