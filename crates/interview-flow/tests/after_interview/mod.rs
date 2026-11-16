@@ -939,3 +939,106 @@ async fn hr_records_a_decision(pool: PgPool) {
     let response = put(json!({ "decision": "hold", "note": "长".repeat(2001) })).await;
     assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn hr_sees_what_the_video_check_found(pool: PgPool) {
+    let h = harness(pool).await;
+    let id = h.finished_interview("completed").await;
+    let interview_id: Uuid = id.parse().unwrap();
+    let events_uri = format!("/api/v1/interviews/{id}/frame-events");
+    let frame_uri = |at_ms: u64| format!("/api/v1/interviews/{id}/frames/{at_ms}");
+
+    // 还没检查过
+    let list = h.get(&events_uri).await.json();
+    assert_eq!(list, json!({ "checked": false, "items": [] }));
+    assert_eq!(
+        h.get(&frame_uri(95_000)).await.status,
+        StatusCode::NOT_FOUND
+    );
+
+    // 报告任务检查完存下来的样子：整理好的事件，加上不正常的那几帧
+    let event = |id: &str, kind: &str, at_ms: u64, duration_ms: Option<u64>, detail: Value| {
+        json!({
+            "id": id, "kind": kind, "at_ms": at_ms, "duration_ms": duration_ms,
+            "detail": detail.to_string(),
+        })
+    };
+    let saved = json!({
+        "recordings": ["interviews/x/recordings/camera/0/final.webm"],
+        "events": [
+            event("frame-people-60000", "face_count_changed", 60_000, Some(10_000),
+                json!({ "people": 2, "frames": 3, "note": "身后站着一个人" })),
+            event("frame-phone-95000", "phone_visible", 95_000, None,
+                json!({ "frames": 1, "note": "右手拿着手机" })),
+            event("frames-checked", "frames_checked", 0, Some(120_000),
+                json!({ "frames": 25, "interval_ms": 5000, "flagged": 4, "unreadable": 0 })),
+        ],
+    });
+    let blobs = &h.ctx.blobs;
+    blobs
+        .put(
+            &blob_key::frame_events(interview_id),
+            Bytes::from(saved.to_string()),
+        )
+        .await
+        .unwrap();
+    let jpeg = |at_ms: u64| Bytes::from(format!("jpeg-{at_ms}"));
+    for at_ms in [60_000, 65_000, 70_000, 95_000] {
+        blobs
+            .put(&blob_key::frame(interview_id, at_ms), jpeg(at_ms))
+            .await
+            .unwrap();
+    }
+
+    let list = h.get(&events_uri).await.json();
+    assert_eq!(list["checked"], true);
+    let items = list["items"].as_array().unwrap();
+    let ids: Vec<&str> = items
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        ["frames-checked", "frame-people-60000", "frame-phone-95000"]
+    );
+
+    let checked = &items[0];
+    assert_eq!(checked["payload"]["frames"], 25);
+    assert_eq!(
+        checked["frame_at_ms"],
+        json!([]),
+        "整段检查过了这一条不带帧"
+    );
+
+    let people = &items[1];
+    assert_eq!(people["kind"], "face_count_changed");
+    assert_eq!(people["at_ms"], 60_000);
+    assert_eq!(people["duration_ms"], 10_000);
+    assert_eq!(people["payload"]["people"], 2);
+    assert_eq!(people["payload"]["note"], "身后站着一个人");
+    assert_eq!(people["frame_at_ms"], json!([60_000, 65_000, 70_000]));
+
+    let phone = &items[2];
+    assert_eq!(phone["duration_ms"], Value::Null);
+    assert_eq!(phone["frame_at_ms"], json!([95_000]));
+
+    // 取那一帧
+    let response = h.get(&frame_uri(95_000)).await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.content_type(), Some("image/jpeg"));
+    assert_eq!(response.body, jpeg(95_000));
+    // 这一刻没有存图、没有这场面试
+    assert_eq!(
+        h.get(&frame_uri(80_000)).await.status,
+        StatusCode::NOT_FOUND
+    );
+    let other = Uuid::now_v7();
+    let response = h
+        .get(&format!("/api/v1/interviews/{other}/frames/95000"))
+        .await;
+    assert_eq!(response.status, StatusCode::NOT_FOUND);
+    let response = h
+        .get(&format!("/api/v1/interviews/{other}/frame-events"))
+        .await;
+    assert_eq!(response.status, StatusCode::NOT_FOUND);
+}
