@@ -112,4 +112,36 @@ describe("岗位详情", () => {
     expect(screen.queryByText("这个岗位已经归档")).toBeNull();
     expect(server.db.positions.find((p) => p.id === position.id)?.archived_at).toBeNull();
   });
+
+  it("改岗位改到一半，按 Esc 或者点到弹窗外面不会关，改的内容还在", async () => {
+    const position = firstPosition();
+    open(position.id);
+
+    fireEvent.click(await screen.findByRole("button", { name: "改岗位" }));
+    const dialog = (await screen.findByRole("dialog", { name: "改岗位" })) as HTMLDialogElement;
+    const title = within(dialog).getByLabelText(/^岗位名称/) as HTMLInputElement;
+    fireEvent.change(title, { target: { value: "改了一半的岗位名称" } });
+
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    fireEvent.click(dialog);
+
+    expect(dialog.open).toBe(true);
+    expect(title.value).toBe("改了一半的岗位名称");
+    expect(within(dialog).getByRole("status").textContent).toContain("还没保存");
+
+    // 确实不想要了，点「取消」照常关
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(dialog.open).toBe(false);
+  });
+
+  it("改岗位什么都没改，按 Esc 就关", async () => {
+    const position = firstPosition();
+    open(position.id);
+
+    fireEvent.click(await screen.findByRole("button", { name: "改岗位" }));
+    const dialog = (await screen.findByRole("dialog", { name: "改岗位" })) as HTMLDialogElement;
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+
+    expect(dialog.open).toBe(false);
+  });
 });

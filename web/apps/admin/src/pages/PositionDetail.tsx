@@ -26,6 +26,7 @@ import { Confirm, Person, QueryView } from "../components/common";
 import { PageHeader } from "../components/PageHeader";
 import { RaasApplicantsDialog } from "../components/RaasApplicantsDialog";
 import { hasVerdict, InterviewTags } from "../components/ReportVerdict";
+import { sameForm } from "../lib/form";
 import { fullTime, positionStatusLabel, positionStatusTone, relativeTime } from "../lib/format";
 import { PositionFields, type PositionForm } from "./Positions";
 
@@ -71,6 +72,7 @@ function EditDialog({
     <Dialog
       open={open}
       onClose={onClose}
+      unsaved={!sameForm(value, pick(position))}
       wide
       title="改岗位"
       footer={
