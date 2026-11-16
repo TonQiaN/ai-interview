@@ -20,6 +20,7 @@ import {
 import {
   Archive,
   ArchiveRestore,
+  ArrowUpDown,
   Ban,
   CalendarPlus,
   CircleArrowRight,
@@ -69,6 +70,7 @@ import type {
   Utterance,
 } from "../api/types";
 import { AddQuestionDialog } from "../components/AddQuestionDialog";
+import { ArrangeQuestionsDialog } from "../components/ArrangeQuestionsDialog";
 import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import {
   Confirm,
@@ -1055,6 +1057,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
   const [regenerating, setRegenerating] = useState(false);
   const [removing, setRemoving] = useState<Removing | null>(null);
   const [adding, setAdding] = useState(false);
+  const [arranging, setArranging] = useState(false);
   const canEdit = editable(interview);
 
   // 出题的那一步结束后，把题目取回来
@@ -1153,7 +1156,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
           {followUps > 0 && `，${followUps} 句追问`}
           {speech > 0 && `；面试官说话约 ${duration(speech)}`}。
           {canEdit
-            ? "可以改措辞，改完那一句会重新合成语音；不想问的题和追问可以去掉，也可以加自己的题。"
+            ? "可以改措辞，改完那一句会重新合成语音；不想问的题和追问可以去掉，也可以加自己的题。时间不够时，标着「时间紧时可能跳过」的题会被跳过，越靠后越容易轮不上；先后和哪些题一定要问都可以调。"
             : preparing
               ? ""
               : "链接发出之后题目不能再改。"}
@@ -1168,6 +1171,14 @@ function QuestionsTab({ interview }: { interview: Interview }) {
               onClick={() => setAdding(true)}
             >
               加一道题
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<ArrowUpDown aria-hidden="true" />}
+              onClick={() => setArranging(true)}
+            >
+              调先后和必问
             </Button>
             <Button
               size="sm"
@@ -1223,6 +1234,11 @@ function QuestionsTab({ interview }: { interview: Interview }) {
                     <span className="adm-item__sub">
                       预计答 {duration(q.expected_answer_sec * 1000)}
                     </span>
+                    {!q.reserve && (
+                      <span className="adm-item__sub">
+                        {q.required ? "时间紧也会问" : "时间紧时可能跳过"}
+                      </span>
+                    )}
                   </div>
                   {q.intent && <div className="adm-utter__intent">想考察：{q.intent}</div>}
                   <Signals question={q} />
@@ -1427,6 +1443,12 @@ function QuestionsTab({ interview }: { interview: Interview }) {
         maxAnswerSec={interview.config.answer.max_sec}
         open={adding && canEdit}
         onClose={() => setAdding(false)}
+      />
+      <ArrangeQuestionsDialog
+        interviewId={interview.id}
+        plan={data}
+        open={arranging && canEdit}
+        onClose={() => setArranging(false)}
       />
       <Confirm
         open={removing !== null}

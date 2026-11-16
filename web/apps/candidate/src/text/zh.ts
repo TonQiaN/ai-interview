@@ -123,6 +123,11 @@ export const zh = {
   cameraLabel: "你的画面",
   /** 须知、同意、设备、开始四步的名字。 */
   steps: ["须知", "同意", "设备", "开始"],
+  /** 顶上的步骤条读给读屏软件听的那一句。 */
+  stepOf: (index: number, total: number, name: string): string =>
+    `第 ${index} 步，共 ${total} 步：${name}`,
+  /** 浏览器标签页上的名字，现在在哪一页写在前面。 */
+  titleOf: (page: string): string => `${page} · AI 面试`,
   minutes: (seconds: number): string => `约 ${Math.max(1, Math.round(seconds / 60))} 分钟`,
   /**
    * 服务端拒绝时带回来的说明是中文的，中文页面直接显示；
@@ -231,6 +236,8 @@ export const zh = {
   },
 
   interview: {
+    /** 这一页的标题，只给读屏软件，页面上不显示。 */
+    heading: "面试进行中",
     recording: "录制中",
     elapsed: "已用时",
     end: "结束",

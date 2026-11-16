@@ -11,6 +11,7 @@ import {
   Field,
   formatClock,
   Input,
+  InterviewerPresence,
   Segmented,
   Slider,
   Steps,
@@ -261,6 +262,42 @@ describe("ConsentList", () => {
     const next = onChange.mock.calls[0]?.[0] as Set<string>;
     expect([...next].sort()).toEqual(["ai", "record"]);
     expect([...checked]).toEqual(["record"]);
+  });
+
+  it("每一条的展开按钮名字里带着这一条的内容，读屏软件分得出是哪一条的", () => {
+    render(
+      <ConsentList
+        items={[
+          { id: "record", label: "同意录音录像", detail: "录像只用于这次招聘" },
+          { id: "ai", label: "知道面试官是 AI", detail: "题目和追问由 AI 给出" },
+          { id: "plain", label: "没有详情的一条" },
+        ]}
+        checked={new Set()}
+        onChange={() => {}}
+      />,
+    );
+    // 两条有详情，各有一个按钮，名字不一样
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+    const more = screen.getByRole("button", { name: "查看详情 同意录音录像" });
+    expect(screen.getByRole("button", { name: "查看详情 知道面试官是 AI" })).toBeTruthy();
+    // 勾选框的名字还是这一条的内容
+    expect(screen.getByRole("checkbox", { name: "同意录音录像" })).toBeTruthy();
+    fireEvent.click(more);
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("录像只用于这次招聘")).toBeTruthy();
+  });
+});
+
+describe("InterviewerPresence", () => {
+  it("头像下面的状态文字默认会念给读屏软件", () => {
+    render(<InterviewerPresence state="speaking" />);
+    expect(screen.getByRole("status").textContent).toBe("正在提问");
+  });
+
+  it("使用方自己另有一处念状态时可以关掉，字还在", () => {
+    render(<InterviewerPresence state="speaking" announce={false} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("正在提问")).toBeTruthy();
   });
 });
 

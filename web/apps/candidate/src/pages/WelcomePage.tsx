@@ -1,5 +1,6 @@
-import { Banner, Button, Painting, Stage, Steps } from "@ai-interview/ui";
+import { Banner, Button, Painting, Stage } from "@ai-interview/ui";
 import { Clock, Headphones, Video, Wifi } from "lucide-react";
+import { StepBar } from "../components/StepBar";
 import type { RoomSession } from "../lib/api/room-types";
 import type { CapabilityReport } from "../lib/flow/capabilities";
 import { useText } from "../text";
@@ -21,7 +22,7 @@ export function WelcomePage({ room, capability, volatileStorage, onNext }: Welco
 
   return (
     <Stage
-      header={<Steps compact steps={t.steps} current={0} />}
+      header={<StepBar current={0} />}
       footer={
         <Button size="lg" block variant="accent" onClick={onNext}>
           {resuming ? text.resume : text.start}

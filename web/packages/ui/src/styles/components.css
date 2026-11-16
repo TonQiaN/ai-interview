@@ -1203,14 +1203,25 @@
   .oil-step__line[data-done="true"] {
     background: var(--oil-success);
   }
-  /* 窄屏只留圆点，当前步骤的文字放在下面由使用方显示 */
+  /* 窄屏只留圆点，当前步骤的文字放在下面由使用方显示。
+     步骤名只是看不见，读屏软件照样念：用 display: none 的话它只念得出「1、2、3」 */
   .oil-steps--compact .oil-step__text {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
-  /* 手机宽度放不下四五个步骤名：只留当前这一步的文字 */
+  /* 手机宽度放不下四五个步骤名：只留当前这一步的文字，别的同样只是看不见 */
   @media (max-width: 640px) {
     .oil-step:not([data-state="current"]) .oil-step__text {
-      display: none;
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
     }
     .oil-table {
       min-width: 600px;

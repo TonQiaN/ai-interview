@@ -90,6 +90,8 @@ export function ConsentList({ items, checked, onChange, className }: ConsentList
     <ul className={clsx("oil-consent", className)}>
       {items.map((item) => {
         const detailId = `${base}-${item.id}`;
+        const labelId = `${detailId}-label`;
+        const moreId = `${detailId}-more`;
         return (
           <li className="oil-consent__item" key={item.id}>
             <div className="oil-consent__row">
@@ -104,15 +106,18 @@ export function ConsentList({ items, checked, onChange, className }: ConsentList
                     onChange(next);
                   }}
                 />
-                <span>{item.label}</span>
+                <span id={labelId}>{item.label}</span>
               </label>
               {item.detail && (
                 <button
                   type="button"
                   className="oil-consent__more"
+                  id={moreId}
                   aria-expanded={open === item.id}
                   aria-controls={detailId}
+                  // 每一条的按钮都叫「查看详情」的话，读屏软件列出按钮时分不出是哪一条的：名字后面带上这一条的内容
                   aria-label={text.consentDetail}
+                  aria-labelledby={`${moreId} ${labelId}`}
                   onClick={() => setOpen(open === item.id ? null : item.id)}
                 >
                   <ChevronDown aria-hidden="true" />
@@ -190,6 +195,11 @@ export interface InterviewerPresenceProps {
   label?: string;
   /** 直径，比如 200 或 "40vw"。默认 min(46vw, 220px) */
   size?: number | string;
+  /**
+   * 状态文字变了要不要让读屏软件念出来，默认念。
+   * 使用方自己另有一处念状态时传 false：不然面试官一开口，读屏软件就念「正在提问」，盖住他说的话。
+   */
+  announce?: boolean;
   className?: string;
 }
 
@@ -199,6 +209,7 @@ export function InterviewerPresence({
   painting = "sitter",
   label,
   size,
+  announce = true,
   className,
 }: InterviewerPresenceProps) {
   const ui = useUiText();
@@ -216,7 +227,7 @@ export function InterviewerPresence({
         <img src={paintings[painting]} alt={ui.interviewer} />
       </div>
       {text && (
-        <span className="oil-presence__label" role="status">
+        <span className="oil-presence__label" role={announce ? "status" : undefined}>
           {text}
         </span>
       )}

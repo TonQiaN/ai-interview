@@ -648,6 +648,7 @@ describe("面试详情", () => {
 
       expect(screen.queryAllByRole("button", { name: /^去掉/ })).toEqual([]);
       expect(screen.queryByRole("button", { name: "加一道题" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "调先后和必问" })).toBeNull();
     });
 
     it("加一道自己的题：两样都填了才能保存，加在主问题最后，别的题不动", async () => {
@@ -700,6 +701,99 @@ describe("面试详情", () => {
             .some((el) => el.className === "adm-utter__text"),
         ).toBe(true),
       );
+    });
+
+    it("每道主问题写着时间紧时问不问", async () => {
+      const { target, plan } = readyWithPlan();
+      const main = plan.questions.filter((q) => !q.reserve);
+      await openQuestions(target.id);
+
+      expect(screen.getAllByText("时间紧也会问")).toHaveLength(
+        main.filter((q) => q.required).length,
+      );
+      expect(screen.queryAllByText("时间紧时可能跳过")).toHaveLength(
+        main.filter((q) => !q.required).length,
+      );
+    });
+
+    it("调先后和必问：在窗口里调好一起存，面试官要说的话不变", async () => {
+      const { target, plan } = readyWithPlan();
+      const before = plan.questions.map((q) => q.key);
+      const [first, second, third] = plan.questions;
+      if (!first || !second || !third) throw new Error("演示数据里的题不够三道");
+      const texts = new Map(plan.questions.map((q) => [q.key, q.text]));
+      await openQuestions(target.id);
+
+      fireEvent.click(screen.getByRole("button", { name: "调先后和必问" }));
+      const dialog = await screen.findByRole("dialog", { name: "调先后和必问" });
+      const inDialog = within(dialog);
+      const saveButton = inDialog.getByRole("button", { name: "保存" }) as HTMLButtonElement;
+      const button = (name: string) => inDialog.getByRole("button", { name }) as HTMLButtonElement;
+      // 什么都没动不能存；第一道不能上移，最后一道主问题不能下移
+      expect(saveButton.disabled).toBe(true);
+      expect(button("第 1 题上移").disabled).toBe(true);
+      const mainCount = plan.questions.filter((q) => !q.reserve).length;
+      expect(button(`第 ${mainCount} 题下移`).disabled).toBe(true);
+
+      // 第 3 题挪到最前面：上移两次。挪完焦点跟着这道题走，可以接着按
+      fireEvent.click(button("第 3 题上移"));
+      await waitFor(() => expect(document.activeElement).toBe(button("第 2 题上移")));
+      expect(inDialog.getByText("挪到了第 2 题")).toBeTruthy();
+      fireEvent.click(button("第 2 题上移"));
+      // 到头了，「上移」不能再按，焦点放到这道题的「下移」上
+      await waitFor(() => expect(document.activeElement).toBe(button("第 1 题下移")));
+      expect(button("第 1 题上移").disabled).toBe(true);
+
+      // 现在排第 2 的是原来的第 1 题，把它的必问反过来
+      const check = inDialog.getByRole("checkbox", {
+        name: "第 2 题时间紧也要问",
+      }) as HTMLInputElement;
+      expect(check.checked).toBe(first.required);
+      fireEvent.click(check);
+
+      // 还没点保存，后端那边没有动
+      expect(server.db.plans.get(target.id)?.questions.map((q) => q.key)).toEqual(before);
+      expect(saveButton.disabled).toBe(false);
+      fireEvent.click(saveButton);
+
+      await waitFor(() =>
+        expect(
+          server.db.plans
+            .get(target.id)
+            ?.questions.slice(0, 3)
+            .map((q) => q.key),
+        ).toEqual([third.key, first.key, second.key]),
+      );
+      const saved = server.db.plans.get(target.id)?.questions ?? [];
+      expect(saved).toHaveLength(before.length);
+      expect(saved.find((q) => q.key === first.key)?.required).toBe(!first.required);
+      expect(saved.find((q) => q.key === second.key)?.required).toBe(second.required);
+      // 每道题的文字一个字没变
+      for (const q of saved) expect(q.text).toBe(texts.get(q.key));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog", { name: "调先后和必问" })).toBeNull(),
+      );
+    });
+
+    it("调到一半取消：什么都不存", async () => {
+      const { target, plan } = readyWithPlan();
+      const before = plan.questions.map((q) => q.key);
+      await openQuestions(target.id);
+
+      fireEvent.click(screen.getByRole("button", { name: "调先后和必问" }));
+      const dialog = await screen.findByRole("dialog", { name: "调先后和必问" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "第 2 题上移" }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog", { name: "调先后和必问" })).toBeNull(),
+      );
+      expect(server.db.plans.get(target.id)?.questions.map((q) => q.key)).toEqual(before);
+      // 再打开是原来的先后，上一次没存的改动不带过来
+      fireEvent.click(screen.getByRole("button", { name: "调先后和必问" }));
+      const again = await screen.findByRole("dialog", { name: "调先后和必问" });
+      const first = plan.questions[0];
+      expect(within(again).getAllByRole("listitem")[0]?.textContent).toContain(first?.text);
     });
   });
 });
