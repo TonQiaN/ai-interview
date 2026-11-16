@@ -842,6 +842,39 @@ export const useRevokeInvite = (id: string) =>
       ),
     ["invites"],
   );
+/**
+ * 给一场面试生成链接，连同写「给候选人的话」要用的内容一起拿回来。一次给好几场生成时用，
+ * 所以这里不刷新列表（一场刷一次太多），全部生成完由 `useRefreshAfterInvites` 一起刷。
+ *
+ * 先取面试，取到了再生成：链接只返回一次，生成了却写不出那段话就白生成了。
+ * 候选人的联系方式只是让 HR 知道发到哪，取不到不拦着。
+ */
+export function useIssueInvite() {
+  return useMutation({
+    mutationFn: async ({ id, expiresInHours }: { id: string; expiresInHours: number }) => {
+      const interview = await unwrap(api.GET("/api/v1/interviews/{id}", at(id)));
+      const candidate = await unwrap(
+        api.GET("/api/v1/candidates/{id}", at(interview.candidate.id)),
+      ).catch(() => null);
+      const created = await unwrap(
+        api.POST("/api/v1/interviews/{id}/invites", {
+          ...at(id),
+          body: { expires_in_hours: expiresInHours },
+        }),
+      );
+      return { interview, candidate, created };
+    },
+  });
+}
+/** 一批链接生成完以后，把面试的列表、详情和链接记录都刷新一遍 */
+export function useRefreshAfterInvites() {
+  const qc = useQueryClient();
+  return () => {
+    for (const key of ["interviews", "interview", "invites"]) {
+      qc.invalidateQueries({ queryKey: [key] });
+    }
+  };
+}
 /** 保存改过的题目。要把整份计划交回去，改过的句子会重新合成语音 */
 export const useSavePlan = (id: string) =>
   useInterviewAction(

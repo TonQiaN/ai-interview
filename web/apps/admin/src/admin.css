@@ -1151,6 +1151,20 @@
     color: var(--oil-ink-3);
     font-size: var(--oil-text-sm);
   }
+  /* 一次生成好几个链接时，每位候选人那一行里的链接：能选中，太长就折行 */
+  /* 窄屏上名字和链接占满一行，有效期和按钮换到下面，不把名字挤成一列 */
+  .adm-invite-row .adm-item__main {
+    flex-basis: 16rem;
+  }
+  .adm-invite-url {
+    display: block;
+    margin-top: var(--oil-space-2);
+    font-family: var(--oil-font-mono);
+    font-size: var(--oil-text-xs);
+    color: var(--oil-ink-3);
+    overflow-wrap: anywhere;
+    user-select: all;
+  }
   .adm-message {
     white-space: pre-wrap;
     font-family: var(--oil-font-body);
