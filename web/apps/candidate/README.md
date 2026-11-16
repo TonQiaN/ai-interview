@@ -63,3 +63,5 @@ E2E_REAL=1 E2E_SPEECH_WAV=<一段有人说话的 WAV> pnpm e2e
 - `e2e/`：端到端测试。后端的实现在 `crates/interview-room`。
 
 接口约定见 `docs/architecture/api.md` 的「面试间协议」。
+
+浏览器测试只有 Chromium 加假的摄像头和麦克风。手机上（尤其是 iPhone 和微信里）的权限弹窗、录像格式、自动播放、来电话和锁屏，要拿真机照 `docs/room/real-device.md` 走一遍（issue #15）。
