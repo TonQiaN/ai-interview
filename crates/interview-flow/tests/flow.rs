@@ -1129,6 +1129,90 @@ async fn the_list_and_the_detail_say_when_an_interview_was_archived(pool: PgPool
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_list_says_which_stage_an_interview_is(pool: PgPool) {
+    let h = Harness::new(pool, None, FakeBackend::new()).await;
+    let screening = h.create(json!({})).await;
+    let in_depth = h.create(json!({ "stage": "in_depth" })).await;
+
+    let list = h.get("/api/v1/interviews").await.json();
+    let stage = |id: &str| {
+        list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .unwrap()["stage"]
+            .clone()
+    };
+    assert_eq!(stage(&screening), "screening", "没指定时是初筛");
+    assert_eq!(stage(&in_depth), "in_depth");
+}
+
+/// 往库里放一条面试链接。链接归面试间那个模块管，这里只关心列表和详情读不读得到它的到期时间。
+async fn insert_invite(pool: &PgPool, interview_id: &str, expires_in_hours: i32, revoked: bool) {
+    sqlx::query(
+        "INSERT INTO interview_invites (id, interview_id, token_hash, expires_at, revoked_at) \
+         VALUES ($1, $2::uuid, $3, now() + make_interval(hours => $4), \
+                 CASE WHEN $5 THEN now() END)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(interview_id)
+    .bind(Uuid::now_v7().as_bytes().to_vec())
+    .bind(expires_in_hours)
+    .bind(revoked)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_list_and_the_detail_say_when_the_link_expires(pool: PgPool) {
+    let h = Harness::new(pool.clone(), None, FakeBackend::new()).await;
+    let none = h.create(json!({})).await;
+    let live = h.create(json!({})).await;
+    let expired = h.create(json!({})).await;
+    let revoked = h.create(json!({})).await;
+    let replaced = h.create(json!({})).await;
+
+    insert_invite(&pool, &live, 72, false).await;
+    insert_invite(&pool, &expired, -1, false).await;
+    insert_invite(&pool, &revoked, 72, true).await;
+    // 先发的一条过期了，后来又发了一条还有效的：以还能用的那条为准
+    insert_invite(&pool, &replaced, -1, false).await;
+    insert_invite(&pool, &replaced, 24, false).await;
+
+    let list = h.get("/api/v1/interviews").await.json();
+    let now = chrono::Utc::now();
+    let expires_at = |value: &Value| -> Option<chrono::DateTime<chrono::Utc>> {
+        value["invite_expires_at"]
+            .as_str()
+            .map(|text| text.parse().unwrap())
+    };
+    for (id, expected) in [
+        (&none, None),
+        (&live, Some(true)),
+        (&expired, Some(false)),
+        (&revoked, None),
+        (&replaced, Some(true)),
+    ] {
+        let item = list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id.as_str())
+            .unwrap();
+        let detail = h.detail(id).await;
+        for (place, value) in [("列表", item), ("详情", &detail)] {
+            assert_eq!(
+                expires_at(value).map(|at| at > now),
+                expected,
+                "{place}：{value}"
+            );
+        }
+    }
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn an_archived_interview_can_be_restored(pool: PgPool) {
     let h = Harness::new(pool, None, FakeBackend::new()).await;
     let id = h.create(json!({})).await;

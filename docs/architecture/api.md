@@ -113,8 +113,8 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 
 | 方法和路径 | 做什么 |
 | --- | --- |
-| `GET /api/v1/interviews`、`POST /api/v1/interviews` ★ | 列表（可按候选人、岗位、状态筛；每一行带报告的结论和综合分；`include_archived=true` 带上已归档的，归档的那几行 `archived_at` 有时间）、新建 |
-| `GET /api/v1/interviews/{id}`、`PATCH /api/v1/interviews/{id}`、`DELETE /api/v1/interviews/{id}` ★ | 详情（带候选人和岗位摘要、最新报告状态；归档了的 `archived_at` 有时间）、改配置、归档 |
+| `GET /api/v1/interviews`、`POST /api/v1/interviews` ★ | 列表（可按候选人、岗位、状态筛；每一行带报告的结论和综合分、面试阶段 `stage`、链接到期时间 `invite_expires_at`（没撤销的链接里最晚的那个；已经过了就是候选人打不开了，面试的状态不会因此变，再生成一条链接就能接着用）；`include_archived=true` 带上已归档的，归档的那几行 `archived_at` 有时间）、新建 |
+| `GET /api/v1/interviews/{id}`、`PATCH /api/v1/interviews/{id}`、`DELETE /api/v1/interviews/{id}` ★ | 详情（带候选人和岗位摘要、最新报告状态、链接到期时间 `invite_expires_at`；归档了的 `archived_at` 有时间）、改配置、归档 |
 | `POST /api/v1/interviews/{id}/restore` | 把归档的面试恢复回来，返回详情。状态、题目、录像、报告都和归档前一样；候选人的面试链接归档时打不开，恢复以后没过期、没撤销的又能用。没归档的再调一次也算成功 |
 | `POST /api/v1/interviews/{id}/prepare` ★ | 出题加预合成语音 |
 | `POST /api/v1/interviews/{id}/cancel` | 取消 |
