@@ -587,6 +587,11 @@ export function ReportView({
                     诚信风险：{riskLabel[report.integrity.risk_level]}
                   </Badge>
                 )}
+                {asksToFollowUp > 0 && (
+                  <Badge tone="warning" plain>
+                    候选人有 {asksToFollowUp} 个问题等你回复
+                  </Badge>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"

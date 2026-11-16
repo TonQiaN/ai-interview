@@ -187,6 +187,18 @@ describe("分析报告", () => {
       expect(s.getAllByText(/不是公司的正式答复/)).toHaveLength(1);
     });
 
+    it("报告最上面也说一声有几个问题等回复，只看结论的人不会漏掉", () => {
+      render(<ReportView report={asks()} onSeek={() => {}} />);
+      expect(screen.getByText("候选人有 2 个问题等你回复")).toBeTruthy();
+    });
+
+    it("问题面试官都当场答了的话，最上面不提", () => {
+      const report = asks();
+      for (const q of report.candidate_questions ?? []) q.handling = "answered";
+      render(<ReportView report={report} onSeek={() => {}} />);
+      expect(screen.queryByText(/等你回复/)).toBeNull();
+    });
+
     it("点候选人提问的原话跳到回看的那个时间", () => {
       const onSeek = vi.fn();
       render(<ReportView report={asks()} onSeek={onSeek} />);
@@ -199,7 +211,7 @@ describe("分析报告", () => {
       report.candidate_questions = [];
       render(<ReportView report={report} onSeek={() => {}} />);
       expect(section().getByText("候选人没有提问。")).toBeTruthy();
-      expect(screen.queryByText(/个等你回复/)).toBeNull();
+      expect(screen.queryByText(/等你回复/)).toBeNull();
     });
 
     it("旧报告没有这一栏：不显示，也不说没有提问", () => {
