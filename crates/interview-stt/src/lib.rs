@@ -24,6 +24,8 @@
 //!
 //! 候选人说的话是个人信息：这个 crate 不把转写文字写进日志。
 
+#[cfg(any(feature = "sherpa", test))]
+mod chunk;
 mod config;
 mod fake;
 mod live;
