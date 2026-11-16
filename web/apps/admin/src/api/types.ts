@@ -162,6 +162,11 @@ export type InterviewEvent = Omit<Schemas["InterviewEvent"], "payload"> & {
   payload: Record<string, unknown>;
 };
 
+/** 出报告前检查录像画面得到的一条结果 */
+export type FrameEvent = Omit<Schemas["FrameEvent"], "payload"> & {
+  payload: Record<string, unknown>;
+};
+
 // ───────── 分析报告 ─────────
 
 export type Level = Schemas["Level"];

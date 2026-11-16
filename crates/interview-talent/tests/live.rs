@@ -13,6 +13,7 @@ use interview_talent::{
 };
 
 const SYNTHETIC_RESUME: &[u8] = include_bytes!("fixtures/resume-synthetic.pdf");
+const SYNTHETIC_WORD_RESUME: &[u8] = include_bytes!("fixtures/resume-synthetic.docx");
 
 const SYNTHETIC_JD: &str = "\
 【急招】高级后端开发工程师（Rust 方向） 杭州·滨江 25-40K·14薪
@@ -105,6 +106,52 @@ async fn reads_a_resume_and_writes_a_profile() {
         pricing.cost_cny(&reading.usage),
         profile_usage,
         pricing.cost_cny(&profile_usage),
+    );
+}
+
+#[tokio::test]
+#[ignore = "要连真 DeepSeek，会产生费用"]
+async fn reads_a_word_resume() {
+    let model = DeepSeekClient::from_env().expect("需要 DEEPSEEK_API_KEY");
+    let settings = TalentAiSettings::from_env().expect("环境变量格式正确");
+
+    let content = ResumeContent::load(
+        SYNTHETIC_WORD_RESUME,
+        Some("简历.docx"),
+        &PdfRenderer::default(),
+    )
+    .await
+    .expect("取得出文字");
+    let started = std::time::Instant::now();
+    let reading = read_resume(&model, &content, &settings)
+        .await
+        .expect("读得出来");
+    println!("—— 全文 ——\n{}\n", reading.text);
+    println!(
+        "—— 结构化 ——\n{}\n",
+        serde_json::to_string_pretty(&reading.parsed).expect("能序列化")
+    );
+
+    // 联系方式在页眉里，学历在表格里，都要认得出
+    let parsed = &reading.parsed;
+    assert_eq!(parsed.name.as_deref(), Some("林知夏"));
+    assert_eq!(parsed.phone.as_deref(), Some("13800001234"));
+    assert_eq!(parsed.email.as_deref(), Some("linzhixia@example.com"));
+    assert_eq!(parsed.location.as_deref(), Some("杭州"));
+    assert_eq!(parsed.highest_degree.as_deref(), Some("本科"));
+    assert_eq!(parsed.education.len(), 1);
+    assert_eq!(parsed.education[0].school.as_deref(), Some("浙江示例大学"));
+    assert_eq!(parsed.work_experience.len(), 2);
+    assert_eq!(parsed.work_experience[0].start.as_deref(), Some("2021-07"));
+    assert!(parsed.work_experience[0].is_current);
+    assert_eq!(parsed.projects.len(), 2);
+    assert!(parsed.skills.iter().any(|skill| skill == "Rust"));
+
+    println!(
+        "读 Word 简历 {:.1} 秒，{:?}，约 {:.4} 元",
+        started.elapsed().as_secs_f32(),
+        reading.usage,
+        Pricing::FLASH_PEAK.cost_cny(&reading.usage),
     );
 }
 

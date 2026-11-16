@@ -13,7 +13,7 @@ use futures_util::{Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
 
 use crate::error::LlmError;
-use crate::model::{ChatModel, ChatStream};
+use crate::model::{ChatModel, ChatStream, collect};
 use crate::redact::without_values;
 use crate::sse::{SseDecoder, SseLine};
 use crate::types::{
@@ -189,6 +189,47 @@ impl ChatModel for DeepSeekClient {
         };
         Ok(Box::pin(stream::unfold(state, StreamState::next_event)))
     }
+
+    /// 等全部输出完再返回。响应读到一半连接断了或者没了动静，整个请求重发，次数和退避同
+    /// [`DeepSeekClient::send`]：一个字都还没交给调用方，重来一遍没有副作用。
+    ///
+    /// [`ChatModel::chat_stream`] 不这样做：前半截已经交出去了（实时对话里可能已经说出口），
+    /// 断了只能把错误报给调用方。
+    async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, LlmError> {
+        let mut resent = 0;
+        loop {
+            // 拿响应头这一步的失败 send 已经重试过，这里不再叠一层
+            let events = self.chat_stream(request.clone()).await?;
+            let error = match collect(events).await {
+                Ok(response) => return Ok(response),
+                Err(error) => error,
+            };
+            if !error.is_retryable() {
+                return Err(error);
+            }
+            if resent >= self.config.max_retries {
+                return Err(interrupted(error, resent));
+            }
+            let delay = backoff_delay(self.config.retry_base_delay, resent);
+            tracing::warn!(%error, resent, ?delay, "大模型的响应读到一半断了，稍后整个重发");
+            tokio::time::sleep(delay).await;
+            resent += 1;
+        }
+    }
+}
+
+/// 重发过还是读不完：把试了几次写进错误里，调用方看得出不是偶然断了一下。
+fn interrupted(error: LlmError, resent: u32) -> LlmError {
+    if resent == 0 {
+        return error;
+    }
+    let cause = match error {
+        LlmError::Transport(message) => message,
+        other => other.to_string(),
+    };
+    LlmError::Transport(format!(
+        "响应读到一半就断了，重发 {resent} 次还是这样：{cause}"
+    ))
 }
 
 type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>>;
@@ -224,7 +265,7 @@ impl StreamState {
                     if let Some(line) = self.decoder.finish() {
                         self.handle_line(line);
                     }
-                    self.complete();
+                    self.complete(false);
                 }
             }
         }
@@ -235,7 +276,7 @@ impl StreamState {
             return;
         }
         match line {
-            SseLine::Done => self.complete(),
+            SseLine::Done => self.complete(true),
             SseLine::Data(data) => match serde_json::from_str::<WireChunk>(&data) {
                 Ok(chunk) => {
                     for event in self.assembler.absorb(chunk) {
@@ -251,14 +292,15 @@ impl StreamState {
         }
     }
 
-    fn complete(&mut self) {
+    /// 流到头了。`saw_done` 是有没有收到结束标记：没收到又没有结束原因，就是连接中途断了。
+    fn complete(&mut self, saw_done: bool) {
         if self.finished {
             return;
         }
         self.finished = true;
         let assembler = std::mem::take(&mut self.assembler);
         self.pending
-            .push_back(assembler.finish().map(StreamEvent::Done));
+            .push_back(assembler.finish(saw_done).map(StreamEvent::Done));
     }
 
     fn fail(&mut self, error: LlmError) {
@@ -339,13 +381,19 @@ impl Assembler {
         }
     }
 
-    fn finish(self) -> Result<ChatResponse, LlmError> {
+    fn finish(self, saw_done: bool) -> Result<ChatResponse, LlmError> {
+        if self.finish_reason.is_none() && !saw_done {
+            // 归到网络错误里：重发一次多半就好了
+            return Err(LlmError::Transport(
+                "响应没有正常结束，连接中途断开".to_owned(),
+            ));
+        }
         if !self.saw_choice {
             return Err(LlmError::Decode("响应里没有任何内容".to_owned()));
         }
         let finish_reason = self
             .finish_reason
-            .ok_or_else(|| LlmError::Decode("响应没有正常结束，连接可能中途断开".to_owned()))?;
+            .ok_or_else(|| LlmError::Decode("响应结束了，但没有给结束原因".to_owned()))?;
         Ok(ChatResponse {
             content: self.content,
             reasoning_content: Some(self.reasoning).filter(|text| !text.is_empty()),

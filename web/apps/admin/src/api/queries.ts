@@ -693,6 +693,15 @@ export function useRecordings(id: string, enabled = true) {
   });
 }
 
+/** 出报告前检查录像画面的结果。还没检查过时 checked 是 false、items 是空的 */
+export function useFrameEvents(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["frame-events", id],
+    queryFn: () => unwrap(api.GET("/api/v1/interviews/{id}/frame-events", at(id))),
+    enabled,
+  });
+}
+
 /** 一场面试的全部过程事件，按发生的先后排。接口是分页的，这里翻到底 */
 export function useEvents(id: string, enabled = true) {
   return useQuery({

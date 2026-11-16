@@ -27,6 +27,7 @@ import {
   useDecide,
   useDeleteInterview,
   useEvents,
+  useFrameEvents,
   useInterview,
   useInvites,
   usePlan,
@@ -84,6 +85,7 @@ import {
   synthStatusTone,
   thinkingLabel,
 } from "../lib/format";
+import { framesByEvent, withFrameEvents } from "../lib/frames";
 import { updateOutcome } from "../lib/replan";
 
 type Tab = "overview" | "questions" | "invites" | "replay" | "report";
@@ -1226,6 +1228,12 @@ function ReplayTab({
   const transcript = useTranscript(interview.id, started);
   const recordings = useRecordings(interview.id, started);
   const events = useEvents(interview.id, started);
+  // 画面检查的结果取不到不耽误回看，时间轴上少几条而已
+  const frameEvents = useFrameEvents(interview.id, started);
+  const timeline = useMemo(
+    () => withFrameEvents(interview.id, events.data?.items ?? [], frameEvents.data?.items ?? []),
+    [interview.id, events.data, frameEvents.data],
+  );
   if (!started)
     return <Banner tone="info">面试还没开始，结束后这里可以看录像、听录音、读逐字稿。</Banner>;
   if (transcript.data && recordings.data && events.data) {
@@ -1237,7 +1245,7 @@ function ReplayTab({
         <ReplayPlayer
           turns={transcript.data.items}
           recordings={recordings.data.items}
-          events={events.data.items}
+          events={timeline}
           candidateName={interview.candidate.name}
           elapsedMs={elapsedMs(interview)}
           seekTo={seekTo}
@@ -1258,6 +1266,12 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
   const [picked, setPicked] = useState<number | undefined>(undefined);
   const hasDone = latest?.status === "done" || done.length > 0;
   const report = useReport(interview.id, hasDone, picked);
+  // 证据里引用的录像画面。取不到不耽误看报告，只是证据旁边没有图
+  const frameEvents = useFrameEvents(interview.id, hasDone);
+  const frames = useMemo(
+    () => framesByEvent(interview.id, frameEvents.data?.items ?? []),
+    [interview.id, frameEvents.data],
+  );
   const regenerate = useRegenerateReport(interview.id);
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
@@ -1276,7 +1290,10 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
   // biome-ignore lint/correctness/useExhaustiveDependencies: 只在最新一版的状态变的时候重新取
   useEffect(() => {
     void versions.refetch();
-    if (hasDone) void report.refetch();
+    if (hasDone) {
+      void report.refetch();
+      void frameEvents.refetch();
+    }
   }, [latest?.id, latest?.status]);
 
   if (!ended(interview)) return <Banner tone="info">面试结束后会自动生成分析报告。</Banner>;
@@ -1331,6 +1348,7 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
                 report={data.content}
                 onSeek={onSeek}
                 onRegenerate={busy ? undefined : () => setConfirming(true)}
+                frames={frames}
               />
             ) : null
           }

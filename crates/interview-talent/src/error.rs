@@ -13,8 +13,12 @@ pub enum TalentError {
     EmptyFile,
 
     /// 文件类型不在支持范围里。
-    #[error("不支持这种文件：{0}。可以上传 PDF、图片（PNG、JPG、WebP）或纯文本")]
+    #[error("不支持这种文件：{0}。可以上传 PDF、Word（.docx）、图片（PNG、JPG、WebP）或纯文本")]
     UnsupportedFile(String),
+
+    /// Word 文档打不开，或者里面没有文字。
+    #[error("这份 Word 文档读不了：{0}")]
+    Docx(String),
 
     /// 把 PDF 渲染成图片时出错。
     #[error("PDF 打不开：{0}")]

@@ -203,7 +203,7 @@ async fn get_interview(
 /// 只能在发链接之前改。换了简历，或者改的配置写进了题目里（时长、面试官、考察要求等），
 /// 已经出好的题目会作废、面试回到草稿，要重新准备，`replan_reasons` 里是导致重新出题的字段。
 /// 改的配置不影响题目（早停、思考模式、单题最长时间等）时题目和语音都保留，状态不变。
-/// 只换音色的话题目保留，重新准备时只重新合成语音。
+/// 只换音色的话题目保留，重新准备时只重新合成语音。`voice_id` 带 `null` 是改回用默认音色，和换音色一样处理。
 #[utoipa::path(
     patch,
     path = "/api/v1/interviews/{id}",
@@ -232,8 +232,9 @@ async fn update_interview(
     if let Some(resume_id) = request.resume_id {
         check_resume(&deps, resume_id, row.candidate_id).await?;
     }
-    let voice_id = request.voice_id.or(row.voice_id);
-    if let Some(voice_id) = request.voice_id {
+    // 没带 voice_id 是不改，带 null 是改回默认音色
+    let voice_id = request.voice_id.unwrap_or(row.voice_id);
+    if let Some(Some(voice_id)) = request.voice_id {
         check_voice(&deps, voice_id).await?;
     }
 

@@ -512,7 +512,7 @@ async fn falls_back_to_the_parsed_resume_when_the_file_is_missing_or_unreadable(
         }]}),
     )
     .await;
-    // c-2：原始文件是 Word，我们读不了
+    // c-2：原始文件是一份坏掉的 Word 文档，我们读不了
     mount_get(&server, "/api/v1/candidates/c-2", candidate("c-2")).await;
     mount_resume_file(&server, "c-2", b"PK\x03\x04 word").await;
     let model = Arc::new(

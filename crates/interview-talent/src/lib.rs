@@ -17,6 +17,7 @@
 
 mod deps;
 pub mod document;
+mod docx;
 mod error;
 pub mod http;
 mod input;

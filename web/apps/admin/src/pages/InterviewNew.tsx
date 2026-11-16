@@ -5,13 +5,14 @@ import {
   Card,
   CardBody,
   CardHeader,
+  Chip,
   Field,
   PageHeader,
   Select,
   Steps,
   useToast,
 } from "@ai-interview/ui";
-import { Check } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { errorMessage, fieldErrors } from "../api/http";
@@ -26,16 +27,18 @@ import type { Candidate, InterviewConfig, Position } from "../api/types";
 import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import { QueryView, SearchInput } from "../components/common";
 import { VoicePicker } from "../components/VoicePicker";
+import { scheduleAll } from "../lib/schedule";
 
-function PickCandidate({
+function PickCandidates({
   selected,
-  onSelect,
+  onToggle,
 }: {
-  selected: Candidate | null;
-  onSelect: (c: Candidate) => void;
+  selected: Candidate[];
+  onToggle: (c: Candidate) => void;
 }) {
   const [q, setQ] = useState("");
   const candidates = useCandidates({ q, page_size: 50 });
+  const isSelected = (c: Candidate) => selected.some((s) => s.id === c.id);
   return (
     <Card>
       <CardHeader
@@ -50,6 +53,23 @@ function PickCandidate({
         <div className="adm-toolbar">
           <SearchInput value={q} placeholder="搜姓名、公司或职位" onChange={setQ} />
         </div>
+        {selected.length === 0 ? (
+          <p className="oil-muted adm-picked">可以选几位，每人安排一场。</p>
+        ) : (
+          // 换了搜索词，选过的人可能不在下面的列表里了，在这里留着
+          <ul className="adm-picked" aria-label={`已选 ${selected.length} 位`}>
+            {selected.map((c) => (
+              <li key={c.id}>
+                <Chip>
+                  {c.name}
+                  <button type="button" aria-label={`不选${c.name}`} onClick={() => onToggle(c)}>
+                    <X aria-hidden="true" size={12} />
+                  </button>
+                </Chip>
+              </li>
+            ))}
+          </ul>
+        )}
         <QueryView query={candidates}>
           {({ items }) =>
             items.length === 0 ? (
@@ -61,8 +81,8 @@ function PickCandidate({
                     key={c.id}
                     type="button"
                     className="adm-pick"
-                    aria-pressed={selected?.id === c.id}
-                    onClick={() => onSelect(c)}
+                    aria-pressed={isSelected(c)}
+                    onClick={() => onToggle(c)}
                   >
                     <Avatar name={c.name} />
                     <span className="oil-grow">
@@ -72,7 +92,7 @@ function PickCandidate({
                           "还没有简历"}
                       </span>
                     </span>
-                    {selected?.id === c.id && <Check aria-hidden="true" size={18} />}
+                    {isSelected(c) && <Check aria-hidden="true" size={18} />}
                   </button>
                 ))}
               </div>
@@ -150,7 +170,11 @@ export function InterviewNewPage() {
   const presetPositions = usePositions({ page_size: 100 });
 
   const [step, setStep] = useState(0);
-  const [candidate, setCandidate] = useState<Candidate | null>(null);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  // 正在一位一位安排时的进度，和没安排上的人
+  const [progress, setProgress] = useState<{ finished: number; total: number } | null>(null);
+  const [failures, setFailures] = useState<{ person: Candidate; error: unknown }[]>([]);
+  const busy = progress !== null;
   const [position, setPosition] = useState<Position | null>(null);
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [config, setConfig] = useState<InterviewConfig | null>(null);
@@ -159,10 +183,13 @@ export function InterviewNewPage() {
   // 从候选人页或岗位页点过来时，先替他选好
   const candidateParam = params.get("candidate");
   const positionParam = params.get("position");
+  const [presetDone, setPresetDone] = useState(false);
   useEffect(() => {
-    if (candidateParam && !candidate)
-      setCandidate(presetCandidates.data?.items.find((c) => c.id === candidateParam) ?? null);
-  }, [candidateParam, candidate, presetCandidates.data]);
+    if (!candidateParam || presetDone || !presetCandidates.data) return;
+    const preset = presetCandidates.data.items.find((c) => c.id === candidateParam);
+    if (preset) setCandidates([preset]);
+    setPresetDone(true);
+  }, [candidateParam, presetDone, presetCandidates.data]);
   useEffect(() => {
     if (positionParam && !position)
       setPosition(presetPositions.data?.items.find((p) => p.id === positionParam) ?? null);
@@ -180,27 +207,46 @@ export function InterviewNewPage() {
     if (base) setConfig(structuredClone(base));
   }
 
-  function submit(prepare: boolean) {
-    if (!candidate || !position || !config) return;
-    create.mutate(
-      {
-        input: {
-          candidate_id: candidate.id,
-          position_id: position.id,
-          template_id: templateId,
-          voice_id: voiceId,
-          config: cleanConfig(config),
-        },
-        prepare,
-      },
-      {
-        onSuccess: (interview) => {
-          toast(prepare ? "开始准备题目和语音" : "已存为草稿");
-          navigate(`/interviews/${interview.id}`);
-        },
-      },
+  function toggleCandidate(c: Candidate) {
+    setCandidates((now) =>
+      now.some((s) => s.id === c.id) ? now.filter((s) => s.id !== c.id) : [...now, c],
     );
   }
+
+  async function submit(prepare: boolean) {
+    if (candidates.length === 0 || !position || !config || busy) return;
+    const shared = {
+      position_id: position.id,
+      template_id: templateId,
+      voice_id: voiceId,
+      config: cleanConfig(config),
+    };
+    setFailures([]);
+    setProgress({ finished: 0, total: candidates.length });
+    const outcome = await scheduleAll(
+      candidates,
+      (c) => create.mutateAsync({ input: { ...shared, candidate_id: c.id }, prepare }),
+      (finished, total) => setProgress({ finished, total }),
+    );
+    setProgress(null);
+    const [only] = outcome.done;
+    if (outcome.failed.length > 0) {
+      // 安排好的不用再动，留下没成的，改好后再点一次只安排这几位
+      setFailures(outcome.failed);
+      setCandidates(outcome.failed.map((f) => f.person));
+      if (outcome.done.length > 0) toast(`${outcome.done.length} 场已经安排好了`);
+    } else if (outcome.done.length === 1 && only) {
+      toast(prepare ? "开始准备题目和语音" : "已存为草稿");
+      navigate(`/interviews/${only.result.id}`);
+    } else {
+      toast(
+        `安排了 ${outcome.done.length} 场面试${prepare ? "，正在准备题目和语音" : "，都存成了草稿"}`,
+      );
+      navigate(`/positions/${position.id}`);
+    }
+  }
+
+  const noResume = candidates.filter((c) => !c.profile);
 
   return (
     <>
@@ -214,30 +260,39 @@ export function InterviewNewPage() {
       {step === 0 && (
         <>
           <div className="adm-split adm-split--even adm-section">
-            <PickCandidate selected={candidate} onSelect={setCandidate} />
+            <PickCandidates selected={candidates} onToggle={toggleCandidate} />
             <PickPosition selected={position} onSelect={setPosition} />
           </div>
           <div className="oil-row adm-section" style={{ justifyContent: "flex-end" }}>
             <Button variant="secondary" onClick={() => navigate(-1)}>
               取消
             </Button>
-            <Button disabled={!candidate || !position} onClick={() => setStep(1)}>
+            <Button disabled={candidates.length === 0 || !position} onClick={() => setStep(1)}>
               下一步
             </Button>
           </div>
         </>
       )}
 
-      {step === 1 && candidate && position && (
+      {step === 1 && candidates.length > 0 && position && (
         <div
           className="adm-section oil-stack"
           style={{ "--oil-gap": "var(--oil-space-5)" } as React.CSSProperties}
         >
-          <Banner tone="info" title={`${candidate.name} 面试 ${position.title}`}>
-            {candidate.profile
-              ? "面试官会结合这份简历和岗位要求出题。"
-              : "这位候选人还没有解析好的简历，面试官只能按岗位要求出题。"}
-          </Banner>
+          {candidates.length === 1 ? (
+            <Banner tone="info" title={`${candidates[0]?.name} 面试 ${position.title}`}>
+              {noResume.length === 0
+                ? "面试官会结合这份简历和岗位要求出题。"
+                : "这位候选人还没有解析好的简历，面试官只能按岗位要求出题。"}
+            </Banner>
+          ) : (
+            <Banner tone="info" title={`${candidates.length} 位候选人面试 ${position.title}`}>
+              {candidates.map((c) => c.name).join("、")}
+              。每人一场，用同一份设置，题目按各自的简历出。
+              {noResume.length > 0 &&
+                `${noResume.map((c) => c.name).join("、")}还没有解析好的简历，只能按岗位要求出题。`}
+            </Banner>
+          )}
           <Card>
             <CardBody className="adm-form-grid">
               <Field label="从哪份设置开始" hint="选一个模板，下面的内容可以再改，只对这一场生效。">
@@ -260,7 +315,7 @@ export function InterviewNewPage() {
               <VoicePicker
                 value={voiceId}
                 onChange={setVoiceId}
-                disabled={create.isPending}
+                disabled={busy}
                 error={fieldErrors(create.error).voice_id}
               />
             </CardBody>
@@ -269,24 +324,42 @@ export function InterviewNewPage() {
             <ConfigForm
               value={config}
               onChange={setConfig}
-              disabled={create.isPending}
+              disabled={busy}
               errors={fieldErrors(create.error)}
             />
           )}
-          {create.error && <Banner tone="danger">{errorMessage(create.error)}</Banner>}
+          {failures.length > 0 && (
+            <Banner
+              tone="danger"
+              title={failures.length === 1 ? "没有安排上" : `有 ${failures.length} 位没有安排上`}
+            >
+              <ul className="adm-failures">
+                {failures.map((f) => (
+                  <li key={f.person.id}>
+                    {f.person.name}：{errorMessage(f.error)}
+                  </li>
+                ))}
+              </ul>
+              {failures.length > 1 && "已经安排好的不受影响，改好后再点一次，只会安排这几位。"}
+            </Banner>
+          )}
           <div className="oil-row oil-row--wrap" style={{ justifyContent: "flex-end" }}>
-            <Button variant="ghost" onClick={() => setStep(0)} disabled={create.isPending}>
+            {progress && progress.total > 1 && (
+              <span className="oil-muted" role="status">
+                正在安排第 {Math.min(progress.finished + 1, progress.total)} 位，共 {progress.total}{" "}
+                位
+              </span>
+            )}
+            <Button variant="ghost" onClick={() => setStep(0)} disabled={busy}>
               上一步
             </Button>
-            <Button
-              variant="secondary"
-              onClick={() => submit(false)}
-              disabled={create.isPending || !config}
-            >
+            <Button variant="secondary" onClick={() => submit(false)} disabled={busy || !config}>
               先存草稿
             </Button>
-            <Button onClick={() => submit(true)} loading={create.isPending} disabled={!config}>
-              生成题目和语音
+            <Button onClick={() => submit(true)} loading={busy} disabled={!config}>
+              {candidates.length > 1
+                ? `给 ${candidates.length} 位都生成题目和语音`
+                : "生成题目和语音"}
             </Button>
           </div>
         </div>

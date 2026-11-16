@@ -28,7 +28,7 @@ pub(crate) const MAX_UPLOAD_BODY_BYTES: usize = MAX_RESUME_BYTES + 1024 * 1024;
 #[derive(ToSchema)]
 #[allow(dead_code, reason = "只用来生成接口文档")]
 pub struct ResumeUploadForm {
-    /// 简历文件：PDF、图片（PNG、JPG、WebP）或纯文本，最大 20 MB
+    /// 简历文件：PDF、Word（.docx）、图片（PNG、JPG、WebP）或纯文本，最大 20 MB
     #[schema(value_type = Option<String>, format = Binary)]
     file: Option<Vec<u8>>,
     /// 直接粘贴的简历文字。没有文件时用

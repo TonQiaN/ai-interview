@@ -616,6 +616,69 @@ async fn changing_config_drops_the_plan_but_changing_voice_keeps_it(pool: PgPool
     assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
+/// 选过音色的面试能改回「用默认音色」：`voice_id` 带 null 是清空，不带是不改。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_chosen_voice_can_be_cleared_back_to_the_default(pool: PgPool) {
+    let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;
+    let id = h.create(config()).await;
+    let voice_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO voices (name, engine, kind, instruction) \
+         VALUES ('温和女声', 'breeze2', 'designed', '温和的女声，语速偏慢') RETURNING id",
+    )
+    .fetch_one(&h.ctx.db)
+    .await
+    .unwrap();
+    let response = h
+        .patch(
+            &format!("/api/v1/interviews/{id}"),
+            json!({ "voice_id": voice_id }),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    assert_eq!(response.json()["voice_id"], json!(voice_id));
+    assert_eq!(h.prepare(&id).await["status"], "ready");
+    let total = h.utterances(&id).await.len();
+
+    // 不带 voice_id：音色不动，语音也不用重做
+    let response = h
+        .patch(&format!("/api/v1/interviews/{id}"), json!({}))
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    assert_eq!(response.json()["voice_id"], json!(voice_id));
+    assert_eq!(response.json()["status"], "ready");
+
+    // 带 null：改回默认音色。等于换了声音，题目留着，语音重新合成
+    let response = h
+        .patch(
+            &format!("/api/v1/interviews/{id}"),
+            json!({ "voice_id": null }),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let detail = response.json();
+    assert_eq!(detail["voice_id"], json!(null));
+    assert_eq!(detail["status"], "draft");
+    assert_eq!(detail["has_plan"], true);
+    assert_eq!(detail["replan_reasons"], json!([]));
+    assert_eq!(detail["synth"]["done"], 0);
+    assert_eq!(detail["synth"]["total"], total);
+
+    let again = h.with(None, FakeBackend::new());
+    let detail = again.prepare(&id).await;
+    assert_eq!(detail["status"], "ready", "{detail}");
+    assert_eq!(again.tts.calls(), total);
+
+    // 本来就是默认音色，再带一次 null：什么都没变
+    let response = h
+        .patch(
+            &format!("/api/v1/interviews/{id}"),
+            json!({ "voice_id": null }),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    assert_eq!(response.json()["status"], "ready");
+}
+
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn config_changes_that_leave_the_questions_alone_keep_the_plan(pool: PgPool) {
     let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;

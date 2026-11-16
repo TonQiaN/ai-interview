@@ -131,7 +131,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 几条前端要知道的规则：
 
 - 只有 `draft`、`prepare_failed`、`ready` 三个状态能改配置、改题、点准备，其他状态返回 409，`code` 是 `interview_not_editable`。
-- `PATCH` 换了简历，或者改的配置写进了题目里（时长、轮次、面试官、考察要求、必问题等），出好的题目作废，状态回到 `draft`。改的配置不影响题目（早停、思考模式、最短回答时间、单题最长时间、把追问上限调小等）时题目和语音都留着，状态不变；计划会跟着新配置收拾一下（去掉多出来的追问、压短预期回答时间），文字不变。只换音色的话题目保留，状态回到 `draft`，再点准备只重新合成语音。哪些配置算哪一类见 `crates/interview-engine/README.md` 的「改了配置，题目还能不能用」。
+- `PATCH` 换了简历，或者改的配置写进了题目里（时长、轮次、面试官、考察要求、必问题等），出好的题目作废，状态回到 `draft`。改的配置不影响题目（早停、思考模式、最短回答时间、单题最长时间、把追问上限调小等）时题目和语音都留着，状态不变；计划会跟着新配置收拾一下（去掉多出来的追问、压短预期回答时间），文字不变。只换音色的话题目保留，状态回到 `draft`，再点准备只重新合成语音。`voice_id` 不带是不改，带 `null` 是改回用默认音色（和换音色一样处理）。哪些配置算哪一类见 `crates/interview-engine/README.md` 的「改了配置，题目还能不能用」。
 - `PATCH` 返回面试详情，外加 `replan_reasons`：这次改动让题目作废了的话，是哪些字段导致的（配置里的路径，比如 `interviewer.name`、`target_duration_minutes`；换简历是 `resume_id`）。题目还能用、或者本来就没出题时是空数组。
 - `POST .../prepare` 返回 202 和面试详情（状态 `preparing`），之后轮询详情。失败是 `prepare_failed`，原因在 `prepare_error`；语音合成失败时题目会保留，再点一次只补失败的那几句。请求体可以不传；传 `{"regenerate_plan": true}` 会重新出题。没配大模型又需要出题时返回 503。
 - `GET .../plan` 在还没出题时返回 404，`code` 是 `plan_not_ready`。`PUT .../plan` 要传完整的计划，校验不过返回 422，`details` 按位置（比如 `questions[1].text`）列出原因；保存后状态先变 `preparing`，文字变了的那几句重新合成完回到 `ready`。
@@ -152,7 +152,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `GET /api/v1/positions`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 岗位 |
 | `POST /api/v1/positions/draft` | 粘贴一段岗位描述，让大模型整理成岗位草稿（不保存，给新建岗位的表单预填） |
 | `GET /api/v1/candidates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 候选人 |
-| `GET /api/v1/candidates/{id}/resumes`、`POST /api/v1/candidates/{id}/resumes` | 简历列表、上传 |
+| `GET /api/v1/candidates/{id}/resumes`、`POST /api/v1/candidates/{id}/resumes` | 简历列表、上传。能收 PDF、Word（.docx）、图片（PNG、JPG、WebP）和纯文本，最大 20 MB；老格式的 Word（.doc）不收，返回 422 `unsupported_file`；Word 文档坏了或者里面没有文字，返回 422 `unreadable_file` |
 | `GET /api/v1/resumes/{id}`、`GET /api/v1/resumes/{id}/file`、`POST /api/v1/resumes/{id}/parse`、`DELETE /api/v1/resumes/{id}` | 简历详情、原件、重新解析、删除（连原件一起删）。`parse_status` 是 `failed` 时原因在 `parse_error`；是 `done` 但 `parse_warning` 有值时，要把这句话显示给 HR（比如 PDF 页数太多，只读了前 8 页） |
 | `POST /api/v1/candidates/import` | 直接传一份简历，自动建候选人 |
 | `POST /api/v1/candidates/{id}/profile/regenerate` | 重新生成画像 |
@@ -165,7 +165,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 - 列表和详情是实时去 RAAS 查的，`{ref}` 是 RAAS 里的编号（列表里的 `external_ref`）。已经导入过的带 `imported_position_id` 或 `imported_candidate_id`。候选人的列表和详情不带手机和邮箱，导入以后在我们这边看。
 - 导入是同步的，请求体 `{"refs": [...], "refresh": false}`，一次最多 20 条。每条各自成功或失败，返回 `items[]`，看 `outcome`：`created`、`already_imported`、`refreshed`、`restored`（原来归档了，这次恢复）、`failed`（原因在 `message`）。
 - 已经导入过的默认不动。`refresh` 为真时：岗位用 RAAS 的最新内容覆盖（用工形式 RAAS 里没有，留着我们这边填的）；候选人的基本信息只补空的，RAAS 里有新简历就导进来设成主简历。
-- 候选人的简历优先取 RAAS 里的原始文件，没有或者读不了（比如 Word）就用 RAAS 的解析结果拼一份文字版，都交给 `resume.parse` 任务。`items[].resume` 是 `queued`、`unchanged`、`none`（RAAS 里没有简历）或 `failed`（取简历时 RAAS 出错，人已经建好，稍后带 `refresh` 再导）。
+- 候选人的简历优先取 RAAS 里的原始文件，没有或者读不了（比如老格式的 Word .doc）就用 RAAS 的解析结果拼一份文字版，都交给 `resume.parse` 任务。`items[].resume` 是 `queued`、`unchanged`、`none`（RAAS 里没有简历）或 `failed`（取简历时 RAAS 出错，人已经建好，稍后带 `refresh` 再导）。
 - RAAS 没配置或登录不上是 503（`raas_unavailable`），RAAS 暂时访问不了是 502（`raas_error`）。
 
 ### ④ 语音（interview-tts、interview-stt）
