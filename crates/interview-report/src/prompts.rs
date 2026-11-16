@@ -7,7 +7,7 @@ use crate::record::Segment;
 use crate::transcript::{QuestionGroup, segment_alias};
 
 /// 提示词版本。
-pub const PROMPT_VERSION: u32 = 9;
+pub const PROMPT_VERSION: u32 = 10;
 
 /// 所有步骤共用的系统提示。
 pub(crate) const SYSTEM: &str = r#"你是一位资深的招聘评估专家，正在帮企业的 HR 分析一场 AI 面试的记录。
@@ -180,7 +180,7 @@ pub(crate) const INTEGRITY_TASK: &str = r#"# 任务：找出作弊和诚信方�
 - 候选人能力弱、答不上来、中途离开：这是表现问题，不是诚信问题。
 - 画面里零星的情况：有人从身后路过、候选人起身离开了几秒、手机只是放在桌上。单独出现时在 summary 里交代一句就够了；持续得久、反复出现，或者正好和某道题的作答对得上，才列为迹象。
 - 面试页上的正常操作：重听题目（question_replayed）、在静音倒计时里表示还没说完（answer_continued）、设备检测（device_check）、面试中刷新后重新打开页面、设备个数的变化。
-- 网络和设备的状况：录像传不动又恢复（upload_stalled）、录像传完（upload_finished）、没拿到屏幕常亮（screen_wake_lock）、上行网速慢（device_report）。这些不是候选人的行为，不列进 signals，也不能用来加重别的迹象。网络差的时候断网、录制中断、面试官没听清请候选人再说一遍，都更可能是网络的原因。
+- 网络和设备的状况：录像传不动又恢复（upload_stalled）、录像传完（upload_finished）、没拿到屏幕常亮（screen_wake_lock）、上行网速慢（device_report）、浏览器播不了压缩过的面试官语音而改取了没压缩的（audio_format_fallback）。这些不是候选人的行为，不列进 signals，也不能用来加重别的迹象。网络差的时候断网、录制中断、面试官没听清请候选人再说一遍，都更可能是网络的原因。
 - 中途换到另一个页面接着面（page_taken_over）：手机快没电了换电脑、网络不好换一台设备，都是正常的事。单独出现不列进 signals，不提高 risk_level。但是这份分析不比对人脸，换页面前后是不是同一个人看不出来，所以只要有这个事件，就在 summary 里写明是在什么时间、哪道题前后换的，请 HR 看一眼这个时间前后的录像，确认是同一个人。只有换了之后回答的水平、说话的习惯明显和之前不一样，或者换页面正好和别的迹象对得上，才列为 identity 迹象，reliability 填 low。
 - 画面的码率降过的那一段（interview_started 的 video_reduced 为 true）里，只出现一两帧的 phone_visible 和 face_count_changed：这一段录像的画面是糊的，模型看图容易出错，会把遥控器、眼镜盒这类小东西看成手机，把暗的画面说成看不清，把背景里的东西看成人。单独出现不列进 signals，不提高 risk_level，在 summary 里写明是什么时间、看到了什么，并说明这一段画面的码率降过、看图容易出错，请 HR 回看。连续三帧以上都是这样，或者正好和别的迹象对得上（那道题的回答像照着念、开口前等了很久、同时有切出页面或第三个人的声音），照常列为迹象，reliability 填 low。
 没有迹象就如实说没有，risk_level 填 none，signals 输出 []，不要凑。
