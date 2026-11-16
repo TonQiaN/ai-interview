@@ -280,6 +280,8 @@ function Form({
   const system = useSystemStatus();
   const blockers = realtimeBlockers(system.data?.components);
   const autoCount = value.question_count === null;
+  // 实时对话里候选人说没说完由面试官自己判断，追问也是现场问的，下面几项的说明要跟着变
+  const live = value.mode === "conversational";
   const competenciesFull = value.competencies.length >= limits.max_list_items;
 
   return (
@@ -421,7 +423,11 @@ function Form({
       >
         <Field
           label="停顿多久算答完"
-          hint="候选人说完之后安静这么久，面试官就接着往下问。太短容易打断思考，太长会显得拖沓。"
+          hint={
+            live
+              ? "实时对话里面试官自己判断候选人说完没有，停一两秒就会接话，不按这里的时长等。这一项只在按逐题问答进行时用，比如语音识别用不了的时候。"
+              : "候选人说完之后安静这么久，面试官就接着往下问。太短容易打断思考，太长会显得拖沓。"
+          }
           error={errors["answer.silence_sec"]}
         >
           <NumberChoice
@@ -449,7 +455,11 @@ function Form({
         </Field>
         <Field
           label="开口后至少等多久"
-          hint="开口之后过了这么久，停顿才算答完。防止刚说两个字停一下就被切走。"
+          hint={
+            live
+              ? "实时对话里用不到。这一项只在按逐题问答进行时用。"
+              : "开口之后过了这么久，停顿才算答完。防止刚说两个字停一下就被切走。"
+          }
           error={errors["answer.min_sec"]}
         >
           <Slider
@@ -463,7 +473,11 @@ function Form({
         </Field>
         <Field
           label="追问"
-          hint="追问也是提前写好并合成好的，面试官听完回答后决定问不问。"
+          hint={
+            live
+              ? "实时对话里追问是面试官听完回答现场问的，提前写好的追问只当方向。现场问得更贴着回答，每道题最多能问到这里的两倍，时间不够就不问。"
+              : "追问也是提前写好并合成好的，面试官听完回答后决定问不问。"
+          }
           error={errors["follow_ups.max_per_question"]}
         >
           <div className="oil-row oil-row--wrap">
@@ -528,7 +542,11 @@ function Form({
           </div>
         </Field>
         <Switch
-          label="最后请候选人提问（记下来转给你，不当场回答）"
+          label={
+            live
+              ? "最后请候选人提问（公司介绍里写了的会简单回答，其余记下来转给你）"
+              : "最后请候选人提问（记下来转给你，不当场回答）"
+          }
           checked={value.candidate_questions === "collect"}
           onChange={(e) => set({ candidate_questions: e.target.checked ? "collect" : "skip" })}
         />
@@ -766,10 +784,15 @@ function Form({
 /** 一句话说清一份设置，用在列表和详情里 */
 export function configSummary(config: InterviewConfig): string {
   const count = config.question_count === null ? "题数自动" : `${config.question_count} 题`;
+  const head = `${config.target_duration_minutes} 分钟，${count}，${modeLabel[config.mode]}`;
+  // 实时对话里停顿多久由面试官自己判断，追问是现场问的，设置里的秒数和次数说出来反而让人误会
+  if (config.mode === "conversational") {
+    return `${head}，${config.follow_ups.enabled ? "现场追问" : "不追问"}`;
+  }
   const followUps = config.follow_ups.enabled
     ? `每题最多追问 ${config.follow_ups.max_per_question} 次`
     : "不追问";
-  return `${config.target_duration_minutes} 分钟，${count}，停顿 ${config.answer.silence_sec} 秒，${followUps}`;
+  return `${head}，停顿 ${config.answer.silence_sec} 秒，${followUps}`;
 }
 
 /** 保存前把没填的空条目去掉 */
