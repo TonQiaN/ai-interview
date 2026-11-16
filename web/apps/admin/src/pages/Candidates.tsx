@@ -33,6 +33,7 @@ import type {
 import { Empty, Pager, Person, QueryView, SearchInput } from "../components/common";
 import { PageHeader } from "../components/PageHeader";
 import { RaasImportDialog } from "../components/RaasImportDialog";
+import { sameForm } from "../lib/form";
 import { relativeTime } from "../lib/format";
 
 const sourceLabel: Record<CandidateSource, string> = {
@@ -142,6 +143,7 @@ function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     <Dialog
       open={open}
       onClose={onClose}
+      unsaved={!sameForm(value, emptyCandidate)}
       title="手动添加候选人"
       footer={
         <>

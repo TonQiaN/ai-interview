@@ -54,6 +54,7 @@ import type {
 import { Confirm, QueryView, StatusBadge } from "../components/common";
 import { PageHeader } from "../components/PageHeader";
 import { InterviewTags } from "../components/ReportVerdict";
+import { sameForm } from "../lib/form";
 import {
   fileSize,
   fullTime,
@@ -310,6 +311,7 @@ function EditDialog({
     <Dialog
       open={open}
       onClose={onClose}
+      unsaved={!sameForm(value, pick(candidate))}
       title="改基本信息"
       footer={
         <>

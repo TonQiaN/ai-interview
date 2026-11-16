@@ -1,6 +1,6 @@
 import { clsx } from "clsx";
 import { X } from "lucide-react";
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useUiText } from "../text";
 import { buttonClass } from "./Button";
 
@@ -16,6 +16,11 @@ export interface DialogProps {
   modalOnly?: boolean;
   /** 必须在弹窗里的按钮中选一个才能离开：没有关闭按钮，按 Esc、点遮罩都不关 */
   persistent?: boolean;
+  /**
+   * 里面有填了还没保存的内容：按 Esc、点遮罩不关（很容易误触），并提示一句内容还没保存。
+   * 右上角的关闭按钮和底部的按钮照常能关。
+   */
+  unsaved?: boolean;
   className?: string;
 }
 
@@ -29,11 +34,21 @@ export function Dialog({
   wide,
   modalOnly,
   persistent,
+  unsaved,
   className,
 }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const text = useUiText();
+  // 因为内容没保存而没关成：提示一句，不然按了 Esc 没反应会以为卡住了
+  const [held, setHeld] = useState(false);
+  if (held && (!open || !unsaved)) setHeld(false);
+
+  /** 按 Esc、点遮罩：不是明确要关，有没保存的内容就留着 */
+  function dismiss() {
+    if (unsaved) setHeld(true);
+    else onClose();
+  }
 
   useEffect(() => {
     const el = ref.current;
@@ -50,11 +65,11 @@ export function Dialog({
       aria-labelledby={titleId}
       onCancel={(e) => {
         e.preventDefault();
-        if (!persistent) onClose();
+        if (!persistent) dismiss();
       }}
       onClick={(e) => {
         // 点在 dialog 自身上就是点在遮罩上：内容区都在子元素里
-        if (!modalOnly && !persistent && e.target === ref.current) onClose();
+        if (!modalOnly && !persistent && e.target === ref.current) dismiss();
       }}
     >
       <div className="oil-dialog__head">
@@ -73,6 +88,11 @@ export function Dialog({
         )}
       </div>
       <div className="oil-dialog__body">{children}</div>
+      {held && (
+        <p className="oil-dialog__hint" role="status">
+          {text.unsavedHint}
+        </p>
+      )}
       {footer && <div className="oil-dialog__foot">{footer}</div>}
     </dialog>
   );

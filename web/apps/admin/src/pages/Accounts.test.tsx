@@ -131,6 +131,12 @@ describe("账号", () => {
     expect(await dialog.findByText("账号开好了")).toBeTruthy();
     const handover = dialog.getByText(/后台登录邮箱：new@example.com/);
     expect(handover.textContent).toContain(password);
+    // 密码只显示这一次：按 Esc、点到弹窗外面都不关，要点「好了」
+    const element = screen.getByRole("dialog") as HTMLDialogElement;
+    fireEvent(element, new Event("cancel", { cancelable: true }));
+    fireEvent.click(element);
+    expect(element.open).toBe(true);
+    expect(dialog.getByText(/后台登录邮箱：new@example.com/)).toBeTruthy();
     fireEvent.click(dialog.getByRole("button", { name: "好了" }));
     expect((await row("新同事")).getByText("普通账号")).toBeTruthy();
   });

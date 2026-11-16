@@ -68,6 +68,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ReplayPlayer } from "../components/ReplayPlayer";
 import { ReportView } from "../components/ReportView";
 import { useVoiceName, VoicePicker } from "../components/VoicePicker";
+import { sameForm } from "../lib/form";
 import {
   categoryLabel,
   decisionLabel,
@@ -393,6 +394,7 @@ function EditConfigDialog({
     <Dialog
       open={open}
       onClose={onClose}
+      unsaved={!sameForm(config, interview.config) || voiceId !== (interview.voice_id ?? null)}
       wide
       title="改这一场的设置"
       footer={
@@ -1077,6 +1079,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
       <Dialog
         open={editing !== null}
         onClose={() => setEditing(null)}
+        unsaved={editing !== null && text !== editing.text}
         title={editing ? `改${editing.label}` : ""}
         footer={
           <>

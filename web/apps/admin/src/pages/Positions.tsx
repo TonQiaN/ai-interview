@@ -31,6 +31,7 @@ import type {
 import { Empty, Pager, QueryView, SearchInput } from "../components/common";
 import { PageHeader } from "../components/PageHeader";
 import { RaasImportDialog } from "../components/RaasImportDialog";
+import { sameForm } from "../lib/form";
 import { positionStatusLabel, positionStatusTone, relativeTime } from "../lib/format";
 
 export const emptyExtra: PositionExtra = {
@@ -263,6 +264,7 @@ function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     <Dialog
       open={open}
       onClose={onClose}
+      unsaved={!sameForm(value, emptyPosition)}
       wide
       title="新建岗位"
       footer={

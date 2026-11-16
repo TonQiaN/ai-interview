@@ -89,6 +89,44 @@ describe("Dialog", () => {
     expect(cancel.defaultPrevented).toBe(true);
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it("unsaved 的弹窗按 Esc、点遮罩不关，并提示内容还没保存；关闭按钮照常关", () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <Dialog open unsaved onClose={onClose} title="改岗位">
+        内容
+      </Dialog>,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(screen.queryByRole("status")).toBeNull();
+
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    expect(screen.getByRole("status").textContent).toContain("还没保存");
+    fireEvent.click(dialog);
+    expect(onClose).not.toHaveBeenCalled();
+
+    // 内容保存了（或者改回去了），提示收起来，Esc 又能关了
+    rerender(
+      <Dialog open onClose={onClose} title="改岗位">
+        内容
+      </Dialog>,
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("unsaved 的弹窗点关闭按钮照常关", () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog open unsaved onClose={onClose} title="改岗位">
+        内容
+      </Dialog>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Segmented", () => {
