@@ -309,6 +309,49 @@ describe("Uploader", () => {
     expect(api.seqs("seg-1")).toEqual([0, 1]);
   });
 
+  it("传得比录得慢：新录下的分片马上算进还没传完的里面，不等手上这一轮传完", async () => {
+    const { store, api, uploader } = setup();
+    await store.putSegment(segment("seg-1", 1000, 5));
+    for (const seq of [0, 1, 2]) await addChunk(store, "seg-1", seq);
+
+    // 每传一片之前看一眼还剩几片；传第 0 片的时候又录下了两片
+    const pending: number[] = [];
+    api.beforeCall = async (call) => {
+      if (!call.startsWith("put:")) return;
+      if (call === "put:seg-1:0") {
+        await addChunk(store, "seg-1", 3);
+        uploader.notify();
+        await addChunk(store, "seg-1", 4);
+        uploader.notify();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      pending.push(uploader.getStatus().pendingChunks);
+    };
+
+    uploader.start();
+    await uploader.drain();
+    // 一直是本机真的留着的片数，只减不增；以前是 3、2、1 传完了又跳回 2
+    expect(pending).toEqual([5, 4, 3, 2, 1]);
+    expect(uploader.getStatus().pendingBytes).toBe(0);
+    expect(api.seqs("seg-1")).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("断网的时候录下的分片也算进还没传完的里面", async () => {
+    const { store, uploader } = setup({ isOnline: () => false });
+    await store.putSegment(segment("seg-1", 1000));
+    uploader.start();
+
+    for (const seq of [0, 1, 2]) {
+      await addChunk(store, "seg-1", seq);
+      uploader.notify();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(uploader.getStatus().state).toBe("offline");
+    expect(uploader.getStatus().pendingChunks).toBe(3);
+    expect(uploader.getStatus().pendingBytes).toBeGreaterThan(0);
+    uploader.stop();
+  });
+
   it("没有网络时等待，恢复后继续", async () => {
     let online = false;
     const { store, api, uploader, states } = setup({ isOnline: () => online });

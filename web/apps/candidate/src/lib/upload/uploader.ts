@@ -135,6 +135,11 @@ export class Uploader {
   private stopped = false;
   private wake: (() => void) | null = null;
   private dirty = false;
+  /**
+   * 本机的队列变过几次（录下了新的分片、传完删掉了一片）。
+   * 量「还剩多少」要读一遍本机的清单，读的过程中队列变了，量出来的就不准，靠它发现。
+   */
+  private revision = 0;
   private idleWaiters: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
 
   constructor(options: UploaderOptions) {
@@ -173,6 +178,10 @@ export class Uploader {
   /** 有新分片入队、段被关闭、网络恢复时调用，叫醒上传循环。 */
   notify(): void {
     this.dirty = true;
+    this.revision += 1;
+    // 新录下的分片马上算进「还剩多少」里。等上传循环自己去量的话，传得慢、断网、等重试的时候
+    // 一轮要很久，这段时间里的数会一直偏小，传完这一轮又突然跳上去
+    void this.refreshPending().catch(() => {});
     this.wakeUp();
   }
 
@@ -204,16 +213,23 @@ export class Uploader {
     for (const listener of this.listeners) listener(this.status);
   }
 
+  /** 把本机的清单读一遍，量出还剩多少没传。只读每一片的大小，不读内容。 */
   private async refreshPending(): Promise<void> {
-    let pendingChunks = 0;
-    let pendingBytes = 0;
-    for (const segment of await this.store.listSegments(this.sessionKey)) {
-      for (const chunk of await this.store.listChunks(this.sessionKey, segment.segmentId)) {
-        pendingChunks += 1;
-        pendingBytes += chunk.size;
+    for (;;) {
+      const revision = this.revision;
+      let pendingChunks = 0;
+      let pendingBytes = 0;
+      for (const segment of await this.store.listSegments(this.sessionKey)) {
+        for (const chunk of await this.store.listChunks(this.sessionKey, segment.segmentId)) {
+          pendingChunks += 1;
+          pendingBytes += chunk.size;
+        }
       }
+      // 读的过程中队列变了：这个数已经不准，重新量
+      if (revision !== this.revision) continue;
+      this.setStatus({ pendingChunks, pendingBytes });
+      return;
     }
-    this.setStatus({ pendingChunks, pendingBytes });
   }
 
   private async loop(): Promise<void> {
@@ -286,7 +302,10 @@ export class Uploader {
           }
           received.add(info.seq);
         }
+        // 删之前、删之后各记一次：正好在这期间量的那一遍不知道这一片算没算进去，让它重新量
+        this.revision += 1;
         await this.store.deleteChunk(key);
+        this.revision += 1;
         worked = true;
         this.setStatus({
           uploadedBytes: this.status.uploadedBytes + info.size,
@@ -298,7 +317,9 @@ export class Uploader {
       }
 
       if (closed) {
+        this.revision += 1;
         await this.store.discardSegment(this.sessionKey, segment.segmentId);
+        this.revision += 1;
         this.opened.delete(segment.segmentId);
         await this.refreshPending();
         worked = true;
