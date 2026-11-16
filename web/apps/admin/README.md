@@ -37,4 +37,5 @@ pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin
 
 - 接口返回的每个枚举值都要在 `src/lib/format.ts` 里有中文文案。`src/api/mock/samples.test.ts` 会拿报告线的样例检查，样例里出现没有文案的值测试就失败。
 - 报告里的判断下面跟着原话，点一下跳到回看的那个时间。新加的报告内容也照这个做，简历里的原文没有时间，不做成可点的。
+- 报告可以打印或存成 PDF（`src/lib/print.ts` 和 `admin.css` 末尾的打印样式）：打印前把收起来的内容展开、换成浅色主题。报告里新加了要点开才看得到的内容，要么用 `<details>`，要么读 `PrintingContext`，不然印不出来。
 - 诚信相关的内容写成「值得核对的迹象」，带上别的可能解释，不写成结论。
