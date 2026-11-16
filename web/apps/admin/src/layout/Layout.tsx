@@ -33,6 +33,7 @@ import { useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { isMock } from "../api/http";
 import { useInterviews, useLogout, useMe } from "../api/queries";
+import { ReLoginDialog } from "../components/ReLoginDialog";
 
 interface Item {
   to: string;
@@ -154,6 +155,7 @@ export function Layout() {
       }
     >
       <Outlet />
+      <ReLoginDialog email={me.data.email} />
     </AppShell>
   );
 }

@@ -3,7 +3,9 @@
 import type { paths } from "@ai-interview/api-client";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, errorMessage, unwrap, unwrapBlob } from "./http";
+import { clearSessionEnded, markSessionEnded } from "./session";
 import type {
+  AdminUser,
   CandidateInput,
   CandidateListItem,
   ChangePasswordInput,
@@ -45,13 +47,19 @@ const at = (id: string | undefined) => ({ params: { path: { id: id ?? "" } } });
 // ───────── 登录 ─────────
 
 export function useMe() {
+  const qc = useQueryClient();
   return useQuery({
     queryKey: ["me"],
     queryFn: async () => {
       try {
         return await unwrap(api.GET("/api/v1/auth/me"));
       } catch (e) {
-        if (e instanceof ApiError && e.status === 401) return null;
+        if (e instanceof ApiError && e.status === 401) {
+          // 本来登录着、现在失效了：人留在当前页面，由弹窗重新登录（见 session.ts）
+          const before = qc.getQueryData<AdminUser | null>(["me"]);
+          if (before && markSessionEnded(qc)) return before;
+          return null;
+        }
         throw e;
       }
     },
@@ -69,6 +77,34 @@ export function useLogin() {
       qc.setQueryData(["me"], user);
     },
   });
+}
+
+/**
+ * 登录用到一半失效以后，在原来的页面上重新登录。
+ * 还是同一个人的话，页面上的东西都留着，只把数据重新取一遍
+ */
+export function useReLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: LoginInput) => unwrap(api.POST("/api/v1/auth/login", { body: input })),
+    onSuccess: (user) => {
+      const before = qc.getQueryData<AdminUser | null>(["me"]);
+      if (before?.id !== user.id) qc.clear();
+      qc.setQueryData(["me"], user);
+      clearSessionEnded(qc);
+      // 刚才因为没登录而失败的请求，重新取一遍
+      void qc.invalidateQueries();
+    },
+  });
+}
+
+/** 登录失效以后不在这里重新登录了，回登录页 */
+export function useLeaveSession() {
+  const qc = useQueryClient();
+  return () => {
+    qc.clear();
+    qc.setQueryData(["me"], null);
+  };
 }
 
 export function useLogout() {
