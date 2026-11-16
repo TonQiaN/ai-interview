@@ -454,7 +454,7 @@ export function InterviewNewPage() {
                 label="从哪份设置开始"
                 hint={
                   usingSource === "next" && source
-                    ? `按 ${fullTime(source.created_at)} 安排的那一场的报告改成了深入面试：报告建议的方向放进了「重点考察」，建议的问题放进了「必须问的题」，那一场的结论记在「之前已经了解到的情况」里。${leftOut > 0 && source.config.question_count != null ? `题目数量是 ${source.config.question_count} 道，报告建议的问题只放进了前面几个，还有 ${leftOut} 个没放。` : ""}都可以再改，只对这一场生效。`
+                    ? `按 ${fullTime(source.created_at)} 安排的那一场的报告改成了深入面试：报告建议的方向放进了「重点考察」，建议的问题放进了「必须问的题」，那一场的结论记在「之前已经了解到的情况」里${source.config.stage === "screening" ? "，「这场面试在流程里的位置」改成了初筛之后的深入面试" : ""}。${leftOut > 0 && source.config.question_count != null ? `题目数量是 ${source.config.question_count} 道，报告建议的问题只放进了前面几个，还有 ${leftOut} 个没放。` : ""}都可以再改，只对这一场生效。`
                     : usingSource && source
                       ? `沿用了 ${fullTime(source.created_at)} 安排的那一场的设置和声音。下面的内容可以再改，只对这一场生效。`
                       : "选一个模板，下面的内容可以再改，只对这一场生效。"

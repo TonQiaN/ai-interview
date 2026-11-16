@@ -480,6 +480,9 @@ describe("安排面试", () => {
         report.next_round.questions.map((q) => q.question),
       );
       expect(made?.config.screening_checks).toEqual([]);
+      expect(made?.config.process_note).toBe(
+        "这是初筛之后的深入面试，候选人之前做过一轮 AI 初筛面试。",
+      );
       expect(made?.config.prior_notes).toContain(report.recommendation.headline);
     });
 

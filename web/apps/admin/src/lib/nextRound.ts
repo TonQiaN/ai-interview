@@ -1,6 +1,9 @@
 import type { ConfigLimits, InterviewConfig, InterviewReport } from "../api/types";
 import { stageLabelOf } from "./format";
 
+/** 上一场是初筛时，下一轮的「这场面试在流程里的位置」 */
+export const AFTER_SCREENING_NOTE = "这是初筛之后的深入面试，候选人之前做过一轮 AI 初筛面试。";
+
 /**
  * 按上一场的报告，把上一场的设置改成下一轮（深入面试）的。
  *
@@ -42,6 +45,8 @@ export function nextRoundConfig(
       Math.min(limits.max_list_items, source.question_count ?? limits.max_list_items),
     ),
     screening_checks: [],
+    // 上一场是初筛的话，流程说明写的是初筛那一轮的位置，面试官开场会照着说，得跟着换
+    process_note: source.stage === "screening" ? AFTER_SCREENING_NOTE : source.process_note,
     prior_notes: clip(
       [source.prior_notes.trim(), note].filter(Boolean).join("\n"),
       limits.max_text_chars,

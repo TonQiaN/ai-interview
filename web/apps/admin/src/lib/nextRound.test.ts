@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createMockServer } from "../api/mock/server";
 import type { ConfigLimits, InterviewConfig, InterviewReport } from "../api/types";
-import { nextRoundConfig } from "./nextRound";
+import { AFTER_SCREENING_NOTE, nextRoundConfig } from "./nextRound";
 
 async function fixtures() {
   const server = createMockServer({ latencyMs: 0, jobMs: 60_000 });
@@ -45,6 +45,16 @@ describe("按上一场的报告安排下一轮", () => {
     expect(next.must_ask_questions).toEqual(report.next_round.questions.map((q) => q.question));
     expect(next.must_ask_questions).not.toContain("上一轮问过的题");
     expect(next.screening_checks).toEqual([]);
+    expect(next.process_note).toBe(AFTER_SCREENING_NOTE);
+    // 上一场已经是深入面试的，流程说明是 HR 给那个阶段写的，留着
+    expect(
+      nextRoundConfig(
+        { ...source, stage: "in_depth", process_note: "合成的说明：这是终面前的一轮。" },
+        report,
+        limits,
+        "11 月 16 日",
+      ).process_note,
+    ).toBe("合成的说明：这是终面前的一轮。");
     expect(next.prior_notes).toContain("电话里说下个月能到岗。");
     expect(next.prior_notes).toContain("11 月 16 日安排的 AI 面试（第一轮初筛）的结论：");
     expect(next.prior_notes).toContain(report.recommendation.headline);
