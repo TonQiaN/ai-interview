@@ -1341,11 +1341,29 @@ export function createMockServer(options: MockOptions = {}) {
     find.interview(params[0]);
     return { items: db.recordings.get(params[0] ?? "") ?? [] };
   });
+  // 画面检查的结果真后端不放在过程事件里，走单独的接口
+  const fromFrames = (kind: string) => kind === "face_count_changed" || kind === "phone_visible";
   on("GET", "/interviews/:id/events", ({ params, query }) => {
     find.interview(params[0]);
     const kind = query.get("kind");
-    const list = (db.events.get(params[0] ?? "") ?? []).filter((e) => !kind || e.kind === kind);
+    const list = (db.events.get(params[0] ?? "") ?? []).filter(
+      (e) => !fromFrames(e.kind) && (!kind || e.kind === kind),
+    );
     return paginate(list, query);
+  });
+  on("GET", "/interviews/:id/frame-events", ({ params }) => {
+    const interview = find.interview(params[0]);
+    const items = (db.events.get(params[0] ?? "") ?? [])
+      .filter((e) => fromFrames(e.kind) && typeof e.at_ms === "number")
+      .map((e) => ({
+        id: e.id,
+        kind: e.kind,
+        at_ms: e.at_ms ?? null,
+        duration_ms: 10_000,
+        payload: { people: Number(e.payload.count ?? 1), frames: 2, note: "旁边多了一个人" },
+        frame_at_ms: [e.at_ms ?? 0, (e.at_ms ?? 0) + 5000],
+      }));
+    return { checked: interview.report?.status === "done", items };
   });
 
   /** 接口客户端给的是 Request 对象，请求体要从它身上读出来 */

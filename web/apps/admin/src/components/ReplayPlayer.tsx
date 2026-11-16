@@ -11,7 +11,7 @@ import {
 } from "@ai-interview/ui";
 import { Download, Pause, Play, RotateCcw, RotateCw } from "lucide-react";
 import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef } from "react";
-import type { InterviewEvent, Recording, Turn } from "../api/types";
+import type { Recording, Turn } from "../api/types";
 import { activeTurnIndex, useClock } from "../lib/clock";
 import {
   clock,
@@ -26,6 +26,8 @@ import {
   speakerLabel,
   turnNote,
 } from "../lib/format";
+import { isFrameEvent, type TimelineEvent } from "../lib/frames";
+import { FrameThumbs } from "./FrameThumbs";
 
 const rates = [0.75, 1, 1.25, 1.5, 2];
 const trackLabel: Record<Recording["track"], string> = {
@@ -37,7 +39,8 @@ const trackLabel: Record<Recording["track"], string> = {
 export interface ReplayPlayerProps {
   turns: Turn[];
   recordings: Recording[];
-  events: InterviewEvent[];
+  /** 过程事件。画面检查的结果已经排进来的话（见 lib/frames），带着存了图的帧 */
+  events: TimelineEvent[];
   candidateName: string;
   /** 面试从开始到结束的时长；还在进行时不传 */
   elapsedMs?: number | null;
@@ -292,7 +295,11 @@ export function ReplayPlayer({
               <ul className="adm-timeline">
                 {events.map((e) => (
                   <li key={e.id}>
-                    <span className="adm-turn__time">{eventWhen(e, events)}</span>
+                    <span className="adm-turn__time">
+                      {isFrameEvent(e) && typeof e.at_ms !== "number"
+                        ? "结束后"
+                        : eventWhen(e, events)}
+                    </span>
                     <span>
                       {typeof e.at_ms !== "number" ? (
                         eventName(e)
@@ -306,6 +313,7 @@ export function ReplayPlayer({
                         </button>
                       )}
                       {eventNote(e) && <span className="adm-item__sub"> {eventNote(e)}</span>}
+                      <FrameThumbs frames={e.frames} onPick={seek} />
                     </span>
                     {eventSeverity(e.kind) !== "info" && (
                       <Badge tone={eventSeverity(e.kind) === "warning" ? "warning" : "info"} plain>
