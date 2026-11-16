@@ -742,6 +742,149 @@ async fn real_webm_is_remuxed_and_gets_a_duration(pool: PgPool) {
     );
 }
 
+/// Safari 和 iPhone 录出来的容器。
+const MP4: &str = "video/mp4;codecs=avc1.42E01E,mp4a.40.2";
+
+/// 用 ffmpeg 现做一段三秒的分段 MP4（H.264 加 AAC），和 Safari 的 MediaRecorder 录出来的结构一样：
+/// 开头是 ftyp 和 moov，后面一秒一个 moof 加 mdat，文件头里没有总时长。
+/// 机器上没装 ffmpeg，或者它不带 H.264 和 AAC 编码器，返回 `None`。
+fn sample_fragmented_mp4(dir: &std::path::Path) -> Option<Vec<u8>> {
+    let path = dir.join("sample.mp4");
+    let status = Command::new("ffmpeg")
+        .args(["-nostdin", "-v", "error", "-y"])
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=3:size=160x120:rate=10",
+        ])
+        .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=3"])
+        .args([
+            "-c:v",
+            "libx264",
+            "-profile:v",
+            "baseline",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "10",
+        ])
+        .args(["-c:a", "aac", "-b:a", "64k"])
+        .args([
+            "-movflags",
+            "+frag_keyframe+empty_moov+default_base_moof",
+            "-f",
+            "mp4",
+        ])
+        .arg(&path)
+        .status()
+        .ok()?;
+    if !status.success() {
+        return None;
+    }
+    std::fs::read(&path).ok()
+}
+
+/// 某个 MP4 盒子（比如 `moov`）的类型名第一次出现的位置。
+fn box_at(bytes: &[u8], name: &[u8; 4]) -> Option<usize> {
+    bytes.windows(4).position(|window| window == name)
+}
+
+/// iPhone 和 Safari 录的是分段 MP4。分片合并、重新封装之后是一个普通的 MP4：
+/// 读得出时长，索引在文件开头（HR 回看时不用下完整个文件就能拖进度条），画面和声音都在。
+/// 没装 ffmpeg 的机器上跳过。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn fragmented_mp4_from_safari_is_assembled_into_a_seekable_file(pool: PgPool) {
+    let dir = tempfile::tempdir().expect("建临时目录失败");
+    let Some(mp4) = sample_fragmented_mp4(dir.path()) else {
+        eprintln!("没有可用的 ffmpeg，跳过");
+        return;
+    };
+    // 录出来的样子：没有总时长，索引是一段一段的
+    assert!(box_at(&mp4, b"moof").is_some(), "测试素材应该是分段的");
+
+    let blobs = LocalBlobStore::open(dir.path().join("blobs"))
+        .await
+        .expect("打不开文件存储");
+    let ctx = AppContext::new(pool, Arc::new(blobs), PlatformConfig::for_tests());
+    let app = app_on(ctx, RoomConfig::default()).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+
+    let opened = TestRequest::put(segment_url("camera", segment))
+        .bearer(&token)
+        .json(&json!({ "content_type": MP4, "start_ms": 0 }))
+        .send(&app.public)
+        .await;
+    assert_eq!(opened.status, 204, "{}", opened.text());
+    // 分片的边界和 MP4 的盒子边界对不上也没关系：合并就是按顺序接起来
+    let chunks: Vec<&[u8]> = mp4.chunks(mp4.len() / 5 + 1).collect();
+    for (seq, chunk) in chunks.iter().enumerate() {
+        let seq = u32::try_from(seq).expect("分片数很小");
+        assert_eq!(
+            put_chunk(&app, &token, "camera", segment, seq, chunk)
+                .await
+                .status,
+            204
+        );
+    }
+    let total = u32::try_from(chunks.len()).expect("分片数很小");
+    assert_eq!(
+        complete(&app, &token, "camera", segment, total)
+            .await
+            .status,
+        204
+    );
+    assert_eq!(run_tasks(&app).await, 1);
+
+    let list = recordings(&app, interview_id).await;
+    let recording = &list[0];
+    assert_eq!(recording["status"], "ready", "{recording}");
+    assert_eq!(recording["error"], Value::Null);
+    assert_eq!(recording["content_type"], MP4);
+    let duration = recording["duration_ms"].as_i64().expect("应该读得出时长");
+    assert!((2_500..=3_500).contains(&duration), "时长 {duration} 毫秒");
+
+    let media = TestRequest::get(recording["media_url"].as_str().expect("应该有地址"))
+        .send(&app.hr)
+        .await;
+    assert_eq!(media.status, 200);
+    assert_eq!(media.content_type(), Some("video/mp4"));
+    // MP4 文件以 ftyp 盒子开始；索引（moov）在数据（mdat）前面，不再是分段的
+    assert_eq!(&media.body[4..8], b"ftyp");
+    let (moov, mdat) = (
+        box_at(&media.body, b"moov").expect("应该有 moov"),
+        box_at(&media.body, b"mdat").expect("应该有 mdat"),
+    );
+    assert!(
+        moov < mdat,
+        "索引应该在文件开头：moov 在 {moov}，mdat 在 {mdat}"
+    );
+    assert_eq!(box_at(&media.body, b"moof"), None, "不应该还是分段的");
+
+    // 画面和声音都在
+    let out = dir.path().join("assembled.mp4");
+    std::fs::write(&out, &media.body).expect("写不了临时文件");
+    let probe = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(&out)
+        .output()
+        .expect("起不了 ffprobe");
+    let codecs = String::from_utf8_lossy(&probe.stdout);
+    let codecs: Vec<&str> = codecs.split_whitespace().collect();
+    assert!(
+        codecs.contains(&"h264") && codecs.contains(&"aac"),
+        "{codecs:?}"
+    );
+}
+
 /// ffmpeg 处理不了的内容（这里是随便几个字节）：录像照样可用，只是标一句说明。
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn unreadable_media_is_kept_as_is(pool: PgPool) {

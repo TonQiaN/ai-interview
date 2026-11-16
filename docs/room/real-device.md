@@ -175,7 +175,7 @@
 常见问题对应去哪里看代码：
 
 - 权限、设备检测：`web/apps/candidate/src/lib/media/capture.ts`、`errors.ts`。
-- 录像的容器和编码：`src/lib/recording/mime.ts`；后端合并分片在 `crates/interview-room/src/recording.rs`。
+- 录像的容器和编码：`src/lib/recording/mime.ts`；后端合并分片在 `crates/interview-room/src/recording.rs`。后端收到分段 MP4（Safari 和 iPhone 录的那种）以后合并成能拖动的文件、面试中边传边转写，云端有测试（`crates/interview-room/tests/recording.rs` 和 `transcribe.rs` 里带 mp4 的两条），用的是 ffmpeg 造的 MP4；真手机录出来的要是合并失败或者没有转写，先拿那场的分片对比这两条测试里的文件差在哪。
 - 声音不自动播、被系统停掉：`src/lib/media/audio-graph.ts`、`output-watch.ts`。
 - 内置浏览器的识别和提醒：`src/lib/flow/capabilities.ts`。
 - 屏幕常亮：`src/lib/media/wake-lock.ts`。

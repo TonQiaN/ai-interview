@@ -74,6 +74,53 @@ fn recording(ffmpeg: &Ffmpeg) -> Vec<Vec<u8>> {
         .collect()
 }
 
+/// Safari 和 iPhone 录出来的容器。
+const MP4: &str = "video/mp4;codecs=avc1.42E01E,mp4a.40.2";
+
+/// 和 [`recording`] 一样的 10 秒内容，但是分段 MP4（H.264 加 AAC），Safari 和 iPhone 录出来是这样：
+/// 开头是 ftyp 和 moov，后面一秒一个 moof 加 mdat。切成 10 片。
+fn recording_mp4(ffmpeg: &Ffmpeg) -> Vec<Vec<u8>> {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("recording.mp4");
+    let status = Command::new(ffmpeg.program())
+        .args(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i"])
+        .arg("sine=frequency=440:duration=10:sample_rate=48000")
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=160x120:rate=10:duration=10",
+            "-af",
+        ])
+        .arg("volume=enable='between(t,0,2)+between(t,5,7)':volume=0")
+        .args(["-c:a", "aac", "-b:a", "64k"])
+        .args([
+            "-c:v",
+            "libx264",
+            "-profile:v",
+            "baseline",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "10",
+        ])
+        .args([
+            "-movflags",
+            "+frag_keyframe+empty_moov+default_base_moof",
+            "-f",
+            "mp4",
+        ])
+        .arg(&path)
+        .status()
+        .expect("起不了 ffmpeg");
+    assert!(status.success(), "生成测试录像失败");
+    let bytes = std::fs::read(path).unwrap();
+    bytes
+        .chunks(bytes.len() / 10 + 1)
+        .map(<[u8]>::to_vec)
+        .collect()
+}
+
 /// 假的识别后端也做现场转写（默认是不做的）。
 fn with_fake() -> RoomConfig {
     RoomConfig {
@@ -167,10 +214,14 @@ fn key(step: &Value) -> &str {
 
 /// 登记一段从面试第 `start_ms` 毫秒开始的录制。
 async fn open_segment(app: &TestApp, token: &str, start_ms: i64) -> Uuid {
+    open_segment_as(app, token, start_ms, WEBM).await
+}
+
+async fn open_segment_as(app: &TestApp, token: &str, start_ms: i64, content_type: &str) -> Uuid {
     let segment = Uuid::now_v7();
     let response = TestRequest::put(format!("/api/v1/room/recordings/camera/{segment}"))
         .bearer(token)
-        .json(&json!({ "content_type": WEBM, "start_ms": start_ms }))
+        .json(&json!({ "content_type": content_type, "start_ms": start_ms }))
         .send(&app.public)
         .await;
     assert_eq!(response.status, 204, "{}", response.text());
@@ -300,6 +351,58 @@ async fn what_the_candidate_said_comes_from_the_uploaded_recording(pool: PgPool)
         .await;
     assert_eq!(response.status, 204, "{}", response.text());
     assert_eq!(live(&app), 0);
+}
+
+/// iPhone 和 Safari 传上来的是分段 MP4：面试中照样能边收边转写，时间也对得上。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn an_mp4_recording_from_safari_is_transcribed_as_it_arrives(pool: PgPool) {
+    let Some(ffmpeg) = ffmpeg().await else { return };
+    let chunks = recording_mp4(&ffmpeg);
+    let model = Arc::new(ScriptedModel::new().reply(WEAK_ANSWER).reply(STRONG_ANSWER));
+    let stt = Arc::new(FakeTranscriber::with_script([
+        "我们团队做了很多事情。",
+        "我负责的是缓存这一块。",
+    ]));
+    let app = app_with(pool, model.clone(), stt, with_fake()).await;
+    let (interview_id, token) = prepared(&app, json!({})).await;
+
+    let opening = start(&app, &token, interview_id).await;
+    let segment = open_segment_as(&app, &token, 1_000, MP4).await;
+    let question = advance(&app, &token, &played(&opening, 100)).await;
+
+    // 回答第一题时录像一片一片传上来；分片的边界和 MP4 的盒子边界对不上
+    upload(&app, &token, segment, &chunks, 0..6).await;
+    assert_eq!(live(&app), 1);
+    let ack = advance(&app, &token, &answered(&question, 2_500, 3_300, 6_500)).await;
+    let follow_up = advance(&app, &token, &played(&ack, 6_600)).await;
+    assert_eq!(key(&follow_up), "q1.f1", "回答太泛，应该追问");
+
+    let said = answers(&app, interview_id).await;
+    assert_eq!(said.len(), 1);
+    let (answered_key, text, words, engine, source) = &said[0];
+    assert_eq!(
+        (answered_key.as_str(), text.as_str()),
+        ("q1", "我们团队做了很多事情。")
+    );
+    assert_eq!((engine.as_deref(), source.as_str()), (Some("fake"), "live"));
+    // 录像里 2 到 5 秒的声音，是面试的 3 到 6 秒
+    let words = words
+        .as_ref()
+        .and_then(Value::as_array)
+        .expect("应该有逐字时间");
+    let (first, last) = (words.first().unwrap(), words.last().unwrap());
+    let (from, to) = (first["s"].as_i64().unwrap(), last["e"].as_i64().unwrap());
+    assert!((2_800..=3_400).contains(&from), "第一个字在 {from} 毫秒");
+    assert!((5_600..=6_300).contains(&to), "最后一个字到 {to} 毫秒");
+
+    // 追问的回答在后面的分片里
+    upload(&app, &token, segment, &chunks, 6..chunks.len()).await;
+    let ack = advance(&app, &token, &answered(&follow_up, 7_500, 8_300, 10_900)).await;
+    let next = advance(&app, &token, &played(&ack, 11_000)).await;
+    assert_eq!(key(&next), "q2");
+    let said = answers(&app, interview_id).await;
+    assert_eq!(said.len(), 2);
+    assert_eq!(said[1].1, "我负责的是缓存这一块。");
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]

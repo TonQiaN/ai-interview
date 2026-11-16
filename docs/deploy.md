@@ -48,17 +48,26 @@
 
 6. 进「系统」页看运行状态：数据库、大模型、语音合成、语音识别、ffmpeg 都应该是正常的。哪一项不正常，页面上写了原因。
 
-7. 进「声音」页建面试官的音色：上传一段 2 到 30 秒、只有一个人说话的清晰录音，选引擎，试听，设成默认。没有默认音色时用 BreezeTTS2 设计的一个通用女声。参考录音是真人的声音，只留在这台机器上。
+7. 进「声音」页建面试官的音色：上传一段 2 到 30 秒、只有一个人说话的清晰录音，选引擎，试听，设成默认。没有默认音色时用 BreezeTTS2 设计的一个通用女声；只备了 IndexTTS 的话没有这个兜底，要先建好默认音色，不然准备面试时会提示「还没有默认音色」。参考录音是真人的声音，只留在这台机器上。
 
 之后的日常使用：建岗位（或者从 RAAS 导入）、上传简历、安排面试、把链接发给候选人、面试结束后看回看和报告。
 
-### 给别的 HR 开账号
+### 账号和密码
+
+第一次启动建的管理员密码是随机生成的。登录以后可以改成自己的：`PUT /api/v1/auth/password`（后台的页面还没做，见 issue #242，在那之前到 `/api/docs` 里调）。
+
+给别的 HR 开账号、停用离职的人的账号、帮忘了密码的人重设，管理员用 `/api/v1/accounts` 这组接口（见 `/api/docs`）。在跑服务的机器上也可以用命令行：
 
 ```bash
+# 开账号。--role 不写是 admin，普通账号写 recruiter
 DATABASE_URL="$(scripts/dev-db.sh url)" target/release/interview-server create-admin --email hr@example.com --name 张三
+# 重设密码。唯一的管理员忘了密码时只能用这个
+DATABASE_URL="$(scripts/dev-db.sh url)" target/release/interview-server reset-password --email hr@example.com
 ```
 
 密码从标准输入读一行。用自己的数据库时把 `DATABASE_URL` 换成自己的。
+
+管理员和普通账号的区别：只有管理员能改全局设置（默认的面试设置等）和管理账号。
 
 ### 从 RAAS 导入岗位和候选人
 

@@ -14,6 +14,7 @@ import {
 import { useEffect, useState } from "react";
 import { CameraPreview } from "../components/CameraPreview";
 import { MicMeter } from "../components/MicMeter";
+import { questionProgressOf } from "../lib/interview/progress";
 import type { RunnerPhase, RunnerSnapshot } from "../lib/interview/runner";
 import type { UploadStatus } from "../lib/upload/uploader";
 import { useText } from "../text";
@@ -76,9 +77,9 @@ export function InterviewPage(props: InterviewPageProps) {
 
   const { phase, utterance, progress, turn } = runner;
   const listening = phase === "listening";
-  const isQuestion = progress !== null && progress.index > 0;
-  const meta = isQuestion
-    ? text.questionOf(progress.index, progress.total)
+  const question = questionProgressOf(utterance, progress);
+  const meta = question
+    ? text.questionOf(question.index, question.total)
     : utterance
       ? text.utteranceKind[utterance.kind]
       : "";
@@ -174,7 +175,7 @@ export function InterviewPage(props: InterviewPageProps) {
       )}
       {!held && !offline && backlog && <Banner tone="info">{text.backlog}</Banner>}
 
-      {isQuestion && <QuestionProgress total={progress.total} current={progress.index - 1} />}
+      {question && <QuestionProgress total={question.total} current={question.index - 1} />}
 
       <InterviewerPresence state={held ? "idle" : PRESENCE[phase]} label={hint} />
 

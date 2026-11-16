@@ -210,6 +210,58 @@ test("可以手动点「我答完了」，也可以提前结束面试", async ({
   await expect(button(page, "开始准备")).toHaveCount(0);
 });
 
+test("连着两题没出声，面试提前结束：说结束语的时候不显示题号", async ({ page }) => {
+  // 记下页面拿到的麦克风，之后把它关成静音；再记下面试中页面上依次出现过的题号和「结束语」
+  await page.addInitScript(() => {
+    const scope = window as unknown as { __streams: MediaStream[]; __labels: string[] };
+    scope.__streams = [];
+    scope.__labels = [];
+    const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async (constraints) => {
+      const stream = await original(constraints);
+      scope.__streams.push(stream);
+      return stream;
+    };
+    setInterval(() => {
+      const text = document.body?.textContent ?? "";
+      const label =
+        /第 \d+ 题 \/ 共 \d+ 题/.exec(text)?.[0] ?? (text.includes("结束语") ? "结束语" : null);
+      if (label && scope.__labels.at(-1) !== label) scope.__labels.push(label);
+    }, 50);
+  });
+
+  const interview = await enterInterview(page, { maxSec: 10 });
+  await expectQuestion(page, 1);
+  await page.evaluate(() => {
+    const scope = window as unknown as { __streams: MediaStream[] };
+    for (const stream of scope.__streams) {
+      for (const track of stream.getAudioTracks()) track.enabled = false;
+    }
+  });
+
+  // 最长作答时间是 10 秒，一直不出声每次等满 10 秒
+  await expect(page.getByText("面试已结束")).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText("我们一直没有听到你的回答")).toBeVisible();
+
+  // 每题提醒一次，第二题还是没出声就结束：三道题只问到第二道
+  const state = await expectRecordingsReady(interview, 1);
+  expect(state.end_reason).toBe("no_response");
+  expect(spokenKeys(state)).toEqual([
+    "opening",
+    "q1",
+    "nudge",
+    "q1",
+    "q2",
+    "nudge",
+    "q2",
+    "closing.early",
+  ]);
+
+  // 服务端在结束语上给的题号是「第 3 题 / 共 3 题」，页面不能照着显示
+  const labels = await page.evaluate(() => (window as unknown as { __labels: string[] }).__labels);
+  expect(labels).toEqual(["第 1 题 / 共 3 题", "第 2 题 / 共 3 题", "结束语"]);
+});
+
 test("答题中刷新页面，重新检查设备后从中断的那一题继续，两段录像都完整", async ({ page }) => {
   const interview = await enterInterview(page);
   await expectQuestion(page, 2);

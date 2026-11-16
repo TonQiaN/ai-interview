@@ -1,8 +1,8 @@
-import { Badge, Button, PageHeader, Select, Table } from "@ai-interview/ui";
+import { Button, PageHeader, Select, Table } from "@ai-interview/ui";
 import { Plus } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useInterviews } from "../api/queries";
-import type { InterviewStatus, InterviewSummary } from "../api/types";
+import type { InterviewStatus } from "../api/types";
 import {
   DecisionBadge,
   Empty,
@@ -12,18 +12,10 @@ import {
   SearchInput,
   StatusBadge,
 } from "../components/common";
-import { duration, elapsedMs, relativeTime, reportStatusLabel, statusLabel } from "../lib/format";
+import { ReportVerdict } from "../components/ReportVerdict";
+import { duration, elapsedMs, relativeTime, statusLabel } from "../lib/format";
 
 const statuses = Object.keys(statusLabel) as InterviewStatus[];
-
-/** 报告到哪一步了。没开始面试的不显示 */
-export function ReportState({ interview }: { interview: InterviewSummary }) {
-  const status = interview.report_status;
-  if (!status) return <span className="oil-muted">—</span>;
-  if (status === "done") return <Badge tone="success">已生成</Badge>;
-  if (status === "failed") return <Badge tone="danger">{reportStatusLabel.failed}</Badge>;
-  return <Badge tone="info">{reportStatusLabel[status]}</Badge>;
-}
 
 export function InterviewsPage() {
   const navigate = useNavigate();
@@ -31,7 +23,15 @@ export function InterviewsPage() {
   const status = statuses.find((s) => s === params.get("status")) ?? "";
   const q = params.get("q") ?? "";
   const page = Number(params.get("page") ?? 1) || 1;
-  const interviews = useInterviews({ status: status || undefined, q, page, page_size: 20 });
+  // 默认新安排的在前；按分数排时没有报告的排在最后
+  const byScore = params.get("sort") === "score";
+  const interviews = useInterviews({
+    status: status || undefined,
+    q,
+    page,
+    page_size: 20,
+    sort: byScore ? "-score" : undefined,
+  });
   const filtered = Boolean(q || status);
 
   function update(patch: Record<string, string>) {
@@ -72,6 +72,15 @@ export function InterviewsPage() {
               {statusLabel[s]}
             </option>
           ))}
+        </Select>
+        <Select
+          aria-label="排序"
+          style={{ width: "auto" }}
+          value={byScore ? "score" : ""}
+          onChange={(e) => update({ sort: e.target.value, page: "" })}
+        >
+          <option value="">新安排的在前</option>
+          <option value="score">综合分高的在前</option>
         </Select>
       </div>
       <QueryView query={interviews}>
@@ -114,7 +123,7 @@ export function InterviewsPage() {
                       </td>
                       <td className="oil-num">{duration(elapsedMs(i))}</td>
                       <td>
-                        <ReportState interview={i} />
+                        <ReportVerdict interview={i} />
                       </td>
                       <td>
                         {i.decision === "pending" ? (
