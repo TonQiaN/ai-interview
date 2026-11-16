@@ -11,11 +11,17 @@ import {
   PageHeader,
   useToast,
 } from "@ai-interview/ui";
-import { Archive, Download, Pencil, Plus, Scale } from "lucide-react";
+import { Archive, ArchiveRestore, Download, Pencil, Plus, Scale } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api/http";
-import { useDeletePosition, useInterviews, usePosition, useSavePosition } from "../api/queries";
+import {
+  useDeletePosition,
+  useInterviews,
+  usePosition,
+  useRestorePosition,
+  useSavePosition,
+} from "../api/queries";
 import type { Position, PositionExtra } from "../api/types";
 import { Confirm, Person, QueryView } from "../components/common";
 import { RaasApplicantsDialog } from "../components/RaasApplicantsDialog";
@@ -148,6 +154,7 @@ function Detail({ position }: { position: Position }) {
   // 一个岗位下的人是要拿来比的：综合分高的在前，还没有报告的排在后面
   const interviews = useInterviews({ position_id: position.id, page_size: 50, sort: "-score" });
   const remove = useDeletePosition();
+  const restore = useRestorePosition();
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -196,9 +203,28 @@ function Detail({ position }: { position: Position }) {
         }
       />
       {archived && (
-        <Banner tone="info" title="这个岗位已经归档" className="adm-gap-below">
-          归档的岗位不在列表里显示，不能再修改，也不能再安排面试。岗位的内容和已经安排的面试都还在，在岗位列表勾上「带上已归档的」能找到。
-          {fromRaas && "从 RAAS 重新导入这个岗位，会把它恢复回来。"}
+        <Banner
+          tone="info"
+          title="这个岗位已经归档"
+          className="adm-gap-below"
+          actions={
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<ArchiveRestore />}
+              loading={restore.isPending}
+              onClick={() =>
+                restore.mutate(position.id, {
+                  onSuccess: () => toast("已恢复"),
+                  onError: (e) => toast(errorMessage(e)),
+                })
+              }
+            >
+              恢复
+            </Button>
+          }
+        >
+          归档的岗位不在列表里显示，不能再修改，也不能再安排面试。岗位的内容和已经安排的面试都还在，在岗位列表勾上「带上已归档的」能找到。归档错了，点「恢复」就回到列表里。
         </Banner>
       )}
       <div className="adm-split">
