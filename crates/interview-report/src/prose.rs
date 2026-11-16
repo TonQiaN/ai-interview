@@ -11,9 +11,10 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
+use crate::prompts;
 use crate::record::InterviewRecord;
 use crate::report::InterviewReport;
-use crate::transcript::QuestionGroup;
+use crate::transcript::{EVENT_LEGEND, QuestionGroup};
 
 /// 这些字段里放的是 id、原话或者给程序看的数据，不动。
 const KEPT_FIELDS: [&str; 7] = [
@@ -113,16 +114,44 @@ fn replace_token(text: &str, id: &str, name: &str) -> String {
 ///
 /// 返回每一处出现的名字，按出现的先后。评估用，分析本身不调用。
 ///
-/// 怎么认：正文里一串连着的字母、数字、下划线，全是小写并且带下划线的，或者正好是这场面试某个
-/// 过程事件的种类或字段名的，算一处。候选人自己说过的词不算（比如 SQL 里的 `row_number`）：
-/// 在岗位、简历、题目、转写里出现过的都放过。整个字段只有这一个词的是枚举值，也不算。
+/// 怎么认：只认讲给模型听过的名字，也就是提示词和事件说明里带下划线的英文名，加上这场面试的
+/// 过程事件的种类和字段名。模型自己写出来的技术名词（比如建议下一轮问 `dense_rank`）不算。
+/// 候选人和 HR 自己用过的词也不算：在岗位、简历、题目、转写里出现过的都放过。
+/// 整个字段只有这一个词的是枚举值，不算正文。
 pub fn program_names_in_prose(record: &InterviewRecord, report: &InterviewReport) -> Vec<String> {
-    let mut event_names = BTreeSet::new();
+    let names = names_told_to_model(record);
+    let mut found = Vec::new();
+    if let Ok(value) = serde_json::to_value(report) {
+        collect_program_names(&value, &names, &mut found);
+    }
+    found
+}
+
+/// 讲给模型听过、又不是候选人和 HR 自己用过的名字。
+fn names_told_to_model(record: &InterviewRecord) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let synthesis = prompts::synthesis_task("");
+    for told in [
+        prompts::SYSTEM,
+        prompts::ALIGNMENT_TASK,
+        prompts::REQUIREMENT_TASK,
+        prompts::RESUME_TASK,
+        prompts::INTEGRITY_TASK,
+        prompts::COMMUNICATION_TASK,
+        synthesis.as_str(),
+        EVENT_LEGEND,
+    ] {
+        names.extend(
+            ascii_words(told)
+                .filter(|word| is_snake_case(word))
+                .map(str::to_owned),
+        );
+    }
     for event in &record.events {
-        event_names.insert(event.kind.clone());
+        names.insert(event.kind.clone());
         let detail = event.detail.as_deref().map(serde_json::from_str::<Value>);
         if let Some(Ok(Value::Object(fields))) = detail {
-            event_names.extend(fields.keys().cloned());
+            names.extend(fields.keys().cloned());
         }
     }
     // 候选人和 HR 写的、说的内容。事件不算在内
@@ -131,46 +160,43 @@ pub fn program_names_in_prose(record: &InterviewRecord, report: &InterviewReport
         fields.remove("events");
     }
     let material = material.to_string();
-
-    let mut found = Vec::new();
-    if let Ok(value) = serde_json::to_value(report) {
-        collect_program_names(&value, &event_names, &material, &mut found);
-    }
-    found
+    names.retain(|name| !material.contains(name.as_str()));
+    names
 }
 
-fn collect_program_names(
-    value: &Value,
-    event_names: &BTreeSet<String>,
-    material: &str,
-    found: &mut Vec<String>,
-) {
+/// 一段文字里一串串连着的字母、数字、下划线。
+fn ascii_words(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|word| !word.is_empty())
+}
+
+/// 全是小写、中间带下划线的名字，比如 `page_opened`。
+fn is_snake_case(word: &str) -> bool {
+    word.contains('_')
+        && word.starts_with(|c: char| c.is_ascii_lowercase())
+        && !word.ends_with('_')
+        && !word.chars().any(|c| c.is_ascii_uppercase())
+}
+
+fn collect_program_names(value: &Value, names: &BTreeSet<String>, found: &mut Vec<String>) {
     match value {
         Value::String(text) => {
-            let is_word = |c: char| c.is_ascii_alphanumeric() || c == '_';
-            for word in text.split(|c: char| !is_word(c)) {
-                // 整个字段就是这一个词：枚举值
-                if word.is_empty() || word.len() == text.len() {
-                    continue;
-                }
-                let snake_case = word.contains('_')
-                    && word.starts_with(|c: char| c.is_ascii_lowercase())
-                    && !word.ends_with('_')
-                    && !word.chars().any(|c| c.is_ascii_uppercase());
-                if (snake_case || event_names.contains(word)) && !material.contains(word) {
-                    found.push(word.to_owned());
-                }
-            }
+            // 整个字段就是一个词的是枚举值
+            found.extend(
+                ascii_words(text)
+                    .filter(|word| word.len() != text.len() && names.contains(*word))
+                    .map(str::to_owned),
+            );
         }
         Value::Array(items) => {
             for item in items {
-                collect_program_names(item, event_names, material, found);
+                collect_program_names(item, names, found);
             }
         }
         Value::Object(fields) => {
             for (key, field) in fields {
                 if !KEPT_FIELDS.contains(&key.as_str()) {
-                    collect_program_names(field, event_names, material, found);
+                    collect_program_names(field, names, found);
                 }
             }
         }
@@ -182,24 +208,43 @@ fn collect_program_names(
 mod tests {
     use super::*;
 
-    fn found_in(text: &str, event_names: &[&str], material: &str) -> Vec<String> {
-        let event_names = event_names.iter().map(|name| (*name).to_owned()).collect();
-        let value = serde_json::json!({
-            "integrity": {"summary": text, "signals": [{"kind": "page_event", "quote": "page_hidden"}]},
-            "meta": {"note": "risk_level"},
+    /// 一场只有一条过程事件的面试。`resume` 是候选人自己写的内容。
+    fn record_with_event(kind: &str, detail: &str, resume: &str) -> InterviewRecord {
+        serde_json::from_value(serde_json::json!({
+            "interview_id": "i1",
+            "job": {"title": "后端开发", "description": "写服务"},
+            "candidate": {"candidate_id": "c1", "resume": resume},
+            "config": {"round": "初筛", "expected_minutes": 20},
+            "questions": [],
+            "transcript": [],
+            "events": [{"id": "e1", "kind": kind, "detail": detail}],
+            "duration_ms": 1000
+        }))
+        .expect("面试记录的样子变了，这里的最小记录要跟着改")
+    }
+
+    /// 报告里的几种字段：正文、枚举值、引文、给程序看的 `meta`。
+    fn found_in(summary: &str, record: &InterviewRecord) -> Vec<String> {
+        let report = serde_json::json!({
+            "integrity": {
+                "risk_level": "none",
+                "summary": summary,
+                "signals": [{"kind": "page_event", "evidence": [{"quote": "page_opened"}]}]
+            },
+            "meta": {"failed_stages": ["risk_level 没算出来"]},
         });
         let mut found = Vec::new();
-        collect_program_names(&value, &event_names, material, &mut found);
+        collect_program_names(&report, &names_told_to_model(record), &mut found);
         found
     }
 
     #[test]
-    fn event_and_field_names_in_prose_are_counted() {
+    fn names_told_to_the_model_are_counted_in_prose() {
+        let record = record_with_event("interview_started", r#"{"resumed":true}"#, "");
         assert_eq!(
             found_in(
                 "02:05 换到了另一个页面（page_taken_over），interview_started 的 resumed 为 true，risk_level 不变。",
-                &["page_taken_over", "interview_started", "resumed"],
-                "",
+                &record,
             ),
             [
                 "page_taken_over",
@@ -211,13 +256,18 @@ mod tests {
     }
 
     #[test]
-    fn words_from_the_interview_itself_and_enum_values_are_not_counted() {
-        // 候选人说过的词、普通的英文词、带大写的名字、枚举值和引文都不算
+    fn technical_terms_and_words_from_the_interview_are_not_counted() {
+        // 模型自己写的技术名词（dense_rank）、候选人自己用过的词（简历里写了 resumed 和 page_opened）、
+        // 普通的英文词和带大写的名字都不算
+        let record = record_with_event(
+            "interview_started",
+            r#"{"resumed":true}"#,
+            "做过 resumed 状态机，监听 page_opened",
+        );
         assert_eq!(
             found_in(
-                "候选人讲了用 row_number 去重，用的是 Redis 和 MAX_CONN，换页面前后水平一致。",
-                &["page_taken_over"],
-                r#"{"transcript":[{"text":"我用 row_number 开窗去重"}]}"#,
+                "下一轮可以问 row_number 和 dense_rank 的区别；候选人讲了 resumed 状态和 page_opened 的处理，用的是 Redis 和 MAX_CONN。",
+                &record,
             ),
             Vec::<String>::new()
         );

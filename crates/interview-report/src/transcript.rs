@@ -215,6 +215,31 @@ pub(crate) fn lookup_by_alias<'a>(
     lookup
 }
 
+/// 过程事件每一行的格式和各种事件的含义，放在事件列表前面讲给模型听。
+pub(crate) const EVENT_LEGEND: &str = "\n# 过程事件\n由候选人的面试网页采集。每行的格式：[事件 id | 开始时间 | 种类 | 持续时间] 说明\n\
+     开始时间写「开始前」的，是面试开始之前的事件。page_opened 是打开面试页，说明里的 signals \
+     是这个浏览器能采集哪几类信号，in_app_browser 是所在的内置浏览器（微信这一类，里面窗口失焦可能采不到）。\
+     某类信号采集不到时，没有记录不等于没有发生。\n\
+     frames_checked、face_count_changed、phone_visible 这三种不是网页采集的，\
+     是面试结束后从摄像头录像里每隔几秒抽一帧、由模型看图得到的。\n\
+     device_report、screen_wake_lock、upload_stalled、upload_finished 说的是候选人的设备和网络，\
+     和候选人做了什么无关。device_report 是面试前的设备检测，uplink_kbps 是测出来的上行网速（千比特每秒）。\
+     screen_wake_lock 的 held 为 false 表示没拿到屏幕常亮，手机中途可能自动锁屏，录像会断。\
+     upload_stalled 是录像传不动了：cause 是原因（retrying 请求失败在重试，offline 断网，failed 重试也没用），\
+     持续时间是过了多久又传动的，failures 是中间连续失败了几次；持续时间写「-」的是到最后都没有恢复。\
+     upload_finished 是面试结束后录像全部传完了。\
+     录像是边录边传的，面试中候选人说的话也是从传上来的录像里识别的。传不动的时候录像先存在候选人的浏览器里，\
+     恢复之后补传。所以停顿恢复了的，最后的录像和转写都是完整的，不要说那一段可能缺内容；\
+     只是停顿的那段时间面试官可能没听到回答、请候选人再说一遍。\
+     一直没恢复、也没有 upload_finished 的，停顿之后的录像、转写和画面检查才可能缺一截。\n\
+     page_taken_over 是候选人在另一个页面（另一台设备，或者另一个标签页）打开同一条面试链接接着面，\
+     原来的页面停了下来。它旁边会有一条 interview_started（resumed 为 true），是新的页面接上了面试：\
+     面试从停下的地方继续，录像换成新的一段接着录，中间不是候选人离开。\
+     interview_started 的 resumed 为 true、旁边却没有 page_taken_over 的，是在同一个页面上刷新之后接着面。\n\
+     interview_started 的 video_kbps 是这一段录像的画面实际用的码率（千比特每秒）。video_reduced 为 true \
+     表示候选人的上行网速装不下平时的码率，面试页把画面的码率降了下来，好让声音及时传到：\
+     这一段录像的画面比平时糊，是页面有意降的，和候选人做了什么无关，也不是摄像头有问题；声音和转写不受影响。\n";
+
 /// 把整场面试的材料排成给模型看的文本。所有分析步骤共用这一段，放在提示的最前面，
 /// 这样各步的输入前缀相同，可以命中模型服务的缓存。
 pub(crate) fn render_context(
@@ -305,31 +330,7 @@ pub(crate) fn render_context(
         );
     }
 
-    out.push_str(
-        "\n# 过程事件\n由候选人的面试网页采集。每行的格式：[事件 id | 开始时间 | 种类 | 持续时间] 说明\n\
-         开始时间写「开始前」的，是面试开始之前的事件。page_opened 是打开面试页，说明里的 signals \
-         是这个浏览器能采集哪几类信号，in_app_browser 是所在的内置浏览器（微信这一类，里面窗口失焦可能采不到）。\
-         某类信号采集不到时，没有记录不等于没有发生。\n\
-         frames_checked、face_count_changed、phone_visible 这三种不是网页采集的，\
-         是面试结束后从摄像头录像里每隔几秒抽一帧、由模型看图得到的。\n\
-         device_report、screen_wake_lock、upload_stalled、upload_finished 说的是候选人的设备和网络，\
-         和候选人做了什么无关。device_report 是面试前的设备检测，uplink_kbps 是测出来的上行网速（千比特每秒）。\
-         screen_wake_lock 的 held 为 false 表示没拿到屏幕常亮，手机中途可能自动锁屏，录像会断。\
-         upload_stalled 是录像传不动了：cause 是原因（retrying 请求失败在重试，offline 断网，failed 重试也没用），\
-         持续时间是过了多久又传动的，failures 是中间连续失败了几次；持续时间写「-」的是到最后都没有恢复。\
-         upload_finished 是面试结束后录像全部传完了。\
-         录像是边录边传的，面试中候选人说的话也是从传上来的录像里识别的。传不动的时候录像先存在候选人的浏览器里，\
-         恢复之后补传。所以停顿恢复了的，最后的录像和转写都是完整的，不要说那一段可能缺内容；\
-         只是停顿的那段时间面试官可能没听到回答、请候选人再说一遍。\
-         一直没恢复、也没有 upload_finished 的，停顿之后的录像、转写和画面检查才可能缺一截。\n\
-         page_taken_over 是候选人在另一个页面（另一台设备，或者另一个标签页）打开同一条面试链接接着面，\
-         原来的页面停了下来。它旁边会有一条 interview_started（resumed 为 true），是新的页面接上了面试：\
-         面试从停下的地方继续，录像换成新的一段接着录，中间不是候选人离开。\
-         interview_started 的 resumed 为 true、旁边却没有 page_taken_over 的，是在同一个页面上刷新之后接着面。\n\
-         interview_started 的 video_kbps 是这一段录像的画面实际用的码率（千比特每秒）。video_reduced 为 true \
-         表示候选人的上行网速装不下平时的码率，面试页把画面的码率降了下来，好让声音及时传到：\
-         这一段录像的画面比平时糊，是页面有意降的，和候选人做了什么无关，也不是摄像头有问题；声音和转写不受影响。\n",
-    );
+    out.push_str(EVENT_LEGEND);
     if record.events.is_empty() {
         out.push_str("（面试网页全程在采集，没有记录到切出页面、粘贴、退出全屏这类事件。）\n");
     }
