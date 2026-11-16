@@ -36,6 +36,10 @@ required-features = ["sherpa"]
 name = "realtime_latency"
 required-features = ["sherpa"]
 
+[[example]]
+name = "concurrent"
+required-features = ["sherpa"]
+
 [[test]]
 name = "sherpa_live"
 required-features = ["sherpa"]
