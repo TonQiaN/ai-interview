@@ -117,6 +117,9 @@ function Picker({
                 <Avatar name={i.candidate_name} />
                 <span className="oil-grow">
                   <strong>{i.candidate_name}</strong>
+                  <span className="adm-person__sub" style={{ display: "block" }}>
+                    {fullTime(i.ended_at ?? i.started_at ?? i.created_at)} 的面试
+                  </span>
                 </span>
                 <ReportVerdict interview={i} />
                 <span className="adm-compare__tick">
