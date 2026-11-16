@@ -141,6 +141,45 @@ function SynthFailed({ interview }: { interview: Interview }) {
   );
 }
 
+/**
+ * 发了链接、候选人还没开始。链接到期以后面试的状态不会变，还是「已发链接」，
+ * 所以这里看一眼链接本身：过期了就提醒 HR 换一个，没过期就写上什么时候过期、候选人打开过没有。
+ */
+function InvitedStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) => void }) {
+  const invites = useInvites(interview.id).data?.items;
+  // 还没取到链接时先按没过期说，免得闪一下警告
+  if (!invites) return <Banner tone="info">{statusHint.invited}</Banner>;
+
+  const active = invites.find((invite) => invite.status === "active");
+  if (active) {
+    const opened =
+      active.open_count > 0 ? `打开过 ${active.open_count} 次，还没开始面试` : "还没打开";
+    return (
+      <Banner tone="info">
+        {`${statusHint.invited}链接 ${relativeTime(active.expires_at)}过期，候选人${opened}。`}
+      </Banner>
+    );
+  }
+  // 新的在前：最近发出去的那一个
+  const latest = invites[0];
+  const opened = invites.some((invite) => invite.open_count > 0);
+  return (
+    <Banner
+      tone="warning"
+      title="链接过期了，候选人还没有面试"
+      actions={
+        <Button size="sm" icon={<Send aria-hidden="true" />} onClick={() => goTo("invites")}>
+          换一个新链接
+        </Button>
+      }
+    >
+      {latest ? `链接在 ${fullTime(latest.expires_at)} 过期，` : ""}
+      {opened ? "候选人打开过链接，但没有开始面试。" : "候选人没有打开过链接。"}
+      题目和语音都还在，生成一个新链接发给候选人就行。
+    </Banner>
+  );
+}
+
 function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) => void }) {
   const prepare = usePrepareInterview(interview.id);
   const toast = useToast();
@@ -211,6 +250,7 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
       </Banner>
     );
   }
+  if (status === "invited") return <InvitedStep interview={interview} goTo={goTo} />;
   if (ended(interview) && interview.report?.status === "done" && interview.decision === "pending") {
     return (
       <Banner
