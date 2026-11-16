@@ -198,7 +198,9 @@ function silenceLimitMs(state: Listening, config: TurnConfig): number {
 /** 检查各种超时。只在没有暂停时调用。 */
 function checkTimeouts(state: Listening, at: number, config: TurnConfig): TurnState {
   if (at - state.listenStartedAt >= config.maxAnswerMs) {
-    return end(state, "max_duration", at);
+    // 一直没开口就等到了时间上限：是没出声，不是答满了时间。
+    // 两个时限一样长时（最长作答时间设得短）不分清楚，服务端会当成答过了，不提醒也不会提前结束
+    return end(state, state.firstSpeechAt === null ? "no_speech" : "max_duration", at);
   }
   if (state.firstSpeechAt === null) {
     const waited = at - state.listenStartedAt;

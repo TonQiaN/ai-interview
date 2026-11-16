@@ -31,7 +31,9 @@ test("英文面试：从须知到结束页都是英文", async ({ page }) => {
   await button(page, "Get ready").click();
 
   // 同意事项是服务端按面试语言给的
-  await expect(page.getByText("I agree to this interview being audio and video recorded")).toBeVisible();
+  await expect(
+    page.getByText("I agree to this interview being audio and video recorded"),
+  ).toBeVisible();
   for (const box of await page.getByRole("checkbox").all()) await box.check();
   await page.getByRole("button", { name: "Show details" }).first().click();
   await expectNoChinese(page, "同意页");
