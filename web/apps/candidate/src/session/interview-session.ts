@@ -24,6 +24,7 @@ import { InterviewRunner, levelFromDb, type RunnerSnapshot } from "../lib/interv
 import { AudioGraph, type LevelFrame } from "../lib/media/audio-graph";
 import { CaptureError, requestCapture, stopStream } from "../lib/media/capture";
 import type { MediaErrorKind } from "../lib/media/errors";
+import type { OutputHalt, OutputWatch } from "../lib/media/output-watch";
 import { ScreenWakeLock } from "../lib/media/wake-lock";
 import { recorderFactory } from "../lib/recording/create-recorder";
 import { SegmentRecorder } from "../lib/recording/segment-recorder";
@@ -99,6 +100,8 @@ export interface SessionSnapshot {
   upload: UploadStatus | null;
   /** 面试中摄像头或麦克风断了。 */
   interrupted: boolean;
+  /** 面试中声音被系统停掉了，自己恢复不了，要候选人点一下「继续面试」。 */
+  audioHalted: boolean;
   /** 录像分片只能放在内存里（没有 IndexedDB），刷新会丢。 */
   volatileStorage: boolean;
   /** 面试是怎么结束的。 */
@@ -139,6 +142,7 @@ export class InterviewSession {
     runner: null,
     upload: null,
     interrupted: false,
+    audioHalted: false,
     volatileStorage: false,
     finishReason: null,
   };
@@ -155,6 +159,11 @@ export class InterviewSession {
   private recorder: SegmentRecorder | null = null;
   private runner: InterviewRunner<AudioBuffer> | null = null;
   private wakeLock: ScreenWakeLock | null = null;
+  private outputWatch: OutputWatch | null = null;
+  /** 声音是什么时候被系统停掉的（performance.now()）；没停是 null。 */
+  private outputHaltedAt: number | null = null;
+  /** 面试因为什么被按住了。全都放开了才接着走。 */
+  private readonly holds = new Set<"device" | "audio">();
   /** 面试是什么时候结束的（performance.now()）；这次打开页面时面试已经结束是 null。 */
   private finishedAt: number | null = null;
   private readonly cleanups: Array<() => void> = [];
@@ -474,6 +483,7 @@ export class InterviewSession {
         runner.subscribe((snapshot) => this.patch({ runner: snapshot })),
         () => runner.stop(),
       );
+      this.watchOutput(graph);
       this.patch({
         stage: "interview",
         runner: runner.getSnapshot(),
@@ -561,8 +571,74 @@ export class InterviewSession {
       await this.startRecording();
       this.collector?.record("device_recovered");
       this.patch({ interrupted: false });
-      this.runner?.resume();
+      this.release("device");
     });
+  }
+
+  /** 声音被系统停掉之后点「继续面试」。必须在按钮点击里调用：有的手机只在点击里才让声音恢复。 */
+  async resumeAudio(): Promise<void> {
+    const watch = this.outputWatch;
+    if (!watch) return;
+    await this.action(async () => {
+      if (!(await watch.revive())) this.patch({ actionError: "audio_halted" });
+    });
+  }
+
+  /** 面试开始后盯着声音有没有被系统停掉。 */
+  private watchOutput(graph: AudioGraph): void {
+    const watch = graph.watchOutput(this.handleOutputChange);
+    this.outputWatch = watch;
+    // 切回页面时系统多半已经肯让声音恢复了，不用等候选人点
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && this.outputHaltedAt !== null) {
+        void this.reviveOutput();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    this.cleanups.push(
+      () => watch.stop(),
+      () => document.removeEventListener("visibilitychange", onVisible),
+    );
+  }
+
+  private handleOutputChange = (halt: OutputHalt | null): void => {
+    if (this.snapshot.stage !== "interview") return;
+    if (halt !== null) {
+      if (this.outputHaltedAt !== null) return;
+      this.outputHaltedAt = performance.now();
+      // 声音停着的这一段，录像里没有声音，面试官的话也播不出来
+      this.collector?.record("recording_gap", { device: "audio_output", cause: halt });
+      this.hold("audio");
+      void this.reviveOutput();
+    } else if (this.outputHaltedAt !== null) {
+      this.collector?.record("device_recovered", {
+        device: "audio_output",
+        duration_ms: Math.round(performance.now() - this.outputHaltedAt),
+      });
+      this.outputHaltedAt = null;
+      this.patch({ audioHalted: false, actionError: null });
+      this.release("audio");
+    }
+  };
+
+  /** 先自己试着恢复；不行就让候选人点按钮。 */
+  private async reviveOutput(): Promise<void> {
+    const revived = await this.outputWatch?.revive();
+    if (!revived && this.outputHaltedAt !== null && this.snapshot.stage === "interview") {
+      this.patch({ audioHalted: true });
+    }
+  }
+
+  /** 按住面试：计时停下，下一句先不播。 */
+  private hold(reason: "device" | "audio"): void {
+    const first = this.holds.size === 0;
+    this.holds.add(reason);
+    if (first) this.runner?.pause();
+  }
+
+  private release(reason: "device" | "audio"): void {
+    if (!this.holds.delete(reason)) return;
+    if (this.holds.size === 0) this.runner?.resume();
   }
 
   private watchTracks(stream: MediaStream): void {
@@ -576,7 +652,7 @@ export class InterviewSession {
         if (track.kind !== "audio" || !this.snapshot.interrupted) return;
         this.collector?.record("device_recovered");
         this.patch({ interrupted: false });
-        this.runner?.resume();
+        this.release("device");
       };
       track.addEventListener("ended", onEnded);
       track.addEventListener("mute", onMute);
@@ -592,7 +668,7 @@ export class InterviewSession {
   private handleInterruption(kind: string, cause: "ended" | "muted"): void {
     if (this.snapshot.stage === "interview") {
       this.collector?.record("recording_gap", { device: kind, cause });
-      this.runner?.pause();
+      this.hold("device");
       this.patch({ interrupted: true });
     } else if (this.snapshot.stage === "device" || this.snapshot.stage === "ready") {
       if (cause !== "ended") return;
@@ -609,8 +685,17 @@ export class InterviewSession {
   private async finish(reason: string, notifyServer: boolean): Promise<void> {
     if (this.snapshot.stage === "finishing" || this.snapshot.stage === "done") return;
     this.finishedAt = performance.now();
-    this.patch({ stage: "finishing", finishReason: reason, interrupted: false });
+    this.patch({
+      stage: "finishing",
+      finishReason: reason,
+      interrupted: false,
+      audioHalted: false,
+    });
     this.collector?.record("interview_finished", { reason });
+    this.outputWatch?.stop();
+    this.outputWatch = null;
+    this.outputHaltedAt = null;
+    this.holds.clear();
 
     const recorder = this.recorder;
     this.recorder = null;

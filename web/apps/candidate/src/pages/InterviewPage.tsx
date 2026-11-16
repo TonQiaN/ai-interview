@@ -22,6 +22,8 @@ export interface InterviewPageProps {
   runner: RunnerSnapshot;
   upload: UploadStatus | null;
   interrupted: boolean;
+  /** 声音被系统停掉了，要候选人点一下才能接着来。 */
+  audioHalted: boolean;
   busy: boolean;
   actionError: string | null;
   cameraStream: MediaStream | null;
@@ -34,6 +36,7 @@ export interface InterviewPageProps {
   onReplay: () => void;
   onReady: () => void;
   onReconnect: () => void;
+  onResumeAudio: () => void;
   onLeave: () => void;
 }
 
@@ -69,7 +72,12 @@ function useElapsedSeconds(elapsedMs: () => number | null): number {
 }
 
 export function InterviewPage(props: InterviewPageProps) {
-  const { runner, upload, interrupted, busy, actionError, cameraStream, silenceSec } = props;
+  const { runner, upload, busy, actionError, cameraStream, silenceSec } = props;
+  const { interrupted } = props;
+  // 设备断了的提示优先：设备接好之前，声音恢复了也没法继续
+  const audioHalted = props.audioHalted && !interrupted;
+  /** 面试被按住了：计时停着，不显示作答的按钮。 */
+  const held = interrupted || audioHalted;
   const seconds = useElapsedSeconds(props.elapsedMs);
   const [confirmLeave, setConfirmLeave] = useState(false);
 
@@ -93,7 +101,7 @@ export function InterviewPage(props: InterviewPageProps) {
   else if (phase === "reading")
     hint = runner.expectsAnswer ? "语音没有加载出来，请看文字，准备好后点「开始回答」" : "";
   else if (listening) {
-    if (interrupted) hint = "已暂停";
+    if (held) hint = "已暂停";
     else if (turn?.noSpeechPromptVisible) hint = "请开始回答。如果已经在说，请靠近麦克风";
     else if (turn?.maxWarningVisible) hint = "这道题的时间快到了，请尽快收尾";
     else if (runner.speaking) hint = "正在听";
@@ -116,17 +124,17 @@ export function InterviewPage(props: InterviewPageProps) {
       }
       footer={
         <>
-          {listening && !interrupted && turn?.countdownVisible && (
+          {listening && !held && turn?.countdownVisible && (
             <Button block size="lg" variant="gold" onClick={props.onContinue}>
               我还没说完
             </Button>
           )}
-          {listening && !interrupted && (
+          {listening && !held && (
             <Button block size="lg" variant="secondary" onClick={props.onDone}>
               我答完了，下一题
             </Button>
           )}
-          {listening && !interrupted && runner.canReplay && (
+          {listening && !held && runner.canReplay && (
             <Button block variant="ghost" onClick={props.onReplay}>
               再听一遍题目
             </Button>
@@ -154,18 +162,33 @@ export function InterviewPage(props: InterviewPageProps) {
             : "面试已暂停，计时也停了。接好设备后点「重新连接」继续。"}
         </Banner>
       )}
-      {!interrupted && offline && (
+      {audioHalted && (
+        <Banner
+          tone="danger"
+          title="声音被暂停了"
+          actions={
+            <Button size="sm" loading={busy} onClick={props.onResumeAudio}>
+              继续面试
+            </Button>
+          }
+        >
+          {actionError === "audio_halted"
+            ? "声音还是没有恢复。请先挂断电话或关掉正在用麦克风的应用，再点「继续面试」。"
+            : "可能是来了电话，或者刚才切到了别的应用。面试已暂停，计时也停了，点「继续面试」接着进行。"}
+        </Banner>
+      )}
+      {!held && offline && (
         <Banner tone="warning" title="网络不稳定">
           正在重新连接。录像先存在本机，不会丢，网络恢复后自动上传。
         </Banner>
       )}
-      {!interrupted && !offline && backlog && (
+      {!held && !offline && backlog && (
         <Banner tone="info">网络较慢，部分录像还在上传。面试可以正常进行。</Banner>
       )}
 
       {isQuestion && <QuestionProgress total={progress.total} current={progress.index - 1} />}
 
-      <InterviewerPresence state={interrupted ? "idle" : PRESENCE[phase]} label={hint} />
+      <InterviewerPresence state={held ? "idle" : PRESENCE[phase]} label={hint} />
 
       {utterance && <CaptionCard meta={meta}>{utterance.text}</CaptionCard>}
 

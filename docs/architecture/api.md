@@ -345,6 +345,7 @@ HR 侧：
 - `page_opened` 带 `signals`：这个浏览器里哪几类事件采得到（`visibility`、`fullscreen`、`device_change`、`network`、`clipboard`），以及 `in_app_browser`（微信等内置浏览器的名字，可能不触发失焦事件）。报告据此区分「没发生」和「采不到」。
 - `device_check` 带 `result`（`passed` 或 `failed`）；失败时带 `error`（`permission_denied`、`device_not_found` 等）。
 - `device_report` 是 `POST /room/device-check` 记下的：`camera`、`microphone`、`speaker`（`ok`、`failed`、`skipped`）、`uplink_kbps`（页面测出来的上行网速，千比特每秒；没测出来是 null）、`recording_mime`、`user_agent`。
+- `recording_gap` 是面试中录像缺了一段，带 `device` 和 `cause`：`device` 是 `audio` 或 `video` 时是麦克风或摄像头断了（`cause` 为 `ended` 设备没了、`muted` 被系统静音，比如来电话）；`device` 是 `audio_output` 时是页面的声音被系统整个停掉了（`cause` 为 `suspended`、`interrupted`，或者 `stalled` 状态正常但声音不走），这一段面试官的话播不出来，录像里也没有声音。恢复了报 `device_recovered`；声音被停掉的那一种带 `device: "audio_output"` 和 `duration_ms`（停了多久）。这两种情况面试都会停下来等，不会把这段时间算成候选人没说话。
 - `screen_wake_lock` 在开始面试时报一次：`supported`（浏览器有没有屏幕常亮的能力）和 `held`（有没有申请到）。没申请到时手机可能中途自动锁屏，录像会断。
 - `upload_stalled` 是录像传不动了：`cause`（`retrying` 请求失败在重试、`offline` 浏览器报告断网、`failed` 重试也没用）和当时还没传的分片数 `pending_chunks`。又传动了报 `upload_recovered`：`stalled_ms`（停了多久）、`failures`（中间连续失败了几次）、`pending_chunks`。一次停顿不管重试多少次只报这一对。
 - `upload_finished` 是面试结束后录像全部传完：`uploaded_bytes`（这次打开页面以来传了多少字节）和 `wait_ms`（面试结束后候选人等了多久；刷新后回来补传的是 null）。
