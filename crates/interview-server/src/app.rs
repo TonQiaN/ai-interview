@@ -3,13 +3,14 @@
 use std::path::Path;
 
 use axum::extract::{Request, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{Extensions, HeaderMap, HeaderValue, StatusCode, Version, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use interview_platform::http::ApiError;
 use interview_platform::{AppContext, auth};
+use tower_http::compression::CompressionLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme};
@@ -168,7 +169,42 @@ fn spa(dir: &Path, name: &'static str) -> Router {
     }
     Router::new()
         .fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index)))
+        .layer(CompressionLayer::new().compress_when(compressible))
         .layer(middleware::from_fn(static_cache_headers))
+}
+
+/// 前端的文件里哪些值得压缩后再发：页面、脚本、样式这些文字。候选人第一次打开面试页要下的脚本和样式
+/// 压完只有原来的三分之一，网络慢的时候少等几秒。字体、图片本身就是压缩格式，再压只是白花时间；
+/// 只取文件的一段（`Range`）时不压，不然取到的就不是原文件里的那一段了。
+///
+/// 只用在托管前端的路由上。接口、录像分片、面试官的语音不过这一层。
+fn compressible(
+    status: StatusCode,
+    _version: Version,
+    headers: &HeaderMap,
+    _extensions: &Extensions,
+) -> bool {
+    if status != StatusCode::OK {
+        return false;
+    }
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    let essence = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    essence.starts_with("text/")
+        || matches!(
+            essence.as_str(),
+            "application/javascript"
+                | "application/json"
+                | "application/manifest+json"
+                | "image/svg+xml"
+        )
 }
 
 /// 带内容哈希的资源（`assets/` 下）可以长期缓存；其他的（主要是 `index.html`）每次都要重新确认，
