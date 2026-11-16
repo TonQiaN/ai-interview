@@ -935,6 +935,7 @@ function Line({
   follow,
   utterance,
   onEdit,
+  editLabel,
   onRemove,
   removeLabel,
   children,
@@ -944,6 +945,8 @@ function Line({
   follow?: boolean;
   utterance: Utterance | undefined;
   onEdit?: () => void;
+  /** 「改」按钮念出来的名字：每一行都有一个，要说清改的是哪一句 */
+  editLabel?: string;
   /** 去掉这一句。只有题目和追问能去掉，开场白这些固定要说的话不能 */
   onRemove?: () => void;
   /** 「去掉」按钮念出来的名字：一页上有很多个，要说清是哪一句 */
@@ -969,6 +972,7 @@ function Line({
                 size="sm"
                 variant="ghost"
                 icon={<Pencil aria-hidden="true" />}
+                aria-label={editLabel}
                 onClick={onEdit}
               >
                 改
@@ -1104,12 +1108,16 @@ function QuestionsTab({ interview }: { interview: Interview }) {
   const reserve = data.questions.length - main.length;
   const followUps = data.questions.reduce((sum, q) => sum + (q.follow_ups?.length ?? 0), 0);
   const speech = (utterances.data ?? []).reduce((sum, u) => sum + (u.audio_duration_ms ?? 0), 0);
+  /** 一行的「改」：按下去做什么、按钮念出来叫什么。和弹出来的窗口标题是同一句 */
   const edit = (target: Editing) => {
-    if (!canEdit) return undefined;
-    return () => {
-      save.reset();
-      setEditing(target);
-      setText(target.text);
+    if (!canEdit) return {};
+    return {
+      editLabel: `改${target.label}`,
+      onEdit: () => {
+        save.reset();
+        setEditing(target);
+        setText(target.text);
+      },
     };
   };
   const setQuestion = (index: number, patch: (q: PlannedQuestion) => PlannedQuestion) => {
@@ -1152,6 +1160,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
     });
   };
   let mainNo = 0;
+  let reserveNo = 0;
 
   return (
     <div className="oil-stack" style={gap(5)}>
@@ -1211,23 +1220,25 @@ function QuestionsTab({ interview }: { interview: Interview }) {
             label="开场"
             text={data.phrases.opening}
             utterance={byKey.get("opening")}
-            onEdit={edit({
+            {...edit({
               label: "开场白",
               text: data.phrases.opening,
               apply: setPhrase("opening"),
             })}
           />
           {data.questions.map((q, index) => {
-            if (!q.reserve) mainNo += 1;
+            if (q.reserve) reserveNo += 1;
+            else mainNo += 1;
             const label = q.reserve ? "备用" : `Q${mainNo}`;
-            const name = q.reserve ? "这道备用题" : `第 ${mainNo} 题`;
+            // 按钮和弹窗里怎么叫这道题：备用题也编上号，几道备用题的按钮念出来才分得清
+            const name = q.reserve ? `第 ${reserveNo} 道备用题` : `第 ${mainNo} 题`;
             return (
               <div key={q.key}>
                 <Line
                   label={label}
                   text={q.text}
                   utterance={byKey.get(q.key)}
-                  onEdit={edit({
+                  {...edit({
                     label: name,
                     text: q.text,
                     hint: q.intent ? `想考察：${q.intent}` : undefined,
@@ -1273,8 +1284,8 @@ function QuestionsTab({ interview }: { interview: Interview }) {
                     label="追问"
                     text={f.text}
                     utterance={byKey.get(f.key)}
-                    onEdit={edit({
-                      label: `${label} 的追问`,
+                    {...edit({
+                      label: `${name}的第 ${fIndex + 1} 句追问`,
                       text: f.text,
                       hint: `什么时候问：${f.ask_when}`,
                       apply: (current, next) =>
@@ -1301,7 +1312,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
                         ),
                       }),
                     })}
-                    removeLabel={`去掉 ${label} 的第 ${fIndex + 1} 句追问`}
+                    removeLabel={`去掉${name}的第 ${fIndex + 1} 句追问`}
                   >
                     <div className="adm-utter__intent">什么时候问：{f.ask_when}</div>
                   </Line>
@@ -1314,7 +1325,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
               label="提问"
               text={data.phrases.candidate_questions}
               utterance={byKey.get("candidate_questions")}
-              onEdit={edit({
+              {...edit({
                 label: "请候选人提问的那句话",
                 text: data.phrases.candidate_questions,
                 apply: (current, next) => ({
@@ -1328,7 +1339,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
             label="结束"
             text={data.phrases.closing}
             utterance={byKey.get("closing")}
-            onEdit={edit({
+            {...edit({
               label: "结束语",
               text: data.phrases.closing,
               apply: setPhrase("closing"),
@@ -1347,8 +1358,8 @@ function QuestionsTab({ interview }: { interview: Interview }) {
               label="过渡"
               text={ack}
               utterance={byKey.get(`ack.${index + 1}`)}
-              onEdit={edit({
-                label: "这句过渡语",
+              {...edit({
+                label: `第 ${index + 1} 句过渡语`,
                 text: ack,
                 apply: (current, next) => ({
                   ...current,
@@ -1364,7 +1375,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
             label="提醒"
             text={data.phrases.nudge}
             utterance={byKey.get("nudge")}
-            onEdit={edit({
+            {...edit({
               label: "提醒的话",
               text: data.phrases.nudge,
               apply: setPhrase("nudge"),
@@ -1376,7 +1387,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
             label="重复"
             text={data.phrases.repeat}
             utterance={byKey.get("repeat")}
-            onEdit={edit({
+            {...edit({
               label: "重复题目前的话",
               text: data.phrases.repeat,
               apply: setPhrase("repeat"),
@@ -1388,7 +1399,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
             label="提前结束"
             text={data.phrases.closing_early}
             utterance={byKey.get("closing_early")}
-            onEdit={edit({
+            {...edit({
               label: "提前结束时的话",
               text: data.phrases.closing_early,
               apply: setPhrase("closing_early"),

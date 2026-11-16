@@ -587,7 +587,7 @@ describe("面试详情", () => {
       if (!question || !followUp) throw new Error("演示数据里没有带追问的题");
       await openQuestions(target.id);
 
-      fireEvent.click(screen.getByRole("button", { name: `去掉 Q${index + 1} 的第 1 句追问` }));
+      fireEvent.click(screen.getByRole("button", { name: `去掉第 ${index + 1} 题的第 1 句追问` }));
       const dialog = await screen.findByRole("dialog", { name: "去掉这句追问？" });
       fireEvent.click(within(dialog).getByRole("button", { name: "去掉这句追问" }));
 
@@ -610,7 +610,39 @@ describe("面试详情", () => {
       await openQuestions(target.id);
 
       expect(screen.queryByRole("button", { name: "去掉第 1 题" })).toBeNull();
-      expect(screen.getByRole("button", { name: "去掉这道备用题" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "去掉第 1 道备用题" })).toBeTruthy();
+    });
+
+    it("几道备用题的按钮念出来分得清是哪一道", async () => {
+      const { target, plan } = readyWithPlan();
+      const count = plan.questions.length;
+      if (count < 3) throw new Error("演示数据里的题不够三道");
+      plan.questions.forEach((q, index) => {
+        if (index < count - 2) return;
+        q.reserve = true;
+        q.required = false;
+        q.follow_ups = [
+          { key: `${q.key}.f9`, text: `备用题的追问 ${index}`, ask_when: "回答比较笼统的时候" },
+        ];
+      });
+      await openQuestions(target.id);
+
+      for (const no of [1, 2]) {
+        expect(screen.getByRole("button", { name: `去掉第 ${no} 道备用题` })).toBeTruthy();
+        expect(
+          screen.getByRole("button", { name: `去掉第 ${no} 道备用题的第 1 句追问` }),
+        ).toBeTruthy();
+        expect(screen.getByRole("button", { name: `改第 ${no} 道备用题` })).toBeTruthy();
+        expect(
+          screen.getByRole("button", { name: `改第 ${no} 道备用题的第 1 句追问` }),
+        ).toBeTruthy();
+      }
+      // 一页上没有两个念出来一样的「改」和「去掉」
+      const names = screen
+        .getAllByRole("button", { name: /^(改|去掉)/ })
+        .map((button) => button.getAttribute("aria-label"));
+      expect(names.length).toBeGreaterThan(10);
+      expect(new Set(names).size).toBe(names.length);
     });
 
     it("改完一句，等它合成好，这一行显示合成好的语音，不停在「待合成」", async () => {
@@ -622,7 +654,7 @@ describe("面试详情", () => {
       await openQuestions(target.id);
 
       const opening = screen.getByText(plan.phrases.opening).closest(".adm-utter") as HTMLElement;
-      fireEvent.click(within(opening).getByRole("button", { name: "改" }));
+      fireEvent.click(within(opening).getByRole("button", { name: "改开场白" }));
       const dialog = await screen.findByRole("dialog", { name: "改开场白" });
       fireEvent.change(within(dialog).getByLabelText("面试官会这样说"), {
         target: { value: "你好，我们开始吧。" },
