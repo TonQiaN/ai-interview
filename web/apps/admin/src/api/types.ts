@@ -133,6 +133,7 @@ export type Recommendation = Schemas["Decision"];
 export type Decision = Schemas["InterviewDecision"];
 
 export type InterviewSummary = Schemas["InterviewSummary"];
+export type InterviewCounts = Schemas["InterviewCounts"];
 export type Interview = Schemas["InterviewDetail"];
 export type InterviewInput = Schemas["CreateInterview"];
 export type InterviewPatch = Schemas["UpdateInterview"];
