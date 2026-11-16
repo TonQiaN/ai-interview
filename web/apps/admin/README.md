@@ -21,6 +21,8 @@ pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin
 
 带表单的弹窗（改岗位、开账号、改题目等）在填了还没保存的时候，按 Esc、点到弹窗外面不关，只提示一句内容还没保存，要点「取消」或右上角的关闭才关。做法是给设计系统的 `Dialog` 传 `unsaved`，用 `src/lib/form.ts` 的 `sameForm` 比现在的内容和打开时的内容。新加带表单的弹窗时也接上。只显示一次的密码（开账号、重设密码以后）用 `persistent`，必须点「好了」才关。
 
+整页的表单（新建和编辑模板、安排面试）填了还没保存时，离开之前先问一句：在后台里换页面（侧栏、链接、浏览器后退）弹出来问，默认留下；刷新、关标签页时浏览器弹它自带的提示。做法是 `src/components/LeaveGuard.tsx` 的 `useLeaveGuard(有没有改过)`，把它给的 `dialog` 渲染出来，自己要跳走时（点取消、保存成功以后）先调 `allow()`。它靠路由的拦截功能，所以 `main.tsx` 用的是 `createBrowserRouter`（页面还是写在 `App` 的 `<Routes>` 里）；测试里渲染这两页要用 `src/test/router.tsx` 的 `TestRouter`，放在 `MemoryRouter` 里会报错。
+
 ## 演示数据
 
 `dev:demo` 和 `build:demo`（也就是 `--mode demo`，或者设 `VITE_API_MOCK=1`）会把请求交给浏览器里的一套假后端（`src/api/mock/`），右上角显示「演示数据」。这时邮箱和密码随便填都能进（密码填 `wrong` 可以看登录失败的样子），所有改动只存在内存里，刷新就没了。正常构建的产物里不带假后端。
