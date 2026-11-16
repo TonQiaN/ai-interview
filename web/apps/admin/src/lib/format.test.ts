@@ -298,6 +298,13 @@ describe("录像上传和屏幕常亮的事件", () => {
       expect(eventSeverity(kind)).toBe("info");
   });
 
+  it("浏览器放不了压缩过的面试官语音时有中文说法，只是排查用，不提示", () => {
+    expect(eventText({ kind: "audio_format_fallback", payload: { from: "mp3" } })).toBe(
+      "这个浏览器放不了压缩过的面试官语音，改用没压缩的（面试不受影响，每句话取得慢一些）",
+    );
+    expect(eventSeverity("audio_format_fallback")).toBe("info");
+  });
+
   it("没有时间轴位置的事件，按发生的时刻说是开始前、面试中还是结束后", () => {
     const events = [
       { kind: "page_opened", occurred_at: "2026-01-05T09:58:00Z" },
