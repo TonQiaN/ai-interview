@@ -210,6 +210,8 @@ report.generate（interview-flow）
     看到的情况作为过程事件加进记录。结果存下来，重新生成报告时不再看。检查不成不影响出报告
   → 调 interview-report 生成报告，存 interview_reports（每次生成一个新版本）
 HR 在后台看录像、文字记录、报告，写结论（interviews.decision）
+HR 在岗位下选几位面完的候选人点「对比」
+  → 入队 position.compare（interview-flow）：取各自最新的报告，调 interview-report 的 compare，存 position_comparisons
 ```
 
 ## 后台任务清单
@@ -226,6 +228,7 @@ HR 在后台看录像、文字记录、报告，写结论（interviews.decision�
 | `room.watchdog` | ⑤ | 面试开始后定时看候选人还在不在，太久没动静就结束面试（`abandoned`，原因 `connection_lost`） |
 | `interview.finalize` | ① | 面试结束后的转写 |
 | `report.generate` | ① | 生成分析报告 |
+| `position.compare` | ① | 拿几场面试的报告做同一个岗位候选人的横向对比 |
 
 ## 配置和密钥
 

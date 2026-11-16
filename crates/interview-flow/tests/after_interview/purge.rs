@@ -98,6 +98,18 @@ async fn purging_removes_every_file_and_row_of_the_interview(pool: PgPool) {
     ] {
         blobs.put(&key, Bytes::from_static(b"x")).await.unwrap();
     }
+    // 两份候选人对比：一份比过这场面试，一份没有
+    for compared in [vec![interview_id, other_id], vec![other_id]] {
+        sqlx::query(
+            "INSERT INTO position_comparisons (position_id, interview_ids, status, content) \
+             VALUES ($1, $2, 'done', '{}')",
+        )
+        .bind(h.position_id)
+        .bind(compared)
+        .execute(&h.ctx.db)
+        .await
+        .unwrap();
+    }
     let other_files = files_left(&h, other_id).await;
     assert_eq!(other_files, 1);
     let other_rows = rows_left(&h, other_id).await;
@@ -126,6 +138,14 @@ async fn purging_removes_every_file_and_row_of_the_interview(pool: PgPool) {
     assert_eq!(rows_left(&h, interview_id).await, 0);
     let response = h.get(&format!("/api/v1/interviews/{id}")).await;
     assert_eq!(response.status, StatusCode::NOT_FOUND);
+
+    // 比过它的那份对比跟着删了，没比过它的还在
+    let comparisons: Vec<Vec<Uuid>> =
+        sqlx::query_scalar("SELECT interview_ids FROM position_comparisons")
+            .fetch_all(&h.ctx.db)
+            .await
+            .unwrap();
+    assert_eq!(comparisons, vec![vec![other_id]]);
 
     // 费用记录还在，只是不再指向这场面试
     let usage_after: i64 = sqlx::query_scalar("SELECT count(*) FROM llm_usage")

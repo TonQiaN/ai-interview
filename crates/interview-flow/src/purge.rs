@@ -29,6 +29,11 @@ pub(crate) async fn purge(ctx: &AppContext, id: Uuid) -> ApiResult<()> {
         .bind(id.to_string())
         .execute(&mut *tx)
         .await?;
+    // 比过这场面试的候选人对比里有这位候选人的结论，一起删。HR 要看就重新比一次
+    sqlx::query("DELETE FROM position_comparisons WHERE $1 = ANY(interview_ids)")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     // 题目、对话记录、过程事件、面试链接、同意记录、录制记录、报告都跟着这一行删
     sqlx::query("DELETE FROM interviews WHERE id = $1")
         .bind(id)

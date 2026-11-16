@@ -28,6 +28,7 @@ use uuid::Uuid;
 
 use super::{Harness, config, error_code, planner};
 
+mod comparison;
 mod purge;
 mod recordings;
 
@@ -109,6 +110,7 @@ fn stage_of(prompt: &str) -> String {
         ("# 任务：找出作弊和诚信方面的迹象", "integrity"),
         ("# 任务：评价沟通表达", "communication"),
         ("# 任务：给出综合建议", "synthesis"),
+        ("# 任务：比较这", "comparison"),
     ];
     stages
         .iter()
