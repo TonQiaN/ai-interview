@@ -641,12 +641,57 @@ describe("面试详情", () => {
       );
     });
 
-    it("链接发出以后题目不能改，也没有「去掉」", async () => {
+    it("链接发出以后题目不能改，也没有「去掉」和「加一道题」", async () => {
       const target = server.db.interviews.find((i) => i.status === "invited" && i.has_plan);
       if (!target) throw new Error("演示数据里没有已发链接的面试");
       await openQuestions(target.id);
 
       expect(screen.queryAllByRole("button", { name: /^去掉/ })).toEqual([]);
+      expect(screen.queryByRole("button", { name: "加一道题" })).toBeNull();
+    });
+
+    it("加一道自己的题：两样都填了才能保存，加在主问题最后，别的题不动", async () => {
+      const { target, plan } = readyWithPlan();
+      const before = plan.questions.map((q) => q.key);
+      await openQuestions(target.id);
+
+      fireEvent.click(screen.getByRole("button", { name: "加一道题" }));
+      const dialog = await screen.findByRole("dialog", { name: "加一道题" });
+      const saveButton = within(dialog).getByRole("button", { name: "加进去并合成语音" });
+      expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.change(within(dialog).getByLabelText("面试官会这样问"), {
+        target: { value: "你能接受每个月出差一周吗？" },
+      });
+      // 只写了要说的话，还没写想考察什么
+      expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.change(within(dialog).getByLabelText(/^想考察什么/), {
+        target: { value: "确认出差安排" },
+      });
+      expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+      fireEvent.click(saveButton);
+
+      await waitFor(() =>
+        expect(server.db.plans.get(target.id)?.questions).toHaveLength(before.length + 1),
+      );
+      const saved = server.db.plans.get(target.id)?.questions ?? [];
+      expect(saved.slice(0, before.length).map((q) => q.key)).toEqual(before);
+      expect(saved.at(-1)).toMatchObject({
+        text: "你能接受每个月出差一周吗？",
+        intent: "确认出差安排",
+        origin: "must_ask",
+        required: true,
+      });
+      expect(before).not.toContain(saved.at(-1)?.key);
+      expect(await screen.findByText(new RegExp(`共 ${before.length + 1} 道主问题`))).toBeTruthy();
+      // 题目清单里多了这一句（弹窗里填过的那一格不算）
+      await waitFor(() =>
+        expect(
+          screen
+            .getAllByText("你能接受每个月出差一周吗？")
+            .some((el) => el.className === "adm-utter__text"),
+        ).toBe(true),
+      );
     });
   });
 });

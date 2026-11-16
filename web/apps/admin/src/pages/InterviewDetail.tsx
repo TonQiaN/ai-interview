@@ -25,6 +25,7 @@ import {
   CircleArrowRight,
   Link2,
   Pencil,
+  Plus,
   RefreshCw,
   Send,
   Trash2,
@@ -67,6 +68,7 @@ import type {
   PlannedQuestion,
   Utterance,
 } from "../api/types";
+import { AddQuestionDialog } from "../components/AddQuestionDialog";
 import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import {
   Confirm,
@@ -1052,6 +1054,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
   const [text, setText] = useState("");
   const [regenerating, setRegenerating] = useState(false);
   const [removing, setRemoving] = useState<Removing | null>(null);
+  const [adding, setAdding] = useState(false);
   const canEdit = editable(interview);
 
   // 出题的那一步结束后，把题目取回来
@@ -1150,21 +1153,31 @@ function QuestionsTab({ interview }: { interview: Interview }) {
           {followUps > 0 && `，${followUps} 句追问`}
           {speech > 0 && `；面试官说话约 ${duration(speech)}`}。
           {canEdit
-            ? "可以改措辞，改完那一句会重新合成语音；不想问的题和追问可以去掉。"
+            ? "可以改措辞，改完那一句会重新合成语音；不想问的题和追问可以去掉，也可以加自己的题。"
             : preparing
               ? ""
               : "链接发出之后题目不能再改。"}
           「想考察什么」只有你看得到。
         </p>
         {canEdit && (
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<RefreshCw aria-hidden="true" />}
-            onClick={() => setRegenerating(true)}
-          >
-            重新出题
-          </Button>
+          <div className="oil-row oil-row--wrap">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Plus aria-hidden="true" />}
+              onClick={() => setAdding(true)}
+            >
+              加一道题
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<RefreshCw aria-hidden="true" />}
+              onClick={() => setRegenerating(true)}
+            >
+              重新出题
+            </Button>
+          </div>
         )}
       </div>
 
@@ -1408,6 +1421,13 @@ function QuestionsTab({ interview }: { interview: Interview }) {
           </Field>
         </div>
       </Dialog>
+      <AddQuestionDialog
+        interviewId={interview.id}
+        plan={data}
+        maxAnswerSec={interview.config.answer.max_sec}
+        open={adding && canEdit}
+        onClose={() => setAdding(false)}
+      />
       <Confirm
         open={removing !== null}
         title={removing?.title ?? ""}
