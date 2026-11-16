@@ -194,6 +194,9 @@ export function InterviewPage(props: InterviewPageProps) {
           className="app-scene__presence"
           size="var(--app-presence-size)"
           state={held ? "idle" : PRESENCE[phase]}
+          // 头像下面的小标签不让读屏软件念：「正在提问」会压在面试官开口的那一句上。
+          // 该念的由下面只给读屏软件的那一行说
+          announce={false}
         />
 
         {/* 给候选人的提示有的很长，单独占一行、可以折行；头像下面的小标签只写面试官的状态。

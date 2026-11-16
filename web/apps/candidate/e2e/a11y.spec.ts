@@ -45,6 +45,14 @@ test("只用键盘走完一场面试：每换一页焦点都在标题上，步�
   await expect(step(page, "第 2 步，共 4 步：同意")).toBeVisible();
   const boxes = await page.getByRole("checkbox").all();
   expect(boxes.length).toBeGreaterThan(0);
+  // 每一条的「查看详情」读出来带着这一条的内容，几个按钮听起来不一样
+  const details = await page.getByRole("button", { name: /^查看详情/ }).all();
+  expect(details.length).toBeGreaterThan(1);
+  const names = await Promise.all(
+    details.map(async (detail) => /"(.*)"/.exec(await detail.ariaSnapshot())?.[1] ?? ""),
+  );
+  expect(new Set(names).size).toBe(names.length);
+  for (const name of names) expect(name.length).toBeGreaterThan("查看详情".length);
   for (const box of boxes) {
     for (let i = 0; i < 6; i++) {
       if (await box.evaluate((el) => el === document.activeElement)) break;
@@ -72,7 +80,10 @@ test("只用键盘走完一场面试：每换一页焦点都在标题上，步�
   await expect(page.getByText("录制中")).toBeVisible();
   // 面试官说话的时候读屏软件不念提示（会盖住题目的开头），轮到候选人回答时才念
   const spoken = page.locator('p[role="status"]');
-  await expect(page.locator(".oil-presence__label")).toHaveText("正在提问");
+  const presence = page.locator(".oil-presence__label");
+  await expect(presence).toHaveText("正在提问");
+  // 头像下面的小标签只给眼睛看：读屏软件念了它，「正在提问」会压在题目的开头上
+  await expect(presence).not.toHaveAttribute("role", "status");
   await expect(spoken).toHaveText("");
   await expect(spoken).toHaveText("请回答", { timeout: 30_000 });
   await pressButton(page, "我答完了，下一题");
