@@ -149,6 +149,16 @@ export function useRaasPositions(query: RaasPositionQuery, enabled: boolean) {
   });
 }
 
+/** RAAS 里的一个岗位。要它的 job_requisition_ref 才查得到投了这个岗位的人 */
+export function useRaasPosition(ref: string | null | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["raas-position", ref],
+    queryFn: () =>
+      unwrap(api.GET("/api/v1/raas/positions/{ref}", { params: { path: { ref: ref ?? "" } } })),
+    enabled: enabled && Boolean(ref),
+  });
+}
+
 export function useImportRaasPositions() {
   const qc = useQueryClient();
   return useMutation({
