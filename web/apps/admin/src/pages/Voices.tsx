@@ -128,7 +128,18 @@ function PreviewOutput({ preview, engines }: { preview: Preview; engines: Speech
 
 // ───────── 引擎 ─────────
 
-function EngineCard({ engine }: { engine: SpeechEngine }) {
+/**
+ * 不可用的引擎是不是都出于同一个原因（多半是语音合成的服务没连上）。
+ * 是的话原因只在引擎上面说一遍，不在每张卡片上各写一遍。
+ */
+function sharedOutage(items: SpeechEngine[]) {
+  const down = items.filter((e) => !e.available);
+  const reason = down[0]?.unavailable_reason;
+  if (down.length < 2 || !reason || down.some((e) => e.unavailable_reason !== reason)) return null;
+  return { names: down.map((e) => e.name), all: down.length === items.length, reason };
+}
+
+function EngineCard({ engine, hideReason }: { engine: SpeechEngine; hideReason?: boolean }) {
   const can = [
     "克隆一段录音",
     engine.supports_voice_design && "用文字描述设计音色",
@@ -147,7 +158,7 @@ function EngineCard({ engine }: { engine: SpeechEngine }) {
             </Badge>
           </span>
         </div>
-        {!engine.available && engine.unavailable_reason && (
+        {!engine.available && engine.unavailable_reason && !hideReason && (
           <p className="adm-engine__why">{engine.unavailable_reason}</p>
         )}
         <div className="adm-chips adm-engine__caps">
@@ -515,7 +526,7 @@ function VoiceDialog({
           error={errors.engine}
           hint={
             engine && !engine.available
-              ? `这个引擎现在不可用：${engine.unavailable_reason ?? "没有连上"}。可以先存着。`
+              ? "这个引擎现在不可用，可以先存着，等它恢复了再试听。"
               : cloned
                 ? "同一段录音可以换引擎，换完听听哪个更像。"
                 : undefined
@@ -822,7 +833,6 @@ function VoiceRow({
         {engine && !engine.available && (
           <div className="adm-item__sub adm-item__sub--warn">
             <TriangleAlert aria-hidden="true" size={14} /> {engine.name} 现在不可用
-            {engine.unavailable_reason ? `：${engine.unavailable_reason}` : ""}
           </div>
         )}
       </div>
@@ -916,13 +926,34 @@ export function VoicesPage() {
       )}
       <h2 className="oil-title-md adm-h2">语音合成引擎</h2>
       <QueryView query={engines}>
-        {({ items }) => (
-          <div className="adm-templates">
-            {items.map((e) => (
-              <EngineCard key={e.id} engine={e} />
-            ))}
-          </div>
-        )}
+        {({ items }) => {
+          const outage = sharedOutage(items);
+          return (
+            <>
+              {outage && (
+                <Banner
+                  tone="danger"
+                  className="adm-engines__outage"
+                  title={
+                    outage.all
+                      ? "语音合成引擎现在都不可用"
+                      : `${outage.names.join("、")} 现在不可用`
+                  }
+                >
+                  音色照常可以添加和修改，以前合成过的句子还能试听。新的试听和准备面试要等引擎恢复。
+                  <div className="adm-item__sub" style={{ overflowWrap: "anywhere" }}>
+                    原因：{outage.reason}
+                  </div>
+                </Banner>
+              )}
+              <div className="adm-templates">
+                {items.map((e) => (
+                  <EngineCard key={e.id} engine={e} hideReason={outage !== null} />
+                ))}
+              </div>
+            </>
+          );
+        }}
       </QueryView>
 
       <h2 className="oil-title-md adm-h2">音色</h2>

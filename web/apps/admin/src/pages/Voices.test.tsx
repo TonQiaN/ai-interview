@@ -109,3 +109,52 @@ describe("声音：克隆的音色换一个引擎试听", () => {
     await waitFor(() => expect(previews).toBe(0));
   });
 });
+
+describe("声音：引擎不可用", () => {
+  const REASON = "没有 worker 提供这个引擎：连不上";
+
+  /** 让这几个引擎显示成不可用，原因各自给 */
+  function engineDown(reasons: Record<string, string>) {
+    setFetch(async (request) => {
+      const response = await server.fetch(request);
+      if (new URL(request.url).pathname !== "/api/v1/speech/engines") return response;
+      const body = await response.json();
+      for (const item of body.items)
+        if (item.id in reasons)
+          Object.assign(item, { available: false, unavailable_reason: reasons[item.id] });
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+  }
+
+  it("三个引擎都因为同一个原因不可用：原因只说一遍，音色那几行只说哪个引擎不可用", async () => {
+    engineDown({ index2: REASON, index25: REASON, breeze2: REASON });
+    open();
+
+    expect(await screen.findByText("语音合成引擎现在都不可用")).toBeTruthy();
+    expect(screen.getAllByText(new RegExp(REASON))).toHaveLength(1);
+    expect(screen.getAllByText("不可用")).toHaveLength(3);
+    const row = (await screen.findByText("默认面试官")).closest("li");
+    if (!row) throw new Error("列表里没有「默认面试官」");
+    expect(within(row).getByText("IndexTTS 2 现在不可用")).toBeTruthy();
+  });
+
+  it("只有一个引擎不可用：原因写在它自己的卡片上，上面不另外提示", async () => {
+    engineDown({ breeze2: "这台机器上没装这个引擎" });
+    open();
+
+    expect(await screen.findByText("这台机器上没装这个引擎")).toBeTruthy();
+    expect(screen.queryByText(/现在都不可用/)).toBeNull();
+    expect(screen.getAllByText("不可用")).toHaveLength(1);
+  });
+
+  it("两个引擎不可用、原因不一样：各写各的", async () => {
+    engineDown({ index25: "原因甲", breeze2: "原因乙" });
+    open();
+
+    expect(await screen.findByText("原因甲")).toBeTruthy();
+    expect(screen.getByText("原因乙")).toBeTruthy();
+    expect(screen.queryByText(/、.* 现在不可用$/)).toBeNull();
+  });
+});
