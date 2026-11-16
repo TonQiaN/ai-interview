@@ -25,8 +25,10 @@ import {
 import type { Candidate, InterviewConfig, Position } from "../api/types";
 import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import { QueryView, SearchInput } from "../components/common";
+import { useLeaveGuard } from "../components/LeaveGuard";
 import { PageHeader } from "../components/PageHeader";
 import { VoicePicker } from "../components/VoicePicker";
+import { sameForm } from "../lib/form";
 import { scheduleAll } from "../lib/schedule";
 
 function PickCandidates({
@@ -178,7 +180,16 @@ export function InterviewNewPage() {
   const [position, setPosition] = useState<Position | null>(null);
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [config, setConfig] = useState<InterviewConfig | null>(null);
+  // 设置是从哪一份开始改的（系统默认或者选的模板），用来看有没有动过
+  const [baseConfig, setBaseConfig] = useState<InterviewConfig | null>(null);
   const [voiceId, setVoiceId] = useState<string | null>(null);
+  // 只选了一位候选人和岗位时两下就能选回来，不拦；选了几位、动了设置或者正在安排时，离开前先问一句
+  const leave = useLeaveGuard(
+    busy ||
+      candidates.length > 1 ||
+      voiceId !== null ||
+      (config !== null && baseConfig !== null && !sameForm(config, baseConfig)),
+  );
 
   // 从候选人页或岗位页点过来时，先替他选好
   const candidateParam = params.get("candidate");
@@ -197,14 +208,18 @@ export function InterviewNewPage() {
 
   // 设置的初始值是系统默认，选了模板再换成模板的
   useEffect(() => {
-    if (!config && defaults.data) setConfig(structuredClone(defaults.data.config));
+    if (config || !defaults.data) return;
+    setConfig(structuredClone(defaults.data.config));
+    setBaseConfig(defaults.data.config);
   }, [config, defaults.data]);
 
   function applyTemplate(id: string) {
     const template = templates.data?.items.find((t) => t.id === id);
     setTemplateId(template?.id ?? null);
     const base = template?.config ?? defaults.data?.config;
-    if (base) setConfig(structuredClone(base));
+    if (!base) return;
+    setConfig(structuredClone(base));
+    setBaseConfig(base);
   }
 
   function toggleCandidate(c: Candidate) {
@@ -237,11 +252,13 @@ export function InterviewNewPage() {
       if (outcome.done.length > 0) toast(`${outcome.done.length} 场已经安排好了`);
     } else if (outcome.done.length === 1 && only) {
       toast(prepare ? "开始准备题目和语音" : "已存为草稿");
+      leave.allow();
       navigate(`/interviews/${only.result.id}`);
     } else {
       toast(
         `安排了 ${outcome.done.length} 场面试${prepare ? "，正在准备题目和语音" : "，都存成了草稿"}`,
       );
+      leave.allow();
       navigate(`/positions/${position.id}`);
     }
   }
@@ -250,6 +267,7 @@ export function InterviewNewPage() {
 
   return (
     <>
+      {leave.dialog}
       <PageHeader
         title="安排面试"
         crumbs={<Link to="/interviews">面试</Link>}
@@ -264,7 +282,13 @@ export function InterviewNewPage() {
             <PickPosition selected={position} onSelect={setPosition} />
           </div>
           <div className="oil-row adm-section" style={{ justifyContent: "flex-end" }}>
-            <Button variant="secondary" onClick={() => navigate(-1)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                leave.allow();
+                navigate(-1);
+              }}
+            >
               取消
             </Button>
             <Button disabled={candidates.length === 0 || !position} onClick={() => setStep(1)}>

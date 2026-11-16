@@ -1,11 +1,12 @@
 import { ToastProvider } from "@ai-interview/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Route, Routes } from "react-router";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setFetch } from "../api/http";
 import { createMockServer } from "../api/mock/server";
 import type { InterviewSummary, Page } from "../api/types";
+import { TestRouter } from "../test/router";
 import { InterviewNewPage } from "./InterviewNew";
 
 type Server = ReturnType<typeof createMockServer>;
@@ -13,6 +14,16 @@ let server: Server;
 /** 让第几次建面试的请求失败，0 是不失败 */
 let failOn = 0;
 let created = 0;
+
+// jsdom 没有实现弹窗的打开和关闭
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function showModal() {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function close() {
+    this.open = false;
+  };
+});
 
 beforeEach(async () => {
   server = createMockServer({ latencyMs: 0, jobMs: 60_000 });
@@ -43,13 +54,14 @@ function open() {
   render(
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <MemoryRouter initialEntries={["/interviews/new"]}>
+        <TestRouter initialEntries={["/interviews/new"]}>
           <Routes>
             <Route path="/interviews/new" element={<InterviewNewPage />} />
             <Route path="/interviews/:id" element={<p>面试详情页</p>} />
             <Route path="/positions/:id" element={<p>岗位详情页</p>} />
+            <Route path="/candidates" element={<p>候选人列表页</p>} />
           </Routes>
-        </MemoryRouter>
+        </TestRouter>
       </ToastProvider>
     </QueryClientProvider>,
   );
@@ -133,5 +145,31 @@ describe("安排面试", () => {
     fireEvent.click(row);
     expect(row.getAttribute("aria-pressed")).toBe("false");
     expect(document.querySelectorAll(".adm-picked li")).toHaveLength(0);
+  });
+
+  it("选了几位候选人以后点到别的页面，先问一句，留下来选的人还在", async () => {
+    open();
+    const names = await pick(2);
+    fireEvent.click(screen.getByRole("button", { name: "上一步" }));
+
+    fireEvent.click(await screen.findByRole("link", { name: "去上传简历" }));
+    const dialog = await screen.findByRole("dialog", { name: "这一页的内容还没保存" });
+    expect(screen.queryByText("候选人列表页")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "留在这一页" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "这一页的内容还没保存" })).toBeNull(),
+    );
+    expect(screen.getByRole("list", { name: "已选 2 位" }).textContent).toContain(names[0]);
+  });
+
+  it("只选了一位候选人和岗位、没动设置，点到别的页面直接走", async () => {
+    open();
+    await pick(1);
+    fireEvent.click(screen.getByRole("button", { name: "上一步" }));
+
+    fireEvent.click(await screen.findByRole("link", { name: "去上传简历" }));
+
+    expect(await screen.findByText("候选人列表页")).toBeTruthy();
   });
 });
