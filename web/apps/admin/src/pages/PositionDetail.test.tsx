@@ -227,6 +227,85 @@ describe("岗位详情", () => {
     });
   });
 
+  describe("一起换新链接", () => {
+    const HOUR = 3_600_000;
+    const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+    /** 给这个岗位安排几场发过链接的面试，链接什么时候到期由参数定 */
+    async function invited(positionId: string, count: number, expiresInMs: number) {
+      const made = [];
+      for (const candidate of server.db.candidates.filter((c) => !c.archived_at).slice(0, count)) {
+        const response = await server.fetch("/api/v1/interviews", {
+          method: "POST",
+          body: JSON.stringify({ candidate_id: candidate.id, position_id: positionId }),
+        });
+        const { id } = (await response.json()) as { id: string };
+        const interview = server.db.interviews.find((i) => i.id === id);
+        if (!interview) throw new Error("没建成");
+        interview.status = "invited";
+        server.db.invites.set(id, [
+          {
+            id: `00000000-0000-4000-8000-${String(made.length).padStart(12, "0")}`,
+            interview_id: id,
+            status: "active",
+            expires_at: at(expiresInMs),
+            revoked_at: null,
+            first_opened_at: null,
+            last_opened_at: null,
+            open_count: 0,
+            created_at: at(-72 * HOUR),
+          },
+        ]);
+        made.push({ interview, candidate });
+      }
+      if (made.length < count) throw new Error("演示数据里的候选人不够");
+      return made;
+    }
+    /** 这个岗位下原来就发过链接的先挪开，数得清楚 */
+    function clearInvited(positionId: string) {
+      for (const i of server.db.interviews)
+        if (i.position.id === positionId && i.status === "invited") i.status = "draft";
+    }
+
+    it("链接都还有效时不提示", async () => {
+      const position = firstPosition();
+      clearInvited(position.id);
+      await invited(position.id, 2, 48 * HOUR);
+      open(position.id);
+
+      await screen.findByText("这个岗位的面试");
+      await waitFor(() => expect(screen.queryByText("加载中")).toBeNull());
+      expect(screen.queryByText(/场的链接过期了/)).toBeNull();
+      expect(screen.queryByRole("button", { name: /换新链接/ })).toBeNull();
+    });
+
+    it("链接过期、候选人还没面的，一次都换成新链接", async () => {
+      const position = firstPosition();
+      clearInvited(position.id);
+      const made = await invited(position.id, 2, -2 * HOUR);
+      open(position.id);
+
+      expect(await screen.findByText("2 场的链接过期了，候选人还没有面试。")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "一起换新链接" }));
+      const picking = within(await screen.findByRole("dialog", { name: "一起换新链接" }));
+      expect(picking.getByText(/链接过期了，还没有面试/)).toBeTruthy();
+      for (const { candidate } of made) expect(picking.getByText(new RegExp(candidate.name)));
+      fireEvent.click(picking.getByRole("button", { name: "生成 2 个链接" }));
+
+      const done = within(await screen.findByRole("dialog", { name: "生成了 2 个链接" }));
+      expect(
+        within(done.getByRole("list", { name: "生成好的链接" })).getAllByRole("listitem"),
+      ).toHaveLength(2);
+      // 每场都有了一个还有效的新链接，面试还是已发链接
+      for (const { interview } of made) {
+        expect(interview.status).toBe("invited");
+        const [latest] = server.db.invites.get(interview.id) ?? [];
+        expect(Date.parse(latest?.expires_at ?? "")).toBeGreaterThan(Date.now());
+      }
+      // 换完以后提醒就没了
+      await waitFor(() => expect(screen.queryByText(/场的链接过期了/)).toBeNull());
+    });
+  });
+
   describe("一起生成链接", () => {
     /** 给这个岗位安排几场题目已经准备好的面试，一位候选人一场 */
     async function ready(positionId: string, count: number) {

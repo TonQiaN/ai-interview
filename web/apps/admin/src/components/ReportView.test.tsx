@@ -86,6 +86,22 @@ describe("分析报告", () => {
     expect(screen.getByText(/简历里有 2 条说法存疑/)).toBeTruthy();
   });
 
+  it("这道题中间面试停过（设备断开、页面出错）：写出停了多久，说明没算进等待", () => {
+    const report = sampleReport("backend-strong", "i-1", Date.now());
+    const [first, second] = report.questions.filter((q) => q.asked);
+    if (!first || !second) throw new Error("样例里问到的题不够两道");
+    first.timing.held_ms = 85_000;
+    second.timing.held_ms = 0;
+    const { container } = render(<ReportView report={report} onSeek={() => {}} />);
+    const held = screen.getAllByText(/面试中间停了/);
+    expect(held).toHaveLength(1);
+    expect(held[0]?.textContent).toBe(
+      "面试中间停了 1 分 25 秒（设备断开或页面出错），没有算进开口前的等待和停顿",
+    );
+    // 是第一道题的，不是别的题的
+    expect(container.querySelector(".adm-qa")?.contains(held[0] ?? null)).toBe(true);
+  });
+
   it("没问到的题目标成没问到", () => {
     const report = sampleReport("sales-early-exit", "i-1", Date.now());
     expect(report.questions.some((q) => !q.asked)).toBe(true);

@@ -32,13 +32,16 @@ const contactOf = (row: InviteRow) => [row.phone, row.email].filter(Boolean).joi
 export function BatchInvitesDialog({
   interviews,
   total,
+  renew = false,
   open,
   onClose,
 }: {
-  /** 题目准备好、还没发链接的面试（最多一页） */
+  /** 题目准备好、还没发链接的面试（最多一页）；`renew` 时是链接过期、候选人还没面的 */
   interviews: InterviewSummary[];
   /** 这样的面试一共有几场，比上面多的话这一次生成不完 */
   total: number;
+  /** 给链接过期的面试换新链接。做的事一样，只是说法不同 */
+  renew?: boolean;
   open: boolean;
   onClose: () => void;
 }) {
@@ -100,7 +103,7 @@ export function BatchInvitesDialog({
         open={open}
         onClose={close}
         persistent={running}
-        title="一起生成面试链接"
+        title={renew ? "一起换新链接" : "一起生成面试链接"}
         footer={
           <>
             <Button variant="secondary" disabled={running} onClick={close}>
@@ -121,13 +124,14 @@ export function BatchInvitesDialog({
       >
         <div className="oil-stack">
           <p style={{ margin: 0 }}>
-            给下面 {interviews.length}{" "}
-            位候选人各生成一个面试链接。候选人打开链接就能面试，不用登录；每个链接只能用于他自己那一场。
+            {renew
+              ? `下面 ${interviews.length} 位候选人的链接过期了，还没有面试。给他们各换一个新链接，原来的链接已经打不开了，要把新的重新发给候选人。`
+              : `给下面 ${interviews.length} 位候选人各生成一个面试链接。候选人打开链接就能面试，不用登录；每个链接只能用于他自己那一场。`}
           </p>
           <p className="oil-muted adm-note">{interviews.map((i) => i.candidate_name).join("、")}</p>
           {total > interviews.length && (
             <Banner tone="info">
-              准备好的一共 {total} 场，一次最多生成 {interviews.length}{" "}
+              {renew ? "链接过期的" : "准备好的"}一共 {total} 场，一次最多生成 {interviews.length}{" "}
               个。这一批发完再点一次，生成剩下的。
             </Banner>
           )}

@@ -1,6 +1,6 @@
 import { ToastProvider } from "@ai-interview/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setFetch } from "../api/http";
@@ -102,5 +102,56 @@ describe("总览：链接过期了的面试", () => {
     const stat = screen.getByText("已发链接，等候选人").parentElement;
     if (!stat) throw new Error("没找到那个数字");
     expect(stat.textContent).toContain(String(waiting));
+  });
+});
+
+describe("总览：面试超过 100 场", () => {
+  /** 列表里某个数字那一格的文字 */
+  const stat = (label: string) =>
+    [...document.querySelectorAll(".oil-stat")].find(
+      (node) => node.querySelector(".oil-stat__label")?.textContent === label,
+    )?.textContent ?? "";
+
+  it("上面的数字是全部面试数出来的，不只是最近的 100 场", async () => {
+    // 接口一页最多 100 场，演示数据没这么多，多造一些：更早面完的 150 场，决定都是进入下一轮
+    const done = server.db.interviews.find((i) => i.status === "completed");
+    if (!done) throw new Error("演示数据里没有面完的面试");
+    for (let n = 0; n < 150; n += 1)
+      server.db.interviews.push({
+        ...done,
+        id: `old-${n}`,
+        decision: "advance",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      });
+    const live = server.db.interviews.filter((i) => !i.archived_at);
+    const completed = live.filter((i) => i.status === "completed").length;
+    const advanced = live.filter((i) => i.decision === "advance").length;
+    expect(completed).toBeGreaterThan(150);
+    open();
+
+    await screen.findByText("最近的面试");
+    await waitFor(() => expect(stat("已完成")).toContain(String(completed)));
+    expect(stat("决定进入下一轮")).toContain(String(advanced));
+  });
+
+  it("等你处理的比列出来的多时，说明还有几场没列在这里", async () => {
+    const draft = server.db.interviews.find((i) => i.status === "draft");
+    if (!draft) throw new Error("演示数据里没有草稿");
+    const before = server.db.interviews.length;
+    // 很早以前留下的 130 份草稿，排在最近的 100 场之外
+    for (let n = 0; n < 130; n += 1)
+      server.db.interviews.push({
+        ...draft,
+        id: `old-draft-${n}`,
+        updated_at: "2026-01-01T00:00:00.000Z",
+      });
+    open();
+
+    const note = await screen.findByText(/场不在最近的 100 场面试里/);
+    const listed = within(note.closest(".oil-card") as HTMLElement).getAllByRole("listitem").length;
+    const all = Number(stat("等你处理").match(/\d+/)?.[0]);
+    expect(all).toBeGreaterThan(130);
+    expect(note.textContent).toContain(`还有 ${all - listed} 场`);
+    expect(before).toBeLessThan(100);
   });
 });
