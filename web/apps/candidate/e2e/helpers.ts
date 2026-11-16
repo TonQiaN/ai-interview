@@ -76,6 +76,8 @@ export function seedInterview({
   maxSec = 60,
   /** 配成实时对话。后端接了真的大模型和语音识别（E2E_REAL=1）时才真的按实时对话进行 */
   realtime = false,
+  /** 配成英文面试：题目、岗位名和候选人名字也是英文的 */
+  english = false,
 } = {}): SeededInterview {
   return demo(
     "seed",
@@ -87,6 +89,8 @@ export function seedInterview({
     String(maxSec),
     "--realtime",
     realtime ? "1" : "0",
+    "--english",
+    english ? "1" : "0",
   );
 }
 

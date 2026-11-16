@@ -164,7 +164,7 @@
 
 ## 同意事项
 
-内容在 `src/consent.rs`。改了任何一项的文字都要换一个新的 `CONSENT_VERSION`：库里按版本记候选人同意的是哪一版（连同当时的标题），版本变了要重新确认。
+内容在 `src/consent.rs`，中文和英文各一份，按面试配置里的面试语言给（会话信息的 `language` 就是它，面试页的文字也按它显示）。两份的项目、顺序、哪些必须同意要一样，有测试检查。改了任何一项的意思都要换一个新的 `CONSENT_VERSION`：库里按版本记候选人同意的是哪一版（连同他当时看到的标题），版本变了要重新确认。
 
 ## 展示信息
 
@@ -202,6 +202,6 @@ cargo run -p interview-room --example demo -- seed            # 打印面试的 
 cargo run -p interview-room --example demo -- state <面试的 ID>   # 状态、对话记录、过程事件、录像
 ```
 
-`seed` 可以带 `--silence-sec`、`--min-sec`、`--max-sec`（答题的时间设置）、`--tone-ms`（提示音多长）和 `--realtime 1`（配成实时对话）。候选人页面的浏览器端到端测试（`web/apps/candidate/e2e`）就是用它造数据、查结果的。
+`seed` 可以带 `--silence-sec`、`--min-sec`、`--max-sec`（答题的时间设置）、`--tone-ms`（提示音多长）、`--realtime 1`（配成实时对话）和 `--english 1`（配成英文面试，题目、岗位名、候选人名字也换成英文的）。候选人页面的浏览器端到端测试（`web/apps/candidate/e2e`）就是用它造数据、查结果的。
 
 新加了迁移文件之后如果测试报 500 或者说列不存在，是 `interview-platform` 里嵌进去的迁移没有重新编译，`touch crates/interview-platform/src/db.rs` 再跑。

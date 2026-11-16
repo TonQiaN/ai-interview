@@ -5,7 +5,7 @@ use axum::extract::rejection::BytesRejection;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use chrono::{DateTime, Utc};
-use interview_engine::config::InterviewConfig;
+use interview_engine::config::{InterviewConfig, Language};
 use interview_platform::http::{ErrorBody, Json};
 use interview_platform::{ApiError, ApiResult};
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,8 @@ pub struct RoomSession {
     pub company_name: Option<String>,
     /// 对候选人的称呼；没有时是 null
     pub candidate_name: Option<String>,
+    /// 面试用的语言。页面上的文字和同意事项都跟着它
+    pub language: Language,
     pub mode: RoomMode,
     /// 预计时长（秒）
     pub expected_duration_sec: u32,
@@ -195,12 +197,13 @@ async fn get_session(State(deps): State<Deps>, access: RoomAccess) -> ApiResult<
         position_title,
         company_name,
         candidate_name,
+        language: config.language,
         mode,
         expected_duration_sec: config.target_duration_minutes.saturating_mul(60),
         camera_required: deps.config.camera_required,
         consent: ConsentState {
             version: CONSENT_VERSION.to_owned(),
-            items: consent_items(),
+            items: consent_items(config.language),
             agreed: consent_agreed(&deps, &access).await?,
         },
         recording: deps.config.recording.clone(),
@@ -250,7 +253,12 @@ async fn post_consent(
         return Err(ApiError::conflict("同意事项有更新，请刷新页面后重新确认")
             .with_code("consent_outdated"));
     }
-    let items = consent_items();
+    // 候选人看到的是面试语言的那一份，存下来的也要是那一份
+    let (raw_config,): (Value,) = sqlx::query_as("SELECT config FROM interviews WHERE id = $1")
+        .bind(access.interview_id)
+        .fetch_one(&deps.ctx.db)
+        .await?;
+    let items = consent_items(parse_config(access.interview_id, raw_config).language);
     let missing: Vec<&str> = items
         .iter()
         .filter(|item| item.required && !request.agreed_keys.contains(&item.key))

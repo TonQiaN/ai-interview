@@ -6,6 +6,7 @@ use interview_core::{
     UtteranceSource,
 };
 use interview_engine::{ConfigLimits, InterviewConfig, TimeBudget};
+use interview_report::report::{Decision, ScoreRange};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -22,6 +23,14 @@ pub struct InterviewSummary {
     pub position_title: String,
     /// 最新一份分析报告的状态。还没有报告时为空
     pub report_status: Option<ReportStatus>,
+    /// 报告的综合得分，0 到 100。取最新一份生成好的报告；还没有生成好的报告、或者报告里没有总分时为空
+    pub overall_score: Option<i32>,
+    /// 综合得分大概的浮动范围。早先生成的报告没有这一项，为空
+    #[sqlx(json(nullable))]
+    pub score_range: Option<ScoreRange>,
+    /// 报告里是否建议进入下一轮。还没有生成好的报告时为空
+    #[sqlx(json(nullable))]
+    pub recommendation: Option<Decision>,
     pub started_at: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,

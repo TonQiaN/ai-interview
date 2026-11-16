@@ -1,6 +1,7 @@
 import { clsx } from "clsx";
 import { X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useRef } from "react";
+import { useUiText } from "../text";
 import { buttonClass } from "./Button";
 
 export interface DialogProps {
@@ -29,6 +30,7 @@ export function Dialog({
 }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const text = useUiText();
 
   useEffect(() => {
     const el = ref.current;
@@ -59,7 +61,7 @@ export function Dialog({
         <button
           type="button"
           className={buttonClass({ variant: "ghost", size: "sm", iconOnly: true })}
-          aria-label="关闭"
+          aria-label={text.close}
           onClick={onClose}
         >
           <X aria-hidden="true" />

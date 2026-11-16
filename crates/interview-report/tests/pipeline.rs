@@ -469,11 +469,15 @@ async fn failed_step_leaves_its_section_empty() {
         .map(|f| f.stage.as_str())
         .collect();
     assert_eq!(failed, ["question:q2", "integrity"]);
-    assert!(
-        report
-            .review_flags
-            .iter()
-            .any(|f| f.code == ReviewFlagCode::IncompleteAnalysis)
+    // 给 HR 的提示里用报告里各部分的叫法，不带内部的步骤名
+    let flag = report
+        .review_flags
+        .iter()
+        .find(|f| f.code == ReviewFlagCode::IncompleteAnalysis)
+        .expect("有步骤失败时要提示报告不完整");
+    assert_eq!(
+        flag.message,
+        "有 2 个分析步骤失败（诚信观察、1 道题的评分），报告不完整，可以重新生成。"
     );
     // 分析失败的题不参与总分：只剩 q1 的 4 分
     assert_eq!(report.overall_score, Some(80));

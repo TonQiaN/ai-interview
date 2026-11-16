@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useUiText } from "../text";
 
 export interface FieldProps {
   label: ReactNode;
@@ -260,7 +261,8 @@ export interface CopyFieldProps {
 }
 
 /** 一行可复制的文字，比如面试链接。 */
-export function CopyField({ value, label = "复制", onCopied, className }: CopyFieldProps) {
+export function CopyField({ value, label, onCopied, className }: CopyFieldProps) {
+  const text = useUiText();
   const [done, setDone] = useState(false);
   const copy = async () => {
     try {
@@ -278,7 +280,7 @@ export function CopyField({ value, label = "复制", onCopied, className }: Copy
       <code title={value}>{value}</code>
       <button type="button" onClick={copy} aria-live="polite">
         {done ? <CheckIcon aria-hidden="true" /> : <Copy aria-hidden="true" />}
-        {done ? "已复制" : label}
+        {done ? text.copied : (label ?? text.copy)}
       </button>
     </div>
   );
