@@ -42,7 +42,7 @@ pnpm -C web format                     # 用 Biome 格式化并整理 import
 
 真模型测试读 `DEEPSEEK_API_KEY`，会产生少量费用，云端容器里可以直接跑：`cargo test -p interview-llm --test live -- --ignored --nocapture`。
 
-面试引擎用真模型出题和模拟面试（同样读 `DEEPSEEK_API_KEY`，出一份题约 0.1 元，模拟一场不到 0.05 元，`turn_taking` 测停顿和打断约 0.03 元，`guard` 测候选人套答案、打听评分、对面试官下指令时守不守得住约 0.15 元）：
+面试引擎用真模型出题和模拟面试（同样读 `DEEPSEEK_API_KEY`，出一份题约 0.1 元，模拟一场不到 0.05 元，`turn_taking` 测停顿和打断约 0.03 元，`guard` 测候选人套答案、打听评分、对面试官下指令时守不守得住约 0.15 元，`plan_eval` 拿九份岗位和简历各出两遍题再检查约 1.5 元、十分钟）：
 
 ```bash
 cargo run -p interview-engine --example plan -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
@@ -50,9 +50,10 @@ cargo run -p interview-engine --example simulate -- crates/interview-engine/fixt
 cargo run -p interview-engine --example converse -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json vague
 cargo run -p interview-engine --example turn_taking -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
 cargo run -p interview-engine --example guard -- crates/interview-engine/fixtures/backend_engineer.json /tmp/plan.json
+cargo run -p interview-engine --example plan_eval -- /tmp/plans crates/interview-engine/fixtures/*.json crates/interview-engine/fixtures/planning/*.json
 ```
 
-改了出题、判断回答或实时对话的提示词，要用这几个命令实际跑一遍看结果，单元测试用的是假模型，测不出提示词的好坏。
+改了出题、判断回答或实时对话的提示词，要用这几个命令实际跑一遍看结果，单元测试用的是假模型，测不出提示词的好坏。改了出题的提示词用 `plan_eval`，它会换着岗位和材料出题（销售、应届生、没有简历、简历和岗位不对口、岗位描述只有一句、45 分钟的深入面试、英文）。
 
 `simulate`、`converse`、`turn_taking` 默认把模拟候选人写的字原样交给引擎。设了 `AI_INTERVIEW_EVAL_HEARD_CMD`，候选人的话会先读出来再用服务进程同一个识别模型识别回去，引擎拿到的是带识别错字的文字，同一段回答两种文字各判一次并打印差别。准备和用法写在 `crates/interview-engine/scripts/asr_roundtrip.py` 开头（用到的合成模型只是评测工具，不是面试官的语音合成）。
 

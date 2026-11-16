@@ -1,0 +1,26 @@
+{
+  "job": {
+    "title": "Marketing Manager",
+    "company": "Example Analytics",
+    "description": "Responsibilities:\n1. Own demand generation for our B2B analytics product in the APAC region: content, webinars, paid campaigns and events.\n2. Work with sales to define lead quality and hand-off, and report on pipeline contribution every month.\n3. Manage a budget and two junior marketers.\n4. Build messaging and case studies with customers.\n\nRequirements:\n1. 5+ years in B2B marketing, at least 2 in SaaS.\n2. Hands-on experience running campaigns end to end and measuring results.\n3. Fluent English; this role works with a global team every day.\n4. Experience managing people is a plus."
+  },
+  "candidate": {
+    "name": "Emma",
+    "resume_text": "Emma Lin, marketing professional, 7 years of experience.\n\nEducation:\n2015 to 2019, Example University, BA in Communications\n\nExperience:\n2023 to present, Sample Cloud Ltd., Senior Marketing Specialist\n- Ran webinar program: 14 webinars a year, average 220 registrants, contributed 18% of sales pipeline in 2025.\n- Launched a customer case study series with 9 published stories.\n- Managed paid search budget of 600k RMB a year.\n\n2019 to 2023, Demo Events Co., Marketing Executive\n- Organised trade show booths and partner events.\n- Wrote newsletters and social media posts.\n\nSkills: marketing automation tools, analytics dashboards, copywriting."
+  },
+  "config": {
+    "target_duration_minutes": 20,
+    "language": "en",
+    "interviewer": {
+      "name": "Alex",
+      "style": "professional"
+    },
+    "screening_checks": [
+      "Earliest start date",
+      "Whether she has managed people directly"
+    ],
+    "must_ask_questions": [
+      "How do you decide whether a campaign worked?"
+    ]
+  }
+}
