@@ -8,12 +8,14 @@
 //!
 //! 这里不写任何版式规则或正则：简历的版式千奇百怪，交给大模型读。
 
-use interview_llm::{ChatModel, ChatRequest, ContentPart, FinishReason, LlmError, Message, Usage};
+use interview_llm::{
+    ChatModel, ChatRequest, ContentPart, DEFAULT_JSON_ATTEMPTS, FinishReason, LlmError, Message,
+    Usage, chat_json_checked,
+};
 use serde::Deserialize;
 
 use crate::document::ResumeContent;
 use crate::error::TalentError;
-use crate::json::chat_json_private;
 use crate::lenient;
 use crate::model::ParsedResume;
 use crate::settings::TalentAiSettings;
@@ -283,17 +285,20 @@ is_resume 填 false，reason 用一句话说明原因，resume 填 null。\n\n\
     .with_max_tokens(MAX_OUTPUT_TOKENS)
     .with_temperature(0.0);
 
-    let (extraction, usage) = chat_json_private::<Extraction, _>(model, request, |extraction| {
-        // 说是简历，却什么都没整理出来：让模型重来，不能当成一份空的简历收下
-        if extraction.is_resume && extraction.resume == ParsedResume::default() {
-            Err("resume 里什么都没有。请按格式把简历的内容整理进 resume；\
+    // 检查不通过时返回的话会进日志，里面不引用模型输出的内容
+    let reply =
+        chat_json_checked::<Extraction, _>(model, request, DEFAULT_JSON_ATTEMPTS, |extraction| {
+            // 说是简历，却什么都没整理出来：让模型重来，不能当成一份空的简历收下
+            if extraction.is_resume && extraction.resume == ParsedResume::default() {
+                Err("resume 里什么都没有。请按格式把简历的内容整理进 resume；\
 如果这段文字确实不是简历，is_resume 填 false，并在 reason 里说明原因"
-                .to_owned())
-        } else {
-            Ok(())
-        }
-    })
-    .await?;
+                    .to_owned())
+            } else {
+                Ok(())
+            }
+        })
+        .await?;
+    let (extraction, usage) = (reply.value, reply.usage);
     if !extraction.is_resume {
         return Err(TalentError::NotAResume(
             extraction
@@ -510,7 +515,7 @@ mod tests {
         assert!(!message.contains("订单结算"), "{message}");
         assert!(!message.contains("杭州"), "{message}");
 
-        // 让模型修改的那句话里也不带，但要说清楚是哪种错
+        // 让模型修改的那句话要说清楚是哪种错（发回给模型的话里带着它自己写的内容没关系）
         let requests = model.requests();
         assert_eq!(requests.len(), 3);
         let feedback = requests[1]
@@ -519,7 +524,6 @@ mod tests {
             .expect("有反馈")
             .content
             .as_text();
-        assert!(!feedback.contains("订单结算"), "{feedback}");
         assert!(feedback.contains("expected a sequence"), "{feedback}");
     }
 
