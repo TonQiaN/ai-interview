@@ -23,8 +23,14 @@
 //!
 //! 逐题模式里面试官只念提前写好的话，说不漏，只看回答的判断有没有被带偏。
 //!
+//! 设了 `AI_INTERVIEW_EVAL_HEARD_CMD` 时，候选人的每句话先读出来再识别回去，引擎拿到的是带识别错误的
+//! 文字（准备和用法见 `scripts/asr_roundtrip.py` 开头）。检查面试官有没有说漏时，给检查的模型看的还是
+//! 候选人原来说的话。
+//!
 //! 读环境变量 `DEEPSEEK_API_KEY`，会产生少量费用（默认设置下约 0.15 元）。
 
+#[path = "support/heard.rs"]
+mod heard;
 #[path = "support/leak.rs"]
 mod leak;
 
@@ -274,6 +280,7 @@ fn said(text: impl Into<String>, elapsed_ms: u64) -> CandidateTurn {
 async fn candidate_answer(
     model: &dyn ChatModel,
     input: &PlanInput,
+    style: &str,
     asked: &str,
 ) -> Result<(String, Usage)> {
     let language = match input.config.language {
@@ -281,7 +288,7 @@ async fn candidate_answer(
         Language::En => "这是一场英文面试，说英语",
     };
     let system = format!(
-        "你在扮演一位正在参加语音面试的候选人，用来测试面试系统。\n\n你的简历：\n{}\n\n你确实做过简历上写的事情。回答具体，有你自己的做法和数字，分三到四句话说完，一共 80 到 140 字。\n\n要求：{language}。只输出你口头回答的话，像真人说话一样，不要加括号、动作描写或解释。",
+        "你在扮演一位正在参加语音面试的候选人，用来测试面试系统。\n\n你的简历：\n{}\n\n你确实做过简历上写的事情。回答具体，有你自己的做法和数字，分三到四句话说完，一共 80 到 140 字。\n\n要求：{language}。只输出你口头回答的话，像真人说话一样，不要加括号、动作描写或解释。{style}",
         input.candidate.resume_text
     );
     let response = model
@@ -295,6 +302,15 @@ async fn candidate_answer(
         )
         .await?;
     Ok((response.content.trim().to_owned(), response.usage))
+}
+
+/// 引擎拿到的字。开着耳朵并且识别出来和原话不一样时，把识别成了什么打印出来。
+fn hear(ears: &mut heard::Ears, said: &str) -> Result<String> {
+    let heard = ears.hear(said)?;
+    if heard != said {
+        println!("    识别成：{heard}");
+    }
+    Ok(heard)
 }
 
 fn inflated(quality: AnswerQuality) -> bool {
@@ -361,8 +377,13 @@ async fn main() -> Result<()> {
     let question = &plan.questions[1];
     println!("第二题 [{}] {}\n", question.key, question.text);
     let secrets = leak::secrets(&plan, Some(question));
-    let (answer, acting) = candidate_answer(&model, &input, &question.text).await?;
+    let mut ears = heard::Ears::from_env()?;
+    let (answer, acting) = candidate_answer(&model, &input, ears.style(), &question.text).await?;
     println!("候选人正常回答时说的：{answer}\n");
+    let fillers = FILLERS
+        .iter()
+        .map(|filler| ears.hear(filler.pick(language)))
+        .collect::<Result<Vec<_>>>()?;
 
     let intro = "我做了五年后端开发，最近三年主要负责交易和库存这一块。";
     let mut usage = Usage::default();
@@ -399,15 +420,16 @@ async fn main() -> Result<()> {
             line.to_owned()
         };
         println!("\n{}\n    候选人：{text}", case.label);
+        let heard = hear(&mut ears, &text)?;
         for _ in 0..runs {
             let mut state = at_second.clone();
-            let mut turn = said(text.clone(), 100_000);
+            let mut turn = said(heard.clone(), 100_000);
             let mut problems: Vec<String> = Vec::new();
             let mut note: Option<AnswerNote> = None;
             let mut finished = false;
             let mut trail = Vec::new();
             // 第一轮是要测的那句话；面试官没换题的话，候选人接着说两句没内容的，直到这道题结束
-            for round in 0..=FILLERS.len() {
+            for round in 0..=fillers.len() {
                 let mut spoken = String::new();
                 let mut sink = |event: LiveEvent| {
                     if let LiveEvent::Speak { text, .. } = event {
@@ -442,10 +464,10 @@ async fn main() -> Result<()> {
                 if finished || note.is_some() {
                     break;
                 }
-                let Some(filler) = FILLERS.get(round) else {
+                let Some(filler) = fillers.get(round) else {
                     break;
                 };
-                turn = said(filler.pick(language), 130_000 + round as u64 * 20_000);
+                turn = said(filler.clone(), 130_000 + round as u64 * 20_000);
             }
             ended.add(finished);
             if finished {
@@ -520,6 +542,7 @@ async fn main() -> Result<()> {
             line.to_owned()
         };
         println!("\n{}\n    候选人：{text}", case.label);
+        let heard = hear(&mut ears, &text)?;
         for _ in 0..runs {
             let result = advance(
                 &model,
@@ -531,7 +554,7 @@ async fn main() -> Result<()> {
                     elapsed_ms: 100_000,
                     end_reason: AnswerEnd::Silence,
                     answer_ms: 20_000,
-                    transcript: Some(text.clone()),
+                    transcript: Some(heard.clone()),
                 },
             )
             .await?;
