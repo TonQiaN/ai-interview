@@ -646,6 +646,49 @@ async fn captions_keep_coming_through_a_stretch_of_speech_without_a_break() {
     );
 }
 
+/// 另一头：很短的一点声音。面试结束、候选人刚开口就断线时，交给模型的可能只有几十毫秒。
+#[tokio::test]
+#[ignore = "需要真模型"]
+async fn a_scrap_of_speech_cut_off_right_away_does_no_harm() {
+    let stt = load().await;
+    let clip = &sample_wavs()[0];
+    let streaming = StreamingOptions {
+        partials: true,
+        ..StreamingOptions::default()
+    };
+    for start_ms in [0, 1_000] {
+        for length_ms in [10, 30, 60, 120, 250, 300, 400, 600, 700, 1_000] {
+            let scrap = clip.slice_ms(start_ms, start_ms + length_ms);
+
+            // 一次给完
+            let transcript = stt
+                .transcribe(&scrap, &TranscribeOptions::default())
+                .await
+                .unwrap_or_else(|error| panic!("{start_ms} 起 {length_ms} 毫秒：{error}"));
+            assert_well_formed(&transcript);
+
+            // 一点一点给，带中间结果
+            let mut session = stt
+                .start_streaming_session(&TranscribeOptions::default(), &streaming)
+                .await
+                .unwrap();
+            let mut at_ms = 0;
+            while at_ms < scrap.duration_ms() {
+                session
+                    .push(&scrap.slice_ms(at_ms, at_ms + 20))
+                    .await
+                    .unwrap_or_else(|error| panic!("{start_ms} 起 {length_ms} 毫秒：{error}"));
+                at_ms += 20;
+            }
+            let transcript = session
+                .finish()
+                .await
+                .unwrap_or_else(|error| panic!("{start_ms} 起 {length_ms} 毫秒：{error}"));
+            assert_well_formed(&transcript);
+        }
+    }
+}
+
 #[tokio::test]
 async fn a_missing_model_directory_is_reported_as_unavailable() {
     let Err(error) = SherpaTranscriber::load(SherpaConfig::new("/nonexistent/stt-models")).await
