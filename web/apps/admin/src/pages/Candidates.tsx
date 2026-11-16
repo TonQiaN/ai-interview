@@ -40,9 +40,9 @@ const sourceLabel: Record<CandidateSource, string> = {
   raas: "RAAS",
 };
 
-/** 上传简历能收的文件。Word 后端读不了，要先另存为 PDF */
-export const RESUME_ACCEPT = ".pdf,.txt,.md,.png,.jpg,.jpeg,.webp";
-export const RESUME_HINT = "PDF、图片、纯文本都可以，每份不超过 20MB。Word 文档请先另存为 PDF。";
+/** 上传简历能收的文件。老格式的 .doc 后端不收，报错里会让 HR 另存为 .docx 或 PDF */
+export const RESUME_ACCEPT = ".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp";
+export const RESUME_HINT = "PDF、Word（.docx）、图片、纯文本都可以，每份不超过 20MB。";
 
 /** 候选人基本信息表单里的值 */
 export type CandidateForm = Required<Omit<CandidateInput, "allow_duplicate">>;
