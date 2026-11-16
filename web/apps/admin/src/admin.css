@@ -1484,9 +1484,24 @@
       background: none;
       box-shadow: none;
     }
+    .adm-compare {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    /* 纸上不能横向滚动：表格放不下的那几列会被裁掉，改成让第一列的长句子换行 */
+    .oil-table-wrap {
+      overflow: visible;
+    }
+    .adm-compare__table th[scope="row"] {
+      min-width: 0;
+      white-space: normal;
+    }
     .adm-quote,
     .adm-frames,
-    .adm-facts > div {
+    .adm-facts > div,
+    .adm-compare__person,
+    .adm-compare__question,
+    .adm-compare__table tr {
       break-inside: avoid;
     }
     h2,
