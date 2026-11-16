@@ -7,9 +7,140 @@
     <meta name="referrer" content="no-referrer" />
     <meta name="robots" content="noindex, nofollow" />
     <title>AI 面试</title>
+    <style>
+      /*
+       * 脚本和样式下完之前的那一块（#boot）。写在这里是因为这时候样式文件还没到。
+       * 很旧的浏览器也要能看，所以不用新的写法（gap、inset、dvh）。
+       */
+      #boot {
+        min-height: 80vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        box-sizing: border-box;
+        text-align: center;
+        color: #2a2019;
+        font: 16px/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      #boot p {
+        margin: 0 0 12px;
+        max-width: 22em;
+      }
+      #boot-title {
+        font-size: 18px;
+        font-weight: 600;
+      }
+      #boot-detail {
+        color: #5a4c3f;
+      }
+      #boot-reload {
+        margin-top: 8px;
+        padding: 12px 28px;
+        border: 0;
+        border-radius: 8px;
+        color: #fbf6ea;
+        background: #1e3a5c;
+        font: inherit;
+      }
+      #boot-reload[hidden] {
+        display: none;
+      }
+    </style>
+    <script>
+      /*
+       * 页面的脚本下完、跑起来之前，#boot 那一块怎么显示：先是「正在打开面试」，等久了多说一句，
+       * 脚本没下下来或者浏览器跑不了就改成怎么办的提示。页面渲染出来以后 #boot 就没了，这里什么都不再做；
+       * 那之后再出错由 src/components/CrashBoundary.tsx 接手。
+       *
+       * 放在页面脚本的前面，这样脚本一开始加载就已经在听它出没出错。
+       * 要在很旧的浏览器上也能跑，所以只用老写法，不放进打包的脚本里。
+       * body 末尾带 nomodule 的那一段，只有连 module 脚本都不认识的浏览器才会跑。
+       * body 里的脚本和注释不写中文：英文面试的测试会查 body 里还有没有中文。
+       */
+      (() => {
+        // 和页面里一样：浏览器的语言偏好里只要有中文就用中文
+        var languages = navigator.languages || [navigator.language || "zh"];
+        var chinese = languages.length === 0;
+        var i;
+        for (i = 0; i < languages.length; i += 1) {
+          if (String(languages[i]).toLowerCase().indexOf("zh") === 0) chinese = true;
+        }
+        var text = chinese
+          ? {
+              opening: "正在打开面试",
+              slow: "网络比较慢，还在加载，请稍等。一直打不开的话，可以刷新页面试试。",
+              failedTitle: "页面没有加载出来",
+              failed:
+                "请检查网络后刷新页面。还是打不开的话，请换用最新版的 Chrome、Edge 或 Safari，或者换一台设备打开这条链接。",
+              reload: "刷新页面",
+            }
+          : {
+              opening: "Opening the interview",
+              slow: "The network is slow and the page is still loading. If it never opens, try reloading the page.",
+              failedTitle: "This page didn't load",
+              failed:
+                "Please check your network and reload the page. If it still doesn't open, use the latest Chrome, Edge or Safari, or open this link on another device.",
+              reload: "Reload the page",
+            };
+
+        /** 现在该显示哪一种：opening、slow、failed。 */
+        var state = "opening";
+        /** #boot 那一块已经在页面上了。 */
+        var placed = false;
+
+        function show() {
+          var boot = document.getElementById("boot");
+          var title = document.getElementById("boot-title");
+          var detail = document.getElementById("boot-detail");
+          var reload = document.getElementById("boot-reload");
+          // 找不到就是页面已经渲染出来，把这一块换掉了
+          if (!placed || !boot || !title || !detail || !reload) return;
+          title.textContent = state === "failed" ? text.failedTitle : text.opening;
+          detail.textContent = state === "failed" ? text.failed : state === "slow" ? text.slow : "";
+          reload.textContent = text.reload;
+          reload.hidden = state === "opening";
+          reload.onclick = () => {
+            window.location.reload();
+          };
+        }
+        function failed() {
+          state = "failed";
+          show();
+        }
+
+        // 脚本没下下来、下下来了但浏览器不认识里面的写法，都会走到这里
+        window.addEventListener("error", failed, true);
+        setTimeout(() => {
+          if (state !== "opening") return;
+          state = "slow";
+          show();
+        }, 8000);
+        window.__boot = {
+          placed: () => {
+            placed = true;
+            show();
+          },
+          failed: failed,
+        };
+      })();
+    </script>
   </head>
-  <body>
-    <div id="root"></div>
+  <body style="margin: 0">
+    <div id="root">
+      <div id="boot" role="status">
+        <p id="boot-title">正在打开面试</p>
+        <p id="boot-detail"></p>
+        <button id="boot-reload" type="button" hidden>刷新页面</button>
+      </div>
+    </div>
+    <script>
+      if (window.__boot) window.__boot.placed();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
+    <script nomodule>
+      if (window.__boot) window.__boot.failed();
+    </script>
   </body>
 </html>

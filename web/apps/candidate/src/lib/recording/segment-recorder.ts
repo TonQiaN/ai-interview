@@ -6,6 +6,7 @@
  *
  * MediaRecorder 的构造从外面传进来，单测里换成假的。
  */
+import { randomId } from "../random-id";
 import type { ChunkStore, RecordingTrack, SegmentMeta } from "../upload/chunk-store";
 import { sha256Hex } from "../upload/chunk-store";
 
@@ -55,7 +56,7 @@ export class SegmentRecorder {
 
   constructor(options: SegmentRecorderOptions) {
     this.options = options;
-    this.segmentId = (options.newId ?? (() => crypto.randomUUID()))();
+    this.segmentId = (options.newId ?? randomId)();
   }
 
   /** 这一段从面试时间轴的哪一毫秒开始；还没开始是 null。 */
