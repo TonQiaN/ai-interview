@@ -6,9 +6,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use common::{TestApp, app, app_with_model, multipart_file, run_tasks, run_tasks_with};
+use common::{
+    Interrupted, TestApp, app, app_with_model, multipart_file, run_tasks, run_tasks_with,
+};
+use interview_llm::LlmError;
 use interview_llm::testing::ScriptedModel;
-use interview_llm::{ChatModel, ChatRequest, ChatStream, LlmError};
 use interview_platform::testing::TestRequest;
 use interview_talent::{Deps, PdfRenderer};
 use serde_json::{Value, json};
@@ -569,40 +571,6 @@ async fn a_pdf_with_too_many_pages_says_what_was_left_out(pool: PgPool) {
     let parsed = resume(&app, id).await;
     assert_eq!(parsed["parse_status"], "done", "{parsed}");
     assert_eq!(parsed["parse_warning"], Value::Null);
-}
-
-/// 在第 `at` 次调用大模型之前先做一件事的假模型。用来模拟「大模型还在算的时候，别处发生了变化」。
-struct Interrupted {
-    inner: ScriptedModel,
-    at: usize,
-    calls: std::sync::atomic::AtomicUsize,
-    hook: Box<dyn Fn() -> futures_util::future::BoxFuture<'static, ()> + Send + Sync>,
-}
-
-impl Interrupted {
-    fn new<F, Fut>(inner: ScriptedModel, at: usize, hook: F) -> Arc<Self>
-    where
-        F: Fn() -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + Send + 'static,
-    {
-        Arc::new(Self {
-            inner,
-            at,
-            calls: std::sync::atomic::AtomicUsize::new(0),
-            hook: Box::new(move || Box::pin(hook())),
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl ChatModel for Interrupted {
-    async fn chat_stream(&self, request: ChatRequest) -> Result<ChatStream, LlmError> {
-        let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if call == self.at {
-            (self.hook)().await;
-        }
-        self.inner.chat_stream(request).await
-    }
 }
 
 async fn candidate(app: &TestApp, id: &str) -> Value {

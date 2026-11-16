@@ -405,6 +405,7 @@ async fn openapi_lists_candidate_paths(pool: PgPool) {
         "/api/v1/candidates/{id}",
         "/api/v1/candidates/import",
         "/api/v1/candidates/{id}/profile/regenerate",
+        "/api/v1/candidates/{id}/purge",
         "/api/v1/candidates/{id}/resumes",
         "/api/v1/resumes/{id}",
         "/api/v1/resumes/{id}/file",

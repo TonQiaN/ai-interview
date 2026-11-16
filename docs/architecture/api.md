@@ -163,6 +163,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `GET /api/v1/resumes/{id}`、`GET /api/v1/resumes/{id}/file`、`POST /api/v1/resumes/{id}/parse`、`DELETE /api/v1/resumes/{id}` | 简历详情、原件、重新解析、删除（连原件一起删）。`parse_status` 是 `failed` 时原因在 `parse_error`；是 `done` 但 `parse_warning` 有值时，要把这句话显示给 HR（比如 PDF 页数太多，只读了前 8 页） |
 | `POST /api/v1/candidates/import` | 直接传一份简历，自动建候选人 |
 | `POST /api/v1/candidates/{id}/profile/regenerate` | 重新生成画像 |
+| `POST /api/v1/candidates/{id}/purge` | 彻底删除候选人，只有管理员能用（别的账号 403），删了不能恢复。候选人要求删除个人信息时用：姓名、联系方式、画像、备注和他的每一份简历（原件、全文、解析结果）一起删。名下还有面试（归档的也算）时返回 409 `candidate_has_interviews`，要先把每场面试彻底删除（`POST /api/v1/interviews/{id}/purge`）再删人。从 RAAS 导入的候选人删掉以后，再导入会重新建一位。只想从列表里藏起来用 `DELETE /{id}` 归档 |
 | `GET /api/v1/raas/status` | RAAS 是否连得上 |
 | `GET /api/v1/raas/positions`、`GET /api/v1/raas/positions/{ref}`、`POST /api/v1/raas/positions/import` | 浏览和导入 RAAS 岗位 |
 | `GET /api/v1/raas/candidates`、`GET /api/v1/raas/candidates/{ref}`、`POST /api/v1/raas/candidates/import` | 浏览和导入 RAAS 候选人。列表可以带 `job_requisition_ref` 只看投了某个岗位的人 |
