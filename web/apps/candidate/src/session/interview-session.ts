@@ -36,6 +36,7 @@ import {
   sha256Hex,
 } from "../lib/upload/chunk-store";
 import { IndexedDbChunkStore } from "../lib/upload/idb-chunk-store";
+import { discardSession, discardStale } from "../lib/upload/leftovers";
 import { closeOrphanSegments } from "../lib/upload/orphans";
 import { UploadEventTracker } from "../lib/upload/upload-events";
 import { retryDelayMs, Uploader, type UploadStatus } from "../lib/upload/uploader";
@@ -269,6 +270,8 @@ export class InterviewSession {
       this.patch({ volatileStorage: true });
     }
     this.store = store;
+    // 别的面试在这台设备上留下的旧录像已经传不上去了，顺手清掉
+    await discardStale(store, { keep: this.sessionKey, now: Date.now() }).catch(() => {});
 
     const uploader = new Uploader({
       sessionKey: this.sessionKey,
@@ -499,7 +502,7 @@ export class InterviewSession {
       const reason = await runner.run(first);
       if (reason !== null) await this.finish(reason, false);
     } catch (error) {
-      // 链接被撤销、面试被取消：停止录制，把已经录下的传完
+      // 链接被撤销、面试被取消：停止录制。已经录下的服务端不再收，收尾时从本机删掉
       this.patch({ problem: problemOf(error) });
       await this.finish("aborted", false);
     }
@@ -740,7 +743,47 @@ export class InterviewSession {
       window.removeEventListener("beforeunload", this.warnBeforeUnload);
       this.patch({ stage: "done", actionError: null });
     } catch (error) {
-      this.patch({ actionError: error instanceof Error ? error.message : String(error) });
+      const dead = await this.deadLinkProblem();
+      if (dead === null) {
+        this.patch({ actionError: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+      // 链接已经不能用了，剩下的录像谁也传不上去：不让候选人一直点「重试」
+      window.removeEventListener("beforeunload", this.warnBeforeUnload);
+      if (this.snapshot.finishReason === "aborted") {
+        // 面试进行到一半链接失效的：告诉候选人面试中止了
+        await this.discardLocalRecordings();
+        this.patch({ stage: "done", problem: dead, actionError: null });
+      } else {
+        this.fail(dead);
+      }
+    }
+  }
+
+  /** 录像传不上去时问一下服务端：是不是这条链接已经不能用了。还能用、或者问不到，返回 null。 */
+  private async deadLinkProblem(): Promise<ProblemKind | null> {
+    if (!this.api) return null;
+    try {
+      await this.api.getSession();
+      return null;
+    } catch (error) {
+      const problem = problemOf(error);
+      return isDeadLink(problem) ? problem : null;
+    }
+  }
+
+  /**
+   * 链接再也用不了了（过期、被撤销、面试被取消或删除）：留在本机的录像谁也传不上去，删掉。
+   * 录像里是候选人的脸和声音，不该留在可能是借来的设备上。
+   */
+  private async discardLocalRecordings(): Promise<void> {
+    this.uploader?.stop();
+    try {
+      this.store ??= await IndexedDbChunkStore.open();
+      await discardSession(this.store, this.sessionKey);
+      await discardStale(this.store, { keep: this.sessionKey, now: Date.now() });
+    } catch {
+      // 本地存储打不开，也就没有东西留在里面
     }
   }
 
@@ -821,6 +864,7 @@ export class InterviewSession {
 
   private fail(problem: ProblemKind): void {
     this.patch({ stage: "problem", problem });
+    if (isDeadLink(problem)) void this.discardLocalRecordings();
   }
 
   private patch(patch: Partial<SessionSnapshot>): void {
@@ -828,6 +872,11 @@ export class InterviewSession {
     this.snapshot = { ...this.snapshot, ...patch };
     for (const listener of this.listeners) listener();
   }
+}
+
+/** 服务端明确说这条链接不能用了。网络不通、服务端出错不算：那些等一等还能接着传。 */
+function isDeadLink(problem: ProblemKind): boolean {
+  return problem === "invalid_link" || problem === "expired" || problem === "revoked";
 }
 
 function problemOf(error: unknown): ProblemKind {

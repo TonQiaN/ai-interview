@@ -290,8 +290,7 @@ export const zh = {
   done: {
     aborted: {
       title: "面试已中止",
-      description:
-        "这条面试链接已经失效，面试没能继续。已经录下的内容已保存。如有疑问，请联系招聘人员。",
+      description: "这条面试链接已经失效，面试没能继续。如有疑问，请联系招聘人员。",
     },
     left: { title: "面试已结束", description: `${SAVED}现在可以关闭这个页面了。` },
     noResponse: {

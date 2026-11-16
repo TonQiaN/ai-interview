@@ -3,6 +3,7 @@
 //! ```text
 //! cargo run -p interview-room --example demo -- seed [--silence-sec 2] [--min-sec 1] [--max-sec 60] [--tone-ms 800] [--realtime 1] [--english 1]
 //! cargo run -p interview-room --example demo -- state <面试的 ID>
+//! cargo run -p interview-room --example demo -- revoke <面试的 ID>
 //! ```
 //!
 //! 和服务进程读同一套环境变量（`DATABASE_URL`、`AI_INTERVIEW_DATA_DIR`、`AI_INTERVIEW_PUBLIC_URL`），
@@ -37,7 +38,11 @@ async fn main() -> anyhow::Result<()> {
             let id = args.get(1).context("用法：demo state <面试的 ID>")?;
             state(&ctx, id.parse().context("面试的 ID 不是 UUID")?).await?
         }
-        _ => bail!("用法：demo seed [选项] | demo state <面试的 ID>"),
+        Some("revoke") => {
+            let id = args.get(1).context("用法：demo revoke <面试的 ID>")?;
+            revoke(&ctx, id.parse().context("面试的 ID 不是 UUID")?).await?
+        }
+        _ => bail!("用法：demo seed [选项] | demo state <面试的 ID> | demo revoke <面试的 ID>"),
     };
     println!("{output}");
     Ok(())
@@ -332,6 +337,19 @@ async fn seed(ctx: &AppContext, options: &SeedOptions) -> anyhow::Result<Value> 
 }
 
 /// 一场面试现在的样子：状态、对话记录、过程事件、录像。
+/// 把这场面试的链接都撤销掉，像 HR 在后台撤销了链接。面试进行到一半时也可以用。
+async fn revoke(ctx: &AppContext, interview_id: Uuid) -> anyhow::Result<Value> {
+    let revoked = sqlx::query(
+        "UPDATE interview_invites SET revoked_at = now()
+          WHERE interview_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(interview_id)
+    .execute(&ctx.db)
+    .await?
+    .rows_affected();
+    Ok(json!({ "revoked": revoked }))
+}
+
 async fn state(ctx: &AppContext, interview_id: Uuid) -> anyhow::Result<Value> {
     let interview: Option<(String, Option<String>)> =
         sqlx::query_as("SELECT status, end_reason FROM interviews WHERE id = $1")

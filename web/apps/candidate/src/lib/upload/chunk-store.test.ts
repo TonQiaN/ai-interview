@@ -130,6 +130,44 @@ describe.each(implementations)("%s", (_name, create) => {
     await store.deleteChunk({ sessionKey: "a", segmentId: "s1", seq: 99 });
     await store.deleteSegment("a", "nope");
   });
+
+  it("列出这台设备上所有面试的段", async () => {
+    const store = await create();
+    await store.putSegment(segment("a", "s1", 1000));
+    await store.putSegment({ ...segment("b", "s2", 0), createdAt: 42 });
+
+    const all = await store.listAllSegments();
+    expect(all.map((item) => `${item.sessionKey}/${item.segmentId}`).sort()).toEqual([
+      "a/s1",
+      "b/s2",
+    ]);
+    expect(all.find((item) => item.sessionKey === "b")?.createdAt).toBe(42);
+  });
+
+  it("整段丢弃：登记和分片一起删，别的段不动", async () => {
+    const store = await create();
+    await store.putSegment(segment("a", "s1", 1000));
+    await store.putSegment(segment("a", "s2", 2000));
+    await store.putSegment(segment("b", "s1", 0));
+    for (const [sessionKey, segmentId, seq] of [
+      ["a", "s1", 0],
+      ["a", "s1", 1],
+      ["a", "s2", 0],
+      ["b", "s1", 0],
+    ] as const) {
+      await store.putChunk({ sessionKey, segmentId, seq, bytes: bytes("x"), sha256: "h" });
+    }
+
+    await store.discardSegment("a", "s1");
+
+    expect((await store.listSegments("a")).map((item) => item.segmentId)).toEqual(["s2"]);
+    expect(await store.listChunks("a", "s1")).toEqual([]);
+    expect(await store.getChunk({ sessionKey: "a", segmentId: "s1", seq: 1 })).toBeUndefined();
+    expect(await store.listChunks("a", "s2")).toEqual([{ seq: 0, size: 1 }]);
+    expect(await store.listChunks("b", "s1")).toEqual([{ seq: 0, size: 1 }]);
+    // 丢弃不存在的段不报错
+    await store.discardSegment("a", "nope");
+  });
 });
 
 describe("IndexedDbChunkStore", () => {

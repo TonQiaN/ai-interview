@@ -200,6 +200,7 @@ DATABASE_URL=$(scripts/dev-db.sh url) cargo test -p interview-room
 export DATABASE_URL=$(scripts/dev-db.sh url)
 cargo run -p interview-room --example demo -- seed            # 打印面试的 ID 和链接
 cargo run -p interview-room --example demo -- state <面试的 ID>   # 状态、对话记录、过程事件、录像
+cargo run -p interview-room --example demo -- revoke <面试的 ID>  # 撤销这场面试的链接，面试进行到一半也可以
 ```
 
 `seed` 可以带 `--silence-sec`、`--min-sec`、`--max-sec`（答题的时间设置）、`--tone-ms`（提示音多长）、`--realtime 1`（配成实时对话）和 `--english 1`（配成英文面试，题目、岗位名、候选人名字也换成英文的）。候选人页面的浏览器端到端测试（`web/apps/candidate/e2e`）就是用它造数据、查结果的。
