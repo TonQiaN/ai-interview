@@ -299,9 +299,11 @@ async fn chunks_are_checked_and_idempotent(pool: PgPool) {
 }
 
 /// 一个写得慢的文件存储：内容是 `slow` 的那一次写入要多等一会儿。
+/// 给了 `purge_on_put` 的话，每次写入之前先把库里的录制全删掉，像是正好有人在彻底删除这场面试。
 struct SlowStore {
     inner: MemoryBlobStore,
     slow: &'static [u8],
+    purge_on_put: Option<PgPool>,
 }
 
 #[async_trait]
@@ -309,6 +311,12 @@ impl BlobStore for SlowStore {
     async fn put(&self, key: &str, data: Bytes) -> Result<(), BlobError> {
         if data == self.slow {
             tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        if let Some(pool) = &self.purge_on_put {
+            sqlx::query("DELETE FROM interview_recordings")
+                .execute(pool)
+                .await
+                .expect("删录制失败");
         }
         self.inner.put(key, data).await
     }
@@ -342,6 +350,37 @@ impl BlobStore for SlowStore {
     }
 }
 
+/// 分片是先写文件、再在库里登记的。正好在两步之间这场面试被彻底删除了，登记不上，
+/// 写下的文件要收回来，不然它不属于任何一场面试，没有人会再去删。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_chunk_that_cannot_be_registered_leaves_no_file_behind(pool: PgPool) {
+    let blobs = SlowStore {
+        inner: MemoryBlobStore::new(),
+        slow: b"",
+        purge_on_put: Some(pool.clone()),
+    };
+    let ctx = AppContext::new(pool, Arc::new(blobs), PlatformConfig::for_tests());
+    let app = app_on(ctx, RoomConfig::default()).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+    assert_eq!(
+        open_segment(&app, &token, "camera", segment).await.status,
+        204
+    );
+
+    let response = put_chunk(&app, &token, "camera", segment, 0, b"orphan").await;
+    assert_eq!(response.status, 404, "{}", response.text());
+    assert_eq!(error_code(&response.json()), "segment_not_found");
+
+    let left = app
+        .ctx
+        .blobs
+        .list(&format!("interviews/{interview_id}/recordings"))
+        .await
+        .expect("列文件失败");
+    assert!(left.is_empty(), "留下了没有登记的文件：{left:?}");
+}
+
 /// 页面重试和上一次请求撞在一起时，同一个分片会同时到两次。
 /// 不管谁先谁后，库里登记的大小、校验和，和存下来的内容必须是同一次请求的。
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
@@ -349,6 +388,7 @@ async fn the_same_chunk_arriving_at_once_is_stored_once(pool: PgPool) {
     let blobs = SlowStore {
         inner: MemoryBlobStore::new(),
         slow: b"slow-bytes",
+        purge_on_put: None,
     };
     let ctx = AppContext::new(pool, Arc::new(blobs), PlatformConfig::for_tests());
     let app = app_on(ctx, RoomConfig::default()).await;
