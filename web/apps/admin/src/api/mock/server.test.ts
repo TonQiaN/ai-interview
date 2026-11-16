@@ -689,6 +689,30 @@ describe("彻底删除面试", () => {
   });
 });
 
+describe("彻底删除候选人", () => {
+  it("名下还有面试时拒绝，面试删完以后才删得掉，简历一起没了", async () => {
+    const server = createMockServer({ latencyMs: 0, jobMs: 60_000 });
+    await login(server);
+    const candidate = server.db.candidates.find((c) =>
+      server.db.interviews.some((i) => i.candidate.id === c.id),
+    );
+    if (!candidate) throw new Error("演示数据里没有面过试的候选人");
+    const refused = await call<{ error: { code: string } }>(
+      server,
+      "POST",
+      `/candidates/${candidate.id}/purge`,
+    );
+    expect(refused.status).toBe(409);
+    expect(refused.data.error.code).toBe("candidate_has_interviews");
+
+    server.db.interviews = server.db.interviews.filter((i) => i.candidate.id !== candidate.id);
+    expect((await call(server, "POST", `/candidates/${candidate.id}/purge`)).status).toBe(204);
+    expect((await call(server, "GET", `/candidates/${candidate.id}`)).status).toBe(404);
+    expect(server.db.resumes.some((r) => r.candidate_id === candidate.id)).toBe(false);
+    expect((await call(server, "POST", `/candidates/${candidate.id}/purge`)).status).toBe(404);
+  });
+});
+
 describe("候选人对比", () => {
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
