@@ -147,6 +147,8 @@ if [ -z "$tts_backend" ]; then
 fi
 if [ "$tts_backend" = "worker" ]; then
   ok "语音合成用配置里的 worker（$(setting AI_INTERVIEW_TTS_WORKER_URLS)）"
+elif [ -n "$start_workers" ] && [ -n "${AI_INTERVIEW_TTS_WORKER_FAKE:-}" ]; then
+  warn "语音合成起的是假引擎的 worker（设了 AI_INTERVIEW_TTS_WORKER_FAKE）：面试官的声音是一段测试音"
 elif [ "$start_workers" = "all" ]; then
   ok "语音合成用这台机器上的真引擎（启动时会起两个 worker，头一次加载模型要等一会儿）"
 elif [ "$start_workers" = "index" ]; then
@@ -207,7 +209,7 @@ if [ "$build" = true ]; then
   echo "构建前端…" >&2
   pnpm -C web install --frozen-lockfile >&2
   pnpm -C web build >&2
-  echo "编译后端（第一次要十分钟左右）…" >&2
+  echo "编译后端（第一次要几分钟）…" >&2
   cargo build --release -p interview-server "${features[@]}" >&2
 fi
 if [ ! -x target/release/interview-server ]; then
@@ -219,6 +221,15 @@ if [ ! -f web/dist/admin/index.html ]; then
   exit 1
 fi
 
+# 这次启动时由这个脚本起的 worker。退出时只停这些：启动前就在跑的照样用，但不是这个脚本的，不去停它
+started_workers=""
+stop_workers() {
+  local name
+  for name in $started_workers; do
+    tts/worker/run.sh stop "${name}" >&2 || true
+  done
+}
+
 if [ -n "$start_workers" ]; then
   echo "起语音合成的 worker…" >&2
   # worker 的令牌和模型目录写在 .env 里的话，带给 run.sh
@@ -227,8 +238,20 @@ if [ -n "$start_workers" ]; then
       export "$name=$(setting "$name")"
     fi
   done
-  # 服务停了，worker 也一起停，不留在后台占着十几 GB 内存
-  trap 'tts/worker/run.sh stop >&2' EXIT
+  worker_names="index"
+  [ "$start_workers" != "all" ] || worker_names="index breeze"
+  workers_before="$(tts/worker/run.sh status)"
+  for name in $worker_names; do
+    # run.sh status 对没在跑的 worker 打印「名字：没在跑」
+    if printf '%s\n' "$workers_before" | grep -q "^${name}：没在跑"; then
+      started_workers="${started_workers} ${name}"
+    else
+      echo "${name} 的 worker 在启动前就在跑，直接用它。退出时不会停它" >&2
+    fi
+  done
+  # 服务停了，这次起的 worker 也一起停，不留在后台占着十几 GB 内存。
+  # 先设好再起：起到一半失败了，已经起来的那个也会停掉
+  trap stop_workers EXIT
   tts/worker/run.sh start "$start_workers" >&2
   eval "$(tts/worker/run.sh env)"
 fi
@@ -239,5 +262,16 @@ echo "HR 后台：http://${bind:-127.0.0.1:8080}/admin/" >&2
 [ -z "$admin_note" ] || echo "$admin_note" >&2
 echo >&2
 
-# 不用 exec：服务退出以后还要回来停 worker
-target/release/interview-server serve
+# 服务放到后台再等它，不直接在前台跑，也不用 exec：
+# 脚本收到终止信号（kill、关掉终端、进程管理工具停服务）时要把信号转给服务，等它收尾退出，再回来停 worker。
+# 在前台跑的话，脚本被终止以后就直接走了，服务留在后台没人管，还占着端口
+target/release/interview-server serve &
+server=$!
+trap 'kill -TERM "$server" 2>/dev/null || true' TERM INT HUP
+while :; do
+  status=0
+  wait "$server" || status=$?
+  # wait 被信号打断会提前回来，服务这时还在收尾：接着等，拿它真正的退出码
+  kill -0 "$server" 2>/dev/null || break
+done
+exit "$status"
