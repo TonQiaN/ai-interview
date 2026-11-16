@@ -650,6 +650,71 @@ async fn the_next_question_does_not_wait_for_the_model_to_finish_writing(pool: P
     assert_eq!(answers, [Some("q1".to_owned()), Some("q2".to_owned())]);
 }
 
+/// 没配大模型、打开了替身（只给端到端测试用）：面试按实时对话进行，替身在每道题上正好追问一次，
+/// 一直走到结束。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_stand_in_carries_a_conversation_to_the_end_without_a_model(pool: PgPool) {
+    let config = RoomConfig {
+        live_stand_in: true,
+        ..no_warm_up()
+    };
+    let deps = Deps::new(testing::test_context(pool), config)
+        .with_transcriber(FakeTranscriber::says("我们团队做了很多事情。"))
+        .with_voice(Arc::new(FakeVoice::default()));
+    let app = common::app_from(deps).await;
+    let (interview_id, token) = prepared(&app, conversational()).await;
+    assert_eq!(session(&app, &token).await["mode"], "realtime");
+
+    let opening = start(&app, &token).await;
+    let steps = walk(&app, &token, opening, "silence").await;
+    let asked: Vec<&str> = steps
+        .iter()
+        .filter(|step| step["expects_answer"] == true)
+        .map(key)
+        .collect();
+    assert_eq!(
+        asked,
+        [
+            "q1",
+            "q1.p1",
+            "q2",
+            "q2.p1",
+            "q3",
+            "q3.p1",
+            "candidate_questions"
+        ],
+        "每道题追问一次"
+    );
+
+    let probes: Vec<String> = turns(&app, interview_id)
+        .await
+        .into_iter()
+        .filter(|(speaker, key, _)| speaker == "interviewer" && key.as_deref() == Some("q1.p1"))
+        .map(|(_, _, text)| text)
+        .collect();
+    assert!(
+        probes
+            .iter()
+            .any(|text| text.contains("你本人具体负责的是哪一部分")),
+        "{probes:?}"
+    );
+}
+
+/// 没配大模型、也没打开替身：配成实时对话的面试按逐题进行。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn without_a_model_or_the_stand_in_the_interview_goes_question_by_question(pool: PgPool) {
+    let deps = Deps::new(testing::test_context(pool), no_warm_up())
+        .with_transcriber(FakeTranscriber::says("我们团队做了很多事情。"))
+        .with_voice(Arc::new(FakeVoice::default()));
+    let app = common::app_from(deps).await;
+    let (_, token) = prepared(&app, conversational()).await;
+
+    let opening = start(&app, &token).await;
+    let steps = walk(&app, &token, opening, "silence").await;
+    let keys: Vec<&str> = steps.iter().map(key).collect();
+    assert!(!keys.iter().any(|key| key.contains(".p")), "{keys:?}");
+}
+
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn silence_gets_a_nudge_without_asking_the_model(pool: PgPool) {
     let Setup { app, model, .. } = setup(pool, ScriptedModel::new()).await;

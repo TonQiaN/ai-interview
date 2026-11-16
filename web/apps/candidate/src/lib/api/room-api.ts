@@ -8,7 +8,9 @@
  * 每个请求还带着这个页面给自己起的标识（X-Room-Page）。同一条链接同时开在两个页面里时，
  * 服务端靠它认出哪个页面在面试；面试正在另一个页面里进行的话，响应里会带 X-Room-Active-Elsewhere。
  */
+
 import { type ApiClient, ApiError, createRoomClient } from "@ai-interview/api-client";
+import { randomId } from "../random-id";
 import type { SegmentRef, UploadApi } from "../upload/uploader";
 import { UploadError } from "../upload/uploader";
 import type {
@@ -150,7 +152,7 @@ export class HttpRoomApi implements RoomApi {
 
   constructor(options: HttpRoomApiOptions) {
     this.token = options.token;
-    this.pageId = options.pageId ?? crypto.randomUUID();
+    this.pageId = options.pageId ?? randomId();
     this.onActiveElsewhere = options.onActiveElsewhere;
     this.baseUrl = options.baseUrl ?? "";
     this.fetchImpl = options.fetch ?? ((request) => fetch(request));

@@ -9,6 +9,7 @@ import {
   eventWhen,
   fileSize,
   foldEvents,
+  inviteExpired,
   rating,
   ratingSpread,
   relativeTime,
@@ -298,6 +299,13 @@ describe("录像上传和屏幕常亮的事件", () => {
       expect(eventSeverity(kind)).toBe("info");
   });
 
+  it("浏览器放不了压缩过的面试官语音时有中文说法，只是排查用，不提示", () => {
+    expect(eventText({ kind: "audio_format_fallback", payload: { from: "mp3" } })).toBe(
+      "这个浏览器放不了压缩过的面试官语音，改用没压缩的（面试不受影响，每句话取得慢一些）",
+    );
+    expect(eventSeverity("audio_format_fallback")).toBe("info");
+  });
+
   it("没有时间轴位置的事件，按发生的时刻说是开始前、面试中还是结束后", () => {
     const events = [
       { kind: "page_opened", occurred_at: "2026-01-05T09:58:00Z" },
@@ -345,5 +353,28 @@ describe("面试换到另一个页面继续", () => {
     // 没降的不提码率，没有摄像头的（码率是 0）也不提
     expect(text("interview_started", { video_kbps: 900, video_reduced: false })).toBe("面试开始");
     expect(text("interview_started", { video_kbps: 0, video_reduced: false })).toBe("面试开始");
+  });
+});
+
+describe("链接过期了没有", () => {
+  const now = Date.parse("2026-11-16T08:00:00Z");
+
+  it("发了链接、到期时间已经过了：过期了", () => {
+    expect(
+      inviteExpired({ status: "invited", invite_expires_at: "2026-11-16T07:59:00Z" }, now),
+    ).toBe(true);
+  });
+
+  it("还没到期，或者没有到期时间（没发过链接、链接都撤销了）：没过期", () => {
+    expect(
+      inviteExpired({ status: "invited", invite_expires_at: "2026-11-17T08:00:00Z" }, now),
+    ).toBe(false);
+    expect(inviteExpired({ status: "invited", invite_expires_at: null }, now)).toBe(false);
+    expect(inviteExpired({ status: "invited" }, now)).toBe(false);
+  });
+
+  it("候选人已经开始或者面完了，链接到没到期都不提", () => {
+    for (const status of ["in_progress", "completed", "abandoned", "cancelled"] as const)
+      expect(inviteExpired({ status, invite_expires_at: "2026-11-01T00:00:00Z" }, now)).toBe(false);
   });
 });

@@ -270,6 +270,10 @@ pub struct QuestionTiming {
     pub chars_per_minute: Option<u32>,
     /// 候选人作答中间最长的一次停顿。
     pub longest_pause_ms: Option<u64>,
+    /// 这道题中间面试停着的时间：设备断开到恢复、页面出错到刷新后接着面。
+    /// 这段时间面试在等，不是候选人在想，`response_latency_ms` 和 `longest_pause_ms` 里已经扣掉。
+    #[serde(default)]
+    pub held_ms: u64,
 }
 
 /// 岗位要求的重要程度。

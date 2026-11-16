@@ -38,6 +38,7 @@ pub mod protocol;
 pub mod realtime;
 pub mod recording;
 pub mod session;
+mod stand_in;
 pub mod transcribe;
 
 pub use config::RoomConfig;
@@ -146,6 +147,16 @@ impl Deps {
     pub fn with_llm(mut self, llm: Option<Arc<dyn ChatModel>>) -> Self {
         self.llm = llm;
         self
+    }
+
+    /// 实时对话里现场接话用的模型：配了大模型就是它；没配、又打开了替身（只给测试用，见
+    /// [`RoomConfig::live_stand_in`]）就是替身。逐题模式判断回答不用替身。
+    pub(crate) fn live_model(&self) -> Option<Arc<dyn ChatModel>> {
+        self.llm.clone().or_else(|| {
+            self.config
+                .live_stand_in
+                .then(|| Arc::new(stand_in::StandInModel) as Arc<dyn ChatModel>)
+        })
     }
 
     /// 用别的办法拿回答的文字（测试里用假的）。

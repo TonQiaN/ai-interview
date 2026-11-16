@@ -301,6 +301,13 @@ export const en: Texts = {
     },
   },
 
+  crash: {
+    title: "Something went wrong on this page",
+    description:
+      "Please reload the page. Everything recorded and answered so far is saved. If the interview isn't finished, it continues from where it stopped after a quick device check.",
+    reload: "Reload the page",
+  },
+
   problem: {
     unsupportedTitle: "This browser cannot run the interview",
     unsupportedBody: "Please open this link in the latest Chrome, Edge or Safari.",

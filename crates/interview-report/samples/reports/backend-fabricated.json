@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "interview_id": "sample-backend-fabricated",
-  "generated_at_ms": 1794819964658,
+  "generated_at_ms": 1794822780397,
   "recommendation": {
     "decision": "borderline",
     "confidence": "medium",
-    "headline": "业务方向对口，但「主导重构」这一条没被印证，需人工核实后再定",
-    "overview": "五年后端经历、在支付核心交易组，项目方向和岗位高度对口；第 2 题讲分库分表选型时能给出备选方案和取舍，第 5 题协作事例有过程有结果，沟通完整。但 HR 本轮最想确认的「重构是不是他本人主导」没有拿到支持：被追问自己写的接口和代码量就含糊，吞吐量数字讲不出来源，分片键先答按月、被质疑后当场改口成按订单号，谈动机时还自述「交易这块更多是在旁边配合」。硬性要求里 Go、独立排查线上问题、Kafka/Redis 调优都只到「接触过」的深度。建议 HR 先核实角色真实性，再决定是否占用人工面试时间。",
+    "headline": "项目经历真实性存疑，需人工核实后再定",
+    "overview": "候选人有五年后端经历、身处支付公司核心交易组，协作题答得具体，基础知识（隔离级别）准确，不属于明显不合适的人。但简历写「主导支付核心系统重构」，面试里他自述只是参与方案设计和评审、负责一部分接口改造、交易这块「更多是在旁边配合」，压测由同事负责，分片键前后改口，吞吐量数字对不上。四条硬性要求中只有年限明确满足，Go、数据库实战、独立排查都只到概念层面。建议 HR 先核实主导性问题再决定是否推进。",
     "key_reasons": [
       {
-        "point": "业务背景和岗位高度对口：支付核心交易组、订单分库分表、资金对账拆分、高并发场景，都是这个岗位要做的事",
+        "point": "有五年后端经历、在支付核心交易组，年限硬性要求满足，协作题是全场最扎实的一段，有双方理由、解决过程和事后结果",
         "evidence": [
           {
             "source": "resume",
@@ -18,31 +18,8 @@
           },
           {
             "source": "transcript",
-            "segment_id": "s4",
-            "quote": "主要是把原来那个单体的大交易服务拆成几个独立服务，然后订单这块做了分库分表，资金对帐也单独拆出来了",
-            "start_ms": 31916,
-            "end_ms": 88066,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "point": "技术选型题能讲出多个备选方向和取舍逻辑，不是只有结论；协作题有具体分歧、推进方式和事后结果，这两块比一般初筛候选人扎实",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s10",
-            "quote": "中间件那个方案会多一跳，性能上会有损耗，自己控的话链路更短一些。",
-            "start_ms": 184201,
-            "end_ms": 217848,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
             "segment_id": "s22",
-            "quote": "他倾向于每个小时全量对一次，我觉得全量对账压力太大了，建议做增量加定时的全量兜底",
+            "quote": "我整理了一下两种方案的机器成本和延迟，拉了个小会一起看数据，最后是各让一步",
             "start_ms": 368881,
             "end_ms": 408342,
             "speaker": "candidate",
@@ -60,20 +37,47 @@
         ]
       },
       {
-        "point": "本人对现状有自知，主动承认在交易链路上是配合角色，这个表述与简历「主导重构」的落差反而是需要人工核实的信号，而不是直接判死",
+        "point": "基础概念能答对：四种隔离级别和各自解决的问题说准了，还补充了 MySQL 默认级别；排查题有先监控后定位的顺序意识",
         "evidence": [
           {
             "source": "transcript",
-            "segment_id": "s24",
-            "quote": "我现在的公司其实也不错，但交易这块我更多是在旁边配合，想真正深入到主链路里面去",
-            "start_ms": 417056,
-            "end_ms": 451644,
+            "segment_id": "s20",
+            "quote": "隔离级别有四种，读未提交、读已提交、可重复读，还有串行化",
+            "start_ms": 327203,
+            "end_ms": 357453,
             "speaker": "candidate",
             "quote_match": "exact"
           },
           {
-            "source": "resume",
-            "quote": "主导支付核心系统的重构，将系统吞吐量从每秒 5000 笔提升到每秒 5 万笔",
+            "source": "transcript",
+            "segment_id": "s16",
+            "quote": "首先肯定是先看监控和日志，看是哪个环节慢",
+            "start_ms": 265372,
+            "end_ms": 286012,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "技术选型题能给出三个备选方向和取舍理由，不是只报结论",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "一个是我们自己做一层分片，一个是接公司统一的中间件",
+            "start_ms": 184201,
+            "end_ms": 217848,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "因为中间件那个方案会多一跳，性能上会有损耗，自己控的话链路更短一些",
+            "start_ms": 184201,
+            "end_ms": 217848,
+            "speaker": "candidate",
             "quote_match": "exact"
           }
         ]
@@ -81,7 +85,1260 @@
     ],
     "risks": [
       {
-        "point": "简历「主导重构」与面试自述不符：面试里他把角色说成「参与整体方案的设计和评审、负责一部分接口改造」，被追问具体接口和代码量时答不上来",
+        "point": "简历写「主导」重构，本人自述只是参与方案设计和评审、负责一部分接口改造，还说自己「在旁边配合」，主导性明显对不上，这是 HR 重点要核实的一条",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "主导支付核心系统的重构",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s4",
+            "quote": "我在这块主要是参与了整体方案的设计和评审，然后负责一部分接口的改造",
+            "start_ms": 31916,
+            "end_ms": 88066,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s6",
+            "quote": "代码量这个我没太统计过，反正就是配合主链路那边做适配",
+            "start_ms": 102494,
+            "end_ms": 127473,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s24",
+            "quote": "交易这块我更多是在旁边配合",
+            "start_ms": 417056,
+            "end_ms": 451644,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "分片键先答「按月分」，被追问用户怎么查历史订单后改口成「按订单号分」，并把按月解释成另一个归档表；作为自称设计分片方案的人，这个核心参数前后不一致",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s12",
+            "quote": "我们是按时间分的，按月分",
+            "start_ms": 222219,
+            "end_ms": 225871,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s14",
+            "quote": "后来我们其实是按订单号分的，对，订单号里带了用户信息",
+            "start_ms": 234528,
+            "end_ms": 254187,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s14",
+            "quote": "那是另外一个归档表，是这么个情况",
+            "start_ms": 234528,
+            "end_ms": 254187,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "「五千到五万」这个核心数字在追问下没有支撑：压测主要由压测组同事做，本人复述的是「压到五千多机器就扛不住了」，Kafka 调优只说得上加机器、加分区，参数不记得",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s4",
+            "quote": "我们团队整体把吞吐量从每秒五千笔提升到了每秒五万笔",
+            "start_ms": 31916,
+            "end_ms": 88066,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s8",
+            "quote": "主要是我们压测组的同事在搞，我参与了一部分",
+            "start_ms": 143044,
+            "end_ms": 173044,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s8",
+            "quote": "具体参数我不太记得了，当时是照着官方文档调的",
+            "start_ms": 143044,
+            "end_ms": 173044,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "point": "硬性要求里的 Go 全场没有被考察到任何语言层面的细节，数据库和排查能力只在概念层面，项目经验题也举不出真实的事务案例",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s24",
+            "quote": "一方面把 Go 和分布式这块的底子打扎实",
+            "start_ms": 417056,
+            "end_ms": 451644,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "具体是什么场景我一时想不太起来了",
+            "start_ms": 327203,
+            "end_ms": 357453,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s18",
+            "quote": "可能得找 DBA 一起看一下",
+            "start_ms": 295712,
+            "end_ms": 317018,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ]
+  },
+  "overall_score": 57,
+  "score_range": {
+    "low": 55,
+    "high": 59
+  },
+  "competencies": [
+    {
+      "name": "专业能力",
+      "rating": 3,
+      "comment": "项目背景和架构拆分讲得清轮廓，隔离级别等概念准确；但一落到自己动手的部分就空——说不清改了哪几个接口、多少代码量，Kafka 调优答不出参数，分片键改口，事务题举不出真实案例。深度只到「在旁边看过」，达不到三年以上后端应有的独立负责水平。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s6",
+          "quote": "具体接口的话，主要是订单查询和，和后台那块的一些接口改造吧。代码量这个我没太统计过",
+          "start_ms": 102494,
+          "end_ms": 127473,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s8",
+          "quote": "就是加 broker，分区也加了一些。具体参数我不太记得了",
+          "start_ms": 143044,
+          "end_ms": 173044,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "解决问题",
+      "rating": 3,
+      "comment": "排查题有先后顺序，点到了慢查询、锁等待、大 key 这类具体手段，也有先恢复业务的线上意识；但没提先看最近变更、没做分层定位，指标只会说响应时间和 CPU 内存，数据库层推给 DBA，中途就重启切流有冲掉现场的风险。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s16",
+          "quote": "再不行就先重启一下服务，把流量切到备机，先恢复业务，再慢慢定位",
+          "start_ms": 265372,
+          "end_ms": 286012,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s18",
+          "quote": "指标的话……就是看那个响应时间的曲线，还有 CPU、内存这些",
+          "start_ms": 295712,
+          "end_ms": 317018,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "沟通表达",
+      "rating": 3,
+      "comment": "整体表达流畅、不跑题，不会的肯直说，不硬编。但被追问细节时明显变虚，分片键被质疑后当场换答案，听的人需要自己判断哪个是真的。协作分歧那一段条理最完整。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s8",
+          "quote": "具体参数我不太记得了，当时是照着官方文档调的",
+          "start_ms": 143044,
+          "end_ms": 173044,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s22",
+          "quote": "我觉得关键是别在群里吵，把数据摆出来会好沟通很多",
+          "start_ms": 368881,
+          "end_ms": 408342,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "学习与成长",
+      "rating": 3,
+      "comment": "对协作过程有复盘、能提炼方法，也主动承认自己想补 Go 和分布式的基础。但面试里没有问到学新技术、踩坑改正的具体事例，证据有限。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s24",
+          "quote": "我个人是比较愿意啃硬骨头的，也愿意补基础",
+          "start_ms": 417056,
+          "end_ms": 451644,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "动机与契合",
+      "rating": 3,
+      "comment": "方向和岗位对得上（高并发交易、Go、希望独立负责模块），也坦率承认现在不在主链路。但对这个岗位和公司没做任何了解，「业务更核心、技术挑战更大」都是形容词层面的说法，稳定性无从判断。",
+      "evidence": [
+        {
+          "source": "transcript",
+          "segment_id": "s24",
+          "quote": "主要是想找一个业务更核心、技术挑战更大的环境",
+          "start_ms": 417056,
+          "end_ms": 451644,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s24",
+          "quote": "未来两三年我希望能在高并发交易这个方向做深",
+          "start_ms": 417056,
+          "end_ms": 451644,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    },
+    {
+      "name": "职业素养",
+      "rating": 3,
+      "comment": "面试中态度坦诚，记不清就直说，没有编造；但简历「主导」与自述「配合、参与」的落差属于需要核实的诚信疑点，在核实清楚前不宜给高分。",
+      "evidence": [
+        {
+          "source": "resume",
+          "quote": "主导支付核心系统的重构",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s4",
+          "quote": "我在这块主要是参与了整体方案的设计和评审，然后负责一部分接口的改造",
+          "start_ms": 31916,
+          "end_ms": 88066,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    }
+  ],
+  "focus_checks": [
+    {
+      "focus": "确认支付核心系统的重构是不是他本人主导的",
+      "verdict": "not_satisfied",
+      "finding": "面试没能证实他主导。他自述是参与整体方案设计和评审、负责一部分接口改造，被问具体接口和代码量时答不出，压测由压测组同事负责，最后还说自己「更多是在旁边配合」。项目整体做过是可信的，但「主导」这个说法与面试内容不符，需要人工核实并由前主管确认。",
+      "evidence": [
+        {
+          "source": "resume",
+          "quote": "主导支付核心系统的重构，将系统吞吐量从每秒 5000 笔提升到每秒 5 万笔",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s4",
+          "quote": "我在这块主要是参与了整体方案的设计和评审，然后负责一部分接口的改造",
+          "start_ms": 31916,
+          "end_ms": 88066,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s6",
+          "quote": "因为我们是按模块分工的，我这边主要是把原来的调用改成走新的服务",
+          "start_ms": 102494,
+          "end_ms": 127473,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        },
+        {
+          "source": "transcript",
+          "segment_id": "s24",
+          "quote": "但交易这块我更多是在旁边配合，想真正深入到主链路里面去",
+          "start_ms": 417056,
+          "end_ms": 451644,
+          "speaker": "candidate",
+          "quote_match": "exact"
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "question_id": "q1",
+      "question_text": "请用两三分钟介绍一下你最近做的、你觉得最有挑战的一个项目，重点讲你自己负责的部分。",
+      "asked": true,
+      "segment_ids": [
+        "s3",
+        "s4",
+        "s5",
+        "s6",
+        "s7",
+        "s8"
+      ],
+      "timing": {
+        "start_ms": 19645,
+        "end_ms": 173044,
+        "response_latency_ms": 2200,
+        "candidate_speaking_ms": 111129,
+        "candidate_chars": 470,
+        "chars_per_minute": 253,
+        "longest_pause_ms": null,
+        "held_ms": 0
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人介绍了支付核心系统重构：单体交易服务拆成多个服务、订单分库分表、对账独立拆出，团队把吞吐量从每秒五千笔提升到每秒五万笔（约十倍）；他自述参与整体方案设计与评审、负责部分接口改造以及 Redis、Kafka 集群的容量规划和调优，并提到灰度阶段老数据没迁干净导致对账出现差异、后来加了核对脚本才解决。追问下他说不清自己改的是哪几个接口、代码量多少，压测主要由压测组同事负责，Kafka 调优只记得加 broker 和加分区，具体参数不记得。",
+        "rating": 2.5,
+        "ratings": [
+          2.5,
+          2.5,
+          2.5
+        ],
+        "rating_reason": "比「较弱」好一点：他讲清了项目背景、架构拆分的几个方向，也举出一个具体踩坑（灰度时老数据未迁移干净、对账出现差异、加核对脚本解决），不是纯空泛的复述。但够不上「合格」：题目明确要求重点讲自己负责的部分，他的自述停留在「参与方案设计和评审」这种角色描述，追问到具体写了哪几个接口、多少代码时就答不上来；团队十倍吞吐的数字在追问压测时没有得到支撑，反而说「压到五千多机器就扛不住了、扩容之后好很多」，与五万笔的说法对不上；Kafka 调优说不出任何参数。核心贡献和核心数字都没能落到实处。",
+        "strengths": [
+          {
+            "point": "能说清项目整体在做什么：单体交易服务拆分、订单分库分表、对账独立拆出，架构层面有基本轮廓",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s4",
+                "quote": "主要是把原来那个单体的大交易服务拆成几个独立服务，然后订单这块做了分库分表，资金对帐也单独拆出来了",
+                "start_ms": 31916,
+                "end_ms": 88066,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "举出了一个具体的上线问题：灰度时老数据未迁移干净造成对账差异，用核对脚本逐步收敛",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s4",
+                "quote": "灰渡的时候有一批老数据没迁移干净，对账那边就出现了一些差异，后来加了核对脚本才慢慢收敛",
+                "start_ms": 31916,
+                "end_ms": 88066,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "对自己负责的部分讲不清：被追问具体改了哪些接口、大概多少代码时，只说「订单查询和后台那块的一些接口」，代码量说不准，实际是「配合主链路做适配」",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s6",
+                "quote": "具体接口的话，主要是订单查询和，和后台那块的一些接口改造吧。代码量这个我没太统计过",
+                "start_ms": 102494,
+                "end_ms": 127473,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s6",
+                "quote": "因为我们是按模块分工的，我这边主要是把原来的调用改成走新的服务",
+                "start_ms": 102494,
+                "end_ms": 127473,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "简历/开场主打的「五千到五万、十倍提升」在追问压测时没有被支撑，本人给出的数字是压到五千多就扛不住，也没说清十倍是怎么来的",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s7",
+                "quote": "吞吐量从五千到五万这个提升，你们压测是怎么做的",
+                "start_ms": 128373,
+                "end_ms": 139944,
+                "speaker": "interviewer",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s8",
+                "quote": "我记得是压到五千多的时候机器就有点扛不住了，后来扩容之后好很多",
+                "start_ms": 143044,
+                "end_ms": 173044,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "压测不是本人做的，Kafka 调优也停留在「加机器、加分区」，具体参数说不出",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s8",
+                "quote": "压侧这块……主要是我们压测组的同事在搞，我参与了一部分。",
+                "start_ms": 143044,
+                "end_ms": 173044,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s8",
+                "quote": "具体参数我不太记得了，当时是照着官方文档调的。",
+                "start_ms": 143044,
+                "end_ms": 173044,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "提到自己负责 Redis 和 Kafka 集群容量规划调优，但整段没有任何容量数据、扩容依据或调优前后的对比",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s4",
+                "quote": "我在这块主要是参与了整体方案的设计和评审，然后负责一部分接口的改造，还有瑞迪斯集群和卡夫卡集群的容量规划跟调优",
+                "start_ms": 31916,
+                "end_ms": 88066,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请他把「五千提升到五万」这件事从头讲一遍：压测环境怎么搭的、用了什么工具和场景、压到五千时瓶颈具体在哪一环（是数据库、服务还是消息队列）、做了哪些具体改动把数字推到五万、他本人在这中间负责哪一部分；并请他说出至少两个 Kafka 侧真实调过的参数名和调整前后的取值。"
+      }
+    },
+    {
+      "question_id": "q2",
+      "question_text": "这个项目里你做过的最重要的一个技术决定是什么？当时还有哪些别的方案，为什么没选？",
+      "asked": true,
+      "segment_ids": [
+        "s9",
+        "s10",
+        "s11",
+        "s12",
+        "s13",
+        "s14"
+      ],
+      "timing": {
+        "start_ms": 173944,
+        "end_ms": 254187,
+        "response_latency_ms": 1900,
+        "candidate_speaking_ms": 56958,
+        "candidate_chars": 234,
+        "chars_per_minute": 246,
+        "longest_pause_ms": null,
+        "held_ms": 0
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人说这个项目里最重要的技术决定是分库分表的方案选型，比较了自研分片层、接入公司统一中间件、按业务线拆库三个方向，理由是中间件多一跳会有性能损耗、按业务线拆跨库查询麻烦，所以选了自研。追问分片键时先答「按时间分、按月分」，再被问用户查历史订单怎么办，又改口说实际是按订单号分、按月的是归档表。",
+        "rating": 2.5,
+        "ratings": [
+          2.5,
+          2.5,
+          2.5
+        ],
+        "rating_reason": "初始回答按题目的要求给出了一个决定，也说了备选方案和取舍理由（性能、成本、维护成本），不只是结论，这一点够得上合格线以上。但追问到分片键这个最基础的细节时，他先答按月分，随即改口成按订单号分，前后自相矛盾，还临时用「那是归档表」来圆，说明他对这个自称「最重要」的决定并没有一手细节。方案对比部分讲得比较笼统，没有量化的评估依据，也讲不出结果验证。综合看：比 2 分好在有真实的方案对比和取舍理由，够不上 3 分是因为核心事实自相矛盾。",
+        "strengths": [
+          {
+            "point": "给出了三个备选方向，不是只报一个结论，能看出做过方案对比",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s10",
+                "quote": "一个是我们自己做一层分片，一个是接公司统一的中间件",
+                "start_ms": 184201,
+                "end_ms": 217848,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "取舍理由说得比较具体，指向链路长度和性能损耗",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s10",
+                "quote": "因为中间件那个方案会多一跳，性能上会有损耗，自己控的话链路更短一些",
+                "start_ms": 184201,
+                "end_ms": 217848,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "还主动说明了否掉按业务线拆库的原因",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s10",
+                "quote": "另外备选还有按业务线拆库，但那样跨库查询会比较麻烦",
+                "start_ms": 184201,
+                "end_ms": 217848,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "分片键前后说法不一致：先说是按月分，被追问后又改口成按订单号分，这是分库分表方案里最基础的细节，直接影响对「方案由他主导」的判断",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s12",
+                "quote": "我们是按时间分的，按月分",
+                "start_ms": 222219,
+                "end_ms": 225871,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s14",
+                "quote": "后来我们其实是按订单号分的，对，订单号里带了用户信息",
+                "start_ms": 234528,
+                "end_ms": 254187,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s14",
+                "quote": "那是另外一个归档表，是这么个情况",
+                "start_ms": 234528,
+                "end_ms": 254187,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "改口是在面试官提示「按月分怎么查历史订单」之后才发生的，答法是顺着提问方向调头，不是自己想起细节，可信度再打折扣",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s14",
+                "quote": "呃，对，这个确实是个问题",
+                "start_ms": 234528,
+                "end_ms": 254187,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "只讲了为什么没选别的方案，没讲选中的方案落地后效果如何、遇到过什么问题怎么解决，取舍依据也没有数据支撑",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s10",
+                "quote": "我们综合考虑了性能和成本，还有团队的维护成本，最后选了自己做",
+                "start_ms": 184201,
+                "end_ms": 217848,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "下一轮请他不被打断地把订单表的分片方案完整讲一遍：分片键到底是什么、分几个库几张表、按用户查和按商户查分别怎么路由、跨分片查询和对账怎么处理；再让他说明「按月分的归档表」和「按订单号分的订单表」各是什么、数据怎么从一张到另一张、为什么两套并存。简历写的是「独立设计了分库分表方案」，请让他讲清楚哪部分是自己设计的、哪部分是别人做的。"
+      }
+    },
+    {
+      "question_id": "q3",
+      "question_text": "假设线上下单接口的响应时间突然从 100 毫秒涨到 2 秒，你会怎么一步步排查？",
+      "asked": true,
+      "segment_ids": [
+        "s15",
+        "s16",
+        "s17",
+        "s18"
+      ],
+      "timing": {
+        "start_ms": 255087,
+        "end_ms": 317018,
+        "response_latency_ms": 1500,
+        "candidate_speaking_ms": 41946,
+        "candidate_chars": 173,
+        "chars_per_minute": 247,
+        "longest_pause_ms": null,
+        "held_ms": 0
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人给出的顺序是：先看监控和日志判断哪个环节慢，再看数据库的慢查询和锁等待、缓存有没有大 key，如果还不行就重启服务并切流到备机先恢复业务。追问到具体指标时，他说看响应时间曲线、CPU、内存，数据库层看慢查询日志和锁等待，进一步的确认「可能得找 DBA 一起看」。",
+        "rating": 3.0,
+        "ratings": [
+          3.0,
+          3.0,
+          2.5
+        ],
+        "rating_reason": "有基本的排查顺序（先监控日志、再数据库和缓存、最后兜底恢复），也点到了慢查询、锁等待、大 key 这些具体手段，能看出有线上问题处理的基本概念，所以不算「没有顺序」。但整体偏泛：没有提「看最近的变更」，没有按网关、服务、数据库、外部依赖分层定位，也没有提到链路追踪、连接池、GC、主从延迟这类定位手段；追问到的指标只有响应时间、CPU、内存这种通用项，数据库层怎么自己确认基本推给了 DBA。既没有亲身案例支撑，深度也够不上良好。另外把「重启 + 切流」放在定位之前，虽然是为保业务，但有掩盖现场的风险。",
+        "strengths": [
+          {
+            "point": "排查有先后次序，先看监控和日志判断慢在哪个环节，而不是一上来就动手",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s16",
+                "quote": "首先肯定是先看监控和日志，看是哪个环节慢",
+                "start_ms": 265372,
+                "end_ms": 286012,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "数据库层能说出慢查询日志、锁等待这类具体手段",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s18",
+                "quote": "数据库这块可以看慢查询日志，看有没有锁等待",
+                "start_ms": 295712,
+                "end_ms": 317018,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "有先恢复业务、再定位根因的线上意识",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s16",
+                "quote": "再不行就先重启一下服务，把流量切到备机，先恢复业务，再慢慢定位",
+                "start_ms": 265372,
+                "end_ms": 286012,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "没提先看最近有没有发布、配置变更，也没做分层定位（网关、服务、数据库、外部依赖），排查路径比较跳",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s16",
+                "quote": "可以看一下数据库的锁引和慢查询，还有缓存那边有没有大 key",
+                "start_ms": 265372,
+                "end_ms": 286012,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "追问具体看哪些指标时只给了通用项，没有 QPS、连接数、超时率、依赖耗时这类能定位问题的指标",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s18",
+                "quote": "指标的话……就是看那个响应时间的曲线，还有 CPU、内存这些",
+                "start_ms": 295712,
+                "end_ms": 317018,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "数据库层怎么自己确认没有讲出来，直接推给 DBA；没有亲身处理过的案例",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s18",
+                "quote": "具体确认的话，可能得找 DBA 一起看一下",
+                "start_ms": 295712,
+                "end_ms": 317018,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "在没有定位前就把重启、切流作为手段，可能把现场冲掉，也没说重启前要先留什么信息",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s16",
+                "quote": "再不行就先重启一下服务，把流量切到备机",
+                "start_ms": 265372,
+                "end_ms": 286012,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请举一次你亲自处理过的线上接口变慢的真实案例：当时是怎么一步步把范围缩小到具体环节的，用了哪些监控指标或工具，最后根因是什么、怎么修的？如果确认慢在数据库这一层，你自己会看哪些东西来区分是慢查询、锁等待、连接池打满还是主从延迟？"
+      }
+    },
+    {
+      "question_id": "q4",
+      "question_text": "说说数据库事务的隔离级别，以及你在项目里遇到过的和它有关的问题。",
+      "asked": true,
+      "segment_ids": [
+        "s19",
+        "s20"
+      ],
+      "timing": {
+        "start_ms": 317918,
+        "end_ms": 357453,
+        "response_latency_ms": 2000,
+        "candidate_speaking_ms": 30250,
+        "candidate_chars": 121,
+        "chars_per_minute": 240,
+        "longest_pause_ms": null,
+        "held_ms": 0
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人背出了四种隔离级别（读未提交、读已提交、可重复读、串行化）和各自解决的脏读、不可重复读、幻读，并说出 MySQL 默认是可重复读。项目经验部分只说「基本用默认、没调过」，举的例子是一次「数据不一致」，但场景想不起来，最后靠加锁解决，没有细节。",
+        "rating": 3.0,
+        "ratings": [
+          3.0,
+          2.5,
+          3.0
+        ],
+        "rating_reason": "概念部分完整且准确，四种级别、对应的问题、MySQL 的默认级别都说对了，能看出具备数据库基础，因此不低于合格。但题目明确要求「一个真实遇到的例子」，候选人只给了一句「好像有一次数据不一致、具体场景想不起来了、后来加锁解决的」，没有业务背景、没有说明是哪种隔离级别下的什么现象、加的是什么锁、为什么这么解，实际经验这一半基本没答出来，够不上良好，给 3 分。",
+        "strengths": [
+          {
+            "point": "隔离级别的概念说得准确完整，四种级别和各自解决的读问题一一对应，还补充了 MySQL 的默认级别",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s20",
+                "quote": "隔离级别有四种，读未提交、读已提交、可重复读，还有串行化，分别解决脏读、不可重复读、幻读的问题。",
+                "start_ms": 327203,
+                "end_ms": 357453,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s20",
+                "quote": "MySQL 默认是可重复读。",
+                "start_ms": 327203,
+                "end_ms": 357453,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "项目里的例子只有结论没有内容：什么业务、什么现象、哪种隔离级别下出的问题都说不出来，等于没有真实案例",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s20",
+                "quote": "好像有一次是数据不一致，具体是什么场景我一时想不太起来了",
+                "start_ms": 327203,
+                "end_ms": 357453,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "「加锁解决」没有任何展开——是行锁、间隙锁还是业务层的悲观锁/乐观锁，为什么用锁而不是调整隔离级别或用唯一索引，都没讲",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s20",
+                "quote": "反正后来是通过加锁解决的。",
+                "start_ms": 327203,
+                "end_ms": 357453,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "承认项目里一直用默认隔离级别、没调过，说明缺少主动选择隔离级别的实践，和简历里「分布式事务」的技能描述之间缺少支撑",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s20",
+                "quote": "我们基本上用的都是默认的，没有特别去调过。",
+                "start_ms": 327203,
+                "end_ms": 357453,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请让他讲清楚那一次「数据不一致」的完整经过：什么业务场景、观察到什么现象、当时用的是哪种隔离级别、判断是什么原因、加的是哪种锁（或为什么不用乐观锁/唯一索引/调整隔离级别），以及改完之后怎么验证问题不再出现。"
+      }
+    },
+    {
+      "question_id": "q5",
+      "question_text": "讲一次你和同事在技术方案上意见不一致的经历，最后是怎么解决的？",
+      "asked": true,
+      "segment_ids": [
+        "s21",
+        "s22"
+      ],
+      "timing": {
+        "start_ms": 358353,
+        "end_ms": 408342,
+        "response_latency_ms": 2600,
+        "candidate_speaking_ms": 39461,
+        "candidate_chars": 171,
+        "chars_per_minute": 260,
+        "longest_pause_ms": null,
+        "held_ms": 0
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人讲了对账模块的一次分歧：同事主张每小时全量对账，他认为压力太大，主张增量为主、定时全量兜底；他把两种方案的机器成本和延迟整理出来，拉小会一起看数据，最后各让一步，采用增量为主、每天凌晨全量一次；上线后运行比较稳定。他还总结说，不要在群里争吵，把数据摆出来更好沟通。",
+        "rating": 4.0,
+        "ratings": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "rating_reason": "切题，有具体的事、双方各自的理由、解决过程和结果，符合「良好」的要求。离优秀差在深度：两种方案的成本和延迟只说了「整理过」，没给出任何数量级；增量对账具体怎么做、怎么保证不漏单也没讲，说服对方的关键数据是什么也不清楚。",
+        "strengths": [
+          {
+            "point": "分歧点具体，双方的理由都讲到了：一方担心全量对账的压力，一方关心校验的完整性",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "他倾向于每个小时全量对一次，我觉得全量对账压力太大了，建议做增量加定时的全量兜底",
+                "start_ms": 368881,
+                "end_ms": 408342,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "解决方式不是靠职位或情绪，而是用数据说话：整理成本、延迟，拉会一起看",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "我整理了一下两种方案的机器成本和延迟，拉了个小会一起看数据",
+                "start_ms": 368881,
+                "end_ms": 408342,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "有明确的结果和事后复盘，并提炼出可复用的协作经验",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "事后看这个方案跑得还挺稳的",
+                "start_ms": 368881,
+                "end_ms": 408342,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              },
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "我觉得关键是别在群里吵，把数据摆出来会好沟通很多",
+                "start_ms": 368881,
+                "end_ms": 408342,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "「用成本数据说服对方」只停留在说法上，没给出任何具体数字或量级，无法判断是他真算过还是事后概括",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "我整理了一下两种方案的机器成本和延迟，拉了个小会一起看数据",
+                "start_ms": 368881,
+                "end_ms": 408342,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "最终方案只说了结论，增量对账怎么实现、和全量怎么配合、怎么保证不漏单，都没有展开",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s22",
+                "quote": "最后是各让一步，用增量为主、每天凌晨做一次全量",
+                "start_ms": 368881,
+                "end_ms": 408342,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "请具体讲讲最后落地的增量对账方案：增量是怎么算出来的、和每天凌晨的全量怎么衔接、怎么保证不漏单或重复？当时你整理的成本和延迟对比大概是什么量级？"
+      }
+    },
+    {
+      "question_id": "q6",
+      "question_text": "你为什么考虑这个机会？未来两三年想往什么方向发展？",
+      "asked": true,
+      "segment_ids": [
+        "s23",
+        "s24"
+      ],
+      "timing": {
+        "start_ms": 409242,
+        "end_ms": 451644,
+        "response_latency_ms": 1600,
+        "candidate_speaking_ms": 34588,
+        "candidate_chars": 147,
+        "chars_per_minute": 255,
+        "longest_pause_ms": null,
+        "held_ms": 0
+      },
+      "judgement": {
+        "answered": true,
+        "answer_summary": "候选人说想找业务更核心、技术挑战更大的环境，坦言现在公司不错但自己在交易这块「更多是在旁边配合」，想真正进入主链路。方向上是未来两三年在高并发交易方向做深，打扎实 Go 和分布式的基础，并希望能独立负责一个模块从设计到上线；最后表示自己愿意啃硬骨头、愿意补基础。",
+        "rating": 3.0,
+        "ratings": [
+          3.5,
+          3.0,
+          3.0
+        ],
+        "rating_reason": "回答切题，动机和发展方向都说到了，而且和岗位方向（高并发交易、Go）对得上，也主动承认现在自己不在主链路，比纯背套话的回答要实在。但整体偏泛：没有说明为什么是这个机会、这家公司，也没讲清楚未来两三年具体想做成什么、补哪些基础，「业务更核心、技术挑战更大」「愿意啃硬骨头」都是形容词层面的表述，够不上良好档要求的「理由具体可信」中的具体。因此给合格档。",
+        "strengths": [
+          {
+            "point": "发展目标和岗位方向一致，明确指向高并发交易和 Go、分布式，不是泛泛而谈的跳槽理由",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "未来两三年我希望能在高并发交易这个方向做深",
+                "start_ms": 417056,
+                "end_ms": 451644,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "对自己现状有清醒认识，主动说明现在在交易链路里是配合角色，想进入主链路",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "但交易这块我更多是在旁边配合，想真正深入到主链路里面去",
+                "start_ms": 417056,
+                "end_ms": 451644,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "对下一阶段有具体一点的诉求：能独立负责一个模块，从设计到上线",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "另一方面希望能独立负责一个模块，从设计到上线都能扛起来",
+                "start_ms": 417056,
+                "end_ms": 451644,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "weaknesses": [
+          {
+            "point": "求职动机只说到「想找更核心、更有挑战的环境」，没有说为什么是这个岗位、这家公司，看不出对这个机会做过了解",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "主要是想找一个业务更核心、技术挑战更大的环境",
+                "start_ms": 417056,
+                "end_ms": 451644,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "「愿意补基础」这句话本身说明他自己认为基础有欠缺，但没讲清楚补什么、怎么补，发展计划停留在意愿层面",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "我个人是比较愿意啃硬骨头的，也愿意补基础",
+                "start_ms": 417056,
+                "end_ms": 451644,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          },
+          {
+            "point": "他自述现在在交易这块只是「旁边配合」，这与简历里「主导支付核心系统的重构」的表述不一致，正好是 HR 要核实的那一点，需要人工面试重点确认",
+            "evidence": [
+              {
+                "source": "transcript",
+                "segment_id": "s24",
+                "quote": "我现在的公司其实也不错，但交易这块我更多是在旁边配合",
+                "start_ms": 417056,
+                "end_ms": 451644,
+                "speaker": "candidate",
+                "quote_match": "exact"
+              }
+            ]
+          }
+        ],
+        "follow_up": "你说现在在交易这块更多是「在旁边配合」，而简历写的是主导支付核心系统重构——请具体说明那个项目里哪些设计、哪些代码是你本人主导完成的，哪些是同事做的，你当时的角色边界在哪里？"
+      }
+    }
+  ],
+  "requirement_match": {
+    "match_level": "low",
+    "summary": "五年后端经历加支付公司核心交易组背景，符合年限要求；沟通表达清楚，协作题有具体例子，整体印象不差。但四条硬性要求里只有年限一条明确满足：面试中没有任何 Go 实际使用的细节，数据库只能背隔离级别的概念、举不出真实案例，排查思路笼统，最后落到重启和找 DBA，Kafka、Redis 调优答不出参数。最需要 HR 注意的是，简历写「主导支付核心系统的重构」，面试里他自述只是「参与方案设计和评审、负责一部分接口改造」，压测由压测组同事负责，分片键的说法还前后改了，主导性和那个吞吐量数字都需要人工核实。",
+    "items": [
+      {
+        "requirement": "三年以上后端开发经验",
+        "importance": "must_have",
+        "verdict": "met",
+        "basis": "resume",
+        "reasoning": "简历显示 2020.07 起连续两段后端开发经历，至今年限超过五年，面试中未出现与工作年限矛盾的信息。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "2020.07 至 2022.02 某软件外包公司 开发工程师",
+            "quote_match": "exact"
+          },
+          {
+            "source": "resume",
+            "quote": "2022.03 至今 某支付公司 核心交易组 后端工程师",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "熟练掌握 Go 或 Rust",
+        "importance": "must_have",
+        "verdict": "partially_met",
+        "basis": "both",
+        "reasoning": "简历技能栏列了 Go，但整场面试没有出现任何 Go 语言层面的细节（并发模型、内存、常用库、代码设计都没有被提及，也没被追问）。他讲职业规划时说要把 Go 的底子打扎实。这句话更像是还在补，而不是熟练使用，因此无法确认达到熟练水平。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "Go、MySQL、Redis、Kafka、分布式事务、微服务架构",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s24",
+            "quote": "一方面把 Go 和分布式这块的底子打扎实",
+            "start_ms": 417056,
+            "end_ms": 451644,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "熟悉关系数据库的索引和事务",
+        "importance": "must_have",
+        "verdict": "partially_met",
+        "basis": "interview",
+        "reasoning": "隔离级别的四种名称和各自解决的问题背对了，也说得出 MySQL 默认是可重复读，属于教科书层面的正确。但一落到项目就空了：说用的都是默认级别、没调过，遇到的问题想不起来具体场景，只说后来加锁解决。索引方面只在排查题里带过一句「慢查询、锁引」，没有任何索引设计或优化的实际例子。基础概念有，实战深度不够。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "隔离级别有四种，读未提交、读已提交、可重复读，还有串行化",
+            "start_ms": 327203,
+            "end_ms": 357453,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "我们基本上用的都是默认的，没有特别去调过",
+            "start_ms": 327203,
+            "end_ms": 357453,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "具体是什么场景我一时想不太起来了",
+            "start_ms": 327203,
+            "end_ms": 357453,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "有消息队列和缓存的实际使用经验",
+        "importance": "must_have",
+        "verdict": "partially_met",
+        "basis": "both",
+        "reasoning": "简历写了负责 Redis 集群和 Kafka 集群的容量规划与调优，但被追问 Kafka 具体调了哪些参数时，只答出加 broker、加分区，参数记不得，是照官方文档调的；Redis 除了开头报了一遍职责，后面没有任何追问和细节。有接触，但看不出独立的调优能力。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "负责 Redis 集群和 Kafka 集群的容量规划与调优",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s8",
+            "quote": "就是加 broker，分区也加了一些。具体参数我不太记得了",
+            "start_ms": 143044,
+            "end_ms": 173044,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "能独立排查线上问题",
+        "importance": "must_have",
+        "verdict": "partially_met",
+        "basis": "interview",
+        "reasoning": "排查顺序有一部分（先看监控和日志，再看数据库慢查询和缓存大 key），但具体手段很虚：指标只说响应时间曲线和 CPU、内存；数据库这一层依赖 DBA；中途就提出重启服务和切流量；最后收在「看日志里有没有报错」。这更像看过别人排查，不像自己独立定位过线上问题，评分要点里「上来就重启」这一条也踩到了。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s16",
+            "quote": "再不行就先重启一下服务，把流量切到备机，先恢复业务，再慢慢定位",
+            "start_ms": 265372,
+            "end_ms": 286012,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s18",
+            "quote": "可能得找 DBA 一起看一下，我一般就是先看日志里有没有报错",
+            "start_ms": 295712,
+            "end_ms": 317018,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "有高并发交易系统的经验（加分项）",
+        "importance": "nice_to_have",
+        "verdict": "partially_met",
+        "basis": "both",
+        "reasoning": "确实在支付公司核心交易组，身处高并发交易场景，这一点简历和面试一致。但他自己在面试里把位置说得很清楚：交易这块更多是在旁边配合；被追问吞吐量从五千到五万怎么压出来的，他说是压测组同事在做、自己只参与一部分，而且复述数字时只说到五千多笔机器扛不住、扩容后好很多，没有把提升到五万的过程讲出来。属于在高并发系统边上待过，不是亲手扛过。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s4",
+            "quote": "我们团队整体把吞吐量从每秒五千笔提升到了每秒五万笔",
+            "start_ms": 31916,
+            "end_ms": 88066,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s8",
+            "quote": "主要是我们压测组的同事在搞，我参与了一部分",
+            "start_ms": 143044,
+            "end_ms": 173044,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s24",
+            "quote": "交易这块我更多是在旁边配合",
+            "start_ms": 417056,
+            "end_ms": 451644,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "requirement": "做过系统拆分或重构（加分项）",
+        "importance": "nice_to_have",
+        "verdict": "partially_met",
+        "basis": "both",
+        "reasoning": "简历写的是「主导支付核心系统的重构」，面试里的实际说法是自己参与了整体方案设计和评审、负责一部分接口改造，问具体是哪几个接口、多少代码量时答不上来（订单查询和后台的一些接口，代码量没统计过，主要是把老调用改成走新服务、加兜底）。技术选型那题能说出备选方案和取舍理由，是加分点；但分片键先答按月分，被追问后又改口成按订单号分，说按月的是归档表，前后不一致。综合看是项目参与者，不是主导者，与简历表述有明显落差，需要人工核实。",
         "evidence": [
           {
             "source": "resume",
@@ -100,7 +1357,330 @@
           {
             "source": "transcript",
             "segment_id": "s6",
-            "quote": "代码量这个我没太统计过",
+            "quote": "代码量这个我没太统计过，反正就是配合主链路那边做适配",
+            "start_ms": 102494,
+            "end_ms": 127473,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s14",
+            "quote": "后来我们其实是按订单号分的，对，订单号里带了用户信息",
+            "start_ms": 234528,
+            "end_ms": 254187,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ]
+  },
+  "resume_verification": {
+    "credibility": "low",
+    "summary": "简历里“主导支付核心系统重构”和面试自述的“参与方案设计、负责一部分接口、在旁边配合”明显对不上；吞吐量、分库分表分片键、Kafka 调优等关键细节也讲不清或前后不一致。当前公司和项目经历存在，但简历把团队成果和个人角色写得明显更强，整体可信度低，下一轮需要重点核实实际职责和技术深度。",
+    "claims": [
+      {
+        "claim": "主导支付核心系统的重构",
+        "verdict": "contradicted",
+        "reasoning": "简历写“主导”，但候选人介绍时把自己定位为参与方案设计和评审、负责一部分接口改造，并说交易这块更多是在旁边配合。这和“主导”明显不相称，团队成果被写成了个人主导。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "主导支付核心系统的重构",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s4",
+            "quote": "我在这块主要是参与了整体方案的设计和评审，然后负责一部分接口的改造",
+            "start_ms": 31916,
+            "end_ms": 88066,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s24",
+            "quote": "交易这块我更多是在旁边配合",
+            "start_ms": 417056,
+            "end_ms": 451644,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "让候选人说明项目谁牵头、他拍板过哪些方案或资源排期、直接带几个人或负责哪些模块，并请前主管确认他的实际角色。"
+      },
+      {
+        "claim": "将系统吞吐量从每秒 5000 笔提升到每秒 5 万笔",
+        "verdict": "doubtful",
+        "reasoning": "他重复了团队整体从 5000 到 5 万，但被追问压测时把主要工作归给压测组，只说自己参与一部分，还给出压到 5000 多机器扛不住的说法，未能说明 5 万这个数字是怎么测出来的。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "将系统吞吐量从每秒 5000 笔提升到每秒 5 万笔",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s4",
+            "quote": "我们团队整体把吞吐量从每秒五千笔提升到了每秒五万笔",
+            "start_ms": 31916,
+            "end_ms": 88066,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s8",
+            "quote": "主要是我们压测组的同事在搞，我参与了一部分。",
+            "start_ms": 143044,
+            "end_ms": 173044,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s8",
+            "quote": "大概每秒五千多笔吧，我记得是压到五千多的时候机器就有点扛不住了",
+            "start_ms": 143044,
+            "end_ms": 173044,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "请提供压测报告或讲清压测环境、工具、指标口径、优化前后瓶颈，以及他本人具体改了哪一段使吞吐提升。"
+      },
+      {
+        "claim": "独立设计了支付订单的分库分表方案",
+        "verdict": "doubtful",
+        "reasoning": "能讲出自己做分片层还是接中间件的取舍，但被问到分片键先答按月，追问后又改成按订单号，并称按月的是归档表。作为“独立设计”者，这个核心参数前后不一致，不能确认方案是他独立定的。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "独立设计了支付订单的分库分表方案",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s10",
+            "quote": "当时其实有几个方向，一个是我们自己做一层分片，一个是接公司统一的中间件。",
+            "start_ms": 184201,
+            "end_ms": 217848,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s12",
+            "quote": "我们是按时间分的，按月分。",
+            "start_ms": 222219,
+            "end_ms": 225871,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s14",
+            "quote": "后来我们其实是按订单号分的，对，订单号里带了用户信息",
+            "start_ms": 234528,
+            "end_ms": 254187,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "下一轮让他画分片键、路由规则和表结构，说明按月归档表和订单号分表分别怎么用，历史订单查询走哪条路径，并追问方案评审记录和代码归属。"
+      },
+      {
+        "claim": "独立设计了资金对账系统",
+        "verdict": "partially_corroborated",
+        "reasoning": "他讲了对账模块里数据校验方案的具体分歧，以及用增量为主、每天凌晨全量兜底的取舍，说明确实参与对账设计；但只覆盖数据校验这一块，没有讲清整个资金对账系统是否由他独立设计。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "独立设计了支付订单的分库分表方案和资金对账系统",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s22",
+            "quote": "之前做对账那个模块的时候，我和另外一个同事在数据校验的方式上意见不太一样。",
+            "start_ms": 368881,
+            "end_ms": 408342,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s22",
+            "quote": "最后是各让一步，用增量为主、每天凌晨做一次全量。",
+            "start_ms": 368881,
+            "end_ms": 408342,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "请他说清对账系统的整体架构、他独立负责的边界、与同事的分工、差异处理流程和上线后的对账准确率。"
+      },
+      {
+        "claim": "负责 Redis 集群和 Kafka 集群的容量规划与调优",
+        "verdict": "doubtful",
+        "reasoning": "项目介绍里只是复述负责这两套集群；追问 Kafka 调优时只说到加机器、加 broker、加分区，具体参数不记得，Redis 也没有任何细节。这个深度与“负责容量规划与调优”不太相称。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "负责 Redis 集群和 Kafka 集群的容量规划与调优",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s4",
+            "quote": "还有瑞迪斯集群和卡夫卡集群的容量规划跟调优",
+            "start_ms": 31916,
+            "end_ms": 88066,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s8",
+            "quote": "就是加 broker，分区也加了一些",
+            "start_ms": 143044,
+            "end_ms": 173044,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s8",
+            "quote": "具体参数我不太记得了，当时是照着官方文档调的。",
+            "start_ms": 143044,
+            "end_ms": 173044,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "请给出两套集群的规模、容量规划依据、关键参数调整前后值、监控指标和一次实际故障处理；Redis 和 Kafka 都要问。"
+      },
+      {
+        "claim": "技能栏列有 MySQL",
+        "verdict": "partially_corroborated",
+        "reasoning": "能准确说出四种隔离级别和 MySQL 默认级别，基础知识在；但项目例子很空，只说好像有一次数据不一致、场景想不起来，最后加锁解决，无法证明实际处理过事务问题。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "Go、MySQL、Redis、Kafka、分布式事务、微服务架构",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "隔离级别有四种，读未提交、读已提交、可重复读，还有串行化",
+            "start_ms": 327203,
+            "end_ms": 357453,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "MySQL 默认是可重复读。",
+            "start_ms": 327203,
+            "end_ms": 357453,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "项目里的话，我们基本上用的都是默认的，没有特别去调过。",
+            "start_ms": 327203,
+            "end_ms": 357453,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "具体是什么场景我一时想不太起来了",
+            "start_ms": 327203,
+            "end_ms": 357453,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "下一轮让他讲一个具体的索引设计或事务锁问题：表结构、SQL、执行计划、隔离级别、如何复现和解决。"
+      },
+      {
+        "claim": "技能栏列有 Go",
+        "verdict": "not_covered",
+        "reasoning": "面试没有考察 Go 的编码或项目用法，无法判断他是否熟练掌握。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "Go、MySQL、Redis、Kafka、分布式事务、微服务架构",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": "下一轮用 Go 讲一个他写过的服务，追问 goroutine、channel、锁、超时控制，最好现场写一段并发代码或排障。"
+      },
+      {
+        "claim": "当前在某支付公司核心交易组任后端工程师",
+        "verdict": "corroborated",
+        "reasoning": "他明确说最近在支付公司核心交易组，也提到现在的公司，和简历当前任职一致。",
+        "evidence": [
+          {
+            "source": "resume",
+            "quote": "2022.03 至今 某支付公司 核心交易组 后端工程师",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s4",
+            "quote": "我最近在支付公司核心交易组",
+            "start_ms": 31916,
+            "end_ms": 88066,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s24",
+            "quote": "我现在的公司其实也不错",
+            "start_ms": 417056,
+            "end_ms": 451644,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ],
+        "follow_up": null
+      }
+    ]
+  },
+  "integrity": {
+    "risk_level": "medium",
+    "summary": "这场面试没有出现明显的作弊行为：转写里没有第三个人说话，也没有对 AI 下指令的内容；整个过程没有切出页面、粘贴或断开连接之类的记录；录像画面没有检查过，无法判断画面里有没有其他人或手机。风险主要来自回答内容本身：项目概况讲得流利，但一旦被追问「你自己写了什么、分片键是什么、那十倍数字怎么压出来的」，回答就变得含糊，被迫追问后还改了说法，前后对不上。这几处指向同一件事：他对支付核心系统重构的参与程度，可能达不到简历和开场陈述给人的印象。建议在人工面试里先把这一块核实清楚再决定是否推进。",
+    "signals": [
+      {
+        "kind": "depth_mismatch",
+        "severity": "medium",
+        "reliability": "medium",
+        "description": "开场把支付核心系统重构讲成自己参与方案设计、负责接口改造和缓存、消息队列集群调优的大项目；但被追问具体写了哪几个接口、大概多少代码时，只答得出「订单查询和后台那块的一些接口改造」，代码量、范围都说不出来，全部落在「配合主链路做适配」「加些兜底逻辑」这类没有细节的描述上。",
+        "alternative_explanations": "确实只承担了边角模块，时间久了记不清行数；或者表达能力弱、临场紧张，把具体的东西说笼统了。但被明确追问具体接口名称后仍给不出任何一块能说清的逻辑，更像是没亲手写过。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s6",
+            "quote": "具体接口的话，主要是订单查询和，和后台那块的一些接口改造吧。代码量这个我没太统计过",
+            "start_ms": 102494,
+            "end_ms": 127473,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s6",
+            "quote": "因为我们是按模块分工的，我这边主要是把原来的调用改成走新的服务，然后加一些兜底逻辑",
             "start_ms": 102494,
             "end_ms": 127473,
             "speaker": "candidate",
@@ -109,7 +1689,11 @@
         ]
       },
       {
-        "point": "分片键说法前后矛盾：先明确说按月分，被追问用户查历史订单要扫所有月表后，立刻改口成按订单号分，并用「归档表」解释。这是被质疑后当场改答案，需要拿表结构和查询语句核",
+        "kind": "depth_mismatch",
+        "severity": "medium",
+        "reliability": "medium",
+        "description": "分片键的说法在追问下直接改口。先说是按时间、按月分；被问到用户怎么查历史订单后，立刻改成「其实是按订单号分的」，并把刚才说的按月解释成「另外一个归档表」。做过分片方案选型的人一般不会把分片键说错，而且改口的时机正好在暴露问题之后。",
+        "alternative_explanations": "项目里确实同时存在按月归档表和按订单号分片两套机制，口误说混了；或者他参与的是归档那部分，一时顺口答错。",
         "evidence": [
           {
             "source": "transcript",
@@ -141,1580 +1725,51 @@
         ]
       },
       {
-        "point": "吞吐量从 5000 到 5 万这个核心数字讲不出来源：他自己复述的是「压到五千多机器就扛不住、扩容后好很多」，压测主要靠压测组同事，与简历的提升幅度对不上",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s8",
-            "quote": "主要是我们压测组的同事在搞，我参与了一部分",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s8",
-            "quote": "大概每秒五千多笔吧，我记得是压到五千多的时候机器就有点扛不住了",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "resume",
-            "quote": "将系统吞吐量从每秒 5000 笔提升到每秒 5 万笔",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "point": "简历写负责 Kafka 和 Redis 集群的容量规划与调优，但被直接追问参数时说不出任何具体项；Redis 全程只在开场一句带过",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "负责 Redis 集群和 Kafka 集群的容量规划与调优",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s8",
-            "quote": "具体参数我不太记得了，当时是照着官方文档调的",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "point": "硬性要求「熟练 Go 或 Rust」整场没有考察到，他自己谈发展时还说要「把 Go 的底子打扎实」，熟练度存疑",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s24",
-            "quote": "一方面把 Go 和分布式这块的底子打扎实",
-            "start_ms": 417056,
-            "end_ms": 451644,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "resume",
-            "quote": "Go、MySQL、Redis、Kafka、分布式事务、微服务架构",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "point": "「能独立排查线上问题」这条成色不足：排查思路有基本顺序，但追问到具体指标只有响应时间和 CPU、内存，数据库变慢时落在「找 DBA 一起看」",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s18",
-            "quote": "指标的话……就是看那个响应时间的曲线，还有 CPU、内存这些。",
-            "start_ms": 295712,
-            "end_ms": 317018,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s18",
-            "quote": "具体确认的话，可能得找 DBA 一起看一下",
-            "start_ms": 295712,
-            "end_ms": 317018,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      }
-    ]
-  },
-  "overall_score": 60,
-  "score_range": {
-    "low": 58,
-    "high": 62
-  },
-  "competencies": [
-    {
-      "name": "专业能力",
-      "rating": 2,
-      "comment": "项目框架、隔离级别这类概念层的东西能讲对，但一落到本人做过的细节就撑不住：分库分表最核心的分片键先答错再改口，Kafka 调优说不出参数，事务题的真实案例「一时想不起来」。与三年以上、要求熟练 Go 且能独立排查线上问题的岗位标准有明显差距。",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s12",
-          "quote": "分片键……我们是按时间分的，按月分。",
-          "start_ms": 222219,
-          "end_ms": 225871,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s8",
-          "quote": "具体参数我不太记得了，当时是照着官方文档调的",
-          "start_ms": 143044,
-          "end_ms": 173044,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s20",
-          "quote": "遇到过的问题……好像有一次是数据不一致，具体是什么场景我一时想不太起来了",
-          "start_ms": 327203,
-          "end_ms": 357453,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        }
-      ]
-    },
-    {
-      "name": "解决问题",
-      "rating": 3,
-      "comment": "排查题给出了「监控日志 → 数据库慢查询和缓存大 key → 不行先切流止血再定位」的基本顺序，没有上来就重启，思路框架是有的。但没有提到先看最近有无发布变更，也没有按网关、服务、数据库、依赖分层，追问到指标和数据库确认手段就变笼统。",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s16",
-          "quote": "首先肯定是先看监控和日志，看是哪个环节慢。",
-          "start_ms": 265372,
-          "end_ms": 286012,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s16",
-          "quote": "再不行就先重启一下服务，把流量切到备机，先恢复业务，再慢慢定位。",
-          "start_ms": 265372,
-          "end_ms": 286012,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        }
-      ]
-    },
-    {
-      "name": "沟通表达",
-      "rating": 3,
-      "comment": "能听懂问题、不跑题，讲项目主线和协作分歧时结构清楚。但一被追问具体细节就含糊：接口说不清、参数推给同事、分片键前后矛盾，听的人得自己判断哪句是真的。",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s6",
-          "quote": "主要是订单查询和，和后台那块的一些接口改造吧。代码量这个我没太统计过",
-          "start_ms": 102494,
-          "end_ms": 127473,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s14",
-          "quote": "刚才说按月那是……那是另外一个归档表，是这么个情况。",
-          "start_ms": 234528,
-          "end_ms": 254187,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        }
-      ]
-    },
-    {
-      "name": "学习与成长",
-      "rating": null,
-      "comment": "没有考察到。整场没有问「最近学了什么、怎么学的、遇到过什么技术难题怎么啃下来」这类问题；只有协作题末尾一句「别在群里吵，把数据摆出来」算事后反思，不足以评价学习能力。",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s22",
-          "quote": "我觉得关键是别在群里吵，把数据摆出来会好沟通很多",
-          "start_ms": 368881,
-          "end_ms": 408342,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        }
-      ]
-    },
-    {
-      "name": "动机与契合",
-      "rating": 3,
-      "comment": "动机说得具体：现在在交易链路上是配合角色，想进主链路；方向落在高并发交易和 Go／分布式，和岗位直接对口，比空泛表决心强。但没有说明为什么选这家公司，也没讲换工作的契机；「愿意啃硬骨头」只是自我评价，没有事例支撑。",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s24",
-          "quote": "主要是想找一个业务更核心、技术挑战更大的环境",
-          "start_ms": 417056,
-          "end_ms": 451644,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s24",
-          "quote": "我个人是比较愿意啃硬骨头的，也愿意补基础。",
-          "start_ms": 417056,
-          "end_ms": 451644,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        }
-      ]
-    },
-    {
-      "name": "职业素养",
-      "rating": 3,
-      "comment": "协作面有具体事例：用成本与延迟的数据拉会推动分歧收敛，还主动让一步，这一块可信。诚信面有一处要留意：简历写「主导」、面试说「参与」和「旁边配合」，分片键被质疑后当场改口。他在动机题里主动承认自己是配合角色，这反倒是个诚实的信号，所以不直接判低，交给人工核实。",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s22",
-          "quote": "后来我整理了一下两种方案的机器成本和延迟，拉了个小会一起看数据",
-          "start_ms": 368881,
-          "end_ms": 408342,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s24",
-          "quote": "交易这块我更多是在旁边配合",
-          "start_ms": 417056,
-          "end_ms": 451644,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "resume",
-          "quote": "主导支付核心系统的重构，将系统吞吐量从每秒 5000 笔提升到每秒 5 万笔",
-          "quote_match": "exact"
-        }
-      ]
-    }
-  ],
-  "focus_checks": [
-    {
-      "focus": "确认支付核心系统的重构是不是他本人主导的",
-      "verdict": "partially_satisfied",
-      "finding": "这一轮没有确认到主导，反而拿到了相反方向的信号。能确认的是他确实在这个项目里、参与过方案设计和评审：第 2 题能讲出自研分片层和统一中间件两条路的取舍，也参与了灰度老数据未迁净导致对账差异的排查。但不能确认「主导」——他自述角色是「参与方案设计、负责一部分接口改造」，追问具体写了哪几个接口、多少代码量时答不上来；核心成绩「5000 到 5 万」说的是团队整体，压测是压测组做的；分库分表最关键的分片键先答按月、被质疑后改口成按订单号。第 6 题还自述「交易这块我更多是在旁边配合」。需要人工面试拿他独立交付的那一块逐层问穿。",
-      "evidence": [
-        {
-          "source": "transcript",
-          "segment_id": "s4",
-          "quote": "我在这块主要是参与了整体方案的设计和评审，然后负责一部分接口的改造",
-          "start_ms": 31916,
-          "end_ms": 88066,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s6",
-          "quote": "具体接口的话，主要是订单查询和，和后台那块的一些接口改造吧。代码量这个我没太统计过",
-          "start_ms": 102494,
-          "end_ms": 127473,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s8",
-          "quote": "主要是我们压测组的同事在搞，我参与了一部分",
-          "start_ms": 143044,
-          "end_ms": 173044,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "transcript",
-          "segment_id": "s24",
-          "quote": "交易这块我更多是在旁边配合",
-          "start_ms": 417056,
-          "end_ms": 451644,
-          "speaker": "candidate",
-          "quote_match": "exact"
-        },
-        {
-          "source": "resume",
-          "quote": "独立设计了支付订单的分库分表方案和资金对账系统",
-          "quote_match": "exact"
-        }
-      ]
-    }
-  ],
-  "questions": [
-    {
-      "question_id": "q1",
-      "question_text": "请用两三分钟介绍一下你最近做的、你觉得最有挑战的一个项目，重点讲你自己负责的部分。",
-      "asked": true,
-      "segment_ids": [
-        "s3",
-        "s4",
-        "s5",
-        "s6",
-        "s7",
-        "s8"
-      ],
-      "timing": {
-        "start_ms": 19645,
-        "end_ms": 173044,
-        "response_latency_ms": 2200,
-        "candidate_speaking_ms": 111129,
-        "candidate_chars": 470,
-        "chars_per_minute": 253,
-        "longest_pause_ms": null
-      },
-      "judgement": {
-        "answered": true,
-        "answer_summary": "候选人介绍了支付核心系统重构：单体交易服务拆成多个独立服务、订单做分库分表、资金对账独立拆出，团队整体吞吐量从每秒五千笔提升到每秒五万笔；自述自己参与整体方案设计与评审、负责一部分接口改造、做 Redis 和 Kafka 集群的容量规划与调优，并提到灰度时老数据没迁干净导致对账差异、后加核对脚本收敛。追问下说不清自己具体改了哪几个接口、代码量多少，压测主要是压测组同事做的，Kafka 调优只记得加 broker 和分区、具体参数不记得。",
-        "rating": 2.5,
-        "ratings": [
-          2.5,
-          2.5,
-          2.5
-        ],
-        "rating_reason": "按评分要点看：项目背景和团队结果讲到了，但「自己负责的部分」始终停留在「参与方案设计」「负责一部分接口改造」这种笼统说法上，被追问具体接口时答「没统计过」「配合主链路做适配」，属于要点里明确要扣分的「只讲团队做了什么、讲不出自己的部分」。核心数字五千到五万，他只能说到五千那一端，压测不是他做的，Kafka 调优说不出参数，简历上「主导重构」在面试里降级成了「参与设计」。比 2 分好在他能讲出拆分、分库分表、对账独立这类改造框架，还给了一个具体的踩坑和解决（灰度老数据未迁净导致对账差异、加核对脚本收敛），不是完全空泛；但离「讲清自己做了什么、怎么做、结果如何」还有明显距离，够不上合格。",
-        "strengths": [
-          {
-            "point": "能把项目改造的整体框架说清楚：单体拆服务、订单分库分表、对账独立拆分，方向讲得对",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s4",
-                "quote": "主要是把原来那个单体的大交易服务拆成几个独立服务，然后订单这块做了分库分表，资金对帐也单独拆出来了",
-                "start_ms": 31916,
-                "end_ms": 88066,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "主动讲了一个具体的踩坑和解决办法，不是只有结论",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s4",
-                "quote": "灰渡的时候有一批老数据没迁移干净，对账那边就出现了一些差异，后来加了核对脚本才慢慢收敛",
-                "start_ms": 31916,
-                "end_ms": 88066,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "weaknesses": [
-          {
-            "point": "被追问自己动手写的部分时明显含糊，既说不出具体接口，也说不出代码量，只说是「配合主链路做适配」",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s6",
-                "quote": "具体接口的话，主要是订单查询和，和后台那块的一些接口改造吧。代码量这个我没太统计过",
-                "start_ms": 102494,
-                "end_ms": 127473,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              },
-              {
-                "source": "transcript",
-                "segment_id": "s6",
-                "quote": "我这边主要是把原来的调用改成走新的服务，然后加一些兜底逻辑",
-                "start_ms": 102494,
-                "end_ms": 127473,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "简历写「主导重构」，面试里自己的定位是「参与方案设计和评审、负责一部分接口改造」，主导的边界没有讲清楚",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s4",
-                "quote": "我在这块主要是参与了整体方案的设计和评审，然后负责一部分接口的改造",
-                "start_ms": 31916,
-                "end_ms": 88066,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "五千到五万这个核心成绩他解释不了：吞吐量说的是团队整体，压测是压测组同事做的，追问下数字只落到五千这一端，与简历上「提升到每秒五万笔」对不上",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s4",
-                "quote": "我们团队整体把吞吐量从每秒五千笔提升到了每秒五万笔，差不多十倍",
-                "start_ms": 31916,
-                "end_ms": 88066,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              },
-              {
-                "source": "transcript",
-                "segment_id": "s8",
-                "quote": "主要是我们压测组的同事在搞，我参与了一部分",
-                "start_ms": 143044,
-                "end_ms": 173044,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              },
-              {
-                "source": "transcript",
-                "segment_id": "s8",
-                "quote": "大概每秒五千多笔吧，我记得是压到五千多的时候机器就有点扛不住了",
-                "start_ms": 143044,
-                "end_ms": 173044,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "自称负责 Kafka 集群调优，但说不出任何具体参数，只说加机器、加分区",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s8",
-                "quote": "具体参数我不太记得了，当时是照着官方文档调的",
-                "start_ms": 143044,
-                "end_ms": 173044,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "follow_up": "请他把简历上「主导重构」和面试里「参与设计、负责一部分接口改造」对齐：具体哪几个接口是他独立改的、改前改后的调用链和兜底逻辑是什么、上线后出过什么问题；以及「从每秒五千笔提升到每秒五万笔」这个数字是谁压出来的、压测方案和瓶颈分别是什么、他在其中具体做了什么。"
-      }
-    },
-    {
-      "question_id": "q2",
-      "question_text": "这个项目里你做过的最重要的一个技术决定是什么？当时还有哪些别的方案，为什么没选？",
-      "asked": true,
-      "segment_ids": [
-        "s9",
-        "s10",
-        "s11",
-        "s12",
-        "s13",
-        "s14"
-      ],
-      "timing": {
-        "start_ms": 173944,
-        "end_ms": 254187,
-        "response_latency_ms": 1900,
-        "candidate_speaking_ms": 56958,
-        "candidate_chars": 234,
-        "chars_per_minute": 246,
-        "longest_pause_ms": null
-      },
-      "judgement": {
-        "answered": true,
-        "answer_summary": "候选人把「分库分表方案选型」作为最重要的技术决定，说自己实现分片、采用公司统一中间件、按业务线拆库三个方向都考虑过，并给出取舍理由（中间件多一跳、性能有损耗、自己实现链路更短；按业务线拆库跨库查询麻烦）。但追问分片键时先答「按月分」，被指出用户查历史订单要扫所有月表后，又改口说「其实按订单号分，订单号里带用户信息，按月那是归档表」。",
-        "rating": 2.5,
-        "ratings": [
-          2.5,
-          3.0,
-          2.5
-        ],
-        "rating_reason": "主问题部分达到了评分要点：至少说出了一个备选方案（自己实现 vs 接统一中间件 vs 按业务线拆库）和取舍理由，比只给结论的 2 分要好。但追问暴露出核心问题：分片键先说是按月分，被质疑后立刻改口成按订单号分，并用「归档表」来解释前后矛盾，无法前后一致地还原自己声称主导的方案；取舍理由也只有「链路更短」「多一跳」这类定性说法，没有数据支撑。由于这道题的考察意图包含「经历是不是亲身的」，而他在最关键的分片键上前后对不上，够不上「能看出具备基本能力」的 3 分，因此给 2.5。",
-        "strengths": [
-          {
-            "point": "主问题给出了多个备选方向和取舍逻辑，不是只有结论",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s10",
-                "quote": "一个是我们自己做一层分片，一个是接公司统一的中间件。",
-                "start_ms": 184201,
-                "end_ms": 217848,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              },
-              {
-                "source": "transcript",
-                "segment_id": "s10",
-                "quote": "中间件那个方案会多一跳，性能上会有损耗，自己控的话链路更短一些。",
-                "start_ms": 184201,
-                "end_ms": 217848,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "被追问到按月分片的缺陷时，没有回避，直接承认问题存在",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s14",
-                "quote": "呃，对，这个确实是个问题。",
-                "start_ms": 234528,
-                "end_ms": 254187,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "weaknesses": [
-          {
-            "point": "分片键前后矛盾：先说按月分，被质疑后改口成按订单号分，并用归档表解释，无法自洽说明自己声称主导的方案",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s12",
-                "quote": "分片键……我们是按时间分的，按月分。",
-                "start_ms": 222219,
-                "end_ms": 225871,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              },
-              {
-                "source": "transcript",
-                "segment_id": "s14",
-                "quote": "后来我们其实是按订单号分的，对，订单号里带了用户信息",
-                "start_ms": 234528,
-                "end_ms": 254187,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              },
-              {
-                "source": "transcript",
-                "segment_id": "s14",
-                "quote": "刚才说按月那是……那是另外一个归档表，是这么个情况。",
-                "start_ms": 234528,
-                "end_ms": 254187,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "取舍理由停留在定性表述，缺少规模、性能数据等具体细节，深度不足以反映亲自主导",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s10",
-                "quote": "我们综合考虑了性能和成本，还有团队的维护成本，最后选了自己做。",
-                "start_ms": 184201,
-                "end_ms": 217848,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "follow_up": "请他把分库分表方案完整讲一遍并要求前后一致：分片键到底按订单号还是按月，订单号里怎么编码用户信息、路由规则是什么，一个用户查全部历史订单要访问几个分片、怎么避免全表扫描；再问在线表和所谓「按月归档表」的关系，看能否自洽还原当时方案，以核实这个决定是否由他本人主导。"
-      }
-    },
-    {
-      "question_id": "q3",
-      "question_text": "假设线上下单接口的响应时间突然从 100 毫秒涨到 2 秒，你会怎么一步步排查？",
-      "asked": true,
-      "segment_ids": [
-        "s15",
-        "s16",
-        "s17",
-        "s18"
-      ],
-      "timing": {
-        "start_ms": 255087,
-        "end_ms": 317018,
-        "response_latency_ms": 1500,
-        "candidate_speaking_ms": 41946,
-        "candidate_chars": 173,
-        "chars_per_minute": 247,
-        "longest_pause_ms": null
-      },
-      "judgement": {
-        "answered": true,
-        "answer_summary": "候选人给出了一条粗线条的排查顺序：先看监控和日志判断哪个环节慢，再查数据库索引、慢查询和缓存大 key；如果还不行就重启服务、把流量切到备机，先止血再定位。追问「具体看哪些指标」时，他补充了响应时间曲线、CPU、内存和慢查询日志、锁等待；数据库慢的确认方式则主要是「找 DBA 一起看」和「先看日志有没有报错」。",
-        "rating": 3.0,
-        "ratings": [
-          3.0,
-          3.0,
-          3.0
-        ],
-        "rating_reason": "按评分要点看，他没有一上来就重启，也给出了「监控日志→数据库/缓存」这样一条基本顺序，并点到慢查询、大 key、锁等待等具体手段，属于基本切题、具备基本的排查意识，所以不低于 2 分。但内容明显偏泛：完全没有提到「先看最近有没有发布/变更」这一关键第一步，也没有按网关、服务、数据库、依赖分层定位，追问到的指标只有响应时间、CPU、内存这类通用项，缺少超时率、连接池、下游依赖耗时、链路追踪等能落到具体环节的手段；数据库慢的确认方式停在「找 DBA」和「看有没有报错」，没有说清自己怎么确认。细节和深度都够不上良好，因此给 3 分。",
-        "strengths": [
-          {
-            "point": "有基本的先后顺序，先看监控和日志判断瓶颈环节，而不是直接动手",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s16",
-                "quote": "首先肯定是先看监控和日志，看是哪个环节慢。",
-                "start_ms": 265372,
-                "end_ms": 286012,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "提到了几个具体的排查手段：慢查询、缓存大 key、锁等待",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s16",
-                "quote": "可以看一下数据库的锁引和慢查询，还有缓存那边有没有大 key",
-                "start_ms": 265372,
-                "end_ms": 286012,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              },
-              {
-                "source": "transcript",
-                "segment_id": "s18",
-                "quote": "数据库这块可以看慢查询日志，看有没有锁等待。",
-                "start_ms": 295712,
-                "end_ms": 317018,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "有先止血再定位的意识，把重启和切流放在「再不行」的兜底位置，而不是首选动作",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s16",
-                "quote": "再不行就先重启一下服务，把流量切到备机，先恢复业务，再慢慢定位。",
-                "start_ms": 265372,
-                "end_ms": 286012,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "weaknesses": [
-          {
-            "point": "没有提到先确认最近的发布或配置变更，这是排查突增类故障的关键第一步",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s16",
-                "quote": "首先肯定是先看监控和日志，看是哪个环节慢。",
-                "start_ms": 265372,
-                "end_ms": 286012,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "没有分层定位的框架，只说「看哪个环节慢」，未涉及网关、服务、数据库、下游依赖各层怎么区分",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s16",
-                "quote": "首先肯定是先看监控和日志，看是哪个环节慢。然后……嗯，可以看一下数据库的锁引和慢查询",
-                "start_ms": 265372,
-                "end_ms": 286012,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "追问到具体指标时答得笼统，只有响应时间、CPU、内存，没有超时率、连接数、GC、下游依赖耗时、链路追踪这类能真正定位的手段",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s18",
-                "quote": "指标的话……就是看那个响应时间的曲线，还有 CPU、内存这些。",
-                "start_ms": 295712,
-                "end_ms": 317018,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "确认数据库是否变慢这件事上，停在「找 DBA」和「看日志有没有报错」，讲不出自己动手确认的方法",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s18",
-                "quote": "具体确认的话，可能得找 DBA 一起看一下，我一般就是先看日志里有没有报错",
-                "start_ms": 295712,
-                "end_ms": 317018,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "follow_up": "如果监控已经确认瓶颈在数据库这一层，你会自己动手用哪些具体手段（比如 processlist、执行计划、锁等待视图、连接池监控）确认到是哪条 SQL 或哪类锁造成的，而不是直接找 DBA？另外，出问题后你会怎么第一时间判断是不是最近一次发布引起的？"
-      }
-    },
-    {
-      "question_id": "q4",
-      "question_text": "说说数据库事务的隔离级别，以及你在项目里遇到过的和它有关的问题。",
-      "asked": true,
-      "segment_ids": [
-        "s19",
-        "s20"
-      ],
-      "timing": {
-        "start_ms": 317918,
-        "end_ms": 357453,
-        "response_latency_ms": 2000,
-        "candidate_speaking_ms": 30250,
-        "candidate_chars": 121,
-        "chars_per_minute": 240,
-        "longest_pause_ms": null
-      },
-      "judgement": {
-        "answered": true,
-        "answer_summary": "候选人背出了四种隔离级别及其分别解决的脏读、不可重复读、幻读问题，并指出 MySQL 默认是可重复读；说项目里基本都用默认值、没有调整过。被要求举实际遇到的问题时，只说了「好像有一次数据不一致」，具体场景想不起来，最后靠加锁解决。",
-        "rating": 3.0,
-        "ratings": [
-          3.0,
-          3.0,
-          3.0
-        ],
-        "rating_reason": "隔离级别的知识点答对了，四种级别和对应的问题都说全了，也点了 MySQL 默认值，说明具备基本概念，达到「合格」。但题目要求的另一半——项目里真实遇到过的问题——基本没有内容：没有场景、没有现象、没有怎么定位，只给了「数据不一致、加锁解决」这样一句结论，还明说想不起来。深度停留在教科书复述，够不上良好（4 分要求有具体内容），也没有明显错误，所以给 3 分。",
-        "strengths": [
-          {
-            "point": "四种隔离级别和各自解决的问题说得准确、完整，基础知识没有硬伤",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s20",
-                "quote": "隔离级别有四种，读未提交、读已提交、可重复读，还有串行化，分别解决脏读、不可重复读、幻读的问题。",
-                "start_ms": 327203,
-                "end_ms": 357453,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "知道 MySQL 的默认隔离级别，并如实说明项目里用的是默认值、没有专门调整",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s20",
-                "quote": "MySQL 默认是可重复读。项目里的话，我们基本上用的都是默认的，没有特别去调过。",
-                "start_ms": 327203,
-                "end_ms": 357453,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "weaknesses": [
-          {
-            "point": "项目中的实例几乎没有内容：说不清是什么场景、什么现象、怎么发现的，只笼统说「数据不一致」然后「加锁解决」，无法判断这是亲历经验还是临时拼凑",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s20",
-                "quote": "遇到过的问题……好像有一次是数据不一致，具体是什么场景我一时想不太起来了，反正后来是通过加锁解决的。",
-                "start_ms": 327203,
-                "end_ms": 357453,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "只有概念复述，没有体现出与岗位相关的深度，比如可重复读下的间隙锁与死锁、MVCC 怎么避免读写冲突、隔离级别选择对交易一致性的影响，这些都没有展开",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s20",
-                "quote": "隔离级别有四种，读未提交、读已提交、可重复读，还有串行化，分别解决脏读、不可重复读、幻读的问题。",
-                "start_ms": 327203,
-                "end_ms": 357453,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "follow_up": "请具体讲一次你在支付交易项目里因为事务隔离级别或锁导致的数据不一致（或死锁）问题：当时是什么业务场景、现象是什么、怎么定位到是隔离级别或锁的问题、加的是什么锁加在哪一层、上线后有没有再复现？如果确实没有亲历过，也请如实说明。"
-      }
-    },
-    {
-      "question_id": "q5",
-      "question_text": "讲一次你和同事在技术方案上意见不一致的经历，最后是怎么解决的？",
-      "asked": true,
-      "segment_ids": [
-        "s21",
-        "s22"
-      ],
-      "timing": {
-        "start_ms": 358353,
-        "end_ms": 408342,
-        "response_latency_ms": 2600,
-        "candidate_speaking_ms": 39461,
-        "candidate_chars": 171,
-        "chars_per_minute": 260,
-        "longest_pause_ms": null
-      },
-      "judgement": {
-        "answered": true,
-        "answer_summary": "候选人讲了对账模块里和同事在数据校验方式上的分歧：同事主张每小时全量对一次，他认为全量对账压力太大，建议增量加定时全量兜底。两人争执后，他整理了两种方案的机器成本和延迟，拉小会一起看数据，最后各让一步，采用增量为主、每天凌晨全量一次，事后运行稳定。他总结说别在群里吵、把数据摆出来更好沟通。",
-        "rating": 4.0,
-        "ratings": [
-          4.0,
-          4.0,
-          4.0
-        ],
-        "rating_reason": "切题，有具体场景（对账模块的数据校验方式）、双方各自的理由（对方要每小时全量，他担心全量压力）、推进方式（整理成本与延迟、拉会看数据）、结果（增量为主加每日凌晨全量，运行稳定）以及事后反思，属于有具体内容的良好档。未给 5 分是因为成本与延迟的对比没有任何量级，增量方案漏对的兜底风险也没展开，取舍深度一般。",
-        "strengths": [
-          {
-            "point": "分歧点具体，双方立场和理由都讲清楚了，不是泛泛而谈",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s22",
-                "quote": "他倾向于每个小时全量对一次，我觉得全量对账压力太大了，建议做增量加定时的全量兜底",
-                "start_ms": 368881,
-                "end_ms": 408342,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "讲了推进方式：用数据而不是情绪推进，主动拉会",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s22",
-                "quote": "后来我整理了一下两种方案的机器成本和延迟，拉了个小会一起看数据",
-                "start_ms": 368881,
-                "end_ms": 408342,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "给出了明确的最终方案和事后结果",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s22",
-                "quote": "最后是各让一步，用增量为主、每天凌晨做一次全量",
-                "start_ms": 368881,
-                "end_ms": 408342,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              },
-              {
-                "source": "transcript",
-                "segment_id": "s22",
-                "quote": "事后看这个方案跑得还挺稳的",
-                "start_ms": 368881,
-                "end_ms": 408342,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "有可复用的协作方法总结",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s22",
-                "quote": "我觉得关键是别在群里吵，把数据摆出来会好沟通很多",
-                "start_ms": 368881,
-                "end_ms": 408342,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "weaknesses": [
-          {
-            "point": "用来支撑取舍的数据没有给出任何量级，无法判断他的判断依据有多扎实",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s22",
-                "quote": "整理了一下两种方案的机器成本和延迟，拉了个小会一起看数据",
-                "start_ms": 368881,
-                "end_ms": 408342,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "只说了自己让步，没说对方的理由里哪部分被采纳、也没提增量方案漏对的风险怎么兜，取舍显得偏简单",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s22",
-                "quote": "最后是各让一步",
-                "start_ms": 368881,
-                "end_ms": 408342,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "follow_up": "请他把当时对比增量和全量的成本、延迟具体数字说出来，并说明如果增量对账中途漏了单，靠什么机制保证最终一致。"
-      }
-    },
-    {
-      "question_id": "q6",
-      "question_text": "你为什么考虑这个机会？未来两三年想往什么方向发展？",
-      "asked": true,
-      "segment_ids": [
-        "s23",
-        "s24"
-      ],
-      "timing": {
-        "start_ms": 409242,
-        "end_ms": 451644,
-        "response_latency_ms": 1600,
-        "candidate_speaking_ms": 34588,
-        "candidate_chars": 147,
-        "chars_per_minute": 255,
-        "longest_pause_ms": null
-      },
-      "judgement": {
-        "answered": true,
-        "answer_summary": "候选人说想找业务更核心、技术挑战更大的环境，承认现在公司不错，但自己在交易这块「更多是在旁边配合」，想真正进入主链路。方向上希望未来两三年在高并发交易方向做深，把 Go 和分布式的基础打扎实，并希望独立负责一个模块、从设计到上线都能承担起来。",
-        "rating": 3.5,
-        "ratings": [
-          3.5,
-          4.0,
-          3.5
-        ],
-        "rating_reason": "回答切题，动机和方向都说清楚了，方向和岗位（高并发交易、Go、独立负责模块）直接对口，还主动承认自己目前更多是配合角色，比只会说「想找有挑战的平台」的空泛回答要实在，所以高于合格档。但离良好差一截：全程没有提到为什么是这家公司、这个岗位，也没讲是什么契机让他现在想看机会；「愿意啃硬骨头、愿意补基础」只是自我评价，没有任何事例或具体计划支撑，稳定性也缺少可验证的信息（比如换工作的节奏、对下一份工作的具体期待）。",
-        "strengths": [
-          {
-            "point": "动机讲得具体，说清了现在缺什么：在交易链路上只是配合角色，想进主链路",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s24",
-                "quote": "我现在的公司其实也不错，但交易这块我更多是在旁边配合，想真正深入到主链路里面去",
-                "start_ms": 417056,
-                "end_ms": 451644,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "发展方向和岗位强相关，落在高并发交易和 Go／分布式上，还提到想独立负责一个模块",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s24",
-                "quote": "希望能独立负责一个模块，从设计到上线都能扛起来",
-                "start_ms": 417056,
-                "end_ms": 451644,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "对自己的现状和短板有自知，没有把动机包装成单纯追求薪资或title",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s24",
-                "quote": "主要是想找一个业务更核心、技术挑战更大的环境",
-                "start_ms": 417056,
-                "end_ms": 451644,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "weaknesses": [
-          {
-            "point": "没有说明为什么选这家公司／这个岗位，动机只停在「想找更核心的环境」这一层，换任何一家交易类公司都成立",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s24",
-                "quote": "主要是想找一个业务更核心、技术挑战更大的环境",
-                "start_ms": 417056,
-                "end_ms": 451644,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "「愿意啃硬骨头、愿意补基础」是自我评价，没有任何事例或具体学习计划支撑",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s24",
-                "quote": "我个人是比较愿意啃硬骨头的，也愿意补基础。",
-                "start_ms": 417056,
-                "end_ms": 451644,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              }
-            ]
-          },
-          {
-            "point": "他自述在交易这块「更多是在旁边配合」，与简历里「主导支付核心系统的重构」的表述有落差，涉及角色定位的一致性，需要人工核实（也可能只是他这里说得保守）",
-            "evidence": [
-              {
-                "source": "transcript",
-                "segment_id": "s24",
-                "quote": "交易这块我更多是在旁边配合",
-                "start_ms": 417056,
-                "end_ms": 451644,
-                "speaker": "candidate",
-                "quote_match": "exact"
-              },
-              {
-                "source": "resume",
-                "quote": "主导支付核心系统的重构，将系统吞吐量从每秒 5000 笔提升到每秒 5 万笔",
-                "quote_match": "exact"
-              }
-            ]
-          }
-        ],
-        "follow_up": "你说现在在交易这块「更多是在旁边配合」，那支付核心系统重构里具体哪些决策是你拍板的、哪些是别人定的？这和你简历里写的「主导重构」怎么对应？另外，为什么是我们这家公司，你了解我们交易系统的哪些情况？"
-      }
-    }
-  ],
-  "requirement_match": {
-    "match_level": "medium",
-    "summary": "工作年限和业务场景（支付核心交易组、分库分表、对账）与岗位方向对得上，第 2 题分库分表选型也能讲出取舍理由。但面试中的个人主导性和技术深度证据明显弱于简历：核心重构项目说不清自己动手写的接口和代码量，吞吐量数字与简历的「5000 到 5 万」对不上，压测和 Kafka 调优都归到同事或官方文档；数据库事务、线上排查停留在背诵和浅层层面。是否值得占用人工面试时间，取决于能否先核实「主导重构」这个角色描述。",
-    "items": [
-      {
-        "requirement": "三年以上后端开发经验",
-        "importance": "must_have",
-        "verdict": "met",
-        "basis": "both",
-        "reasoning": "简历显示 2020.07 起连续两段后端开发经历，至今约五年，满足年限门槛；面试中也能连贯介绍两段工作的业务背景，年限本身没有疑点。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "2020.07 至 2022.02 某软件外包公司 开发工程师",
-            "quote_match": "exact"
-          },
-          {
-            "source": "resume",
-            "quote": "2022.03 至今 某支付公司 核心交易组 后端工程师",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s4",
-            "quote": "我最近在支付公司核心交易组，最有挑战的应该就是我们支付核心系统的重构",
-            "start_ms": 31916,
-            "end_ms": 88066,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "requirement": "熟练掌握 Go 或 Rust",
-        "importance": "must_have",
-        "verdict": "partially_met",
-        "basis": "both",
-        "reasoning": "简历技能栏列了 Go，但整场面试没有一道题考察语言层面的能力，无法验证熟练度；候选人自己在谈发展方向时说要把 Go 的底子打扎实，暗示目前还谈不上熟练。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "Go、MySQL、Redis、Kafka、分布式事务、微服务架构",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s24",
-            "quote": "一方面把 Go 和分布式这块的底子打扎实",
-            "start_ms": 417056,
-            "end_ms": 451644,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "requirement": "熟悉关系数据库的索引和事务",
-        "importance": "must_have",
-        "verdict": "partially_met",
-        "basis": "interview",
-        "reasoning": "第 4 题能完整背出四种隔离级别和对应的问题，基础概念在；但要求举的真实案例只给了「数据不一致、后来加锁解决」，场景说不出来。索引方面只在排查题里顺口提了一句慢查询和索引，没有独立的深度证据。",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s20",
-            "quote": "隔离级别有四种，读未提交、读已提交、可重复读，还有串行化，分别解决脏读、不可重复读、幻读的问题",
-            "start_ms": 327203,
-            "end_ms": 357453,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s20",
-            "quote": "好像有一次是数据不一致，具体是什么场景我一时想不太起来了，反正后来是通过加锁解决的",
-            "start_ms": 327203,
-            "end_ms": 357453,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "requirement": "能独立排查线上问题",
-        "importance": "must_have",
-        "verdict": "partially_met",
-        "basis": "interview",
-        "reasoning": "第 3 题给出的顺序是先看监控日志、再看数据库慢查询和缓存大 key、恢复不了再重启切流，有基本层次，不算上来就重启。但追问到具体指标只说得出响应时间曲线、CPU、内存这类通用项，数据库变慢时表示「找 DBA 一起看」，独立定位的成色不足。",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s16",
-            "quote": "首先肯定是先看监控和日志，看是哪个环节慢",
-            "start_ms": 265372,
-            "end_ms": 286012,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s16",
-            "quote": "再不行就先重启一下服务，把流量切到备机，先恢复业务，再慢慢定位",
-            "start_ms": 265372,
-            "end_ms": 286012,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s18",
-            "quote": "具体确认的话，可能得找 DBA 一起看一下",
-            "start_ms": 295712,
-            "end_ms": 317018,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "requirement": "有消息队列和缓存的实际使用经验（Kafka / Redis）",
-        "importance": "must_have",
-        "verdict": "partially_met",
-        "basis": "both",
-        "reasoning": "简历写负责 Redis 和 Kafka 集群的容量规划与调优，但面试追到 Kafka 具体参数时，只答出加 broker、加分区和「照着官方文档调」，参数说不出来；Redis 全程只在开场一句带过，没有任何细节。属于接触过、没到能讲清原理和调优的程度。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "负责 Redis 集群和 Kafka 集群的容量规划与调优",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s8",
-            "quote": "加机器，对，就是加 broker，分区也加了一些",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s8",
-            "quote": "具体参数我不太记得了，当时是照着官方文档调的",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "requirement": "有高并发交易系统的经验",
-        "importance": "nice_to_have",
-        "verdict": "partially_met",
-        "basis": "both",
-        "reasoning": "确实在支付核心交易组工作，也接触了压测和高并发场景，但个人参与度很浅：压测主要靠压测组同事，被问到数字时说的是「压到五千多就扛不住、扩容后好很多」，与简历写的 5000 提升到 5 万完全对不上，也没讲出任何高并发下的具体设计手段。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "主导支付核心系统的重构，将系统吞吐量从每秒 5000 笔提升到每秒 5 万笔",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s8",
-            "quote": "主要是我们压测组的同事在搞，我参与了一部分",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s8",
-            "quote": "我记得是压到五千多的时候机器就有点扛不住了，后来扩容之后好很多",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "requirement": "做过系统拆分或重构",
-        "importance": "nice_to_have",
-        "verdict": "partially_met",
-        "basis": "both",
-        "reasoning": "能说清项目是把单体交易服务拆成几个独立服务、订单分库分表、对账拆出来，也讲了灰度和老数据迁移导致对账差异的坑，说明在项目里。但被追问自己动手写了什么时，只答「订单查询和后台的一些接口改造」，代码量说不清，自述是按模块分工做适配。",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s4",
-            "quote": "我在这块主要是参与了整体方案的设计和评审，然后负责一部分接口的改造",
-            "start_ms": 31916,
-            "end_ms": 88066,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s6",
-            "quote": "主要是订单查询和，和后台那块的一些接口改造吧。代码量这个我没太统计过",
-            "start_ms": 102494,
-            "end_ms": 127473,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "requirement": "能负责交易系统后端服务的设计与开发（能独立承担核心模块，而非配合角色）",
-        "importance": "must_have",
-        "verdict": "partially_met",
-        "basis": "both",
-        "reasoning": "这是 HR 本轮最需要核实的点。简历写「主导重构」「独立设计分库分表方案」，但面试证据不支持：讲不出自己写的具体接口和代码量；分片键先答按月分，被追问用户查历史订单怎么办后立刻改口成按订单号分，并解释月表是归档表，前后矛盾；第 6 题还自述目前在交易这块更多是旁边配合。能看出参与过方案讨论（第 2 题对中间件多一跳、按业务线拆库的取舍讲得有道理），但主导程度明显低于简历表述。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "独立设计了支付订单的分库分表方案和资金对账系统",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s12",
-            "quote": "分片键……我们是按时间分的，按月分",
-            "start_ms": 222219,
-            "end_ms": 225871,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s14",
-            "quote": "后来我们其实是按订单号分的，对，订单号里带了用户信息",
-            "start_ms": 234528,
-            "end_ms": 254187,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s24",
-            "quote": "我现在的公司其实也不错，但交易这块我更多是在旁边配合，想真正深入到主链路里面去",
-            "start_ms": 417056,
-            "end_ms": 451644,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s10",
-            "quote": "因为中间件那个方案会多一跳，性能上会有损耗，自己控的话链路更短一些",
-            "start_ms": 184201,
-            "end_ms": 217848,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      }
-    ]
-  },
-  "resume_verification": {
-    "credibility": "low",
-    "summary": "简历把支付核心系统重构写成「主导」，但面试里候选人自己反复说是「参与方案设计」「负责一部分接口改造」「更多是在旁边配合」，实际动手内容说不清；吞吐量从5000到5万的数字讲不出来源，压测说主要是压测组在做；分库分表的分片键先答「按月分」，被追问后改口成「按订单号分」。整体看，简历上的项目规模和角色明显高于面试中能展现出来的水平，需要人工面试重点核实。",
-    "claims": [
-      {
-        "claim": "2022.03 至今在某支付公司核心交易组任后端工程师",
-        "verdict": "corroborated",
-        "reasoning": "候选人在介绍项目时主动说明自己所在的公司和团队，与简历一致，没有出入。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "2022.03 至今 某支付公司 核心交易组 后端工程师",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s4",
-            "quote": "我最近在支付公司核心交易组",
-            "start_ms": 31916,
-            "end_ms": 88066,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": null
-      },
-      {
-        "claim": "主导支付核心系统的重构",
-        "verdict": "doubtful",
-        "reasoning": "简历写「主导」，面试里候选人自己把角色降为「参与了整体方案的设计和评审」，追问具体写了哪些接口时只说得出「订单查询和后台那块的一些接口改造」，代码量说不清，理由是「按模块分工」「配合主链路那边做适配」；最后谈动机时又说「交易这块我更多是在旁边配合」。讲的深度和简历写的「主导」明显不相称，但也不能排除他主导了某个子模块，需要人工确认。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "主导支付核心系统的重构，将系统吞吐量从每秒 5000 笔提升到每秒 5 万笔",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s4",
-            "quote": "我在这块主要是参与了整体方案的设计和评审，然后负责一部分接口的改造",
-            "start_ms": 31916,
-            "end_ms": 88066,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s6",
-            "quote": "具体接口的话，主要是订单查询和，和后台那块的一些接口改造吧",
-            "start_ms": 102494,
-            "end_ms": 127473,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s24",
-            "quote": "我现在的公司其实也不错，但交易这块我更多是在旁边配合",
-            "start_ms": 417056,
-            "end_ms": 451644,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "请具体说明重构项目中哪一部分是你独立拍板并落地交付的，整体方案由谁最终决策，团队一共几个人、你带了几个人？"
-      },
-      {
-        "claim": "将系统吞吐量从每秒 5000 笔提升到每秒 5 万笔",
-        "verdict": "doubtful",
-        "reasoning": "候选人讲的是「我们团队整体」提升十倍，不是他个人的成果。被追问压测怎么做的，他说主要是压测组同事在做、自己只参与一部分，并说「压到五千多的时候机器就有点扛不住了，后来扩容之后好很多」，没有解释 5 万这个数字怎么测出来、他做了什么让吞吐提升十倍。数字的来由讲不出来。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "将系统吞吐量从每秒 5000 笔提升到每秒 5 万笔",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s4",
-            "quote": "我们团队整体把吞吐量从每秒五千笔提升到了每秒五万笔",
-            "start_ms": 31916,
-            "end_ms": 88066,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s8",
-            "quote": "压侧这块……主要是我们压测组的同事在搞，我参与了一部分",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s8",
-            "quote": "我记得是压到五千多的时候机器就有点扛不住了，后来扩容之后好很多",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "5 万笔每秒是在什么场景、什么机器规格、多长压测时长下测出来的？从 5000 到 5 万，具体是哪些改造带来的提升，各自贡献多少？"
-      },
-      {
-        "claim": "独立设计了支付订单的分库分表方案",
-        "verdict": "doubtful",
-        "reasoning": "候选人能说出自研分片层和公司统一中间件两个备选方案，并给出中间件多一跳、性能有损耗的取舍理由，方向是对的。但被问到分片键时先答「按时间分，按月分」，被追问用户查历史订单怎么办后立刻改口成「后来其实是按订单号分的」，并解释月表是归档表。分片键是分库分表方案最核心的信息，先答错再改口，不足以免除「方案是不是本人设计」的疑问。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "独立设计了支付订单的分库分表方案和资金对账系统",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s10",
-            "quote": "一个是我们自己做一层分片，一个是接公司统一的中间件",
-            "start_ms": 184201,
-            "end_ms": 217848,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s12",
-            "quote": "分片键……我们是按时间分的，按月分",
-            "start_ms": 222219,
-            "end_ms": 225871,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s14",
-            "quote": "后来我们其实是按订单号分的，对，订单号里带了用户信息",
-            "start_ms": 234528,
-            "end_ms": 254187,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "请把主表的分片键、分片数量、路由规则和归档表的关系一次讲清楚；为什么第一次回答时说的是按月分？另外，不按用户维度查询的后台对账请求怎么路由？"
-      },
-      {
-        "claim": "独立设计了资金对账系统",
-        "verdict": "partially_corroborated",
-        "reasoning": "候选人两次讲到对账：一次说灰度时老数据没迁移干净导致对账出现差异、后来加核对脚本收敛；一次讲了对账模块数据校验方式与同事的分歧，能说出全量对账的压力、增量加定时全量兜底的成本与延迟权衡，以及最后每天凌晨跑一次全量的结果，有具体取舍和结果。但没讲对账系统本身的设计（数据来源、核对维度、差异处理流程），「独立设计」这一点还没被印证。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "独立设计了支付订单的分库分表方案和资金对账系统",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s4",
-            "quote": "对账那边就出现了一些差异，后来加了核对脚本才慢慢收敛",
-            "start_ms": 31916,
-            "end_ms": 88066,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s22",
-            "quote": "他倾向于每个小时全量对一次，我觉得全量对账压力太大了，建议做增量加定时的全量兜底",
-            "start_ms": 368881,
-            "end_ms": 408342,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s22",
-            "quote": "最后是各让一步，用增量为主、每天凌晨做一次全量",
-            "start_ms": 368881,
-            "end_ms": 408342,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "对账系统的数据来源和核对维度是什么？日切时间怎么处理？每天对多少笔、差异率多少、差异单怎么流转？你独立设计的是哪一部分？"
-      },
-      {
-        "claim": "负责 Redis 集群和 Kafka 集群的容量规划与调优",
-        "verdict": "doubtful",
-        "reasoning": "被直接追问 Kafka 调了哪些参数时，候选人只答「加机器、加 broker、分区也加了一些」，并说「具体参数我不太记得了，当时是照着官方文档调的」，说不出任何具体参数或调优依据；Redis 集群的容量规划在整场面试里完全没讲。和简历写的「负责容量规划与调优」的深度不相称。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "负责 Redis 集群和 Kafka 集群的容量规划与调优",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s8",
-            "quote": "具体参数我不太记得了，当时是照着官方文档调的",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "Kafka 集群多大（broker 数、分区数、峰值吞吐）？当时具体调了哪几个参数、调到多少、依据是什么？Redis 集群规模多大、容量是怎么估的、有没有遇到大 key 或热 key？"
-      },
-      {
-        "claim": "技能包括 Go、MySQL、Redis、Kafka、分布式事务、微服务架构",
-        "verdict": "not_covered",
-        "reasoning": "面试没有考 Go 语言和编码，也没有问分布式事务和微服务架构的具体实践。数据库只在隔离级别那道题被问到，候选人背出了四种隔离级别和 MySQL 默认级别，但项目实例说「一时想不太起来了」，只能算基本概念对，远不足以印证技能清单。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "Go、MySQL、Redis、Kafka、分布式事务、微服务架构",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "下一轮建议安排 Go 并发编程的现场编码或代码阅读题，并让其讲一个项目里实际用到的分布式事务方案（如本地消息表、TCC）及其取舍。"
-      },
-      {
-        "claim": "2020.07 至 2022.02 在某软件外包公司任开发工程师，参与多个企业管理系统开发",
-        "verdict": "not_covered",
-        "reasoning": "整场面试都围绕支付公司这段经历，外包公司的两年经历没有被问到，无法判断。对判断「三年以上后端经验」这条硬性要求来说，这段经历是主要缺口。",
-        "evidence": [
-          {
-            "source": "resume",
-            "quote": "2020.07 至 2022.02 某软件外包公司 开发工程师",
-            "quote_match": "exact"
-          }
-        ],
-        "follow_up": "请介绍外包期间做的两三个系统分别是什么业务、你负责哪些模块、用什么技术栈，以及为什么从外包转到支付公司。"
-      }
-    ]
-  },
-  "integrity": {
-    "risk_level": "medium",
-    "summary": "这场面试没有记录到切出页面、粘贴、第三人说话等过程异常，录像画面也没有做抽帧检查，所以画面和现场环境方面无法判断。风险集中在「支付核心系统重构」这段经历上：他讲整体项目时流畅、要素齐全，但一追问本人写了什么、压测怎么做、Kafka 调了哪些参数就说不出来或推给同事；分片键的说法在追问下当场从「按月分」改成「按订单号分」。这两条相互印证，提示可能是准备了说法但并非本人主导，正好落在 HR 要求核实的点上，建议人工面试重点追问后再决定是否推进。",
-    "signals": [
-      {
         "kind": "depth_mismatch",
         "severity": "medium",
         "reliability": "medium",
-        "description": "第 1 题主讲项目时，背景、拆分、分库分表、对账、吞吐量十倍、Redis/Kafka 调优都说得很顺，但一问到自己动手的部分就空了：说不出具体改造了哪几个接口、代码量多少；问压测和 Kafka 参数时，把压测推给「压测组的同事」，参数「不太记得了，照着官方文档调的」，而且自己复述的数字是「压到五千多的时候机器就有点扛不住了」，和十倍提升的结论对不上。",
-        "alternative_explanations": "项目周期长、他负责的只是其中一个模块，接口名和参数细节确实记不清；或者他表达时习惯性谦虚、把团队工作说成自己参与的。但连自己写的接口都举不出一个例子，加上数字对不上，需要人工核。",
+        "description": "吞吐量这个核心数字前后不自洽。开场说团队把吞吐量从每秒五千笔提升到每秒五万笔、约十倍；被问到压测怎么做的，说的却是自己只参与了一部分、主要靠压测组同事，并且给出的数字是「压到五千多机器就扛不住了，扩容之后好很多」，完全没有对应到五万这个量级，卡夫卡调优也只剩「加 broker、加分区、照官方文档调」。",
+        "alternative_explanations": "五万是团队整体口径、他本人只跟过其中一个压测阶段，所以说的是自己看到的那一段；集群参数是运维或中间件团队调的，他记不住细节。但这仍然说明他对这个数字没有一手把握。",
         "evidence": [
           {
             "source": "transcript",
             "segment_id": "s4",
-            "quote": "我在这块主要是参与了整体方案的设计和评审，然后负责一部分接口的改造",
+            "quote": "我们团队整体把吞吐量从每秒五千笔提升到了每秒五万笔，差不多十倍",
             "start_ms": 31916,
             "end_ms": 88066,
             "speaker": "candidate",
             "quote_match": "exact"
           },
+          {
+            "source": "transcript",
+            "segment_id": "s8",
+            "quote": "我记得是压到五千多的时候机器就有点扛不住了，后来扩容之后好很多。",
+            "start_ms": 143044,
+            "end_ms": 173044,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s8",
+            "quote": "压侧这块……主要是我们压测组的同事在搞，我参与了一部分。",
+            "start_ms": 143044,
+            "end_ms": 173044,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      }
+    ]
+  },
+  "communication": {
+    "summary": "整体能把事情讲下来，遇到不会的也肯直说，但一追问细节就明显变虚：接口改造说不出具体内容，压测数字和自己讲的结果对不上，分片键先答「按月分」、被追问后当场改成「按订单号」。第 5 题那次分歧讲得最清楚，有双方理由、有怎么定、有事后结果，是全场面最好的一段。",
+    "aspects": [
+      {
+        "aspect": "clarity",
+        "rating": 2,
+        "observation": "讲整体框架时听得懂，但一到需要说清楚的地方就开始模糊：被问具体改了哪几个接口、多少代码，只说是「订单查询和后台那块的一些接口改造」，代码量「没太统计过」。分片键先答按月分，被问用户查历史订单怎么办，立刻改口说其实是按订单号分、按月那个是归档表，听的人得自己猜到底哪个是真的。",
+        "evidence": [
           {
             "source": "transcript",
             "segment_id": "s6",
@@ -1726,92 +1781,8 @@
           },
           {
             "source": "transcript",
-            "segment_id": "s8",
-            "quote": "压侧这块……主要是我们压测组的同事在搞，我参与了一部分",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s8",
-            "quote": "具体参数我不太记得了，当时是照着官方文档调的",
-            "start_ms": 143044,
-            "end_ms": 173044,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "kind": "depth_mismatch",
-        "severity": "medium",
-        "reliability": "medium",
-        "description": "第 2 题先明确说分片键「按时间分，按月分」，面试官追问「用户查自己的历史订单怎么办，要扫所有月表吗」，他马上改口成「其实我们按订单号分的，订单号里带用户信息」，并把刚才说的按月分解释成另一个归档表。这是被追问后当场改答案，不是补充说明。",
-        "alternative_explanations": "可能确实同时存在按订单号分的主表和按月分的归档表，第一次只是没讲清楚；也可能是紧张之下说错了对象，被提示后纠正。但改口的时机紧跟在质疑之后，更像是在按准备好的说法回忆，人工面试应用具体表结构和查询语句核一下。",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s12",
-            "quote": "分片键……我们是按时间分的，按月分。",
-            "start_ms": 222219,
-            "end_ms": 225871,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
             "segment_id": "s14",
-            "quote": "所以后来……后来我们其实是按订单号分的，对，订单号里带了用户信息",
-            "start_ms": 234528,
-            "end_ms": 254187,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      }
-    ]
-  },
-  "communication": {
-    "summary": "候选人整体能把项目讲下来，语速稳定、没有卡壳，第 1 题和第 5 题的回答有背景、做法和结果，也敢直接说「记不清」。但一被追问具体细节就容易含糊：接口说不清写了哪些、压测和 Kafka 参数推给同事、分片键先说按月、被追问后改口成按订单号，说明表达的具体度和前后一致性是弱项。",
-    "aspects": [
-      {
-        "aspect": "clarity",
-        "rating": 3,
-        "observation": "讲项目主线时听得懂：单体拆服务、订单分库分表、对账独立拆分，结果和踩过的坑都交代了。但具体到「自己动手做了什么」就只剩下模糊说法，代码量答不上来；分片键的回答前后矛盾，先说是按月分，被指出问题后又改成按订单号，还临时解释成「归档表」，听的人得自己猜哪句是真的。",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s4",
-            "quote": "主要是把原来那个单体的大交易服务拆成几个独立服务",
-            "start_ms": 31916,
-            "end_ms": 88066,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s6",
-            "quote": "代码量这个我没太统计过",
-            "start_ms": 102494,
-            "end_ms": 127473,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s12",
-            "quote": "我们是按时间分的，按月分",
-            "start_ms": 222219,
-            "end_ms": 225871,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s14",
-            "quote": "我们其实是按订单号分的，对，订单号里带了用户信息",
+            "quote": "后来我们其实是按订单号分的，对，订单号里带了用户信息",
             "start_ms": 234528,
             "end_ms": 254187,
             "speaker": "candidate",
@@ -1821,8 +1792,8 @@
       },
       {
         "aspect": "structure",
-        "rating": 4,
-        "observation": "多数回答有先后：第 1 题按背景—自己负责的部分—结果—踩坑展开；第 3 题给出「先看监控和日志、再看数据库和缓存、不行先恢复业务」的顺序；第 5 题按分歧点—双方理由—怎么达成的顺序讲，最后还总结了做法。缺点是第 1 题的追问和第 4 题偏零散，想到哪说到哪。",
+        "rating": 3,
+        "observation": "有的回答有清楚的先后，比如排查响应变慢那道先看监控日志、再看数据库和缓存、最后恢复业务；讲和同事分歧那道是按分歧点、双方理由、怎么定、事后结果讲的，条理最完整。但也有些回答是边想边说，比如最重要的技术决定那道，先抛方案再补理由，中间还夹着「综合考虑了性能和成本」这种笼统说法。",
         "evidence": [
           {
             "source": "transcript",
@@ -1836,16 +1807,7 @@
           {
             "source": "transcript",
             "segment_id": "s22",
-            "quote": "我整理了一下两种方案的机器成本和延迟，拉了个小会一起看数据",
-            "start_ms": 368881,
-            "end_ms": 408342,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s22",
-            "quote": "最后是各让一步，用增量为主、每天凌晨做一次全量",
+            "quote": "我整理了一下两种方案的机器成本和延迟，拉了个小会一起看数据，最后是各让一步",
             "start_ms": 368881,
             "end_ms": 408342,
             "speaker": "candidate",
@@ -1856,14 +1818,39 @@
       {
         "aspect": "responsiveness",
         "rating": 3,
-        "observation": "基本听懂了问题、没有跑题，但对「你自己写了哪几个接口」「压测怎么做的、Kafka 调了哪些参数」「具体看哪几个指标」「隔离级别相关的真实案例」这些要细节的追问，多用概括或推给别人来回应，正面给出的信息有限。第 6 题问动机和方向，答得切题也具体。",
+        "observation": "基本听得懂在问什么，没有跑题。但被问到自己身上时经常转开：问压测怎么做，答「主要是压测组的同事在搞，我参与了一部分」；问卡夫卡调了哪些参数，答「加机器」「具体参数不记得」；问数据库变慢下一步怎么确认，答「可能得找 DBA 一起看一下」。技术决定那道是少数正面回答备选方案的。",
         "evidence": [
           {
             "source": "transcript",
             "segment_id": "s8",
-            "quote": "主要是我们压测组的同事在搞，我参与了一部分",
+            "quote": "压侧这块……主要是我们压测组的同事在搞，我参与了一部分",
             "start_ms": 143044,
             "end_ms": 173044,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          },
+          {
+            "source": "transcript",
+            "segment_id": "s18",
+            "quote": "具体确认的话，可能得找 DBA 一起看一下",
+            "start_ms": 295712,
+            "end_ms": 317018,
+            "speaker": "candidate",
+            "quote_match": "exact"
+          }
+        ]
+      },
+      {
+        "aspect": "composure",
+        "rating": 3,
+        "observation": "没有明显慌乱，几次直接说记不清、没统计过、一时想不起来，没有硬编，这一点是稳的。但在分片键被追问时，没有解释为什么前后不一致，而是当场换了答案，这种被质疑就改口的反应需要人工面试时再确认。",
+        "evidence": [
+          {
+            "source": "transcript",
+            "segment_id": "s20",
+            "quote": "具体是什么场景我一时想不太起来了",
+            "start_ms": 327203,
+            "end_ms": 357453,
             "speaker": "candidate",
             "quote_match": "exact"
           },
@@ -1875,86 +1862,43 @@
             "end_ms": 173044,
             "speaker": "candidate",
             "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s18",
-            "quote": "可能得找 DBA 一起看一下",
-            "start_ms": 295712,
-            "end_ms": 317018,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s24",
-            "quote": "一方面把 Go 和分布式这块的底子打扎实",
-            "start_ms": 417056,
-            "end_ms": 451644,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          }
-        ]
-      },
-      {
-        "aspect": "composure",
-        "rating": 3,
-        "observation": "被追问时没有慌，语速和停顿都平稳（各题几乎没有长停顿，等待 1.5 到 2.6 秒就开口），不会的也肯直说记不清，这点是稳的。但分片键被质疑后当场改口，第 4 题承认想不起场景后又用「加锁解决」草草收尾，更像是顺着提问临时找说法，而不是稳住后如实讲边界。",
-        "evidence": [
-          {
-            "source": "transcript",
-            "segment_id": "s20",
-            "quote": "好像有一次是数据不一致，具体是什么场景我一时想不太起来了",
-            "start_ms": 327203,
-            "end_ms": 357453,
-            "speaker": "candidate",
-            "quote_match": "exact"
-          },
-          {
-            "source": "transcript",
-            "segment_id": "s14",
-            "quote": "刚才说按月那是……那是另外一个归档表，是这么个情况",
-            "start_ms": 234528,
-            "end_ms": 254187,
-            "speaker": "candidate",
-            "quote_match": "exact"
           }
         ]
       }
     ],
-    "reliability_note": "只能从文字和计时推断，看不到表情、听不到语气，紧张和从容难以区分；转写有同音错字（如「瑞迪斯」「卡夫卡」「分库分镖」），已按最合理意思理解，个别判断可能因此偏差。"
+    "reliability_note": "只看转写文字和计时数据，听不到语气、看不到表情和停顿细节，语速偏快（240-260 字/分钟）也可能影响转写质量，结论只能作参考，建议人工面试时现场追问核实。"
   },
   "next_round": {
     "focus_areas": [
-      "逐层问穿「重构里他本人独立拍板并落地的是哪一块」，对齐简历的「主导」与面试自述的「参与／配合」",
-      "分库分表方案的完整还原：主表分片键、路由规则、归档表关系、后台对账请求怎么查，验证前后一致性",
-      "Go 语言能力的实测（并发模型、内存管理、现场编码或代码阅读），这一轮完全空白",
-      "线上问题排查的动手能力：从监控定位到数据库具体 SQL 或锁的完整链路，验证是否真的能独立排查"
+      "核实重构项目里的真实角色边界：哪些设计是他拍板的、哪些代码是他写的、团队几人、他直接负责哪块",
+      "分库分表方案的一手细节：分片键、路由规则、跨分片查询和对账怎么处理，验证「独立设计」是否成立",
+      "Go 语言的实际掌握程度（本轮完全没考察）：并发模型、channel、锁、超时控制、线上排障",
+      "数据库索引与事务的实战深度，以及独立定位线上问题的完整案例"
     ],
     "questions": [
       {
-        "question": "支付核心系统重构这个项目团队一共几个人、你向谁汇报？哪些决策是最终由你拍板、哪些是别人定的？请举一个你拍板后落地、上线出问题由你负责的具体例子。",
-        "purpose": "直接对齐简历「主导」与面试自述的「参与」，确认角色边界"
+        "question": "那个重构项目里，谁是技术负责人？请说出至少两件由你拍板、别人按你的方案执行的事，以及你本人提交过哪些模块的代码。",
+        "purpose": "把「主导」还是「参与」这件事问清楚，必要时请他提供代码仓库或评审记录佐证"
       },
       {
-        "question": "请把订单表的分库分表方案完整讲一遍：分片键是什么、总共几个分片、路由规则怎么写、你说的「按月归档表」和主表是什么关系、用户查全部历史订单会落到几个分片、后台不按用户维度查怎么路由？",
-        "purpose": "核验分片键前后矛盾这件事，验证方案是不是他本人设计"
+        "question": "请完整讲一遍订单表的分片方案：分片键是什么、分几个库几张表、按用户查和按商户查分别怎么路由？你说的按月归档表和按订单号分表分别是什么，数据怎么流转？",
+        "purpose": "验证分片方案是不是他本人设计的，本轮他在这里前后改过口"
       },
       {
-        "question": "5 万笔每秒这个数字是在什么机器规格、什么场景下压出来的？从 5000 到 5 万，具体是哪些改造贡献的，各自贡献多少？你在压测里具体负责什么？",
-        "purpose": "核实核心业绩数字的来由，区分团队成果与个人贡献"
+        "question": "吞吐量从五千到五万具体是怎么压出来、怎么优化上去的？压测环境、工具、指标口径是什么，压到五千时瓶颈在哪一环，你本人改了哪一段？",
+        "purpose": "核实简历上的核心数字，本轮他说压测主要是同事做的，且复述的数字与五万对不上"
       },
       {
-        "question": "Kafka 集群多大（broker 数、分区数、峰值吞吐）？你当时具体调了哪几个参数、调到多少、依据是什么？Redis 集群规模多大、容量怎么估的、遇到过大 key 或热 key 吗？",
-        "purpose": "验证简历写的「负责 Kafka 和 Redis 集群容量规划与调优」是真是假"
+        "question": "请用一个你写过的 Go 服务举例：goroutine 怎么管理、超时和取消怎么处理、有没有遇到过并发问题，现场写一段并发安全的代码。",
+        "purpose": "Go 是硬性要求，本轮完全没考察到"
       },
       {
-        "question": "如果监控已经确认下单接口变慢的瓶颈在数据库，你会自己动手用哪些具体手段确认到是哪条 SQL 或哪类锁（比如 processlist、执行计划、锁等待视图、连接池监控）？什么情况下你会自己查完、什么情况下才找 DBA？",
-        "purpose": "补测「能独立排查线上问题」这条硬性要求"
+        "question": "举一个你亲自处理的线上接口变慢或数据不一致的完整案例：怎么发现、怎么一步步缩小范围、根因是什么、怎么修、怎么验证不再复发。",
+        "purpose": "补上数据库实战和独立排查能力这两块，本轮回答都停留在概念层面"
       },
       {
-        "question": "请讲一段你用 Go 写的并发代码：goroutine 和 channel 怎么组织的、怎么控制并发度、怎么处理超时和取消？或者我们现场看一段代码。",
-        "purpose": "补测「熟练 Go」这条硬性要求，这一轮完全没考"
+        "question": "Kafka 和 Redis 集群当时各是什么规模，你调过哪几个具体参数、调整前后是多少，依据是什么数据判断要扩？",
+        "purpose": "核实「负责两套集群容量规划与调优」这条简历描述"
       }
     ]
   },
@@ -1970,7 +1914,7 @@
   "review_flags": [
     {
       "code": "integrity_risk",
-      "message": "发现 2 条诚信方面的迹象，风险等级为中，请回看录像核实后再做决定。"
+      "message": "发现 3 条诚信方面的迹象，风险等级为中，请回看录像核实后再做决定。"
     },
     {
       "code": "resume_doubt",
@@ -1978,31 +1922,31 @@
     }
   ],
   "limitations": [
-    "面试只有 7 分 46 秒，六道题都问了但每题篇幅很短，追问只到第 1、2、3 题，深度证据有限。",
-    "Go 语言能力、编码能力、分布式事务和微服务架构的实际实践完全没有考察到，技能清单无法验证。",
-    "2020.07 至 2022.02 外包公司的两年经历没有被问到，占五年经验中的相当一部分。",
-    "录像画面没有做抽帧检查，现场环境、是否有人协助等无法判断；只在文字和计时层面分析，看不到表情、听不到语气。",
-    "转写为语音识别结果，有同音错字（如「瑞迪斯」「卡夫卡」「灰渡」「分库分镖」「锁引」「压侧」），已按最合理意思理解，个别判断可能因此有偏差。"
+    "面试只有 7 分 46 秒，六道题全部问完但每题平均不到一分钟作答，Go、索引、缓存与消息队列的实操都没有深入考察。",
+    "转写来自语音识别，专业名词有识别错字（如「分库分镖」「灰渡」「压侧」「瑞迪斯」「卡夫卡」），已按最合理的意思理解，但个别表述的准确含义仍可能有偏差。",
+    "这场面试的录像画面没有检查过，画面里有没有其他人、有没有手机，从这份记录里无法判断。",
+    "面试中没有出现切出页面、粘贴等过程事件，但网页类信号采集不到时没有记录不等于没有发生。",
+    "语速偏快（240–260 字/分钟），只看转写听不到语气和表情，对表达状态和紧张程度的判断只能作参考。"
   ],
   "meta": {
     "model": "deepseek-flash",
     "thinking": "high",
-    "prompt_version": 8,
+    "prompt_version": 11,
     "system_fingerprints": [
       "bc19ba97cbe016479903222bb1578db6"
     ],
     "usage": {
       "calls": 23,
-      "prompt_tokens": 123928,
-      "completion_tokens": 54680,
-      "reasoning_tokens": 30159,
-      "cache_hit_tokens": 98304,
-      "cache_miss_tokens": 25624
+      "prompt_tokens": 131716,
+      "completion_tokens": 63521,
+      "reasoning_tokens": 40665,
+      "cache_hit_tokens": 100213,
+      "cache_miss_tokens": 31503
     },
-    "elapsed_ms": 86537,
+    "elapsed_ms": 130710,
     "evidence": {
-      "cited": 146,
-      "exact": 146,
+      "cited": 137,
+      "exact": 137,
       "approximate": 0,
       "whole_segment": 0,
       "dropped": 0

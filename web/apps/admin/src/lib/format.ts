@@ -43,6 +43,21 @@ export const statusLabel: Record<InterviewStatus, string> = {
   cancelled: "已取消",
 };
 
+/**
+ * 发了链接、候选人还没开始，链接已经过了有效期。
+ * 链接到期以后后端不改面试的状态，还是「已发链接」，列表上要自己拿到期时间看。
+ */
+export function inviteExpired(
+  interview: { status: InterviewStatus; invite_expires_at?: string | null },
+  now = Date.now(),
+): boolean {
+  return (
+    interview.status === "invited" &&
+    !!interview.invite_expires_at &&
+    Date.parse(interview.invite_expires_at) <= now
+  );
+}
+
 export const statusTone: Record<InterviewStatus, Tone> = {
   draft: "neutral",
   preparing: "info",
@@ -384,6 +399,7 @@ export const eventLabel: Record<string, string> = {
   phone_visible: "画面里看得到手机",
   frames_checked: "抽查录像画面",
   screen_wake_lock: "屏幕常亮",
+  audio_format_fallback: "这个浏览器放不了压缩过的面试官语音，改用没压缩的",
   upload_stalled: "录像传不上去",
   upload_recovered: "录像又传上去了",
   upload_finished: "录像传完了",
@@ -516,6 +532,7 @@ export function eventNote(event: EventLike): string | null {
     else if (p.held === false)
       parts.push(`${p.supported === false ? "浏览器不支持" : "没申请到"}，手机可能中途锁屏`);
   }
+  if (event.kind === "audio_format_fallback") parts.push("面试不受影响，每句话取得慢一些");
   if (event.kind === "upload_stalled") {
     const cause = str(p.cause);
     if (cause) parts.push(uploadStallCauseLabel[cause] ?? cause);

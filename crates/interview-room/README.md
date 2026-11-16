@@ -195,6 +195,8 @@ DATABASE_URL=$(scripts/dev-db.sh url) cargo test -p interview-room
 
 测试数据都是合成的。录制的测试里有一条会用 ffmpeg 现做一段两秒的测试视频再走一遍上传和合并；现场转写的测试（`tests/transcribe.rs`）用 ffmpeg 现做一段十秒的录像切成分片传上去，识别用假后端。机器上没装 ffmpeg 时这些测试自动跳过。
 
+实时对话要大模型才开得起来。测试里要么给一个按脚本回答的假模型（`tests/realtime.rs`），要么打开替身（`src/stand_in.rs`，`AI_INTERVIEW_ROOM_FAKE_LIVE_MODEL=true`）：没配大模型时它来接话，不看候选人说了什么，每道题追问一句固定的话，候选人再答完就进入下一题，所以同一场面试每次怎么走都一样。候选人页的浏览器测试靠它把实时对话在真浏览器里走一遍（`web/apps/candidate/e2e/realtime.spec.ts`）。它按 `interview_engine::live` 文档里的回答格式回话，那个格式变了它要跟着改。它说的话没有意义，正式环境不要打开；配了大模型时它不起作用。
+
 ## 本地联调
 
 `examples/demo.rs` 造一场准备好的面试（合成的岗位、候选人和题目，面试官的语音是提示音），不用先走出题和语音合成就能把面试间从头到尾跑一遍。它直接写库，只对着自己机器的开发库用，环境变量要和服务进程一样：

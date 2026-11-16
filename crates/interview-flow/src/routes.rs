@@ -16,8 +16,9 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::model::{
-    ConfigDefaults, CreateInterview, InterviewDetail, InterviewFilter, InterviewSummary,
-    PrepareRequest, UpdateInterview, UpdatedInterview, UtteranceView,
+    ConfigDefaults, CreateInterview, InterviewCounts, InterviewCountsFilter, InterviewDetail,
+    InterviewFilter, InterviewSummary, PrepareRequest, UpdateInterview, UpdatedInterview,
+    UtteranceView,
 };
 use crate::store::{self, InterviewRow, NewInterview};
 use crate::{Deps, prepare};
@@ -25,6 +26,7 @@ use crate::{Deps, prepare};
 pub(crate) fn router() -> OpenApiRouter<Deps> {
     OpenApiRouter::new()
         .routes(routes!(list_interviews, create_interview))
+        .routes(routes!(count_interviews))
         .routes(routes!(get_interview, update_interview, archive_interview))
         .routes(routes!(restore_interview))
         .routes(routes!(prepare_interview))
@@ -119,6 +121,25 @@ async fn list_interviews(
 ) -> ApiResult<Json<Page<InterviewSummary>>> {
     let (items, total) = store::list_interviews(&deps.ctx.db, &filter, &query).await?;
     Ok(Json(Page::new(items, total, &query)))
+}
+
+/// 面试计数
+///
+/// 各个状态、各个决定各有几场，再加几个要 HR 处理的数：面完了等着做决定的、报告生成失败的、
+/// 链接过期了候选人没来的。不含已归档的。可以只算某个候选人或某个岗位的。
+#[utoipa::path(
+    get,
+    path = "/api/v1/interviews/counts",
+    tag = "interviews",
+    params(InterviewCountsFilter),
+    responses((status = 200, description = "计数", body = InterviewCounts))
+)]
+async fn count_interviews(
+    State(deps): State<Deps>,
+    _user: AdminUser,
+    Query(filter): Query<InterviewCountsFilter>,
+) -> ApiResult<Json<InterviewCounts>> {
+    Ok(Json(store::count_interviews(&deps.ctx.db, &filter).await?))
 }
 
 /// 新建面试

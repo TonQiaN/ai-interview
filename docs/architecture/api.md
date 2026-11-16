@@ -113,8 +113,9 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 
 | 方法和路径 | 做什么 |
 | --- | --- |
-| `GET /api/v1/interviews`、`POST /api/v1/interviews` ★ | 列表（可按候选人、岗位、状态筛；每一行带报告的结论和综合分；`include_archived=true` 带上已归档的，归档的那几行 `archived_at` 有时间）、新建 |
-| `GET /api/v1/interviews/{id}`、`PATCH /api/v1/interviews/{id}`、`DELETE /api/v1/interviews/{id}` ★ | 详情（带候选人和岗位摘要、最新报告状态；归档了的 `archived_at` 有时间）、改配置、归档 |
+| `GET /api/v1/interviews`、`POST /api/v1/interviews` ★ | 列表（可按候选人、岗位、状态筛；每一行带报告的结论和综合分、面试阶段 `stage`、链接到期时间 `invite_expires_at`（没撤销的链接里最晚的那个；已经过了就是候选人打不开了，面试的状态不会因此变，再生成一条链接就能接着用）；`include_archived=true` 带上已归档的，归档的那几行 `archived_at` 有时间）、新建 |
+| `GET /api/v1/interviews/counts` | 只返回数字，不含已归档的：各个状态、各个决定各有几场，面完了报告已出还没做决定的、最新一份报告生成失败的、链接过期了候选人没来的各有几场。可以带 `candidate_id`、`position_id` 只算一部分。总览和侧栏上的数字用它，不要翻列表自己数（列表一页最多 100 场） |
+| `GET /api/v1/interviews/{id}`、`PATCH /api/v1/interviews/{id}`、`DELETE /api/v1/interviews/{id}` ★ | 详情（带候选人和岗位摘要、最新报告状态、链接到期时间 `invite_expires_at`；归档了的 `archived_at` 有时间）、改配置、归档 |
 | `POST /api/v1/interviews/{id}/restore` | 把归档的面试恢复回来，返回详情。状态、题目、录像、报告都和归档前一样；候选人的面试链接归档时打不开，恢复以后没过期、没撤销的又能用。没归档的再调一次也算成功 |
 | `POST /api/v1/interviews/{id}/prepare` ★ | 出题加预合成语音 |
 | `POST /api/v1/interviews/{id}/cancel` | 取消 |
@@ -366,10 +367,11 @@ HR 侧：
 - `recording_gap` 是面试中录像缺了一段，带 `device` 和 `cause`：`device` 是 `audio` 或 `video` 时是麦克风或摄像头断了（`cause` 为 `ended` 设备没了、`muted` 被系统静音，比如来电话）；`device` 是 `audio_output` 时是页面的声音被系统整个停掉了（`cause` 为 `suspended`、`interrupted`，或者 `stalled` 状态正常但声音不走），这一段面试官的话播不出来，录像里也没有声音。恢复了报 `device_recovered`；声音被停掉的那一种带 `device: "audio_output"` 和 `duration_ms`（停了多久）。这两种情况面试都会停下来等，不会把这段时间算成候选人没说话。
 - `interview_started` 在开始面试、刷新后续面、换到另一个页面接着面时各报一次：`resumed`（是不是接着之前的面）、`video_kbps`（这一段录像的画面实际用的码率，千比特每秒；没有摄像头是 0）、`video_reduced`（是不是因为量出来的上行网速装不下配置的码率，把画面降了下来）。`video_reduced` 为 true 的那一段画面比平时糊，是页面有意降的，不是摄像头的问题。
 - `audio_format_fallback` 是这个浏览器解不了压缩过的面试官语音（`from: "mp3"`），页面改取没压缩的，一场面试最多报一次。面试不受影响，只是之后每句语音取得慢一些；排查真机问题时用。
+- `page_error` 是页面自己渲染出错了：`stage`（出错时在哪一步，`interview`、`preflight` 等）和 `name`（错误的类型名，不带错误的内容）。页面这时显示「页面出了点问题，请刷新」，面试停在原地不再往下走，候选人刷新后会接着面（下一条 `interview_started` 带 `resumed: true`）。这是页面的毛病，不是候选人的表现。
 - `screen_wake_lock` 在开始面试时报一次：`supported`（浏览器有没有屏幕常亮的能力）和 `held`（有没有申请到）。没申请到时手机可能中途自动锁屏，录像会断。
 - `upload_stalled` 是录像传不动了：`cause`（`retrying` 请求失败在重试、`offline` 浏览器报告断网、`failed` 重试也没用）和当时还没传的分片数 `pending_chunks`。又传动了报 `upload_recovered`：`stalled_ms`（停了多久）、`failures`（中间连续失败了几次）、`pending_chunks`。一次停顿不管重试多少次只报这一对。
 - `upload_finished` 是面试结束后录像全部传完：`uploaded_bytes`（这次打开页面以来传了多少字节）和 `wait_ms`（面试结束后候选人等了多久；刷新后回来补传的是 null）。
 - `page_taken_over` 是面试换到另一个页面里继续了（见上面「同一条链接同时开在两个页面里」），由停下来的那个页面报，没有别的内容。这之后到下一条 `interview_started` 之间的录像在另一段里，不是候选人离开了。刷新页面续面不报这一条。
 - `kind` 只能用小写字母、数字和下划线；`payload` 是一个 JSON 对象，序列化后不超过 4096 字节；一次最多报 200 条。格式不对的单条事件会被丢掉，不影响同一批里的其他事件。
 
-`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`upload_stalled`、`upload_recovered`、`upload_finished`、`device_check`、`device_report`、`screen_wake_lock`、`audio_format_fallback`、`page_opened`、`interview_started`、`interview_finished`、`page_taken_over`、`question_replayed`、`answer_continued`、`events_dropped`、`interview_abandoned`（服务端记的：候选人离开后一直没回来，面试被结束）、`face_count_changed`、`phone_visible`、`frames_checked`（这三种由 ⑦ 面试后从录像抽帧产出，浏览器不报，含义见 `crates/interview-report/README.md` 的「录像画面检查」）。
+`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`upload_stalled`、`upload_recovered`、`upload_finished`、`device_check`、`device_report`、`screen_wake_lock`、`audio_format_fallback`、`page_error`、`page_opened`、`interview_started`、`interview_finished`、`page_taken_over`、`question_replayed`、`answer_continued`、`events_dropped`、`interview_abandoned`（服务端记的：候选人离开后一直没回来，面试被结束）、`face_count_changed`、`phone_visible`、`frames_checked`（这三种由 ⑦ 面试后从录像抽帧产出，浏览器不报，含义见 `crates/interview-report/README.md` 的「录像画面检查」）。

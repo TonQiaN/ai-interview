@@ -58,6 +58,9 @@ pub struct RoomConfig {
     /// 语音识别用的是假后端时，要不要也做现场转写。假后端出来的是固定的文字，不是候选人说的话，
     /// 所以默认不做；联调和端到端测试想看整条链路通不通时打开
     pub transcribe_with_fake: bool,
+    /// 没配大模型时，实时对话要不要用一个固定回答的替身（见 [`crate::stand_in`]）。替身不看候选人说了
+    /// 什么，每道题追问同一句，只给端到端测试用：让页面和服务端在实时对话下也能接在一起跑。默认不用
+    pub live_stand_in: bool,
     /// 实时对话里，候选人停下来多少秒算说完了一段。逐题模式用的是面试配置里的静音时长（3 到 10 秒），
     /// 对话的时候等那么久太僵；太短又会把想一想的停顿当成说完了
     pub realtime_silence_sec: u32,
@@ -158,6 +161,16 @@ impl RoomConfig {
             tracing::warn!(reason = %err, "AI_INTERVIEW_ROOM_FAKE_TRANSCRIPT 写得不对，这次按 false 处理");
             default.transcribe_with_fake
         });
+        let live_stand_in = env_flag("AI_INTERVIEW_ROOM_FAKE_LIVE_MODEL", default.live_stand_in)
+            .unwrap_or_else(|err| {
+                tracing::warn!(reason = %err, "AI_INTERVIEW_ROOM_FAKE_LIVE_MODEL 写得不对，这次按 false 处理");
+                default.live_stand_in
+            });
+        if live_stand_in {
+            tracing::warn!(
+                "AI_INTERVIEW_ROOM_FAKE_LIVE_MODEL 打开了：没配大模型时，实时对话里面试官的追问是固定的一句。只该在测试里用"
+            );
+        }
         let realtime_silence_sec = env_parse(
             "AI_INTERVIEW_ROOM_REALTIME_SILENCE_SEC",
             default.realtime_silence_sec,
@@ -240,6 +253,7 @@ impl RoomConfig {
             abandon_after_minutes,
             upload_idle_minutes,
             transcribe_with_fake,
+            live_stand_in,
             realtime_silence_sec,
             realtime_pause_check_ms,
             realtime_done_silence_ms,
@@ -269,6 +283,7 @@ impl Default for RoomConfig {
             abandon_after_minutes: 15,
             settle_timeout_sec: 20,
             transcribe_with_fake: false,
+            live_stand_in: false,
             realtime_silence_sec: 2,
             realtime_pause_check_ms: 500,
             realtime_done_silence_ms: 1_000,

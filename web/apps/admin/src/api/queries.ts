@@ -736,6 +736,31 @@ export function useInterviews(query: InterviewQuery = {}, enabled = true) {
   });
 }
 
+/** 一次导出最多这么多场。再多的话先筛一筛（按岗位、按状态）再导 */
+export const EXPORT_LIMIT = 2000;
+
+/**
+ * 符合条件的面试全部取回来，不只是一页：接口一页最多 100 场，这里一页一页取到取完。
+ * 多于 EXPORT_LIMIT 场时只取前面这么多，`total` 是一共有多少。
+ */
+export async function fetchAllInterviews(
+  query: Omit<InterviewQuery, "page" | "page_size">,
+): Promise<{ items: InterviewSummary[]; total: number }> {
+  const items: InterviewSummary[] = [];
+  let total = 0;
+  for (let page = 1; items.length < EXPORT_LIMIT; page += 1) {
+    const data = await unwrap(
+      api.GET("/api/v1/interviews", { params: { query: { ...query, page, page_size: 100 } } }),
+    );
+    total = data.total;
+    // 取到一半列表变了（有人新安排了一场），同一场可能出现在两页里，只留一行
+    const seen = new Set(items.map((i) => i.id));
+    items.push(...data.items.filter((i) => !seen.has(i.id)));
+    if (data.items.length === 0 || page * 100 >= total) break;
+  }
+  return { items: items.slice(0, EXPORT_LIMIT), total };
+}
+
 export function useInterview(id: string | undefined) {
   return useQuery({
     queryKey: ["interview", id],

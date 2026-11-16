@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { setFetch } from "../api/http";
 import { createMockServer } from "../api/mock/server";
 import type { InterviewSummary, Page } from "../api/types";
+import { catchDownload } from "../test/download";
 import { PositionDetailPage } from "./PositionDetail";
 
 type Server = ReturnType<typeof createMockServer>;
@@ -30,7 +31,10 @@ beforeEach(async () => {
   setFetch((request) => server.fetch(request));
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 function open(id: string) {
   // 和正式页面一样，刚取过的数据十秒内不重新取
@@ -198,6 +202,28 @@ describe("岗位详情", () => {
       await waitFor(() => expect(rows()).toBeGreaterThanOrEqual(3));
       expect(screen.queryByRole("button", { name: "下一页" })).toBeNull();
       expect(screen.queryByText(/^共 \d+ 条/)).toBeNull();
+    });
+  });
+
+  describe("导出表格", () => {
+    it("导出的是这个岗位的全部面试，文件名里带着岗位的名字", async () => {
+      const position = firstPosition();
+      const mine = server.db.interviews.filter(
+        (i) => i.position.id === position.id && !i.archived_at,
+      );
+      expect(mine.length).toBeGreaterThan(0);
+      expect(server.db.interviews.length).toBeGreaterThan(mine.length);
+      const download = catchDownload();
+      open(position.id);
+      const card = (await screen.findByText("这个岗位的面试")).closest(".oil-card") as HTMLElement;
+
+      fireEvent.click(await within(card).findByRole("button", { name: "导出表格" }));
+      const { name, lines } = await download.file();
+      expect(name).toMatch(/^面试结果-.+-\d{8}\.csv$/);
+      expect(name).toContain(position.title.slice(0, 4));
+      expect(lines.length).toBe(mine.length + 1);
+      for (const i of mine)
+        expect(lines.some((line) => line.includes(`/interviews/${i.id}`))).toBe(true);
     });
   });
 

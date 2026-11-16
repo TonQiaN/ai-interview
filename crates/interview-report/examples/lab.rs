@@ -16,6 +16,11 @@
 //! # 给样例加上「上行网速慢，画面的码率降了下来，画面检查在糊的画面上看错了一两帧」的过程事件
 //! cargo run -p interview-report --example lab -- reduced --out /tmp/reduced
 //! cargo run -p interview-report --example lab -- evaluate --samples /tmp/reduced
+//! # 给样例加上「面试页自己出错，候选人刷新后过了一分半钟才接着面」，看这段停顿会不会算到候选人头上
+//! cargo run -p interview-report --example lab -- crash --out /tmp/crash
+//! cargo run -p interview-report --example lab -- evaluate --samples /tmp/crash
+//! # 数一数已经存下来的报告里，给 HR 看的文字带了多少处事件和字段的英文名。不调用模型
+//! cargo run -p interview-report --example lab -- names --samples /tmp/reduced --reports /tmp/reduced-reports
 //! # 从一段录像里抽帧，让模型看画面里有几个人、有没有手机，打印整理出来的过程事件
 //! cargo run -p interview-report --example lab -- frames 录像.webm
 //! # 把这些事件加进一份面试记录再分析（--record 指定记录，报告打印到标准输出）
@@ -44,7 +49,7 @@ use interview_report::record::{
 use interview_report::report::{
     Credibility, Decision, InterviewReport, ReviewFlagCode, RiskLevel, SignalKind, Usage,
 };
-use interview_report::{AnalyzeOptions, analyze, compare};
+use interview_report::{AnalyzeOptions, analyze, compare, program_names_in_prose};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -129,6 +134,19 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// 给样例加上「面试页自己出错，候选人刷新后接着面」：过程事件加上，出错之后的转写和事件整体往后挪，
+    /// 另存一份，用来检验这段停顿会不会算到候选人头上。不调用模型
+    Crash {
+        /// 只处理这几个场景（场景 id），不填就处理全部
+        only: Vec<String>,
+        #[arg(long, default_value = "crates/interview-report/scenarios")]
+        scenarios: PathBuf,
+        #[arg(long, default_value = "crates/interview-report/samples")]
+        samples: PathBuf,
+        /// 改过的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// 给样例加上「上行网速慢，页面把录像画面的码率降了下来」时会有的过程事件，另存一份，
     /// 用来检验报告怎么对待糊的画面上看错的那一两帧。不调用模型
     Reduced {
@@ -141,6 +159,15 @@ enum Command {
         /// 加了事件的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
         #[arg(long)]
         out: PathBuf,
+    },
+    /// 数一数存下来的报告里，给 HR 看的文字带了多少处事件和字段的英文名。不调用模型
+    Names {
+        /// 面试记录所在的目录
+        #[arg(long, default_value = "crates/interview-report/samples")]
+        samples: PathBuf,
+        /// 报告所在的目录，文件名和面试记录相同
+        #[arg(long, default_value = "crates/interview-report/samples/reports")]
+        reports: PathBuf,
     },
     /// 从录像里抽帧，让模型看画面，打印整理出来的过程事件和每一帧的结果
     Frames {
@@ -270,10 +297,26 @@ async fn main() -> Result<()> {
     {
         return reduced_all(scenarios, samples, out, only);
     }
+    if let Command::Crash {
+        only,
+        scenarios,
+        samples,
+        out,
+    } = &cli.command
+    {
+        return crash_all(scenarios, samples, out, only);
+    }
+    if let Command::Names { samples, reports } = &cli.command {
+        return names_all(samples, reports);
+    }
     let model =
         ReportUnfinished(DeepSeekClient::from_env().context("需要设置环境变量 DEEPSEEK_API_KEY")?);
     match cli.command {
-        Command::Network { .. } | Command::Takeover { .. } | Command::Reduced { .. } => Ok(()),
+        Command::Network { .. }
+        | Command::Takeover { .. }
+        | Command::Reduced { .. }
+        | Command::Crash { .. }
+        | Command::Names { .. } => Ok(()),
         Command::Simulate {
             only,
             scenarios,
@@ -756,7 +799,7 @@ fn network_all(
     Ok(())
 }
 
-/// 加上一场网络差的面试里面试间会报的事件：上行网速慢、没拿到屏幕常亮、录像三次传不动
+/// 加上一场网络差的面试里面试间会报的事件：上行网速慢、没拿到屏幕常亮、浏览器播不了压缩过的语音、录像三次传不动
 /// （一次请求失败、一次断网、一次重试到放弃）。事件的写法和面试间上报的一样，
 /// 经过 [`ProctorEvent::from_raw`] 整理。`unrecovered` 为真时最后一次停顿发生在面试快结束时，
 /// 没有恢复，录像也没有传完。返回加了几条事件。
@@ -790,6 +833,8 @@ fn add_network_events(record: &mut InterviewRecord, unrecovered: bool) -> usize 
             Some(0),
             json!({"supported": false, "held": false}),
         ),
+        // 这个浏览器播不了压缩过的面试官语音，页面改取了没压缩的
+        ("audio_format_fallback", Some(900), json!({"from": "mp3"})),
         (
             "upload_stalled",
             Some(first),
@@ -917,6 +962,93 @@ fn add_takeover_events(record: &mut InterviewRecord) -> u64 {
     raw.push(("page_taken_over", Some(at + 400), json!({})));
     add_raw_events(record, "t", raw);
     at
+}
+
+// ---------- 面试页自己出错，刷新后接着面 ----------
+
+fn crash_all(scenarios: &Path, samples: &Path, out: &Path, only: &[String]) -> Result<()> {
+    let scenarios = load_scenarios(scenarios, only)?;
+    std::fs::create_dir_all(out)?;
+    for scenario in &scenarios {
+        let mut record: InterviewRecord =
+            read_json(&samples.join(format!("{}.json", scenario.id)))?;
+        let (crashed_at, resumed_at) = add_page_crash(&mut record);
+        let path = out.join(format!("{}.json", scenario.id));
+        std::fs::write(&path, serde_json::to_string_pretty(&record)? + "\n")?;
+        println!(
+            "{}：页面在 {} 出错，{} 接着面 → {}",
+            scenario.id,
+            clock(crashed_at),
+            clock(resumed_at),
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+/// 面试过半之后，面试官刚问完一个问题，面试页渲染出错：候选人看到「请刷新」，刷新、重新检查设备，
+/// 85 秒之后才接着面。面试的时间轴是照常往前走的，所以出错之后的转写和事件整体往后挪 85 秒，
+/// 面试也长了 85 秒；面试官的那个问题留在出错之前，这样从转写的时间上看，候选人像是隔了一分半钟才开口。
+/// 事件的写法和面试间上报的一样：出错的页面报 `page_error`，刷新后报 `page_opened` 和
+/// `interview_started`（`resumed: true`）。返回出错和接着面的时间。
+fn add_page_crash(record: &mut InterviewRecord) -> (u64, u64) {
+    const HELD_MS: u64 = 85_000;
+    let half = record.duration_ms / 2;
+    let interviewer = || {
+        record
+            .transcript
+            .iter()
+            .filter(|segment| segment.speaker == Speaker::Interviewer)
+    };
+    let crashed_at = interviewer()
+        .find(|segment| segment.start_ms >= half)
+        .or_else(|| interviewer().next_back())
+        .map_or(half, |segment| segment.end_ms);
+    let resumed_at = crashed_at + HELD_MS;
+
+    for segment in &mut record.transcript {
+        if segment.start_ms >= crashed_at {
+            segment.start_ms += HELD_MS;
+            segment.end_ms += HELD_MS;
+            for word in &mut segment.words {
+                word.s += HELD_MS;
+                word.e += HELD_MS;
+            }
+        }
+    }
+    for event in &mut record.events {
+        if let Some(at) = event.at_ms.as_mut().filter(|at| **at >= crashed_at) {
+            *at += HELD_MS;
+        }
+    }
+    record.duration_ms += HELD_MS;
+
+    let signals = json!({
+        "signals": {"visibility": true, "fullscreen": true, "device_change": true, "network": true, "clipboard": true},
+        "in_app_browser": null
+    });
+    let mut raw = Vec::new();
+    if !record
+        .events
+        .iter()
+        .any(|event| event.kind == "page_opened")
+    {
+        raw.push(("page_opened", None, signals.clone()));
+        raw.push(("interview_started", Some(0), json!({"resumed": false})));
+    }
+    raw.push((
+        "page_error",
+        Some(crashed_at),
+        json!({"stage": "interview", "name": "TypeError"}),
+    ));
+    raw.push(("page_opened", None, signals));
+    raw.push((
+        "interview_started",
+        Some(resumed_at),
+        json!({"resumed": true}),
+    ));
+    add_raw_events(record, "c", raw);
+    (crashed_at, resumed_at)
 }
 
 // ---------- 上行慢，画面的码率降了下来 ----------
@@ -1092,6 +1224,8 @@ struct Outcome {
     report: InterviewReport,
     seconds: f64,
     checks: Vec<(String, bool)>,
+    /// 给 HR 看的文字里带出来的事件和字段的英文名
+    program_names: Vec<String>,
 }
 
 async fn evaluate_all(
@@ -1115,12 +1249,14 @@ async fn evaluate_all(
             let started = Instant::now();
             let report = analyze(&record, model, options).await?;
             let checks = check(&scenario.expectation, &report);
+            let program_names = program_names_in_prose(&record, &report);
             anyhow::Ok(Outcome {
                 id: scenario.id.clone(),
                 title: scenario.title.clone(),
                 report,
                 seconds: started.elapsed().as_secs_f64(),
                 checks,
+                program_names,
             })
         }
     }))
@@ -1128,6 +1264,7 @@ async fn evaluate_all(
 
     let mut total = Usage::default();
     let (mut passed, mut failed) = (0, 0);
+    let (mut names, mut reports_with_names) = (0, 0);
     for (scenario, result) in scenarios.iter().zip(results) {
         let outcome = result.with_context(|| format!("分析场景 {} 失败", scenario.id))?;
         let report = &outcome.report;
@@ -1181,6 +1318,11 @@ async fn evaluate_all(
                 failed += 1;
             }
         }
+        if !outcome.program_names.is_empty() {
+            println!("  正文里的英文名：{}", outcome.program_names.join("、"));
+            names += outcome.program_names.len();
+            reports_with_names += 1;
+        }
         add_usage(&mut total, &report.meta.usage);
         if let Some(out) = out {
             std::fs::create_dir_all(out)?;
@@ -1189,8 +1331,46 @@ async fn evaluate_all(
         }
     }
     println!(
-        "\n合计：预期 {passed} 条符合，{failed} 条不符合。{}",
+        "\n合计：预期 {passed} 条符合，{failed} 条不符合。\
+         给 HR 看的文字里带出事件和字段的英文名 {names} 处（{reports_with_names} 份报告）。{}",
         usage_line(&total)
+    );
+    Ok(())
+}
+
+/// 数存下来的报告里带出了多少处事件和字段的英文名。
+fn names_all(samples: &Path, reports: &Path) -> Result<()> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(reports)
+        .with_context(|| format!("读不了目录 {}", reports.display()))?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    files.sort();
+    let (mut names, mut reports_with_names) = (0, 0);
+    for path in &files {
+        let Some(file_name) = path.file_name() else {
+            continue;
+        };
+        let report: InterviewReport = read_json(path)?;
+        let record: InterviewRecord = read_json(&samples.join(file_name))?;
+        let found = program_names_in_prose(&record, &report);
+        println!(
+            "{}：{}",
+            file_name.to_string_lossy(),
+            if found.is_empty() {
+                "没有".to_owned()
+            } else {
+                found.join("、")
+            }
+        );
+        if !found.is_empty() {
+            names += found.len();
+            reports_with_names += 1;
+        }
+    }
+    println!(
+        "\n{} 份报告里，给 HR 看的文字带出事件和字段的英文名 {names} 处（{reports_with_names} 份报告）。",
+        files.len()
     );
     Ok(())
 }

@@ -71,11 +71,12 @@ import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import {
   Confirm,
   DecisionBadge,
+  InterviewStatusBadge,
   LoadError,
   Loading,
   QueryView,
   RecommendationBadge,
-  StatusBadge,
+  StageBadge,
 } from "../components/common";
 import { PageHeader } from "../components/PageHeader";
 import { ReplayPlayer } from "../components/ReplayPlayer";
@@ -1756,7 +1757,8 @@ export function InterviewDetailPage() {
             title={`${i.candidate.name} · ${i.position.title}`}
             description={
               <span className="oil-row oil-row--wrap">
-                <StatusBadge status={i.status} />
+                <InterviewStatusBadge interview={i} />
+                <StageBadge stage={i.config.stage} />
                 {archived(i) && <Badge plain>已归档</Badge>}
                 <Verdict interview={i} />
                 <DecisionBadge value={i.decision} />

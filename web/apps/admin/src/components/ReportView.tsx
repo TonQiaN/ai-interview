@@ -20,7 +20,6 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import type {
   AspectRating,
   ClaimCheck,
@@ -68,7 +67,7 @@ import {
   stageName,
 } from "../lib/format";
 import type { Frame } from "../lib/frames";
-import { prepareForPrint } from "../lib/print";
+import { usePrinting } from "../lib/print";
 import { FrameThumbs } from "./FrameThumbs";
 
 type Seek = (ms: number) => void;
@@ -78,36 +77,6 @@ const FramesContext = createContext<Map<string, Frame[]>>(new Map());
 
 /** 正在打印。纸上点不了「还有几处出处」，这时候全摆出来 */
 const PrintingContext = createContext(false);
-
-/**
- * 打印这份报告的前后要做的事：收着的出处和段落展开，打印完收回去。
- * 用浏览器自己的打印（Ctrl+P）和点页面上的按钮都走这里。
- */
-function usePrinting(root: React.RefObject<HTMLElement | null>): boolean {
-  const [printing, setPrinting] = useState(false);
-  useEffect(() => {
-    let restore: (() => void) | null = null;
-    const before = () => {
-      if (restore) return;
-      // 浏览器在这个事件处理完之后马上排版，等不到下一次渲染
-      flushSync(() => setPrinting(true));
-      restore = prepareForPrint(root.current ?? document);
-    };
-    const after = () => {
-      restore?.();
-      restore = null;
-      setPrinting(false);
-    };
-    window.addEventListener("beforeprint", before);
-    window.addEventListener("afterprint", after);
-    return () => {
-      window.removeEventListener("beforeprint", before);
-      window.removeEventListener("afterprint", after);
-      restore?.();
-    };
-  }, [root]);
-  return printing;
-}
 
 const matchNote: Partial<Record<NonNullable<Evidence["quote_match"]>, string>> = {
   approximate: "大意，和原话不完全一样",

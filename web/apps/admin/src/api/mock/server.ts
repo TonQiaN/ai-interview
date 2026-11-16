@@ -183,8 +183,13 @@ function byNewest<T extends { created_at: string }>(a: T, b: T): number {
 }
 
 /** 列表里的一行。结论和分数取自最新一份生成好的报告，和后端一样 */
-function summary(i: Interview, report: ReportVersion["content"]): InterviewSummary {
+function summary(
+  i: Interview,
+  report: ReportVersion["content"],
+  inviteExpiresAt: string | null,
+): InterviewSummary {
   return {
+    invite_expires_at: inviteExpiresAt,
     overall_score: report?.overall_score ?? null,
     score_range: report?.score_range ?? null,
     recommendation: report?.recommendation.decision ?? null,
@@ -194,6 +199,7 @@ function summary(i: Interview, report: ReportVersion["content"]): InterviewSumma
     position_id: i.position.id,
     position_title: i.position.title,
     status: i.status,
+    stage: i.config.stage ?? "screening",
     decision: i.decision,
     report_status: i.report?.status ?? null,
     started_at: i.started_at ?? null,
@@ -479,6 +485,16 @@ export function createMockServer(options: MockOptions = {}) {
         });
       });
     });
+  }
+
+  /** 没撤销的链接里最晚的那个到期时间，和后端算的一样；没发过或者都撤销了就是空 */
+  function inviteExpiresAt(id: string): string | null {
+    return (db.invites.get(id) ?? [])
+      .filter((invite) => invite.status !== "revoked")
+      .reduce<string | null>(
+        (latest, invite) => (latest && latest >= invite.expires_at ? latest : invite.expires_at),
+        null,
+      );
   }
 
   function refreshInviteState(i: Interview) {
@@ -1352,6 +1368,7 @@ export function createMockServer(options: MockOptions = {}) {
           i,
           (db.reports.get(i.id) ?? []).find((v) => v.brief.status === "done" && v.content)
             ?.content ?? null,
+          inviteExpiresAt(i.id),
         ),
       );
     // 按分数排：没有分数的排在最后，正序倒序都是
@@ -1416,7 +1433,10 @@ export function createMockServer(options: MockOptions = {}) {
     db.interviews.push(i);
     return i;
   });
-  on("GET", "/interviews/:id", ({ params }) => find.interview(params[0]));
+  on("GET", "/interviews/:id", ({ params }) => {
+    const i = find.interview(params[0]);
+    return { ...i, invite_expires_at: inviteExpiresAt(i.id) };
+  });
   on("PATCH", "/interviews/:id", ({ params, body }) => {
     const i = find.interview(params[0]);
     ensureEditable(i);

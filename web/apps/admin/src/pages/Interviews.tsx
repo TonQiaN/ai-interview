@@ -6,12 +6,14 @@ import type { InterviewStatus } from "../api/types";
 import {
   DecisionBadge,
   Empty,
+  InterviewStatusBadge,
   Pager,
   Person,
   QueryView,
   SearchInput,
-  StatusBadge,
+  StageBadge,
 } from "../components/common";
+import { ExportInterviewsButton } from "../components/ExportInterviews";
 import { PageHeader } from "../components/PageHeader";
 import { ReportVerdict } from "../components/ReportVerdict";
 import { duration, elapsedMs, relativeTime, statusLabel } from "../lib/format";
@@ -28,14 +30,14 @@ export function InterviewsPage() {
   const byScore = params.get("sort") === "score";
   // 归档的面试平时不列出来；要找回去看，或者管理员要彻底删除其中一场时勾上
   const archived = params.get("archived") === "1";
-  const interviews = useInterviews({
+  // 列表和导出用同一组筛选条件，导出的就是筛出来的这些
+  const filters = {
     status: status || undefined,
     q,
-    page,
-    page_size: 20,
-    sort: byScore ? "-score" : undefined,
+    sort: byScore ? ("-score" as const) : undefined,
     ...(archived ? { include_archived: true } : {}),
-  });
+  };
+  const interviews = useInterviews({ ...filters, page, page_size: 20 });
   const filtered = Boolean(q || status);
 
   function update(patch: Record<string, string>) {
@@ -91,6 +93,8 @@ export function InterviewsPage() {
           checked={archived}
           onChange={(e) => update({ archived: e.target.checked ? "1" : "", page: "" })}
         />
+        <span className="oil-grow" />
+        <ExportInterviewsButton query={filters} disabled={!interviews.data?.total} />
       </div>
       <QueryView query={interviews}>
         {(data) =>
@@ -129,7 +133,8 @@ export function InterviewsPage() {
                       <td>{i.position_title}</td>
                       <td>
                         <span className="adm-item__tags">
-                          <StatusBadge status={i.status} />
+                          <InterviewStatusBadge interview={i} />
+                          <StageBadge stage={i.stage} />
                           {i.archived_at && <Badge plain>已归档</Badge>}
                         </span>
                       </td>

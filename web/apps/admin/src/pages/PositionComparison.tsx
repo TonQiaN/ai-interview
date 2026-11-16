@@ -9,8 +9,8 @@ import {
   Table,
   useToast,
 } from "@ai-interview/ui";
-import { Check, Copy, Scale } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, Copy, Printer, Scale } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { errorMessage, fieldErrors } from "../api/http";
 import { useComparison, useInterviews, usePosition, useStartComparison } from "../api/queries";
@@ -39,6 +39,7 @@ import {
   reviewFlagLabel,
   scoreRangeText,
 } from "../lib/format";
+import { usePrinting } from "../lib/print";
 
 /** 一次最少、最多比几场，和后端一致 */
 const MIN_PICK = 2;
@@ -78,7 +79,8 @@ function Picker({
     Boolean(comparison?.result) && sameSelection(picked, comparison?.interview_ids ?? []);
 
   return (
-    <Card>
+    // 选人是在页面上做的事，打印出来的对比里不要
+    <Card className="adm-no-print">
       <CardHeader
         title="选要比的人"
         actions={
@@ -165,7 +167,10 @@ function CandidateBlock({
         )}
         <span className="adm-item__sub">{confidenceLabel[candidate.confidence]}</span>
         <span className="oil-grow" />
-        <Link to={`/interviews/${candidate.interview_id}?tab=report`} className="adm-item__sub">
+        <Link
+          to={`/interviews/${candidate.interview_id}?tab=report`}
+          className="adm-item__sub adm-no-print"
+        >
           看这份报告
         </Link>
       </div>
@@ -222,8 +227,18 @@ function CandidateBlock({
 }
 
 /** 一份生成好的对比 */
-export function ComparisonView({ result }: { result: ComparisonResult }) {
+export function ComparisonView({
+  result,
+  positionTitle,
+}: {
+  result: ComparisonResult;
+  /** 岗位的名字。打印出来没有页面上方的导航，抬头靠它说明是哪个岗位 */
+  positionTitle?: string;
+}) {
   const toast = useToast();
+  const root = useRef<HTMLDivElement>(null);
+  // 用浏览器自己的打印（Ctrl+P）和点下面的按钮都走这里：深色主题先换成浅色
+  usePrinting(root);
   const { comparison, people } = result;
   const names = useMemo(
     () => displayNames(comparison.candidates, people),
@@ -244,9 +259,25 @@ export function ComparisonView({ result }: { result: ComparisonResult }) {
     .join("\n");
 
   return (
-    <div className="oil-stack adm-compare">
+    <div ref={root} className="oil-stack adm-compare">
+      <p className="adm-print-only adm-flat">
+        {positionTitle ? `${positionTitle}：` : ""}候选人对比，{fullTime(result.generated_at)}
+        生成。由 AI 读各自的面试报告写出来，供参考。
+      </p>
       <Card>
-        <CardHeader title="结论" />
+        <CardHeader
+          title="结论"
+          actions={
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Printer aria-hidden="true" />}
+              onClick={() => window.print()}
+            >
+              打印 / 存成 PDF
+            </Button>
+          }
+        />
         <CardBody>
           <p className="adm-compare__summary">{text(comparison.summary)}</p>
           {comparison.caveats.length > 0 && (
@@ -479,7 +510,7 @@ function Body({ position }: { position: Position }) {
         </Banner>
       )}
       {current?.result ? (
-        <ComparisonView result={current.result} />
+        <ComparisonView result={current.result} positionTitle={position.title} />
       ) : (
         !busy(current) &&
         current?.status !== "failed" && (
