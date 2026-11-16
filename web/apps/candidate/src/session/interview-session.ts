@@ -38,6 +38,7 @@ import {
 import { IndexedDbChunkStore } from "../lib/upload/idb-chunk-store";
 import { discardSession, discardStale } from "../lib/upload/leftovers";
 import { closeOrphanSegments } from "../lib/upload/orphans";
+import { SpillChunkStore } from "../lib/upload/spill-chunk-store";
 import { UploadEventTracker } from "../lib/upload/upload-events";
 import { retryDelayMs, Uploader, type UploadStatus } from "../lib/upload/uploader";
 import { EnergyVad } from "../lib/vad/energy-vad";
@@ -263,7 +264,11 @@ export class InterviewSession {
 
     let store: ChunkStore;
     try {
-      store = await IndexedDbChunkStore.open();
+      // 面试到一半本机存不下了（磁盘满了、配额用完了），写不进去的分片先留在内存里接着传
+      store = new SpillChunkStore(await IndexedDbChunkStore.open(), {
+        onSpill: (error) =>
+          collector.record("recording_error", { message: error.name, kept_in_memory: true }),
+      });
     } catch {
       // 隐私模式等情况下 IndexedDB 不可用：分片放内存，能录能传，只是刷新会丢没传完的
       store = new MemoryChunkStore();
