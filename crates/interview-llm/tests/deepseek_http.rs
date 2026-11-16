@@ -1,13 +1,17 @@
 //! 用本地假服务器检查 DeepSeek 客户端的 HTTP 行为，不联网。
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use interview_llm::{
     ChatModel, ChatRequest, DeepSeekClient, DeepSeekConfig, Effort, FinishReason, LlmError,
-    Message, StreamEvent, Thinking,
+    Message, StreamEvent, Thinking, chat_json,
 };
 use serde_json::json;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -208,16 +212,163 @@ async fn bad_request_reports_the_server_message() {
 }
 
 #[tokio::test]
-async fn stream_cut_before_finish_is_an_error() {
+async fn stream_that_ends_without_finishing_is_resent_then_reported() {
     let server = MockServer::start().await;
     let body = format!("data: {}\n\n", delta(json!({"content": "说到一半"})));
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+        .expect(3)
         .mount(&server)
         .await;
 
     let error = client(&server).chat(request()).await.unwrap_err();
-    assert!(matches!(error, LlmError::Decode(_)), "{error}");
+    assert!(error.is_retryable(), "{error}");
+    let LlmError::Transport(message) = &error else {
+        panic!("应该算成网络错误：{error}");
+    };
+    assert!(message.contains("重发 2 次"), "{message}");
+}
+
+/// 假服务器的一次应答。
+#[derive(Clone)]
+enum Reply {
+    /// 回 200 和这些数据，然后不收尾就把连接掐掉。
+    Cut(Vec<serde_json::Value>),
+    /// 把这些数据完整地发完。
+    Full(Vec<serde_json::Value>),
+}
+
+/// 能在响应发到一半时掐断连接的假服务器（wiremock 只会把响应发完）。
+/// 第几个连接用第几份应答，用完了一直用最后一份。返回地址和一共来了几个连接。
+async fn cutting_server(replies: Vec<Reply>) -> (String, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let connections = Arc::new(AtomicUsize::new(0));
+    let counter = connections.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let index = counter.fetch_add(1, Ordering::SeqCst);
+            let reply = replies[index.min(replies.len() - 1)].clone();
+            tokio::spawn(async move {
+                read_request(&mut socket).await;
+                let (chunks, complete) = match reply {
+                    Reply::Cut(chunks) => (chunks, false),
+                    Reply::Full(chunks) => (chunks, true),
+                };
+                let mut out = String::from(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n",
+                );
+                for chunk in chunks {
+                    let data = format!("data: {chunk}\n\n");
+                    out.push_str(&format!("{:x}\r\n{data}\r\n", data.len()));
+                }
+                if complete {
+                    let done = "data: [DONE]\n\n";
+                    out.push_str(&format!("{:x}\r\n{done}\r\n0\r\n\r\n", done.len()));
+                }
+                let _ = socket.write_all(out.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            });
+        }
+    });
+    (address, connections)
+}
+
+/// 把请求读完（请求头加上 content-length 那么多的请求体），免得没读完就关连接。
+async fn read_request(socket: &mut tokio::net::TcpStream) {
+    let mut received = Vec::new();
+    let mut buffer = [0u8; 4096];
+    loop {
+        let Ok(count) = socket.read(&mut buffer).await else {
+            return;
+        };
+        if count == 0 {
+            return;
+        }
+        received.extend_from_slice(&buffer[..count]);
+        let Some(head_end) = received.windows(4).position(|window| window == b"\r\n\r\n") else {
+            continue;
+        };
+        let head = String::from_utf8_lossy(&received[..head_end]).to_ascii_lowercase();
+        let body_len = head
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length:"))
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        if received.len() >= head_end + 4 + body_len {
+            return;
+        }
+    }
+}
+
+fn client_at(address: &str) -> DeepSeekClient {
+    let mut config = DeepSeekConfig::new("sk-test");
+    config.base_url = address.to_owned();
+    config.retry_base_delay = Duration::from_millis(5);
+    config.idle_timeout = Duration::from_millis(500);
+    DeepSeekClient::new(config).unwrap()
+}
+
+#[tokio::test]
+async fn connection_dropped_mid_response_is_resent() {
+    let (address, connections) = cutting_server(vec![
+        Reply::Cut(vec![delta(json!({"content": "{\"ans"}))]),
+        Reply::Full(vec![
+            delta(json!({"content": "{\"answer\": 42}"})),
+            finish("stop"),
+        ]),
+    ])
+    .await;
+
+    #[derive(serde::Deserialize)]
+    struct Answer {
+        answer: u32,
+    }
+    let reply = chat_json::<Answer>(&client_at(&address), request())
+        .await
+        .unwrap();
+    assert_eq!(reply.value.answer, 42);
+    assert_eq!(reply.attempts, 1, "连接断了重发不算模型写错");
+    assert_eq!(connections.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn connection_that_keeps_dropping_reports_how_many_times_it_tried() {
+    let (address, connections) = cutting_server(vec![Reply::Cut(vec![delta(
+        json!({"content": "说到一半"}),
+    )])])
+    .await;
+
+    let error = client_at(&address).chat(request()).await.unwrap_err();
+    let LlmError::Transport(message) = &error else {
+        panic!("应该是网络错误：{error}");
+    };
+    assert!(message.contains("重发 2 次"), "{message}");
+    assert!(error.is_retryable());
+    assert_eq!(connections.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn streaming_callers_see_the_drop_instead_of_a_resend() {
+    let (address, connections) = cutting_server(vec![Reply::Cut(vec![delta(
+        json!({"content": "说到一半"}),
+    )])])
+    .await;
+
+    let mut events = client_at(&address).chat_stream(request()).await.unwrap();
+    let first = events.next().await.unwrap().unwrap();
+    assert_eq!(first, StreamEvent::Content("说到一半".to_owned()));
+    let error = events.next().await.unwrap().unwrap_err();
+    assert!(matches!(error, LlmError::Transport(_)), "{error}");
+    assert!(events.next().await.is_none());
+    assert_eq!(
+        connections.load(Ordering::SeqCst),
+        1,
+        "已经交出去的话不能重来"
+    );
 }
 
 #[tokio::test]
