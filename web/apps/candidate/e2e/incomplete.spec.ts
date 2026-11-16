@@ -3,6 +3,7 @@ import {
   button,
   enterInterview,
   expectQuestion,
+  expectRecordingsReady,
   LOCAL_DB,
   localRecordings,
   open,
@@ -14,7 +15,9 @@ import {
 /**
  * 录像没能传完整的时候，HR 照样看得到已经传上去的部分，候选人也不会对着一个传不完的进度干等。
  *
- * 两种情况：候选人没等传完就关了页面；本机有一片没存下来（磁盘满了之类），怎么重试都补不上。
+ * 两种情况：候选人没等传完就关了页面；本机有一片没存下来，怎么重试都补不上。
+ *
+ * 最后一条是防着第二种情况发生：本机存不下的时候，分片先留在内存里接着传，录像是完整的。
  */
 
 const UPLOADS = "**/api/v1/room/recordings/**";
@@ -126,5 +129,41 @@ test("本机有一片录像没存下来：面试照常结束，不卡在重试�
   expect(recording?.total_chunks).toBe(lost);
   expect(recording?.error).toContain("中间缺了");
   await expect.poll(() => localRecordings(page), { timeout: 30_000 }).toEqual({});
+  await expect(button(page, "重试")).toHaveCount(0);
+});
+
+test("面试到一半本机存不下录像了：分片留在内存里接着传，录像是完整的", async ({ page }) => {
+  // 像磁盘满了那样：开关打开以后，往本机的库里写什么都失败（读和删照常）
+  await page.addInitScript(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args) {
+      if ((window as unknown as { __diskFull?: boolean }).__diskFull) {
+        throw new DOMException("磁盘满了", "QuotaExceededError");
+      }
+      return put.apply(this, args);
+    };
+  });
+  const interview = await enterInterview(page, { silenceSec: 30 });
+  await expectQuestion(page, 1);
+  const uploaded = () => roomState(interview).recordings[0]?.chunks.length ?? 0;
+
+  await expect.poll(uploaded, { timeout: 20_000 }).toBeGreaterThan(1);
+  await page.evaluate(() => Object.assign(window, { __diskFull: true }));
+  const before = uploaded();
+
+  // 存不下以后录的几片照样传上去了；一直到面试结束都存不下
+  await expect.poll(uploaded, { timeout: 20_000 }).toBeGreaterThan(before + 3);
+  await button(page, "结束").click();
+  await button(page, "结束面试").click();
+  await expect(page.getByText("面试已结束")).toBeVisible({ timeout: 30_000 });
+
+  const state = await expectRecordingsReady(interview, 1);
+  expect(state.recordings[0]?.error).toBeNull();
+  expect(state.recordings[0]?.total_chunks).toBeGreaterThan(before + 3);
+  // 这件事记了一条过程事件，只记一次
+  const errors = state.events.filter((event) => event.kind === "recording_error");
+  expect(errors.map((event) => event.payload)).toEqual([
+    { message: "QuotaExceededError", kept_in_memory: true },
+  ]);
   await expect(button(page, "重试")).toHaveCount(0);
 });
