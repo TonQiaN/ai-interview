@@ -6,6 +6,15 @@ body,
   min-height: 100%;
 }
 
+/*
+ * 这一页只有浅色的样子（面试中的深色舞台是画出来的，不是跟着系统变的）。
+ * 写成 only light，手机开着深色模式时，会自己把网页变暗的浏览器就不动它。
+ * 设计系统里写的是 light，这里多写一层 html 让它排在前面；index.html 里还有一份，管样式下完之前。
+ */
+html:root {
+  color-scheme: only light;
+}
+
 .app-center {
   flex: 1 1 auto;
   display: grid;
