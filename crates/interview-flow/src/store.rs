@@ -9,8 +9,8 @@ use sqlx::{PgConnection, PgPool, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::model::{
-    CandidateBrief, InterviewDetail, InterviewFilter, InterviewSummary, PositionBrief, ReportBrief,
-    SynthProgress, UtteranceView,
+    CandidateBrief, InterviewCounts, InterviewCountsFilter, InterviewDetail, InterviewFilter,
+    InterviewSummary, PositionBrief, ReportBrief, SynthProgress, UtteranceView,
 };
 
 /// `interviews` 表的一行。
@@ -156,6 +156,51 @@ pub(crate) async fn list_interviews(
         .push_bind(query.offset());
     let items = list.build_query_as().fetch_all(db).await?;
     Ok((items, total))
+}
+
+/// 面试的计数：按状态、按决定，再加几个要 HR 处理的。不含已归档的。
+pub(crate) async fn count_interviews(
+    db: &PgPool,
+    filter: &InterviewCountsFilter,
+) -> Result<InterviewCounts, sqlx::Error> {
+    let ended = "i.status IN ('completed', 'abandoned')";
+    let mut builder = QueryBuilder::new(format!(
+        "SELECT count(*) AS total, \
+         count(*) FILTER (WHERE i.status = 'draft') AS draft, \
+         count(*) FILTER (WHERE i.status = 'preparing') AS preparing, \
+         count(*) FILTER (WHERE i.status = 'prepare_failed') AS prepare_failed, \
+         count(*) FILTER (WHERE i.status = 'ready') AS ready, \
+         count(*) FILTER (WHERE i.status = 'invited') AS invited, \
+         count(*) FILTER (WHERE i.status = 'in_progress') AS in_progress, \
+         count(*) FILTER (WHERE i.status = 'completed') AS completed, \
+         count(*) FILTER (WHERE i.status = 'abandoned') AS abandoned, \
+         count(*) FILTER (WHERE i.status = 'expired') AS expired, \
+         count(*) FILTER (WHERE i.status = 'cancelled') AS cancelled, \
+         count(*) FILTER (WHERE i.decision = 'pending') AS pending, \
+         count(*) FILTER (WHERE i.decision = 'advance') AS advance, \
+         count(*) FILTER (WHERE i.decision = 'hold') AS hold, \
+         count(*) FILTER (WHERE i.decision = 'reject') AS reject, \
+         count(*) FILTER (WHERE {ended} AND i.decision = 'pending' \
+                            AND latest.status = 'done') AS awaiting_decision, \
+         count(*) FILTER (WHERE {ended} AND latest.status = 'failed') AS report_failed, \
+         count(*) FILTER (WHERE i.status = 'invited' \
+                            AND {INVITE_EXPIRES_AT} <= now()) AS invite_expired \
+         FROM interviews i \
+         LEFT JOIN LATERAL ( \
+           SELECT r.status FROM interview_reports r WHERE r.interview_id = i.id \
+           ORDER BY r.version DESC LIMIT 1 \
+         ) latest ON true \
+         WHERE i.archived_at IS NULL"
+    ));
+    if let Some(candidate_id) = filter.candidate_id {
+        builder
+            .push(" AND i.candidate_id = ")
+            .push_bind(candidate_id);
+    }
+    if let Some(position_id) = filter.position_id {
+        builder.push(" AND i.position_id = ").push_bind(position_id);
+    }
+    builder.build_query_as().fetch_one(db).await
 }
 
 pub(crate) async fn synth_progress(db: &PgPool, id: Uuid) -> Result<SynthProgress, sqlx::Error> {

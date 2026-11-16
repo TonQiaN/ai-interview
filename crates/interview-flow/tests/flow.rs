@@ -1212,6 +1212,132 @@ async fn the_list_and_the_detail_say_when_the_link_expires(pool: PgPool) {
     }
 }
 
+/// 把一场面试直接改成某个状态和决定，再按需要放一份报告。计数接口只读库，不关心是怎么走到这一步的。
+async fn force_state(
+    pool: &PgPool,
+    interview_id: &str,
+    status: &str,
+    decision: &str,
+    reports: &[&str],
+) {
+    sqlx::query("UPDATE interviews SET status = $2, decision = $3 WHERE id = $1::uuid")
+        .bind(interview_id)
+        .bind(status)
+        .bind(decision)
+        .execute(pool)
+        .await
+        .unwrap();
+    for (index, report_status) in reports.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO interview_reports (interview_id, version, status) \
+             VALUES ($1::uuid, $2, $3)",
+        )
+        .bind(interview_id)
+        .bind(i32::try_from(index).unwrap() + 1)
+        .bind(report_status)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn counts_interviews_by_status_and_decision(pool: PgPool) {
+    let h = Harness::new(pool.clone(), None, FakeBackend::new()).await;
+
+    // 两场草稿，其中一场归档了：归档的不算
+    let _draft = h.create(json!({})).await;
+    let archived = h.create(json!({})).await;
+    let response = TestRequest::delete(format!("/api/v1/interviews/{archived}"))
+        .send(&h.app)
+        .await;
+    assert_eq!(response.status, StatusCode::NO_CONTENT);
+
+    // 已发链接：一场链接还有效，一场过期了
+    let invited = h.create(json!({})).await;
+    force_state(&pool, &invited, "invited", "pending", &[]).await;
+    insert_invite(&pool, &invited, 72, false).await;
+    let link_expired = h.create(json!({})).await;
+    force_state(&pool, &link_expired, "invited", "pending", &[]).await;
+    insert_invite(&pool, &link_expired, -1, false).await;
+
+    let in_progress = h.create(json!({})).await;
+    force_state(&pool, &in_progress, "in_progress", "pending", &[]).await;
+
+    // 面完了、报告好了、还没做决定：等 HR 处理
+    let waiting = h.create(json!({})).await;
+    force_state(&pool, &waiting, "completed", "pending", &["done"]).await;
+    let waiting_abandoned = h.create(json!({})).await;
+    force_state(&pool, &waiting_abandoned, "abandoned", "pending", &["done"]).await;
+    // 报告还在生成：不算等 HR 处理
+    let report_running = h.create(json!({})).await;
+    force_state(&pool, &report_running, "completed", "pending", &["running"]).await;
+    // 最新一份报告失败了（上一份是好的）：算报告失败，不算等 HR 处理
+    let report_failed = h.create(json!({})).await;
+    force_state(
+        &pool,
+        &report_failed,
+        "completed",
+        "pending",
+        &["done", "failed"],
+    )
+    .await;
+    // 已经做了决定的
+    let advanced = h.create(json!({})).await;
+    force_state(&pool, &advanced, "completed", "advance", &["done"]).await;
+    let rejected = h.create(json!({})).await;
+    force_state(&pool, &rejected, "completed", "reject", &["done"]).await;
+
+    let response = h.get("/api/v1/interviews/counts").await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let counts = response.json();
+    assert_eq!(counts["total"], 10, "{counts}");
+    assert_eq!(
+        counts["by_status"],
+        json!({
+            "draft": 1, "preparing": 0, "prepare_failed": 0, "ready": 0, "invited": 2,
+            "in_progress": 1, "completed": 5, "abandoned": 1, "expired": 0, "cancelled": 0,
+        })
+    );
+    assert_eq!(
+        counts["by_decision"],
+        json!({ "pending": 8, "advance": 1, "hold": 0, "reject": 1 })
+    );
+    assert_eq!(counts["awaiting_decision"], 2, "{counts}");
+    assert_eq!(counts["report_failed"], 1, "{counts}");
+    assert_eq!(counts["invite_expired"], 1, "{counts}");
+
+    // 和列表按状态筛出来的总数对得上
+    for (status, expected) in [("invited", 2), ("completed", 5), ("draft", 1)] {
+        let list = h
+            .get(&format!("/api/v1/interviews?status={status}&page_size=1"))
+            .await
+            .json();
+        assert_eq!(list["total"], expected, "{status}");
+    }
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn counts_can_be_narrowed_to_a_position_or_a_candidate(pool: PgPool) {
+    let h = Harness::new(pool.clone(), None, FakeBackend::new()).await;
+    let _first = h.create(json!({})).await;
+    let _second = h.create(json!({})).await;
+
+    for (filter, expected) in [
+        (format!("position_id={}", h.position_id), 2),
+        (format!("candidate_id={}", h.candidate_id), 2),
+        (format!("position_id={}", Uuid::now_v7()), 0),
+        (format!("candidate_id={}", Uuid::now_v7()), 0),
+    ] {
+        let counts = h
+            .get(&format!("/api/v1/interviews/counts?{filter}"))
+            .await
+            .json();
+        assert_eq!(counts["total"], expected, "{filter}");
+        assert_eq!(counts["by_status"]["draft"], expected, "{filter}");
+    }
+}
+
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn an_archived_interview_can_be_restored(pool: PgPool) {
     let h = Harness::new(pool, None, FakeBackend::new()).await;
