@@ -82,7 +82,7 @@ export function AddQuestionDialog({
       <div className="oil-stack">
         {save.error && <Banner tone="danger">{errorMessage(save.error)}</Banner>}
         <p className="oil-muted" style={{ margin: 0 }}>
-          这道题排在主问题的最后，面试官照你写的原话问，时间不够也不会跳过。重新出题时它不会保留；想每场都问，把它写进设置里「必须问的题」。
+          这道题排在主问题的最后，面试官照你写的原话问。时间紧的时候别的题会被跳过，这道不会；只有整场面试已经超出预期时长四分之一，才会不问就收尾。重新出题时它不会保留；想每场都问，把它写进设置里「必须问的题」。
         </p>
         <Field label="面试官会这样问">
           {({ id, describedBy }) => (

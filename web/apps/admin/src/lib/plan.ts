@@ -27,7 +27,7 @@ export function nextQuestionKey(plan: InterviewPlan): string {
 
 /**
  * 把 HR 写的题放进计划：排在主问题的最后、备用题的前面（后端要求备用题都在主问题后面）。
- * 标成必问题：HR 特意加的，时间不够也不该被跳过。
+ * 标成必问题：HR 特意加的，时间紧也不该被跳过（引擎只在超出预期时长 125% 以后才不问必问题）。
  */
 export function addQuestion(plan: InterviewPlan, draft: QuestionDraft): InterviewPlan {
   const question: PlannedQuestion = {
