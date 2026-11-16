@@ -42,6 +42,16 @@ const json = (body: unknown, status = 200) =>
 
 const errorBody = (code: string, message: string) => ({ error: { code, message, details: null } });
 
+/**
+ * 假的 fetch 一直不返回时，把请求留在这里。
+ *
+ * 真的 fetch 在请求发出去以后一直拿着它。假的不拿的话，整条等待链上没有一头是被别处引用着的：
+ * 超时的计时器只连着外面那个 AbortController，它到 `request.signal` 是 Node 里的一条弱引用。
+ * 这期间来一次垃圾回收，请求连同等它的代码一起被收走，超时到了也没人知道，测试就卡到 5 秒
+ * 超时（#274）。
+ */
+const inFlight = new Set<Request>();
+
 describe("候选人侧接口客户端", () => {
   it("令牌只放在请求头里，不进地址，也不带 cookie", async () => {
     const { api, calls } = setup(() => json({ stage: "not_started" }));
@@ -139,7 +149,20 @@ describe("候选人侧接口客户端", () => {
     expect(calls[2]?.headers.get("Content-Type")).toBe("application/octet-stream");
     // 分片的字节原样发出去，不会被当成 JSON 序列化
     expect([...new Uint8Array(await (calls[2] as Call).request.arrayBuffer())]).toEqual([9, 8]);
-    expect(JSON.parse(calls[3]?.body ?? "")).toEqual({ total_chunks: 3 });
+    expect(JSON.parse(calls[3]?.body ?? "")).toEqual({ total_chunks: 3, accept_missing: false });
+
+    await api.completeSegment(segment, 3, { acceptMissing: true });
+    expect(JSON.parse(calls[4]?.body ?? "")).toEqual({ total_chunks: 3, accept_missing: true });
+  });
+
+  it("上传出错时把错误码带给上传器", async () => {
+    const { api } = setup(() => json(errorBody("segment_closed", "这一段已经合并，不能再传"), 409));
+    const segment = { track: "camera" as const, segmentId: "0b1c2d3e-0000-4000-8000-000000000001" };
+    const error = await api
+      .putChunk(segment, 0, new Uint8Array([1]).buffer, "abc")
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UploadError);
+    expect(error).toMatchObject({ retryable: false, status: 409, code: "segment_closed" });
   });
 
   it("把后端的错误归类，带上错误码和提示", async () => {
@@ -170,15 +193,18 @@ describe("候选人侧接口客户端", () => {
       timeoutMs: 10,
       fetch: (request) =>
         new Promise((_resolve, reject) => {
-          request.signal.addEventListener("abort", () =>
-            reject(new DOMException("aborted", "AbortError")),
-          );
+          inFlight.add(request);
+          request.signal.addEventListener("abort", () => {
+            inFlight.delete(request);
+            reject(new DOMException("aborted", "AbortError"));
+          });
         }),
     });
     expect(await slow.getSession().catch((caught: unknown) => caught)).toMatchObject({
       kind: "network",
       message: "请求超时",
     });
+    expect(inFlight.size).toBe(0);
   });
 
   it("反向代理返回的不是 JSON 时也能给出错误", async () => {

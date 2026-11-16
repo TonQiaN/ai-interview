@@ -98,6 +98,18 @@ async fn purging_removes_every_file_and_row_of_the_interview(pool: PgPool) {
     ] {
         blobs.put(&key, Bytes::from_static(b"x")).await.unwrap();
     }
+    // 两份候选人对比：一份比过这场面试，一份没有
+    for compared in [vec![interview_id, other_id], vec![other_id]] {
+        sqlx::query(
+            "INSERT INTO position_comparisons (position_id, interview_ids, status, content) \
+             VALUES ($1, $2, 'done', '{}')",
+        )
+        .bind(h.position_id)
+        .bind(compared)
+        .execute(&h.ctx.db)
+        .await
+        .unwrap();
+    }
     let other_files = files_left(&h, other_id).await;
     assert_eq!(other_files, 1);
     let other_rows = rows_left(&h, other_id).await;
@@ -126,6 +138,14 @@ async fn purging_removes_every_file_and_row_of_the_interview(pool: PgPool) {
     assert_eq!(rows_left(&h, interview_id).await, 0);
     let response = h.get(&format!("/api/v1/interviews/{id}")).await;
     assert_eq!(response.status, StatusCode::NOT_FOUND);
+
+    // 比过它的那份对比跟着删了，没比过它的还在
+    let comparisons: Vec<Vec<Uuid>> =
+        sqlx::query_scalar("SELECT interview_ids FROM position_comparisons")
+            .fetch_all(&h.ctx.db)
+            .await
+            .unwrap();
+    assert_eq!(comparisons, vec![vec![other_id]]);
 
     // 费用记录还在，只是不再指向这场面试
     let usage_after: i64 = sqlx::query_scalar("SELECT count(*) FROM llm_usage")
@@ -257,5 +277,55 @@ async fn interviews_in_use_are_not_purged(pool: PgPool) {
     assert_eq!(rows_left(&h, interview_id).await, 0);
     assert_eq!(files_left(&h, interview_id).await, 0);
     // 被取消的收尾任务不会再跑
+    assert_eq!(h.run_tasks().await, 0);
+}
+
+/// 合并录像的任务内容里只有录像的 id，没有面试的 id。它正在跑的时候不能删：
+/// 合并出来的文件会在删完以后才写到磁盘上，库里却已经没有这场面试了。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_recording_being_assembled_blocks_the_purge(pool: PgPool) {
+    let h = harness(pool).await;
+    let id = h.finished_interview("completed").await;
+    let interview_id: Uuid = id.parse().unwrap();
+    let files = files_left(&h, interview_id).await;
+    let recording_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO interview_recordings (interview_id, track, content_type, status) \
+         VALUES ($1, 'camera', 'video/webm', 'assembling') RETURNING id",
+    )
+    .bind(interview_id)
+    .fetch_one(&h.ctx.db)
+    .await
+    .unwrap();
+    let assemble_task = |status: &'static str| {
+        sqlx::query(
+            "INSERT INTO tasks (id, kind, payload, status, locked_at) \
+             VALUES ($1, 'recording.assemble', $2, $3, now())",
+        )
+        .bind(interview_core::new_id())
+        .bind(json!({ "recording_id": recording_id }))
+        .bind(status)
+        .execute(&h.ctx.db)
+    };
+
+    assemble_task("running").await.unwrap();
+    let response = purge(&h, &id).await;
+    assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.text());
+    assert_eq!(files_left(&h, interview_id).await, files);
+
+    // 这一段合并完了，还有一次合并排着队：可以删，排着队的那次不会再跑
+    sqlx::query("UPDATE tasks SET status = 'succeeded' WHERE status = 'running'")
+        .execute(&h.ctx.db)
+        .await
+        .unwrap();
+    assemble_task("queued").await.unwrap();
+    assert_eq!(purge(&h, &id).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(rows_left(&h, interview_id).await, 0);
+    assert_eq!(files_left(&h, interview_id).await, 0);
+    let left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM tasks WHERE kind = 'recording.assemble'")
+            .fetch_one(&h.ctx.db)
+            .await
+            .unwrap();
+    assert_eq!(left, 0);
     assert_eq!(h.run_tasks().await, 0);
 }

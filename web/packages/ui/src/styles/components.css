@@ -698,6 +698,8 @@
 
   /* ───────── 表格 ───────── */
   .oil-table-wrap {
+    /* 表格里只给读屏软件看的文字是绝对定位的，不加这一句它会把整个页面撑出横向滚动条 */
+    position: relative;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }

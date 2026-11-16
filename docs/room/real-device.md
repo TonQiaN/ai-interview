@@ -50,7 +50,7 @@
 ### 二、正常答题
 
 8. 听完第一个问题，直接开口回答十几秒，然后停下来不说话。
-   应该看到：停下来以后出现一个倒计时的圆圈，走完自动进入下一题。
+   应该看到：回答的时候「我答完了，下一题」按钮就在屏幕上，不用往下滑；停下来以后出现一个倒计时的圆圈，走完自动进入下一题。页面上的字没有被屏幕边切掉的。
 9. 第二题回答几秒后，点「我答完了，下一题」。
    应该看到：马上进入下一题，不用等倒计时。
 10. 下一题播完以后点「再听一遍题目」。
@@ -168,7 +168,7 @@
 | `device_check`、`device_report` | 设备检测卡在哪一步、失败的原因、测出来的上行网速 |
 | `screen_wake_lock` | `supported`、`held`：屏幕常亮申请到了没有 |
 | `recording_gap`、`device_recovered` | `device` 是 `camera`、`microphone` 还是 `audio_output`（声音被系统停掉），`cause` 是原因，`duration_ms` 是停了多久 |
-| `recording_error` | 录制器报的错误名 |
+| `recording_error` | 录制器报的错误名；带 `kept_in_memory: true` 的是本机存不下录像、分片改放内存接着传（录像应该还是完整的） |
 | `upload_stalled`、`upload_recovered`、`upload_finished` | 录像传不动的原因、攒了多少片、结束后等了多久才传完 |
 | `visibility_hidden`、`visibility_visible` | 切后台、锁屏的时间点 |
 

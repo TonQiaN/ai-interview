@@ -39,6 +39,8 @@ export interface SegmentRecorderOptions {
   timelineNow: () => number;
   /** 生成段标识。 */
   newId?: () => string;
+  /** 现在几点（毫秒时间戳），默认 Date.now。 */
+  now?: () => number;
 }
 
 export class SegmentRecorder {
@@ -93,6 +95,7 @@ export class SegmentRecorder {
       mimeType: recorder.mimeType,
       startMs: options.timelineNow(),
       totalChunks: null,
+      createdAt: (options.now ?? Date.now)(),
     };
     this.meta = meta;
     await options.store.putSegment(meta);

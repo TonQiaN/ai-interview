@@ -527,7 +527,7 @@ export function eventNote(event: EventLike): string | null {
   }
   if (event.kind === "upload_finished") {
     const bytes = num(p.uploaded_bytes);
-    if (bytes !== null) parts.push(`共 ${fileSize(bytes)}`);
+    if (bytes !== null && bytes > 0) parts.push(`共 ${fileSize(bytes)}`);
     const wait = num(p.wait_ms);
     if (wait !== null && wait >= 1000) parts.push(`面试结束后等了 ${duration(wait)}`);
   }
@@ -617,6 +617,10 @@ export function eventEvidenceText(quote: string): string {
 /** 事件叫什么。同一类事件里说法不一样的（画面看不清记在人数变化里）在这里分开 */
 export function eventName(event: EventLike): string {
   if (event.kind === "face_count_changed" && event.payload?.unclear === true) return "画面看不清";
+  // 候选人又打开页面时，没有要补传的，或者剩下的已经传不进去了，页面也会报一次「传完」，
+  // 实际一个字节都没传。写成「录像传完了 共 0 B」会让人以为录像是完整的
+  if (event.kind === "upload_finished" && event.payload?.uploaded_bytes === 0)
+    return "这一次打开页面没有再传录像";
   return eventLabel[event.kind] ?? event.kind;
 }
 
@@ -819,4 +823,9 @@ export function resumeQuote(quote: string): string {
     .map((line) => line.replace(/^\s*(#{1,6}|[-*+])\s+/, "").replace(/\*\*(.+?)\*\*/g, "$1"))
     .join("\n")
     .trim();
+}
+
+/** 账号的角色。后端以后加了新的角色，不认识的原样显示 */
+export function roleLabel(role: string): string {
+  return role === "admin" ? "管理员" : role === "recruiter" ? "普通账号" : role;
 }

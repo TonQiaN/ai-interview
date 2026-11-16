@@ -35,6 +35,8 @@ pub(super) fn router() -> OpenApiRouter<Deps> {
         .routes(routes!(list_candidates, create_candidate))
         .routes(routes!(get_candidate, update_candidate, archive_candidate))
         .routes(routes!(regenerate_profile))
+        .routes(routes!(restore_candidate))
+        .routes(routes!(purge_candidate))
         .merge(uploads)
 }
 
@@ -392,6 +394,84 @@ async fn archive_candidate(
     } else {
         Err(ApiError::not_found("候选人"))
     }
+}
+
+/// 恢复归档的候选人
+///
+/// 归档错了用这个恢复：重新出现在列表里，可以再修改、再安排面试，简历和画像都还在。
+/// 没归档的再调一次也算成功。
+#[utoipa::path(
+    post,
+    path = "/api/v1/candidates/{id}/restore",
+    tag = "candidates",
+    params(("id" = Uuid, Path, description = "候选人 id")),
+    responses(
+        (status = 200, description = "恢复后的候选人", body = CandidateDetail),
+        (status = 404, description = "候选人不存在", body = ErrorBody),
+    )
+)]
+async fn restore_candidate(
+    State(deps): State<Deps>,
+    _user: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<CandidateDetail>> {
+    let candidate = candidates::restore(&deps.ctx.db, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("候选人"))?;
+    Ok(Json(detail(&deps, candidate).await?))
+}
+
+/// 彻底删除候选人
+///
+/// 只有管理员能用，删了不能恢复。候选人要求删除个人信息时用：姓名、手机、邮箱、画像、备注，
+/// 和他的每一份简历（原件、全文、解析结果）一起删掉。大模型的用量记录留着，里面没有个人信息。
+/// 这些简历的解析任务记录也删掉。名下还有面试（归档的也算）时不能删，先把那些面试彻底删除（`POST /api/v1/interviews/{id}/purge`）。
+/// 从 RAAS 导入的候选人删掉以后，再导入会重新建一位。只想在列表里藏起来用归档
+/// （`DELETE /api/v1/candidates/{id}`）。
+#[utoipa::path(
+    post,
+    path = "/api/v1/candidates/{id}/purge",
+    tag = "candidates",
+    params(("id" = Uuid, Path, description = "候选人 id")),
+    responses(
+        (status = 204, description = "删掉了"),
+        (status = 403, description = "不是管理员", body = ErrorBody),
+        (status = 404, description = "候选人不存在", body = ErrorBody),
+        (status = 409, description = "名下还有面试，code 是 candidate_has_interviews", body = ErrorBody),
+    )
+)]
+async fn purge_candidate(
+    State(deps): State<Deps>,
+    user: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<StatusCode> {
+    user.require_admin()?;
+    let mut tx = deps.ctx.db.begin().await?;
+    let Some(resume_ids) = candidates::lock_for_purge(&mut tx, id).await? else {
+        return Err(ApiError::not_found("候选人"));
+    };
+    let interviews = candidates::interview_count(&mut tx, id).await?;
+    if interviews > 0 {
+        return Err(ApiError::conflict(format!(
+            "这位候选人名下还有 {interviews} 场面试（归档的也算）。请先把这些面试彻底删除，再删候选人"
+        ))
+        .with_code("candidate_has_interviews"));
+    }
+    // 先删文件再删记录：文件没删干净就不提交，记录还在，可以再删一次。
+    // 反过来的话，记录没了，剩下的文件就再也找不到是谁的
+    let prefix = resume_files_prefix(id);
+    for file in deps.ctx.blobs.list(&prefix).await? {
+        deps.ctx.blobs.delete(&file.key).await?;
+    }
+    candidates::purge(&mut tx, id, &resume_ids).await?;
+    tx.commit().await?;
+    tracing::info!(candidate_id = %id, admin_id = %user.id, resumes = resume_ids.len(), "彻底删除了一位候选人");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 一位候选人的简历文件都放在这个前缀下（见 `interview_core::blob_key::resume_original`）。
+fn resume_files_prefix(candidate_id: Uuid) -> String {
+    format!("resumes/{candidate_id}")
 }
 
 /// 重新生成画像

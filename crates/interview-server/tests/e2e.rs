@@ -8,6 +8,7 @@
 //! → 从录像里取回答重新转写（①④）→ 录像画面检查和报告（①⑦）。每个模块自己的细节由各自的测试负责。
 //!
 //! 两场面试：一场逐题，一场实时对话（面试官现场追问，追问和对它的回答要算在那道题里）。
+//! 逐题那一场最后走一遍「候选人要求删除数据」：先彻底删除面试，再彻底删除候选人，磁盘上不留他的文件。
 //!
 //! 本机没装 ffmpeg 时，逐题那一场不传录像，报告那一步断言的是「没有回答，评不了」；
 //! 实时对话那一场只能从录像里听候选人说话，直接不跑。CI 里装了，没装会失败。
@@ -665,6 +666,38 @@ async fn a_whole_interview_from_login_to_wrap_up(pool: PgPool) {
         "{reports:?}"
     );
     assert_eq!(image_requests(&llm), looked);
+
+    // ── 候选人要求删除自己的数据：先删面试，再删候选人 ──
+    let candidate_id = w.hr_get(&uri).await["candidate"]["id"]
+        .as_str()
+        .expect("面试详情里有候选人")
+        .to_owned();
+    let purge_candidate = format!("/api/v1/candidates/{candidate_id}/purge");
+    // 名下还有面试时删不了候选人
+    let refused = w.hr(TestRequest::post(&purge_candidate)).await;
+    assert_eq!(refused.status, StatusCode::CONFLICT, "{}", refused.text());
+
+    let purged = w.hr(TestRequest::post(format!("{uri}/purge"))).await;
+    assert_eq!(purged.status, StatusCode::NO_CONTENT, "{}", purged.text());
+    let gone = w.hr(TestRequest::get(&uri)).await;
+    assert_eq!(gone.status, StatusCode::NOT_FOUND);
+    let left = w.ctx.blobs.list(&format!("interviews/{id}")).await.unwrap();
+    assert!(left.is_empty(), "面试的文件没删干净：{left:?}");
+
+    let purged = w.hr(TestRequest::post(&purge_candidate)).await;
+    assert_eq!(purged.status, StatusCode::NO_CONTENT, "{}", purged.text());
+    let left = w
+        .ctx
+        .blobs
+        .list(&format!("resumes/{candidate_id}"))
+        .await
+        .unwrap();
+    assert!(left.is_empty(), "简历文件没删干净：{left:?}");
+    // 磁盘上不再有这位候选人的任何文件：这个测试里只有他一个人
+    let left = w.ctx.blobs.list("interviews").await.unwrap();
+    assert!(left.is_empty(), "{left:?}");
+    let left = w.ctx.blobs.list("resumes").await.unwrap();
+    assert!(left.is_empty(), "{left:?}");
 }
 
 /// 实时对话：面试官现场追问，面试后现场说的话和候选人对它的回答都算在那道题里。

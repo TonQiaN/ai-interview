@@ -368,6 +368,68 @@ pub async fn archive(db: &PgPool, id: Uuid) -> sqlx::Result<bool> {
     Ok(done.rows_affected() == 1)
 }
 
+/// 把归档的候选人恢复回来。返回 `None` 表示候选人不存在；没归档的再恢复一次也算成功。
+pub async fn restore(db: &PgPool, id: Uuid) -> sqlx::Result<Option<Candidate>> {
+    sqlx::query_as(&format!(
+        "UPDATE candidates SET archived_at = NULL WHERE id = $1 RETURNING {COLUMNS}"
+    ))
+    .bind(id)
+    .fetch_optional(db)
+    .await
+}
+
+/// 彻底删除前先把这位候选人锁住，返回他的简历有哪些。没有这个人返回 `None`。
+///
+/// 锁到事务结束：这期间别处给他传简历、安排面试都得等，等来的是「候选人不存在」，
+/// 不会出现我们刚数完、刚删完文件，那边又加进来一份的情况。
+pub async fn lock_for_purge(conn: &mut PgConnection, id: Uuid) -> sqlx::Result<Option<Vec<Uuid>>> {
+    let found: Option<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM candidates WHERE id = $1 FOR UPDATE")
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    if found.is_none() {
+        return Ok(None);
+    }
+    let resume_ids: Vec<Uuid> =
+        sqlx::query_scalar("SELECT id FROM resumes WHERE candidate_id = $1 ORDER BY id")
+            .bind(id)
+            .fetch_all(&mut *conn)
+            .await?;
+    Ok(Some(resume_ids))
+}
+
+/// 这位候选人名下有几场面试（归档的也算，它们的录像和记录都还在）。
+///
+/// `interviews` 是面试场次那条线的表，这里只数个数。
+pub async fn interview_count(conn: &mut PgConnection, id: Uuid) -> sqlx::Result<i64> {
+    sqlx::query_scalar("SELECT count(*) FROM interviews WHERE candidate_id = $1")
+        .bind(id)
+        .fetch_one(conn)
+        .await
+}
+
+/// 把候选人这一行删掉，他的简历记录跟着一起删。这些简历的解析任务也删掉，
+/// 排着队的就不会再跑；正在跑的那条留着，它跑完会发现简历没了，什么都不写。
+///
+/// 调用前要先 [`lock_for_purge`]，并确认没有面试。
+pub async fn purge(conn: &mut PgConnection, id: Uuid, resume_ids: &[Uuid]) -> sqlx::Result<()> {
+    let resume_ids: Vec<String> = resume_ids.iter().map(Uuid::to_string).collect();
+    sqlx::query(
+        "DELETE FROM tasks
+         WHERE kind = $1 AND status <> 'running' AND payload->>'resume_id' = ANY($2)",
+    )
+    .bind(interview_core::task_kind::RESUME_PARSE)
+    .bind(&resume_ids)
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query("DELETE FROM candidates WHERE id = $1")
+        .bind(id)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 /// 找手机号或邮箱一样的其他候选人（不含归档的），最多 5 位。两样都没有就不找。
 pub async fn find_duplicates(
     db: &PgPool,

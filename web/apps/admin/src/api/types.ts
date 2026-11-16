@@ -21,6 +21,13 @@ export interface ApiErrorBody {
 /** 这一段的类型直接取自后端的 OpenAPI 文档（@ai-interview/api-client），后端改了字段这里编译就会报错。 */
 export type AdminUser = Schemas["AdminUser"];
 export type LoginInput = Schemas["LoginRequest"];
+export type ChangePasswordInput = Schemas["ChangePasswordRequest"];
+
+// ───────── HR 账号：只有管理员能管 ─────────
+
+export type Account = Schemas["Account"];
+export type CreateAccountInput = Schemas["CreateAccount"];
+export type UpdateAccountInput = Schemas["UpdateAccount"];
 
 // ───────── 岗位 ─────────
 
@@ -209,3 +216,12 @@ export type ReportEnvelope = Schemas["ReportView"];
 export type SystemStatus = Schemas["SystemStatus"];
 export type ComponentStatus = Schemas["ComponentStatus"];
 export type ComponentState = Schemas["ComponentState"];
+
+// 同一个岗位几位候选人的横向对比
+export type PositionComparison = Schemas["PositionComparison"];
+export type ComparisonResult = Schemas["ComparisonResult"];
+export type Comparison = Schemas["Comparison"];
+export type ComparedCandidate = Schemas["ComparedCandidate"];
+export type ComparedPerson = Schemas["ComparedPerson"];
+export type RequirementRow = Schemas["RequirementRow"];
+export type TieBreaker = Schemas["TieBreaker"];

@@ -9,22 +9,37 @@ import {
   Chip,
   Dialog,
   Dropzone,
+  Field,
+  Input,
   KeyValue,
   PageHeader,
   useToast,
 } from "@ai-interview/ui";
-import { FileText, Pencil, Plus, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  FileText,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage, isMock } from "../api/http";
 import {
   profilePending,
+  useAllInterviewsOfCandidate,
   useCandidate,
   useDeleteCandidate,
   useDeleteResume,
   useInterviews,
+  useMe,
+  usePurgeCandidate,
   useRegenerateProfile,
   useReparseResume,
+  useRestoreCandidate,
   useResume,
   useResumes,
   useSaveCandidate,
@@ -37,10 +52,11 @@ import type {
   ParsedResume,
   Resume,
 } from "../api/types";
-import { Confirm, QueryView } from "../components/common";
+import { Confirm, QueryView, StatusBadge } from "../components/common";
 import { InterviewTags } from "../components/ReportVerdict";
 import {
   fileSize,
+  fullTime,
   parseStatusLabel,
   parseStatusTone,
   relativeTime,
@@ -413,6 +429,125 @@ function ResumeRow({ resume, candidateId }: { resume: Resume; candidateId: strin
   );
 }
 
+/** 彻底删除：个人信息和简历真的从服务器上删掉。名下的面试要先删，所以在这里列出来一起删 */
+function PurgeDialog({
+  candidate,
+  open,
+  onClose,
+}: {
+  candidate: CandidateDetail;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const purge = usePurgeCandidate();
+  const interviews = useAllInterviewsOfCandidate(candidate.id, open);
+  const [typed, setTyped] = useState("");
+  const name = candidate.name.trim();
+  const matched = typed.trim() === name;
+  const list = interviews.data ?? [];
+  const blocked = list.some((i) => i.status === "preparing" || i.status === "in_progress");
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 每次打开都要重新输一遍
+  useEffect(() => {
+    if (!open) return;
+    setTyped("");
+    purge.reset();
+  }, [open]);
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={`彻底删除${candidate.name}？`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} autoFocus>
+            先不
+          </Button>
+          <Button
+            variant="danger"
+            type="submit"
+            form="purge-candidate"
+            loading={purge.isPending}
+            disabled={!matched || !interviews.isSuccess}
+          >
+            彻底删除
+          </Button>
+        </>
+      }
+    >
+      <form
+        id="purge-candidate"
+        className="oil-stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!matched || !interviews.isSuccess) return;
+          purge.mutate(candidate.id, {
+            onSuccess: () => {
+              toast(`${candidate.name}的资料已经彻底删除`);
+              navigate("/candidates", { replace: true });
+            },
+          });
+        }}
+      >
+        {purge.error && <Banner tone="danger">{errorMessage(purge.error)}</Banner>}
+        <p className="adm-flat">
+          {`${candidate.name}的姓名、手机、邮箱、画像、备注，和每一份简历（原件、全文、解析结果）会从服务器上删掉，`}
+          <strong>删了不能恢复</strong>。
+        </p>
+        {interviews.isPending && <p className="oil-muted adm-flat">正在查名下有没有面试…</p>}
+        {interviews.error && <Banner tone="danger">{errorMessage(interviews.error)}</Banner>}
+        {list.length > 0 && (
+          <div>
+            <p className="adm-flat">
+              名下的 {list.length}{" "}
+              场面试会先一起彻底删除，录像、对话记录和报告都在里面，归档了的也算：
+            </p>
+            <ul className="adm-list adm-purge__list">
+              {list.map((i) => (
+                <li key={i.id} className="adm-item adm-item--wrap">
+                  <div className="adm-item__main">
+                    {i.position_title}
+                    <div className="adm-item__sub">
+                      {fullTime(i.ended_at ?? i.started_at ?? i.created_at)}
+                    </div>
+                  </div>
+                  <StatusBadge status={i.status} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {blocked && (
+          <Banner tone="warning">
+            有面试正在准备或者正在进行，删到那一场会停下来。先去把它取消，或者等它结束。
+          </Banner>
+        )}
+        {candidate.source === "raas" && (
+          <p className="adm-flat">
+            这位候选人是从 RAAS 导入的。这里删掉以后，再从 RAAS 导入一次还会重新出现。
+          </p>
+        )}
+        <p className="oil-muted adm-flat">
+          候选人要求删除个人信息时用。只是不想让这个人出现在列表里，用「归档」就行。
+        </p>
+        <Field label={`输入候选人的名字「${name}」来确认`}>
+          {({ id }) => (
+            <Input
+              id={id}
+              autoComplete="off"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+            />
+          )}
+        </Field>
+      </form>
+    </Dialog>
+  );
+}
+
 function Detail({ candidate }: { candidate: CandidateDetail }) {
   const navigate = useNavigate();
   const toast = useToast();
@@ -422,9 +557,14 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
   const reparse = useReparseResume(candidate.id);
   const regenerate = useRegenerateProfile(candidate.id);
   const remove = useDeleteCandidate();
+  const restore = useRestoreCandidate();
   const [editing, setEditing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [purging, setPurging] = useState(false);
+  const isAdmin = useMe().data?.role === "admin";
+  // 归档的候选人后端不让改、不让上传简历、不让再安排面试，这些按钮就不给了
+  const archived = Boolean(candidate.archived_at);
 
   const primary = candidate.primary_resume;
   const reading = primary?.parse_status === "pending" || primary?.parse_status === "running";
@@ -451,23 +591,50 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
             .join(" · ") || undefined
         }
         actions={
-          <>
-            <Button
-              variant="secondary"
-              icon={<Pencil aria-hidden="true" />}
-              onClick={() => setEditing(true)}
-            >
-              改信息
-            </Button>
-            <Button
-              icon={<Plus aria-hidden="true" />}
-              onClick={() => navigate(`/interviews/new?candidate=${candidate.id}`)}
-            >
-              安排面试
-            </Button>
-          </>
+          !archived && (
+            <>
+              <Button
+                variant="secondary"
+                icon={<Pencil aria-hidden="true" />}
+                onClick={() => setEditing(true)}
+              >
+                改信息
+              </Button>
+              <Button
+                icon={<Plus aria-hidden="true" />}
+                onClick={() => navigate(`/interviews/new?candidate=${candidate.id}`)}
+              >
+                安排面试
+              </Button>
+            </>
+          )
         }
       />
+      {archived && (
+        <Banner
+          tone="info"
+          title="这位候选人已经归档"
+          className="adm-gap-below"
+          actions={
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<ArchiveRestore />}
+              loading={restore.isPending}
+              onClick={() =>
+                restore.mutate(candidate.id, {
+                  onSuccess: () => toast("已恢复"),
+                  onError: (e) => toast(errorMessage(e)),
+                })
+              }
+            >
+              恢复
+            </Button>
+          }
+        >
+          归档的候选人不在列表里显示，不能再修改、上传简历或安排面试。资料和简历还留在服务器上，在候选人列表勾上「带上已归档的」能找到。归档错了，点「恢复」就回到列表里。
+        </Banner>
+      )}
       {candidate.possible_duplicates.length > 0 && (
         <Banner tone="warning" title="可能和这些候选人是同一个人" className="adm-gap-below">
           <DuplicateList items={candidate.possible_duplicates} />
@@ -482,6 +649,7 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
             <CardHeader
               title="画像"
               actions={
+                !archived &&
                 hasProfile &&
                 primary?.parse_status === "done" && (
                   <Button
@@ -535,17 +703,19 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
                       ? "还没有画像。可以让大模型按简历归纳一份，面试官出题时会用到。"
                       : "还没有画像。上传一份简历，大模型会读出经历、技能和值得核实的地方，面试官出题时也会用到。"}
                   </p>
-                  <div>
-                    {primary ? (
-                      <Button variant="secondary" onClick={regenerateProfile}>
-                        生成画像
-                      </Button>
-                    ) : (
-                      <Button variant="secondary" onClick={() => setUploading(true)}>
-                        上传简历
-                      </Button>
-                    )}
-                  </div>
+                  {!archived && (
+                    <div>
+                      {primary ? (
+                        <Button variant="secondary" onClick={regenerateProfile}>
+                          生成画像
+                        </Button>
+                      ) : (
+                        <Button variant="secondary" onClick={() => setUploading(true)}>
+                          上传简历
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </CardBody>
@@ -609,9 +779,11 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
             <CardHeader
               title="简历"
               actions={
-                <Button size="sm" variant="secondary" onClick={() => setUploading(true)}>
-                  上传
-                </Button>
+                !archived && (
+                  <Button size="sm" variant="secondary" onClick={() => setUploading(true)}>
+                    上传
+                  </Button>
+                )
               }
             />
             <CardBody>
@@ -662,15 +834,27 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
             </CardBody>
           </Card>
 
-          <div>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Trash2 aria-hidden="true" />}
-              onClick={() => setDeleting(true)}
-            >
-              删除候选人
-            </Button>
+          <div className="oil-row">
+            {!archived && (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Archive aria-hidden="true" />}
+                onClick={() => setDeleting(true)}
+              >
+                归档
+              </Button>
+            )}
+            {isAdmin && (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Trash2 aria-hidden="true" />}
+                onClick={() => setPurging(true)}
+              >
+                彻底删除
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -697,17 +881,17 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
           }}
         />
       </Dialog>
+      <PurgeDialog candidate={candidate} open={purging} onClose={() => setPurging(false)} />
       <Confirm
         open={deleting}
-        title={`删除${candidate.name}？`}
-        confirmLabel="删除"
-        danger
+        title={`归档${candidate.name}？`}
+        confirmLabel="归档"
         loading={remove.isPending}
         onClose={() => setDeleting(false)}
         onConfirm={() =>
           remove.mutate(candidate.id, {
             onSuccess: () => {
-              toast("已删除");
+              toast("已归档");
               navigate("/candidates", { replace: true });
             },
             onError: (e) => {
@@ -717,7 +901,10 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
           })
         }
       >
-        删掉之后列表里不再显示这位候选人，已经安排的面试不受影响。
+        归档以后列表里不再显示这位候选人，已经安排的面试不受影响。资料和简历还留在服务器上，没有删掉。
+        {isAdmin
+          ? "要把它们真的删掉，用旁边的「彻底删除」。"
+          : "候选人要求删除个人信息时，请找管理员彻底删除。"}
       </Confirm>
     </>
   );

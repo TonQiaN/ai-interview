@@ -28,7 +28,7 @@ cargo run -p interview-server -- openapi   # 打印 OpenAPI 文档，不用数�
 scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息不进 Git
 
 pnpm -C web install                    # 装前端依赖（Node 22 以上，pnpm 10）
-pnpm -C web check                      # 前端全量检查：lint、类型检查、测试、构建
+pnpm -C web check                      # 前端全量检查：lint 和格式（没格式化会失败，跑下面的 format）、类型检查、测试、构建
 pnpm -C web gen:api                    # 由后端的 OpenAPI 文档生成 TypeScript 类型（typecheck 和 build 会自己先跑）
 pnpm -C web --filter <包名> test       # 只测一个包，比如 @ai-interview/api-client
 pnpm -C web/apps/candidate e2e         # 候选人面试页的浏览器测试：真的 Chromium 对着真的后端走完整场面试，自己起后端，两三分钟。CI 里是 candidate-e2e
@@ -121,6 +121,7 @@ cargo test -p interview-server --features sherpa --test live -- --ignored --noca
 - 候选人的简历、录像、声音是个人信息：不进日志，不进测试数据，发给大模型的内容只带任务需要的部分。
 - 前端调后端只用 `@ai-interview/api-client`（`createApiClient()` 给 HR 后台，`createRoomClient(token)` 给面试间），类型由 OpenAPI 生成，不手写接口类型。生成结果在 `web/packages/api-client/src/generated/`，不进 Git。
 - 改了引擎清单或能力限制，`tts/engines.json`、`crates/interview-tts` 和 `tts/README.md` 要一起改，有测试检查前两个对不对得上。
+- shell 脚本要在 macOS 自带的 bash 3.2 上能跑：变量名后面紧跟中文或全角标点时写成 `${name}`，不然在 UTF-8 的终端里会报 unbound variable（卫生检查会拦）。
 - 一个 PR 一件事。修 bug 先写一个会失败的测试，再修。
 - 改了约定、命令或目录结构，同一个 PR 里更新这个文件。
 

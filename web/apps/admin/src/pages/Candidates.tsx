@@ -2,6 +2,7 @@ import {
   Badge,
   Banner,
   Button,
+  Checkbox,
   Dialog,
   Dropzone,
   Field,
@@ -243,7 +244,13 @@ export function CandidatesPage() {
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
   const page = Number(params.get("page") ?? 1) || 1;
-  const candidates = useCandidates({ q, page, page_size: 20 });
+  const archived = params.get("archived") === "1";
+  const candidates = useCandidates({
+    q,
+    page,
+    page_size: 20,
+    ...(archived ? { include_archived: true } : {}),
+  });
   const importResume = useImportResume();
   const [adding, setAdding] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -307,6 +314,11 @@ export function CandidatesPage() {
           placeholder="搜姓名、公司、职位、手机或邮箱"
           onChange={(value) => update({ q: value, page: "" })}
         />
+        <Checkbox
+          label="带上已归档的"
+          checked={archived}
+          onChange={(e) => update({ archived: e.target.checked ? "1" : "", page: "" })}
+        />
       </div>
       <QueryView query={candidates}>
         {(data) =>
@@ -337,7 +349,10 @@ export function CandidatesPage() {
                       style={{ cursor: "pointer" }}
                     >
                       <td>
-                        <Person name={c.name} sub={c.location} to={`/candidates/${c.id}`} />
+                        <div className="oil-row">
+                          <Person name={c.name} sub={c.location} to={`/candidates/${c.id}`} />
+                          {c.archived_at && <Badge plain>已归档</Badge>}
+                        </div>
                       </td>
                       <td>
                         {c.current_title ?? "—"}

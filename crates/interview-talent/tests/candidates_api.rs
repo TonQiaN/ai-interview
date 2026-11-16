@@ -229,6 +229,71 @@ async fn patches_fields_and_refuses_archived(pool: PgPool) {
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn restores_an_archived_candidate(pool: PgPool) {
+    let app = app(pool.clone()).await;
+    let created = create(
+        &app.router,
+        json!({"name": "林知夏", "phone": "13800001234", "notes": "二面"}),
+    )
+    .await;
+    let id = created["id"].as_str().expect("有 id");
+    let uri = format!("/api/v1/candidates/{id}");
+    let restore = format!("{uri}/restore");
+    // 带一份简历，恢复以后它还得在
+    let (content_type, body) =
+        multipart_file("file", Some("简历.txt"), "林知夏\n后端工程师".as_bytes());
+    let uploaded = TestRequest::post(format!("{uri}/resumes"))
+        .bytes(&content_type, body)
+        .send(&app.router)
+        .await;
+    assert_eq!(uploaded.status, StatusCode::ACCEPTED, "{}", uploaded.text());
+    let resume_id = uploaded.json()["id"].clone();
+
+    TestRequest::delete(&uri).send(&app.router).await;
+    let hidden = TestRequest::get("/api/v1/candidates")
+        .send(&app.router)
+        .await
+        .json();
+    assert_eq!(hidden["total"], 0);
+
+    let restored = TestRequest::post(&restore).send(&app.router).await;
+    assert_eq!(restored.status, StatusCode::OK, "{}", restored.text());
+    let restored = restored.json();
+    assert_eq!(restored["id"], id);
+    assert_eq!(restored["archived_at"], Value::Null);
+    assert_eq!(restored["phone"], "13800001234");
+    assert_eq!(restored["notes"], "二面");
+    assert_eq!(restored["primary_resume"]["id"], resume_id);
+
+    // 回到列表里，又可以改了
+    let visible = TestRequest::get("/api/v1/candidates")
+        .send(&app.router)
+        .await
+        .json();
+    assert_eq!(visible["total"], 1);
+    let patched = TestRequest::patch(&uri)
+        .json(&json!({"notes": "三面"}))
+        .send(&app.router)
+        .await;
+    assert_eq!(patched.status, StatusCode::OK, "{}", patched.text());
+
+    // 没归档的再恢复一次也算成功，内容不变
+    let again = TestRequest::post(&restore).send(&app.router).await;
+    assert_eq!(again.status, StatusCode::OK);
+    assert_eq!(again.json()["notes"], "三面");
+
+    let missing =
+        TestRequest::post("/api/v1/candidates/0190a0b0-0000-7000-8000-000000000000/restore")
+            .send(&app.router)
+            .await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+    let anonymous = TestRequest::post(&restore)
+        .send(&common::anonymous_app(pool.clone()))
+        .await;
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn import_creates_a_candidate_and_parsing_fills_it_in(pool: PgPool) {
     let model = Arc::new(ScriptedModel::new().reply(EXTRACTION).reply(PROFILE));
     let app = app_with_model(pool, model.clone()).await;
@@ -405,6 +470,8 @@ async fn openapi_lists_candidate_paths(pool: PgPool) {
         "/api/v1/candidates/{id}",
         "/api/v1/candidates/import",
         "/api/v1/candidates/{id}/profile/regenerate",
+        "/api/v1/candidates/{id}/purge",
+        "/api/v1/candidates/{id}/restore",
         "/api/v1/candidates/{id}/resumes",
         "/api/v1/resumes/{id}",
         "/api/v1/resumes/{id}/file",

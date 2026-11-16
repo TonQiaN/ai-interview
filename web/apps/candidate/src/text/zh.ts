@@ -243,7 +243,6 @@ export const zh = {
       paused: "已暂停",
       noSpeech: "请开始回答。如果已经在说，请靠近麦克风",
       maxWarning: "这道题的时间快到了，请尽快收尾",
-      hearing: "正在听",
       countdown: "说完了吗？还想补充就继续说",
       answer: "请回答",
     },
@@ -291,8 +290,7 @@ export const zh = {
   done: {
     aborted: {
       title: "面试已中止",
-      description:
-        "这条面试链接已经失效，面试没能继续。已经录下的内容已保存。如有疑问，请联系招聘人员。",
+      description: "这条面试链接已经失效，面试没能继续。如有疑问，请联系招聘人员。",
     },
     left: { title: "面试已结束", description: `${SAVED}现在可以关闭这个页面了。` },
     noResponse: {

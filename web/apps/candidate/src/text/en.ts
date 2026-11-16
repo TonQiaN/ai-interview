@@ -208,7 +208,6 @@ export const en: Texts = {
       noSpeech:
         "Please start answering. If you are already speaking, move closer to the microphone",
       maxWarning: "Time for this question is almost up. Please wrap up",
-      hearing: "Listening",
       countdown: "Finished? Keep talking if you have more to add",
       answer: "Your turn",
     },
@@ -262,7 +261,7 @@ export const en: Texts = {
     aborted: {
       title: "Interview stopped",
       description:
-        "This interview link is no longer valid, so the interview could not continue. What was recorded has been saved. If you have questions, please contact the recruiter.",
+        "This interview link is no longer valid, so the interview could not continue. If you have questions, please contact the recruiter.",
     },
     left: { title: "Interview ended", description: `${SAVED} You can close this page now.` },
     noResponse: {

@@ -1,9 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   allConsented,
   Button,
   ConsentList,
+  Dialog,
   Field,
   formatClock,
   Input,
@@ -47,6 +48,46 @@ describe("Field", () => {
     const describedBy = input.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     expect(document.getElementById(describedBy as string)?.textContent).toBe("手机号格式不对");
+  });
+});
+
+describe("Dialog", () => {
+  // jsdom 没有实现弹窗的打开和关闭
+  beforeAll(() => {
+    HTMLDialogElement.prototype.showModal = function showModal() {
+      this.open = true;
+    };
+    HTMLDialogElement.prototype.close = function close() {
+      this.open = false;
+    };
+  });
+
+  it("有关闭按钮，按 Esc 也会关", () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog open onClose={onClose} title="改名字">
+        内容
+      </Dialog>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    fireEvent(screen.getByRole("dialog"), new Event("cancel", { cancelable: true }));
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("persistent 的弹窗没有关闭按钮，按 Esc、点遮罩都不关", () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog open persistent onClose={onClose} title="登录已失效">
+        内容
+      </Dialog>,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(screen.queryByRole("button", { name: "关闭" })).toBeNull();
+    const cancel = new Event("cancel", { cancelable: true });
+    fireEvent(dialog, cancel);
+    fireEvent.click(dialog);
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
 

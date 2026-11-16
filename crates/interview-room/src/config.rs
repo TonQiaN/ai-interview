@@ -40,6 +40,9 @@ pub struct RoomConfig {
     pub camera_required: bool,
     /// 面试结束后，链接还能用多少小时来补传没传完的录像
     pub upload_grace_hours: u32,
+    /// 面试结束后，一段录像多少分钟没有新的分片传来，就不再等候选人，把已经收到的部分合并出来。
+    /// 候选人没等传完就关了页面时，HR 过这么久能看到录像，只是可能缺结尾
+    pub upload_idle_minutes: u32,
     pub recording: RecordingSettings,
     /// ffmpeg 的路径或命令名。合并录像后用它补上时长信息；没装也能用，只是录像拖不了进度条
     pub ffmpeg: String,
@@ -107,6 +110,19 @@ impl RoomConfig {
                 default.abandon_after_minutes
             );
             default.abandon_after_minutes
+        });
+        let upload_idle_minutes = env_parse(
+            "AI_INTERVIEW_ROOM_UPLOAD_IDLE_MINUTES",
+            default.upload_idle_minutes,
+        )
+        .ok()
+        .filter(|minutes| (1..=24 * 60).contains(minutes))
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "AI_INTERVIEW_ROOM_UPLOAD_IDLE_MINUTES 要在 1 到 1440 之间，这次用默认值 {}",
+                default.upload_idle_minutes
+            );
+            default.upload_idle_minutes
         });
         let timeslice_ms = env_parse(
             "AI_INTERVIEW_ROOM_RECORDING_TIMESLICE_MS",
@@ -208,6 +224,7 @@ impl RoomConfig {
             ffmpeg,
             ffprobe,
             abandon_after_minutes,
+            upload_idle_minutes,
             transcribe_with_fake,
             realtime_silence_sec,
             realtime_pause_check_ms,
@@ -230,6 +247,7 @@ impl Default for RoomConfig {
             invite_ttl_hours: 24 * 7,
             camera_required: true,
             upload_grace_hours: 24,
+            upload_idle_minutes: 30,
             recording: RecordingSettings::default(),
             ffmpeg: "ffmpeg".to_owned(),
             ffprobe: "ffprobe".to_owned(),

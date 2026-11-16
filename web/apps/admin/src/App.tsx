@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from "react-router";
 import { Layout } from "./layout/Layout";
+import { AccountPage } from "./pages/Account";
+import { AccountsPage } from "./pages/Accounts";
 import { CandidateDetailPage } from "./pages/CandidateDetail";
 import { CandidatesPage } from "./pages/Candidates";
 import { InterviewDetailPage } from "./pages/InterviewDetail";
@@ -8,6 +10,7 @@ import { InterviewsPage } from "./pages/Interviews";
 import { LoginPage } from "./pages/Login";
 import { NotFoundPage } from "./pages/NotFound";
 import { OverviewPage } from "./pages/Overview";
+import { PositionComparisonPage } from "./pages/PositionComparison";
 import { PositionDetailPage } from "./pages/PositionDetail";
 import { PositionsPage } from "./pages/Positions";
 import { SettingsPage } from "./pages/Settings";
@@ -28,11 +31,14 @@ export function App() {
         <Route path="candidates/:id" element={<CandidateDetailPage />} />
         <Route path="positions" element={<PositionsPage />} />
         <Route path="positions/:id" element={<PositionDetailPage />} />
+        <Route path="positions/:id/comparison" element={<PositionComparisonPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="templates/new" element={<TemplateEditPage />} />
         <Route path="templates/:id" element={<TemplateEditPage />} />
         <Route path="voices" element={<VoicesPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="accounts" element={<AccountsPage />} />
+        <Route path="account" element={<AccountPage />} />
         <Route path="home" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

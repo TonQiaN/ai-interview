@@ -8,11 +8,14 @@
 import { estimateBudget } from "../../lib/budget";
 import { replanReasons } from "../../lib/replan";
 import type {
+  Account,
   AdminUser,
   Candidate,
   CandidateDetail,
   CandidateInput,
   CandidateListItem,
+  ChangePasswordInput,
+  CreateAccountInput,
   CreatedInvite,
   CreateVoice,
   Decision,
@@ -27,6 +30,7 @@ import type {
   InterviewTemplate,
   Page,
   Position,
+  PositionComparison,
   PositionDraft,
   PositionInput,
   PreviewRequest,
@@ -38,10 +42,12 @@ import type {
   ResumeDetail,
   SystemStatus,
   TemplateInput,
+  UpdateAccountInput,
   UpdateVoice,
   Utterance,
   Voice,
 } from "../types";
+import { type ComparedInput, sampleComparison } from "./comparison";
 import { planUtterances, samplePlan, sampleReport } from "./samples";
 import {
   buildSeed,
@@ -250,6 +256,9 @@ export function createMockServer(options: MockOptions = {}) {
   } catch {
     // 没有存储就每次刷新重新登录
   }
+
+  /** 每个岗位最近一次的候选人对比，按岗位 id 存 */
+  const comparisons = new Map<string, PositionComparison>();
 
   const later = (ms: number, fn: () => void) => {
     setTimeout(fn, ms);
@@ -496,6 +505,43 @@ export function createMockServer(options: MockOptions = {}) {
     role: "admin",
   };
 
+  /** 能登录后台的账号。第一个是现在登录的这个人 */
+  const accounts: Account[] = [
+    {
+      id: me.id,
+      email: me.email,
+      display_name: me.display_name,
+      role: "admin",
+      disabled: false,
+      created_at: iso(-90 * 24 * 3600_000),
+    },
+    {
+      id: "0193a000-0000-7000-8000-0000000000a2",
+      email: "recruiter@example.com",
+      display_name: "陈雨桐",
+      role: "recruiter",
+      disabled: false,
+      created_at: iso(-30 * 24 * 3600_000),
+    },
+    {
+      id: "0193a000-0000-7000-8000-0000000000a3",
+      email: "former@example.com",
+      display_name: "周启明",
+      role: "recruiter",
+      disabled: true,
+      created_at: iso(-200 * 24 * 3600_000),
+    },
+  ];
+  /** 演示数据里现在登录的人的密码。登录时填什么都行，改密码时要对得上 */
+  let myPassword = "demo";
+  const passwordIssue = (password: string | null | undefined): string | null => {
+    const length = password?.length ?? 0;
+    return length < 8 || length > 200 ? "密码要 8 到 200 位" : null;
+  };
+  const requireAdmin = () => {
+    if (me.role !== "admin") throw new HttpError(403, "forbidden", "只有管理员可以做这个操作");
+  };
+
   const routes: Route[] = [];
   const on = (method: string, path: string, handler: Handler, isPublic = false) => {
     const pattern = new RegExp(`^${path.replace(/:[a-z_]+/g, "([^/]+)")}$`);
@@ -512,6 +558,9 @@ export function createMockServer(options: MockOptions = {}) {
         throw new HttpError(422, "validation_failed", "请输入邮箱和密码");
       if (password === "wrong") throw new HttpError(401, "invalid_credentials", "邮箱或密码不对");
       me.email = email.trim();
+      const self = accounts[0];
+      if (self) self.email = me.email;
+      myPassword = password;
       loggedIn = true;
       try {
         sessionStorage.setItem(SESSION_KEY, "1");
@@ -537,6 +586,84 @@ export function createMockServer(options: MockOptions = {}) {
     true,
   );
   on("GET", "/auth/me", () => me);
+  on("PUT", "/auth/password", ({ body }) => {
+    const input = body as ChangePasswordInput;
+    const issue = passwordIssue(input.new_password);
+    if (issue) throw new HttpError(422, "validation_failed", issue, { new_password: issue });
+    if (input.current_password !== myPassword)
+      throw new HttpError(422, "validation_failed", "现在的密码不对", {
+        current_password: "现在的密码不对",
+      });
+    if (input.new_password === myPassword)
+      throw new HttpError(422, "validation_failed", "新密码不能和现在的一样", {
+        new_password: "新密码不能和现在的一样",
+      });
+    myPassword = input.new_password;
+    return null;
+  });
+
+  // ───────── HR 账号 ─────────
+  on("GET", "/accounts", ({ query }): Page<Account> => {
+    requireAdmin();
+    const list = accounts.filter((a) => matches(query.get("q"), a.email, a.display_name));
+    if (query.get("sort") === "email") list.sort((a, b) => a.email.localeCompare(b.email));
+    else list.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return paginate(list, query);
+  });
+  on("POST", "/accounts", ({ body }): Account => {
+    requireAdmin();
+    const input = body as CreateAccountInput;
+    const email = input.email?.trim() ?? "";
+    if (!/^[^@\s]+@[^@\s]+$/.test(email))
+      throw new HttpError(422, "validation_failed", "邮箱格式不对", { email: "邮箱格式不对" });
+    if (!input.display_name?.trim())
+      throw new HttpError(422, "validation_failed", "名字不能为空", { display_name: "不能为空" });
+    const issue = passwordIssue(input.password);
+    if (issue) throw new HttpError(422, "validation_failed", issue, { password: issue });
+    if (accounts.some((a) => a.email.toLowerCase() === email.toLowerCase()))
+      throw new HttpError(409, "conflict", "这个邮箱已经有账号了");
+    const account: Account = {
+      id: newId(),
+      email,
+      display_name: input.display_name.trim(),
+      role: input.role === "admin" ? "admin" : "recruiter",
+      disabled: false,
+      created_at: iso(0),
+    };
+    accounts.push(account);
+    return account;
+  });
+  on("PATCH", "/accounts/:id", ({ params, body }): Account => {
+    requireAdmin();
+    const account = accounts.find((a) => a.id === params[0]);
+    if (!account) throw notFound("这个账号");
+    const patch = body as UpdateAccountInput;
+    if (patch.password != null) {
+      const issue = passwordIssue(patch.password);
+      if (issue) throw new HttpError(422, "validation_failed", issue, { password: issue });
+    }
+    if (account.id === me.id) {
+      if (patch.disabled === true) throw new HttpError(409, "conflict", "不能停用自己的账号");
+      if (patch.role != null && patch.role !== "admin")
+        throw new HttpError(409, "conflict", "不能把自己改成普通账号");
+      if (patch.password != null)
+        throw new HttpError(409, "conflict", "改自己的密码请用「修改密码」，要先输入现在的密码");
+    }
+    const next: Account = {
+      ...account,
+      display_name: patch.display_name?.trim() || account.display_name,
+      role: patch.role ?? account.role,
+      disabled: patch.disabled ?? account.disabled,
+    };
+    const adminsLeft = accounts
+      .map((a) => (a.id === next.id ? next : a))
+      .filter((a) => a.role === "admin" && !a.disabled).length;
+    if (adminsLeft === 0)
+      throw new HttpError(409, "conflict", "这样改完就没有能登录的管理员了，至少留一个");
+    Object.assign(account, next);
+    if (account.id === me.id) me.display_name = account.display_name;
+    return account;
+  });
 
   on(
     "GET",
@@ -588,7 +715,7 @@ export function createMockServer(options: MockOptions = {}) {
     const list = db.positions
       .filter(
         (p) =>
-          live(p) &&
+          (live(p) || query.get("include_archived") === "true") &&
           (!status || p.status === status) &&
           matches(query.get("q"), p.title, p.department, p.location, p.extra.client_name),
       )
@@ -623,6 +750,68 @@ export function createMockServer(options: MockOptions = {}) {
     };
   });
   on("GET", "/positions/:id", ({ params }) => find.position(params[0]));
+  // ───────── 同一个岗位几位候选人的对比 ─────────
+
+  on("GET", "/positions/:id/comparison", ({ params }) => {
+    const position = find.position(params[0]);
+    const comparison = comparisons.get(position.id);
+    if (!comparison) throw new HttpError(404, "comparison_not_found", "这个岗位还没有对比过候选人");
+    return comparison;
+  });
+  on("POST", "/positions/:id/comparison", ({ params, body }) => {
+    const position = find.position(params[0]);
+    const ids = (body as { interview_ids?: unknown })?.interview_ids;
+    const refuse = (reason: string) =>
+      new HttpError(422, "validation_failed", reason, { interview_ids: reason });
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string"))
+      throw refuse("要给出几场面试的 ID");
+    const wanted = ids as string[];
+    if (wanted.length < 2) throw refuse("至少选 2 场面试才能对比");
+    if (wanted.length > 20) throw refuse("一次最多对比 20 场");
+    if (new Set(wanted).size !== wanted.length) throw refuse("同一场面试选了两次");
+    const inputs: ComparedInput[] = wanted.map((id) => {
+      const interview = db.interviews.find((i) => i.id === id);
+      if (!interview || interview.position.id !== position.id)
+        throw refuse("选的面试里有不属于这个岗位的");
+      const report = db.reports.get(id)?.find((v) => v.brief.status === "done" && v.content);
+      if (!report?.content)
+        throw refuse(`${interview.candidate.name}的面试还没有生成好的报告，先生成报告再对比`);
+      return {
+        interview_id: id,
+        candidate_id: interview.candidate.id,
+        name: interview.candidate.name,
+        report: report.content,
+      };
+    });
+    const current = comparisons.get(position.id);
+    if (current && (current.status === "pending" || current.status === "running")) {
+      const same =
+        current.interview_ids.length === wanted.length &&
+        wanted.every((id) => current.interview_ids.includes(id));
+      if (same) return current;
+      throw new HttpError(409, "comparison_in_progress", "上一次对比还在生成，等它好了再换一批");
+    }
+    const next: PositionComparison = {
+      status: "running",
+      error: null,
+      requested_at: iso(0),
+      interview_ids: wanted,
+      result: current?.result ?? null,
+    };
+    comparisons.set(position.id, next);
+    later(jobMs, () => {
+      // 生成期间其中一场被彻底删除了，这次就不算数
+      if (comparisons.get(position.id) !== next) return;
+      next.status = "done";
+      next.result = {
+        generated_at: iso(0),
+        people: inputs.map(({ report: _, ...person }) => person),
+        comparison: sampleComparison(inputs, Date.now()),
+      };
+    });
+    return next;
+  });
+
   on("PATCH", "/positions/:id", ({ params, body }) => {
     const p = Object.assign(find.position(params[0]), body as Partial<PositionInput>, {
       updated_at: iso(0),
@@ -636,6 +825,9 @@ export function createMockServer(options: MockOptions = {}) {
     find.position(params[0]).archived_at = iso(0);
     return null;
   });
+  on("POST", "/positions/:id/restore", ({ params }) =>
+    Object.assign(find.position(params[0]), { archived_at: null }),
+  );
 
   // ───────── RAAS ─────────
   const raasReady = () => {
@@ -846,7 +1038,7 @@ export function createMockServer(options: MockOptions = {}) {
       db.candidates
         .filter(
           (c) =>
-            live(c) &&
+            (live(c) || query.get("include_archived") === "true") &&
             matches(query.get("q"), c.name, c.phone, c.email, c.current_title, c.current_company),
         )
         .sort(byNewest)
@@ -896,6 +1088,23 @@ export function createMockServer(options: MockOptions = {}) {
   });
   on("DELETE", "/candidates/:id", ({ params }) => {
     find.candidate(params[0]).archived_at = iso(0);
+    return null;
+  });
+  on("POST", "/candidates/:id/restore", ({ params }) =>
+    detail(Object.assign(find.candidate(params[0]), { archived_at: null })),
+  );
+  on("POST", "/candidates/:id/purge", ({ params }) => {
+    requireAdmin();
+    const c = find.candidate(params[0]);
+    const left = db.interviews.filter((i) => i.candidate.id === c.id).length;
+    if (left > 0)
+      throw new HttpError(
+        409,
+        "candidate_has_interviews",
+        `这位候选人名下还有 ${left} 场面试，先把面试彻底删除`,
+      );
+    db.candidates = db.candidates.filter((x) => x !== c);
+    db.resumes = db.resumes.filter((r) => r.candidate_id !== c.id);
     return null;
   });
   on("GET", "/candidates/:id/resumes", ({ params, query }) => {
@@ -1244,6 +1453,17 @@ export function createMockServer(options: MockOptions = {}) {
     if (i.status === "preparing" || i.status === "in_progress")
       throw conflict("面试正在准备或者进行中，等它结束再删");
     db.interviews = db.interviews.filter((x) => x !== i);
+    return null;
+  });
+  on("POST", "/interviews/:id/purge", ({ params }) => {
+    requireAdmin();
+    const i = find.interview(params[0]);
+    if (i.status === "preparing" || i.status === "in_progress")
+      throw conflict("正在准备或者正在面试，先取消再删除");
+    db.interviews = db.interviews.filter((x) => x !== i);
+    // 比过这场面试的那份对比也一起删掉
+    if (comparisons.get(i.position.id)?.interview_ids.includes(i.id))
+      comparisons.delete(i.position.id);
     return null;
   });
   on("POST", "/interviews/:id/prepare", ({ params, body }) => {

@@ -14,6 +14,7 @@ import {
 import { useEffect, useState } from "react";
 import { CameraPreview } from "../components/CameraPreview";
 import { MicMeter } from "../components/MicMeter";
+import { useInterviewLayout } from "../lib/flow/layout";
 import { questionProgressOf } from "../lib/interview/progress";
 import type { RunnerPhase, RunnerSnapshot } from "../lib/interview/runner";
 import type { UploadStatus } from "../lib/upload/uploader";
@@ -99,14 +100,46 @@ export function InterviewPage(props: InterviewPageProps) {
     if (held) hint = hints.paused;
     else if (turn?.noSpeechPromptVisible) hint = hints.noSpeech;
     else if (turn?.maxWarningVisible) hint = hints.maxWarning;
-    else if (runner.speaking) hint = hints.hearing;
+    // 正在说话时头像下面已经写着「正在听」，不用再说一遍
+    else if (runner.speaking) hint = "";
     else if (turn?.countdownVisible) hint = hints.countdown;
     else hint = hints.answer;
   }
 
+  // 矮屏上倒计时的圆圈小一点，和自己的画面叠在一列里不超过面试官的头像
+  const layout = useInterviewLayout();
+  const compact = layout !== "tall";
+
+  const actions = (
+    <>
+      {listening && !held && turn?.countdownVisible && (
+        <Button block size="lg" variant="gold" onClick={props.onContinue}>
+          {text.notDone}
+        </Button>
+      )}
+      {listening && !held && (
+        <Button block size="lg" variant="secondary" onClick={props.onDone}>
+          {text.done}
+        </Button>
+      )}
+      {listening && !held && runner.canReplay && (
+        <Button block variant="ghost" onClick={props.onReplay}>
+          {text.replay}
+        </Button>
+      )}
+      {phase === "reading" && runner.expectsAnswer && (
+        <Button block size="lg" variant="accent" onClick={props.onReady}>
+          {text.startAnswer}
+        </Button>
+      )}
+    </>
+  );
+  const hasActions = (listening && !held) || (phase === "reading" && runner.expectsAnswer);
+
   return (
     <Stage
       night
+      wide={layout === "wide"}
       header={
         <>
           <RecordingIndicator>{text.recording}</RecordingIndicator>
@@ -115,30 +148,6 @@ export function InterviewPage(props: InterviewPageProps) {
           <Button variant="ghost" size="sm" onClick={() => setConfirmLeave(true)}>
             {text.end}
           </Button>
-        </>
-      }
-      footer={
-        <>
-          {listening && !held && turn?.countdownVisible && (
-            <Button block size="lg" variant="gold" onClick={props.onContinue}>
-              {text.notDone}
-            </Button>
-          )}
-          {listening && !held && (
-            <Button block size="lg" variant="secondary" onClick={props.onDone}>
-              {text.done}
-            </Button>
-          )}
-          {listening && !held && runner.canReplay && (
-            <Button block variant="ghost" onClick={props.onReplay}>
-              {text.replay}
-            </Button>
-          )}
-          {phase === "reading" && runner.expectsAnswer && (
-            <Button block size="lg" variant="accent" onClick={props.onReady}>
-              {text.startAnswer}
-            </Button>
-          )}
         </>
       }
     >
@@ -177,22 +186,47 @@ export function InterviewPage(props: InterviewPageProps) {
 
       {question && <QuestionProgress total={question.total} current={question.index - 1} />}
 
-      <InterviewerPresence state={held ? "idle" : PRESENCE[phase]} label={hint} />
+      <div className="app-scene" data-layout={layout}>
+        <InterviewerPresence
+          className="app-scene__presence"
+          size="var(--app-presence-size)"
+          state={held ? "idle" : PRESENCE[phase]}
+        />
 
-      {utterance && <CaptionCard meta={meta}>{utterance.text}</CaptionCard>}
+        {/* 给候选人的提示有的很长，单独占一行、可以折行；头像下面的小标签只写面试官的状态 */}
+        <p className="app-scene__hint" role="status">
+          {hint}
+        </p>
 
-      <div className="app-live">
-        {cameraStream && (
-          <CameraPreview stream={cameraStream} weight="thin" className="app-live__self" />
+        {utterance && (
+          <CaptionCard className="app-scene__caption" meta={meta}>
+            {utterance.text}
+          </CaptionCard>
         )}
-        <div className="app-live__meter">
-          {listening && turn?.countdownVisible && turn.silenceRemainingMs !== null ? (
-            <SilenceRing remaining={turn.silenceRemainingMs / 1000} total={countdownTotal} />
-          ) : (
-            <MicMeter subscribe={props.subscribeLevel} bars={14} />
+
+        <div className="app-live app-scene__live">
+          {cameraStream && (
+            <CameraPreview stream={cameraStream} weight="thin" className="app-live__self" />
           )}
+          <div className="app-live__meter">
+            {listening && turn?.countdownVisible && turn.silenceRemainingMs !== null ? (
+              <SilenceRing
+                remaining={turn.silenceRemainingMs / 1000}
+                total={countdownTotal}
+                size={compact ? 48 : 72}
+              />
+            ) : (
+              <MicMeter subscribe={props.subscribeLevel} bars={14} />
+            )}
+          </div>
         </div>
       </div>
+
+      {hasActions && (
+        <div className="app-foot" data-layout={layout}>
+          {actions}
+        </div>
+      )}
 
       <Dialog
         open={confirmLeave}

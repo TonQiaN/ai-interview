@@ -16,6 +16,27 @@
     font-size: var(--oil-text-xs);
     opacity: 0.7;
   }
+  /* 侧栏底下自己的名字，点了去「我的账号」 */
+  .adm-me {
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+    border-radius: var(--oil-radius-sm);
+  }
+  .adm-me:hover .adm-ellipsis:first-child,
+  .adm-me[aria-current="page"] .adm-ellipsis:first-child {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .adm-me:focus-visible {
+    outline: 2px solid var(--oil-focus);
+    outline-offset: 2px;
+  }
+  .adm-account-actions {
+    --oil-gap: var(--oil-space-3);
+    font-size: var(--oil-text-sm);
+    justify-content: flex-end;
+  }
   .adm-link {
     color: inherit;
     text-decoration: none;
@@ -218,6 +239,17 @@
   .adm-person__sub {
     color: var(--oil-ink-3);
     font-size: var(--oil-text-sm);
+  }
+  /* 手机上列表的列多，每列只剩一两个字宽，名字和地点会被竖着拆开。
+     列表里中文不在字中间断行，表格放宽一些，放不下就横向滚动。
+     对比页的表格里是成段的话，照常换行 */
+  @media (max-width: 640px) {
+    .oil-table:not(.adm-compare__table) {
+      min-width: 720px;
+    }
+    .oil-table:not(.adm-compare__table) td {
+      word-break: keep-all;
+    }
   }
 
   /* 登录页 */
@@ -1265,6 +1297,103 @@
   /* ───────── 打印 ─────────
      打印或者在打印对话框里存成 PDF 时，只留内容：导航、页签、按钮都不印。
      纸是白的，底色和阴影去掉；评分条和徽标的颜色要照样印出来。 */
+  /* 同一个岗位几位候选人的对比 */
+  .adm-compare {
+    --oil-gap: var(--oil-space-5);
+  }
+  .adm-compare__gap {
+    margin-bottom: var(--oil-space-3);
+  }
+  .adm-compare__picks {
+    border: 1px solid var(--oil-line);
+    border-radius: var(--oil-radius);
+    overflow: hidden;
+  }
+  .adm-compare__tick {
+    width: 18px;
+    flex: none;
+    display: inline-flex;
+  }
+  .adm-compare__summary {
+    margin: 0 0 var(--oil-space-4);
+    font-size: var(--oil-text-lg);
+    line-height: 1.7;
+  }
+  .adm-compare__summary:last-child {
+    margin-bottom: 0;
+  }
+  .adm-compare__caveats {
+    margin: 0;
+    padding-left: var(--oil-space-5);
+  }
+  .adm-compare__tier + .adm-compare__tier {
+    margin-top: var(--oil-space-5);
+    padding-top: var(--oil-space-5);
+    border-top: 1px solid var(--oil-line);
+  }
+  .adm-compare__tier > h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-2);
+    margin: 0 0 var(--oil-space-3);
+    font-size: inherit;
+  }
+  .adm-compare__people {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--oil-space-3);
+  }
+  .adm-compare__person {
+    display: flex;
+    flex-direction: column;
+    gap: var(--oil-space-3);
+    padding: var(--oil-space-4);
+    border: 1px solid var(--oil-line);
+    border-radius: var(--oil-radius);
+    background: var(--oil-sunken);
+  }
+  .adm-compare__head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--oil-space-3);
+  }
+  .adm-compare__sides {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: var(--oil-space-4);
+  }
+  .adm-compare__sides h4 {
+    margin: 0 0 var(--oil-space-1);
+    font-size: var(--oil-text-sm);
+    color: var(--oil-ink-3);
+  }
+  .adm-compare__sides ul {
+    margin: 0;
+    padding-left: var(--oil-space-5);
+  }
+  .adm-compare__table th[scope="row"] {
+    min-width: 200px;
+    font-weight: 500;
+    text-align: left;
+  }
+  .adm-compare__table th[scope="col"],
+  .adm-compare__table td {
+    white-space: nowrap;
+  }
+  .adm-compare__question {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--oil-space-4);
+  }
+  .adm-compare__question > div > span {
+    font-weight: 600;
+  }
+
   .adm-print-only {
     display: none;
   }
