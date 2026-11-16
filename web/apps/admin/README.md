@@ -31,6 +31,10 @@ pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin
 
 演示数据里没有语音模型，试听和参考录音播放的是一段提示音，页面顶上会有一句说明。真实后端没连上 Mac 上的模型时也是这样（接口会返回 `simulated: true`）。
 
+试听接口（`POST /speech/preview`）能临时换引擎、语言和语气，逐字稿却只认音色上存着的那份。所以修改克隆音色时，现在选的引擎要用逐字稿（BreezeTTS2）、填的又和存着的不一样，点「试听」会先单独把逐字稿存到音色上再合成，页面上有一句说明；逐字稿还没填时「试听」点不了。
+
+不用 Mac 也能在真实后端上把「声音」页走一遍：`python3 tts/worker/worker.py --engines index2,index25,breeze2 --fake --port 7800` 起一个不加载模型的 worker，后端带上 `AI_INTERVIEW_TTS_BACKEND=worker AI_INTERVIEW_TTS_WORKER_URLS=http://127.0.0.1:7800` 启动，三个引擎就都显示可用。合成出来的还是提示音，但走的是和真模型一样的路。
+
 假后端里没有真的录像文件，回看只能按时间轴放逐字稿。分段录像的连续播放（`src/lib/clock.ts`）要连真后端才看得到。
 
 ## 目录

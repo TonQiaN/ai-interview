@@ -314,6 +314,8 @@ function VoiceDialog({
 }) {
   const create = useCreateVoice();
   const update = useUpdateVoice();
+  // 试听前单独存逐字稿用的，和「保存」分开，免得两边的出错提示串到一起
+  const saveTranscript = useUpdateVoice();
   const preview = usePreview();
   const toast = useToast();
   const [draft, setDraft] = useState<Draft>(() => (voice ? draftOf(voice) : emptyDraft(engines)));
@@ -340,7 +342,14 @@ function VoiceDialog({
         (!needsTranscript || draft.reference_transcript.trim() !== "")
       : draft.description.trim() !== "");
   // 克隆音色要有录音才能合成，所以添加的时候听不了
-  const canPreview = cloned ? Boolean(voice?.has_reference) : draft.description.trim() !== "";
+  const hasSource = cloned ? Boolean(voice?.has_reference) : draft.description.trim() !== "";
+  const transcript = draft.reference_transcript.trim();
+  const missingTranscript = needsTranscript && transcript === "";
+  // 试听接口能临时换引擎、语言和语气，逐字稿却只认音色上存着的那份：
+  // 现在选的引擎要用逐字稿、填的又和存着的不一样时，得先把它存下来再合成
+  const transcriptUnsaved =
+    voice !== null && needsTranscript && transcript !== (voice.reference_transcript ?? "").trim();
+  const canPreview = hasSource && !missingTranscript;
 
   function changeKind(kind: VoiceKind) {
     const fits = engines.find((e) => e.id === draft.engine)?.supports_voice_design;
@@ -361,7 +370,19 @@ function VoiceDialog({
     set({ engine: id, settings: { ...draft.settings, language } });
   }
 
-  function listen() {
+  async function listen() {
+    saveTranscript.reset();
+    if (voice && transcriptUnsaved) {
+      try {
+        await saveTranscript.mutateAsync({
+          id: voice.id,
+          patch: { reference_transcript: transcript },
+        });
+      } catch {
+        // 原因显示在试听按钮下面
+        return;
+      }
+    }
     preview.run({
       text: line.trim(),
       // 设计音色的描述还没存的时候，直接拿描述临时合成
@@ -699,11 +720,15 @@ function VoiceDialog({
           <Field
             label="先听听效果"
             hint={
-              canPreview
-                ? "用现在填的引擎、语言和语气合成，不用先保存。"
-                : cloned
+              !hasSource
+                ? cloned
                   ? "克隆的音色要先有参考录音才能试听，添加之后再回来听。"
                   : "先写一句想要什么样的声音。"
+                : missingTranscript
+                  ? `${engine?.name} 克隆时要用到逐字稿，先填上录音里说了什么再试听。`
+                  : transcriptUnsaved
+                    ? "用现在填的引擎、语言和语气合成。点试听时会先把逐字稿存下来，别的要点「保存」才生效。"
+                    : "用现在填的引擎、语言和语气合成，不用先保存。"
             }
           >
             {({ id, describedBy }) => (
@@ -719,7 +744,7 @@ function VoiceDialog({
                 <Button
                   variant="secondary"
                   icon={<Play aria-hidden="true" />}
-                  loading={preview.pending}
+                  loading={preview.pending || saveTranscript.isPending}
                   disabled={!canPreview || line.trim() === ""}
                   onClick={listen}
                 >
@@ -728,7 +753,11 @@ function VoiceDialog({
               </div>
             )}
           </Field>
-          <PreviewOutput preview={preview} engines={engines} />
+          {saveTranscript.error && !saveTranscript.isPending ? (
+            <Banner tone="danger">逐字稿没存上：{errorMessage(saveTranscript.error)}</Banner>
+          ) : (
+            <PreviewOutput preview={preview} engines={engines} />
+          )}
         </div>
       </form>
     </Dialog>
