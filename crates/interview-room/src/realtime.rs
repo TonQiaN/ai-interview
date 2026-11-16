@@ -328,8 +328,7 @@ pub(crate) async fn enabled(deps: &Deps, config: &InterviewConfig) -> bool {
     if config.mode != InterviewMode::Conversational {
         return false;
     }
-    let (Some(_), Some(_), Some(transcriber)) =
-        (deps.live_model(), &deps.voice, &deps.transcriber)
+    let (Some(_), Some(_), Some(transcriber)) = (deps.live_model(), &deps.voice, &deps.transcriber)
     else {
         return false;
     };

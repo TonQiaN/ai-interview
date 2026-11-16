@@ -674,7 +674,15 @@ async fn the_stand_in_carries_a_conversation_to_the_end_without_a_model(pool: Pg
         .collect();
     assert_eq!(
         asked,
-        ["q1", "q1.p1", "q2", "q2.p1", "q3", "q3.p1", "candidate_questions"],
+        [
+            "q1",
+            "q1.p1",
+            "q2",
+            "q2.p1",
+            "q3",
+            "q3.p1",
+            "candidate_questions"
+        ],
         "每道题追问一次"
     );
 
