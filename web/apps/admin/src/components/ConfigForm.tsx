@@ -18,7 +18,7 @@ import {
 } from "@ai-interview/ui";
 import { Plus, X } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
-import { useConfigDefaults } from "../api/queries";
+import { useConfigDefaults, useSystemStatus } from "../api/queries";
 import type {
   ConfigLimits,
   Effort,
@@ -30,6 +30,7 @@ import type {
 } from "../api/types";
 import { estimateBudget } from "../lib/budget";
 import { effortLabel, modeLabel, seniorityLabel, stageLabelOf, styleLabel } from "../lib/format";
+import { realtimeBlockers } from "../lib/realtime";
 import { LoadError, Loading } from "./common";
 
 const effortOptions = (["low", "high", "max"] as const).map((value) => ({
@@ -276,6 +277,8 @@ function Form({
   const setAnswer = (patch: Partial<InterviewConfig["answer"]>) =>
     set({ answer: { ...value.answer, ...patch } });
   const budget = estimateBudget(value);
+  const system = useSystemStatus();
+  const blockers = realtimeBlockers(system.data?.components);
   const autoCount = value.question_count === null;
   const competenciesFull = value.competencies.length >= limits.max_list_items;
 
@@ -301,9 +304,17 @@ function Form({
           />
         </Field>
         {value.mode === "conversational" ? (
-          <Banner tone="warning">
-            实时对话模式还在开发，现在选它候选人还面不了。先用逐题问答。
-          </Banner>
+          <>
+            <p className="oil-muted" style={{ margin: 0, fontSize: "var(--oil-text-sm)" }}>
+              实时对话：题目照样提前出好，面试官听完回答，现场决定追问还是问下一题，候选人可以插话打断。
+            </p>
+            {blockers.length > 0 && (
+              <Banner tone="warning">
+                现在{blockers.join("和")}
+                用不了，选了实时对话的面试会按逐题问答进行。原因在「系统」页里。
+              </Banner>
+            )}
+          </>
         ) : (
           <p className="oil-muted" style={{ margin: 0, fontSize: "var(--oil-text-sm)" }}>
             逐题问答：题目和面试官的语音都提前准备好，一题一题问，候选人答完再问下一题。
