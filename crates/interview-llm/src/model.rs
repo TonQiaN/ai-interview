@@ -22,14 +22,18 @@ pub trait ChatModel: Send + Sync {
 
     /// 对话，等全部输出完再返回。
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, LlmError> {
-        let mut events = self.chat_stream(request).await?;
-        while let Some(event) = events.next().await {
-            if let StreamEvent::Done(response) = event? {
-                return Ok(response);
-            }
-        }
-        Err(LlmError::Decode("流提前结束，没有收到完整结果".to_owned()))
+        collect(self.chat_stream(request).await?).await
     }
+}
+
+/// 把流读到底，拿最后的完整结果。中途出错就返回那个错。
+pub(crate) async fn collect(mut events: ChatStream) -> Result<ChatResponse, LlmError> {
+    while let Some(event) = events.next().await {
+        if let StreamEvent::Done(response) = event? {
+            return Ok(response);
+        }
+    }
+    Err(LlmError::Decode("流提前结束，没有收到完整结果".to_owned()))
 }
 
 /// 把一个现成的完整结果包成流：先推正文，再推结束事件。给假模型用。
