@@ -329,6 +329,38 @@ describe("面试详情", () => {
     });
   });
 
+  describe("可以直接发给候选人的话", () => {
+    /** 给一场待发送的面试生成链接，返回那段话 */
+    async function message(stage: Interview["config"]["stage"]) {
+      const target = server.db.interviews.find((i) => i.status === "ready");
+      if (!target) throw new Error("演示数据里没有待发送的面试");
+      target.config.stage = stage;
+      open(target.id);
+      fireEvent.click(await screen.findByRole("tab", { name: "链接" }));
+      fireEvent.click(await screen.findByRole("button", { name: "生成链接" }));
+      await screen.findByText("链接生成好了");
+      const text = document.querySelector(".adm-message")?.textContent;
+      if (!text) throw new Error("没有找到那段话");
+      return text;
+    }
+
+    it("手机和电脑都行，提醒不要在微信里直接打开", async () => {
+      const text = await message("screening");
+
+      expect(text).toContain("第一轮是线上的 AI 面试");
+      expect(text).toContain("用手机也可以");
+      expect(text).toContain("Chrome、Edge 或 Safari");
+      expect(text).toContain("不要在微信、钉钉这类聊天软件里直接点开");
+    });
+
+    it("不是第一轮初筛的面试，不说成第一轮", async () => {
+      const text = await message("in_depth");
+
+      expect(text).not.toContain("第一轮");
+      expect(text).toContain("这一轮是线上的 AI 面试");
+    });
+  });
+
   it("没归档的面试不显示归档的说明", async () => {
     const target = server.db.interviews.find((i) => i.status === "ready");
     if (!target) throw new Error("演示数据里没有待发送的面试");
