@@ -1,9 +1,9 @@
-import { Button, Card, CardBody, CardHeader, Hero, Stat } from "@ai-interview/ui";
-import { ArrowRight, Plus } from "lucide-react";
+import { Button, buttonClass, Card, CardBody, CardHeader, Hero, Stat } from "@ai-interview/ui";
+import { ArrowRight, Check, Plus } from "lucide-react";
 import { Link, useNavigate } from "react-router";
-import { useInterviews, useMe, useSystemStatus } from "../api/queries";
+import { useCandidates, useInterviews, useMe, usePositions, useSystemStatus } from "../api/queries";
 import type { InterviewSummary } from "../api/types";
-import { Empty, Person, QueryView } from "../components/common";
+import { Person, QueryView } from "../components/common";
 import { PageTitle } from "../components/PageHeader";
 import { hasVerdict, InterviewTags, ReportVerdict } from "../components/ReportVerdict";
 import { SystemStatusList } from "../components/SystemStatusList";
@@ -26,6 +26,72 @@ function greeting(now = new Date()): string {
   if (h < 12) return "早上好";
   if (h < 18) return "下午好";
   return "晚上好";
+}
+
+/**
+ * 一场面试都还没有的时候（刚装好，或者刚开始用），告诉 HR 先做什么。
+ * 岗位和候选人已经有了的那一步标成做完，不用再点进去看。
+ */
+function FirstSteps() {
+  const positions = usePositions({ page_size: 1 });
+  const candidates = useCandidates({ page_size: 1 });
+  const positionCount = positions.data?.total ?? 0;
+  const candidateCount = candidates.data?.total ?? 0;
+  const steps = [
+    {
+      title: "加一个岗位",
+      description: "写清楚这个岗位要什么样的人，面试官按它出题。",
+      done: positionCount > 0 ? `已经有 ${positionCount} 个岗位` : null,
+      to: "/positions",
+      action: "去加岗位",
+    },
+    {
+      title: "上传候选人的简历",
+      description: "PDF、Word、图片都行，系统会读出候选人的经历。",
+      done: candidateCount > 0 ? `已经有 ${candidateCount} 位候选人` : null,
+      to: "/candidates",
+      action: "去上传简历",
+    },
+    {
+      title: "安排面试，把链接发给候选人",
+      description: "候选人打开链接就能面试，不用注册和登录。面完你会看到录像和分析报告。",
+      done: null,
+      to: "/interviews/new",
+      action: "安排面试",
+    },
+  ];
+  // 前面两步都做完了，第三步才是眼下该点的
+  const next = steps.findIndex((s) => !s.done);
+  return (
+    <Card>
+      <CardHeader title="三步安排第一场面试" />
+      <CardBody>
+        <ol className="adm-list" aria-label="三步安排第一场面试">
+          {steps.map((s, i) => (
+            <li key={s.title} className="adm-item adm-item--wrap">
+              <span className="adm-step__dot" data-done={s.done ? "" : undefined}>
+                {s.done ? <Check aria-hidden="true" size={16} /> : i + 1}
+              </span>
+              <div className="adm-item__main">
+                <strong>{s.title}</strong>
+                <div className="adm-item__sub">{s.description}</div>
+              </div>
+              {s.done && <span className="adm-item__sub">{s.done}</span>}
+              <Link
+                to={s.to}
+                className={buttonClass({
+                  size: "sm",
+                  variant: i === next ? "primary" : "secondary",
+                })}
+              >
+                {s.action}
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </CardBody>
+    </Card>
+  );
 }
 
 export function OverviewPage() {
@@ -63,6 +129,11 @@ export function OverviewPage() {
           const advanced = items.filter((i) => i.decision === "advance").length;
           return (
             <>
+              {items.length === 0 && (
+                <div className="adm-section">
+                  <FirstSteps />
+                </div>
+              )}
               <div className="adm-stats adm-section">
                 <Stat label="等你处理" value={todos.length} unit="场" />
                 <Stat label="正在面试" value={live} unit="场" />
@@ -125,21 +196,19 @@ export function OverviewPage() {
                 </Card>
               </div>
 
-              <div className="adm-section">
-                <div
-                  className="oil-row oil-row--between"
-                  style={{ marginBottom: "var(--oil-space-3)" }}
-                >
-                  <h2 className="oil-title-md" style={{ margin: 0 }}>
-                    最近的面试
-                  </h2>
-                  <Link to="/interviews" className="adm-link">
-                    全部面试
-                  </Link>
-                </div>
-                {items.length === 0 ? (
-                  <Empty title="还没有面试" description="安排第一场面试试试。" />
-                ) : (
+              {items.length > 0 && (
+                <div className="adm-section">
+                  <div
+                    className="oil-row oil-row--between"
+                    style={{ marginBottom: "var(--oil-space-3)" }}
+                  >
+                    <h2 className="oil-title-md" style={{ margin: 0 }}>
+                      最近的面试
+                    </h2>
+                    <Link to="/interviews" className="adm-link">
+                      全部面试
+                    </Link>
+                  </div>
                   <Card>
                     <CardBody>
                       <ul className="adm-list">
@@ -158,8 +227,8 @@ export function OverviewPage() {
                       </ul>
                     </CardBody>
                   </Card>
-                )}
-              </div>
+                </div>
+              )}
             </>
           );
         }}
