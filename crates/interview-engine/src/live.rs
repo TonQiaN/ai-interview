@@ -963,6 +963,7 @@ impl<'a> Run<'a> {
         self.resolve_end(false)?;
         if let Stage::Speaking { splitter, .. } = &mut self.stage
             && let Some(rest) = splitter.finish()
+            && !is_cut_off_label(&rest.text)
         {
             self.speak(rest);
         }
@@ -971,8 +972,14 @@ impl<'a> Run<'a> {
                 key, kind, text, ..
             } => {
                 let text = text.trim().to_owned();
-                if text.is_empty() {
-                    // 说要追问却一个字没给：往下走
+                let action = self.action.unwrap_or(LiveAction::Probe);
+                // 说要追问，却一个字没给，或者只说了接话、后面没有问句：候选人没有问题可答，
+                // 当成这道题问完了，往下走。回应只有一句接话的不算，那句话本身就是把人带回正题
+                let nothing_asked = text.is_empty()
+                    || (action == LiveAction::Probe
+                        && leading_opener(self.config.language, &text)
+                            .is_some_and(|(_, rest)| rest.trim().is_empty()));
+                if nothing_asked {
                     let note = self.quality.map(|quality| AnswerNote {
                         quality,
                         intent: CandidateIntent::Answered,
@@ -980,10 +987,14 @@ impl<'a> Run<'a> {
                         follow_up: None,
                         flags: Vec::new(),
                     });
+                    self.note.clone_from(&note);
+                    if !text.is_empty() {
+                        // 接话已经念出去了，照样记进这一轮说过的话里
+                        self.said.push(Utterance { key, kind, text });
+                    }
                     self.advance(AnswerEnd::Silence, note)?;
                     return Ok(LiveAction::Next);
                 }
-                let action = self.action.unwrap_or(LiveAction::Probe);
                 if action == LiveAction::Probe {
                     self.state.probes_asked += 1;
                 } else {
@@ -1074,6 +1085,7 @@ impl<'a> Run<'a> {
 /// 这一段是不是只有输出格式里的词（动作名和判断词），没有要说给候选人的话。
 ///
 /// 英文面试里「Next.」「Wait.」单独成句也会被当成格式词去掉。面试官不该这么说话，去掉也不碍事。
+/// 中文的「下一题」单独成句也算：模型选了追问却没写问句、写了这三个字的时候，候选人不该听到它。
 fn is_format_label(text: &str) -> bool {
     let lower = text.to_lowercase();
     let mut words = lower
@@ -1095,8 +1107,33 @@ fn is_format_label(text: &str) -> bool {
                     | "weak"
                     | "poor"
                     | "no_answer"
+                    | "下一题"
+                    | "下一道题"
             )
         })
+}
+
+/// 模型的输出到头时剩下的这一段，是不是一个没写完的动作名或判断词（真模型写出来过「pro」）。
+///
+/// 只认三个字母以上、整段只有这一个词的：两个字母的「We」「No」可能是一句话刚开了头。
+fn is_cut_off_label(text: &str) -> bool {
+    let word = text.trim().to_lowercase();
+    word.len() >= 3
+        && word.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        && [
+            "probe",
+            "reply",
+            "next",
+            "repeat",
+            "wait",
+            "strong",
+            "adequate",
+            "weak",
+            "poor",
+            "no_answer",
+        ]
+        .iter()
+        .any(|label| label.len() > word.len() && label.starts_with(word.as_str()))
 }
 
 /// 读第一行：动作和判断。写法不严格也尽量认出来。
@@ -2482,6 +2519,67 @@ mod tests {
             outcome.said[0].text,
             "好的，咱们回到正题。这道题问的是你本人做了什么。"
         );
+    }
+
+    #[tokio::test]
+    async fn a_probe_with_no_question_moves_on_and_the_action_name_is_not_spoken() {
+        let (plan, config) = setup();
+        let (state, _) = open(&plan, &config).unwrap();
+        // 真模型写出来过的两种样子（issue #466）：选了追问，接话后面没有问句，
+        // 写的是「下一题」，或者动作名只写了一半
+        for script in [
+            "probe adequate\n好的，这部分我了解了。\n下一题",
+            "probe adequate\n好的，这部分我了解了。\npro",
+            "probe adequate\n好的，这部分我了解了。",
+        ] {
+            let model = ScriptedModel::new().reply(script);
+            let (outcome, events) = run(
+                &model,
+                &plan,
+                &config,
+                &state,
+                &said("我负责订单服务的拆分，数据迁移是我做的。", 60),
+            )
+            .await;
+            assert_eq!(spoken(&events), ["好的，这部分我了解了。"], "{script}");
+            // 没有问题可等：当成这道题问完了，接着念下一道题
+            assert_eq!(outcome.action, LiveAction::Next, "{script}");
+            assert_eq!(outcome.state.session.question_index, 1, "{script}");
+            assert_eq!(outcome.state.probes_asked, 0, "{script}");
+            // 接话照样记进这一轮说过的话里，排在下一道题前面
+            assert_eq!(outcome.said[0].text, "好的，这部分我了解了。", "{script}");
+            assert!(outcome.said.len() >= 2, "{script}");
+            assert_eq!(
+                outcome.note.as_ref().map(|note| note.quality),
+                Some(AnswerQuality::Adequate),
+                "{script}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reply_that_is_only_the_stock_opener_keeps_listening() {
+        let (plan, config) = setup();
+        let (state, _) = open(&plan, &config).unwrap();
+        let model = ScriptedModel::new().reply("reply weak\n好的，咱们回到正题。");
+        let (outcome, events) =
+            run(&model, &plan, &config, &state, &said("今天多云转晴。", 60)).await;
+        assert_eq!(spoken(&events), ["好的，咱们回到正题。"]);
+        assert_eq!(outcome.action, LiveAction::Reply);
+        assert_eq!(outcome.state.session.question_index, 0);
+    }
+
+    #[test]
+    fn only_whole_action_names_and_cut_off_ones_count_as_format_words() {
+        assert!(is_format_label("下一题"));
+        assert!(is_format_label("下一题。"));
+        assert!(!is_format_label("下一题我们聊聊项目。"));
+        assert!(is_cut_off_label("pro"));
+        assert!(is_cut_off_label("no_ans"));
+        assert!(!is_cut_off_label("We"));
+        assert!(!is_cut_off_label("probe"));
+        assert!(!is_cut_off_label("pro tip"));
+        assert!(!is_cut_off_label("那你说说"));
     }
 
     #[tokio::test]
