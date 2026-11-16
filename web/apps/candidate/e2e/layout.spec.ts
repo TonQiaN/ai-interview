@@ -137,7 +137,8 @@ for (const { name, viewport, english, fits } of [
       await expect(notDone).toBeInViewport({ ratio: 1 });
       await expect(done).toBeInViewport({ ratio: 1 });
       await expect(page.getByRole("timer", { name: t.countdown })).toBeInViewport({ ratio: 1 });
-      await expect(page.getByText(t.countdownHint)).toBeInViewport({ ratio: 1 });
+      await expect(page.locator(".app-scene__hint")).toHaveText(t.countdownHint);
+      await expect(page.locator(".app-scene__hint")).toBeInViewport({ ratio: 1 });
       expect(await offScreen(page), "倒计时的时候").toEqual([]);
 
       if (fits) expect(await overflowY(page), "整页应该一屏放得下").toBeLessThanOrEqual(0);

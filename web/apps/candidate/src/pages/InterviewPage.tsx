@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { CameraPreview } from "../components/CameraPreview";
 import { MicMeter } from "../components/MicMeter";
 import { useInterviewLayout } from "../lib/flow/layout";
+import { announcement } from "../lib/interview/announce";
 import { questionProgressOf } from "../lib/interview/progress";
 import type { RunnerPhase, RunnerSnapshot } from "../lib/interview/runner";
 import type { UploadStatus } from "../lib/upload/uploader";
@@ -151,6 +152,8 @@ export function InterviewPage(props: InterviewPageProps) {
         </>
       }
     >
+      {/* 这一页画面上没有标题，读屏软件要有一个：换到这一页时焦点放在它上面 */}
+      <h1 className="oil-sr-only">{text.heading}</h1>
       {interrupted && (
         <Banner
           tone="danger"
@@ -193,9 +196,13 @@ export function InterviewPage(props: InterviewPageProps) {
           state={held ? "idle" : PRESENCE[phase]}
         />
 
-        {/* 给候选人的提示有的很长，单独占一行、可以折行；头像下面的小标签只写面试官的状态 */}
-        <p className="app-scene__hint" role="status">
+        {/* 给候选人的提示有的很长，单独占一行、可以折行；头像下面的小标签只写面试官的状态。
+            这一行是给眼睛看的；读屏软件念的是下面那一行，面试官说话的时候它不出声 */}
+        <p className="app-scene__hint" aria-hidden="true">
           {hint}
+        </p>
+        <p className="oil-sr-only" role="status">
+          {announcement(phase, hint, utterance?.text ?? null)}
         </p>
 
         {utterance && (

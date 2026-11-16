@@ -1,5 +1,6 @@
-import { allConsented, Banner, Button, ConsentList, Stage, Steps } from "@ai-interview/ui";
+import { allConsented, Banner, Button, ConsentList, Stage } from "@ai-interview/ui";
 import { useMemo, useState } from "react";
+import { StepBar } from "../components/StepBar";
 import type { RoomSession } from "../lib/api/room-types";
 import { useText } from "../text";
 
@@ -29,7 +30,7 @@ export function ConsentPage({ room, busy, error, onAgree }: ConsentPageProps) {
 
   return (
     <Stage
-      header={<Steps compact steps={t.steps} current={1} />}
+      header={<StepBar current={1} />}
       footer={
         <>
           {error && (

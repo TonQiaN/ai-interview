@@ -169,3 +169,11 @@ body,
   flex-direction: row;
   align-items: center;
 }
+
+/*
+ * 换页时焦点放在标题上，是给读屏软件和键盘用的（见 lib/flow/page-heading.ts）。
+ * 标题不是能点的东西，不画焦点框。
+ */
+h1[tabindex="-1"]:focus {
+  outline: none;
+}

@@ -13,6 +13,8 @@ export const en: Texts = {
   copyLink: "Copy link",
   cameraLabel: "Your camera",
   steps: ["Intro", "Consent", "Devices", "Start"],
+  stepOf: (index, total, name) => `Step ${index} of ${total}: ${name}`,
+  titleOf: (page) => `${page} · AI Interview`,
   minutes: (seconds) => {
     const minutes = Math.max(1, Math.round(seconds / 60));
     return `about ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
@@ -188,6 +190,7 @@ export const en: Texts = {
   },
 
   interview: {
+    heading: "Interview in progress",
     recording: "Recording",
     elapsed: "Time elapsed",
     end: "End",
