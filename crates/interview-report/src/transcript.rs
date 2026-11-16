@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use crate::frames::KIND_FRAMES_CHECKED;
-use crate::record::{InterviewRecord, Question, Segment, Speaker};
+use crate::record::{InterviewRecord, ProctorEvent, Question, Segment, Speaker};
 use crate::report::{QuestionTiming, TimingOverview};
 
 /// 一道计划内的题目，连同它的追问和对应的转写片段。
@@ -95,14 +95,66 @@ pub(crate) fn group_by_question<'a>(
     groups
 }
 
-/// 算一道题的计时数据。
-pub(crate) fn question_timing(segments: &[&Segment]) -> QuestionTiming {
+const KIND_RECORDING_GAP: &str = "recording_gap";
+const KIND_PAGE_ERROR: &str = "page_error";
+const KIND_INTERVIEW_STARTED: &str = "interview_started";
+
+/// 面试停着的时间段，按开始时间排好，重叠的合在一起。
+///
+/// 两种情况面试间会把面试按住：摄像头、麦克风断了或者页面的声音被系统停掉（`recording_gap`，
+/// 到 `device_recovered` 为止），页面自己渲染出错（`page_error`，到候选人刷新后接着面的那条
+/// `interview_started` 为止）。这段时间面试在等，候选人没法作答，不该算成候选人开口前在想。
+/// 只算两头都清楚的：没等到恢复的 `recording_gap`、后面没有 `interview_started` 的 `page_error`
+/// 不知道停到了什么时候，不算。刷新页面续面也会停一阵，但页面是什么时候关掉的没有记录，也不算。
+pub(crate) fn held_intervals(events: &[ProctorEvent]) -> Vec<(u64, u64)> {
+    let mut held: Vec<(u64, u64)> = Vec::new();
+    for (index, event) in events.iter().enumerate() {
+        let Some(start) = event.at_ms else { continue };
+        let end = match event.kind.as_str() {
+            KIND_RECORDING_GAP => event.duration_ms.map(|duration| start + duration),
+            KIND_PAGE_ERROR => events[index + 1..]
+                .iter()
+                .filter(|later| later.kind == KIND_INTERVIEW_STARTED)
+                .filter_map(|later| later.at_ms)
+                .find(|at| *at >= start),
+            _ => None,
+        };
+        if let Some(end) = end.filter(|end| *end > start) {
+            held.push((start, end));
+        }
+    }
+    held.sort_unstable();
+    let mut merged: Vec<(u64, u64)> = Vec::with_capacity(held.len());
+    for (start, end) in held {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    merged
+}
+
+/// `from` 到 `to` 之间面试停着的时间。
+fn held_within(held: &[(u64, u64)], from: u64, to: u64) -> u64 {
+    held.iter()
+        .map(|(start, end)| (*end).min(to).saturating_sub((*start).max(from)))
+        .sum()
+}
+
+/// 算一道题的计时数据。`held` 是 [`held_intervals`] 给的面试停着的时间段，等待和停顿里要扣掉。
+pub(crate) fn question_timing(segments: &[&Segment], held: &[(u64, u64)]) -> QuestionTiming {
     let (Some(first), Some(last)) = (segments.first(), segments.last()) else {
         return QuestionTiming::default();
+    };
+    // 从 `from` 到 `to` 候选人实际能作答的时间
+    let waited = |from: u64, to: u64| {
+        to.saturating_sub(from)
+            .saturating_sub(held_within(held, from, to))
     };
     let mut timing = QuestionTiming {
         start_ms: first.start_ms,
         end_ms: last.end_ms,
+        held_ms: held_within(held, first.start_ms, last.end_ms),
         ..Default::default()
     };
 
@@ -114,10 +166,10 @@ pub(crate) fn question_timing(segments: &[&Segment]) -> QuestionTiming {
                 if timing.response_latency_ms.is_none()
                     && let Some(asked) = question_end
                 {
-                    timing.response_latency_ms = Some(segment.start_ms.saturating_sub(asked));
+                    timing.response_latency_ms = Some(waited(asked, segment.start_ms));
                 }
                 if let Some(previous_end) = previous_candidate_end {
-                    let pause = segment.start_ms.saturating_sub(previous_end);
+                    let pause = waited(previous_end, segment.start_ms);
                     if timing
                         .longest_pause_ms
                         .is_none_or(|longest| pause > longest)
@@ -240,6 +292,10 @@ pub(crate) const EVENT_LEGEND: &str = "\n# 过程事件\n由候选人的面试�
      原来的页面停了下来。它旁边会有一条 interview_started（resumed 为 true），是新的页面接上了面试：\
      面试从停下的地方继续，录像换成新的一段接着录，中间不是候选人离开。\
      interview_started 的 resumed 为 true、旁边却没有 page_taken_over 的，是在同一个页面上刷新之后接着面。\n\
+     page_error 是面试页自己渲染出错了（stage 是出错时在哪一步，name 是错误的类型名），是页面的毛病，\
+     和候选人做了什么无关：候选人看到的是「页面出了点问题，请刷新」，面试停在原地，\
+     刷新、重新检查设备之后才接着面，所以它后面会有一条 resumed 为 true 的 interview_started。\
+     从 page_error 到这条 interview_started 之间面试是停着的，候选人没法作答，不是离开，也不是在想。\n\
      interview_started 的 video_kbps 是这一段录像的画面实际用的码率（千比特每秒）。video_reduced 为 true \
      表示候选人的上行网速装不下平时的码率，面试页把画面的码率降了下来，好让声音及时传到：\
      这一段录像的画面比平时糊，是页面有意降的，和候选人做了什么无关，也不是摄像头有问题；声音和转写不受影响。\n";
@@ -313,12 +369,15 @@ pub(crate) fn render_context(
         );
     }
 
-    out.push_str("\n# 计时数据\n由程序从时间戳算出。每行的格式：题目 | 问完到开口的等待 | 候选人说话时长 | 字数 | 语速（字/分钟） | 作答中最长的停顿\n");
+    out.push_str("\n# 计时数据\n由程序从时间戳算出。每行的格式：题目 | 问完到开口的等待 | 候选人说话时长 | 字数 | 语速（字/分钟） | 作答中最长的停顿 | 面试停着的时间\n\
+        面试停着的时间是这道题中间设备断开、页面出错，面试停下来等的时间，候选人这时没法作答；\
+        等待和停顿里已经把它扣掉了，写「-」的是没有停过。\n");
+    let held = held_intervals(&record.events);
     for group in groups {
-        let timing = question_timing(&group.segments);
+        let timing = question_timing(&group.segments, &held);
         let _ = writeln!(
             out,
-            "{} | {} | {} | {} | {} | {}",
+            "{} | {} | {} | {} | {} | {} | {}",
             group.root.id,
             timing
                 .response_latency_ms
@@ -331,6 +390,11 @@ pub(crate) fn render_context(
             timing
                 .longest_pause_ms
                 .map_or_else(|| "-".to_owned(), seconds),
+            if timing.held_ms == 0 {
+                "-".to_owned()
+            } else {
+                seconds(timing.held_ms)
+            },
         );
     }
 
@@ -425,7 +489,7 @@ mod tests {
             ),
         ];
         let refs: Vec<&Segment> = segments.iter().collect();
-        let timing = question_timing(&refs);
+        let timing = question_timing(&refs, &[]);
         assert_eq!(timing.start_ms, 0);
         assert_eq!(timing.end_ms, 19_000);
         assert_eq!(timing.response_latency_ms, Some(2_500));
@@ -434,6 +498,84 @@ mod tests {
         // 「好的我有五年经验」8 个字 +「主要做后端开发用Rust」12 个字
         assert_eq!(timing.candidate_chars, 20);
         assert_eq!(timing.chars_per_minute, Some(120));
+    }
+
+    fn event(kind: &str, at_ms: Option<u64>, duration_ms: Option<u64>) -> ProctorEvent {
+        ProctorEvent {
+            id: format!("{kind}-{}", at_ms.unwrap_or(0)),
+            at_ms,
+            kind: kind.to_owned(),
+            duration_ms,
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn interview_is_held_while_a_device_is_gone_or_the_page_has_crashed() {
+        let events = [
+            event("page_opened", None, None),
+            event("interview_started", Some(0), None),
+            // 手机来电话：麦克风静音和页面的声音被停掉重叠着，合成一段
+            event("recording_gap", Some(20_000), Some(8_000)),
+            event("recording_gap", Some(21_000), Some(9_000)),
+            // 页面出错，候选人刷新、检查设备之后接着面
+            event("page_error", Some(60_000), None),
+            event("page_opened", None, None),
+            event("interview_started", Some(140_000), None),
+            // 切出页面不是面试停着
+            event("visibility_hidden", Some(150_000), Some(5_000)),
+        ];
+        assert_eq!(
+            held_intervals(&events),
+            vec![(20_000, 30_000), (60_000, 140_000)]
+        );
+    }
+
+    #[test]
+    fn a_hold_with_no_known_end_is_not_counted() {
+        let events = [
+            event("interview_started", Some(0), None),
+            // 设备一直没恢复、页面出错后再没接着面：不知道停到什么时候
+            event("recording_gap", Some(20_000), None),
+            event("page_error", Some(60_000), None),
+        ];
+        assert_eq!(held_intervals(&events), vec![]);
+    }
+
+    #[test]
+    fn time_the_interview_was_held_is_taken_out_of_latency_and_pauses() {
+        let segments = [
+            segment("s1", Speaker::Interviewer, 0, 5_000, "请介绍一下你自己。"),
+            // 问完 1 秒页面出错，80 秒后接着面，候选人又过了 2 秒开口
+            segment(
+                "s2",
+                Speaker::Candidate,
+                88_000,
+                93_000,
+                "好的，我有五年经验。",
+            ),
+            // 说到一半来了电话，停了 10 秒，回来 1.5 秒后接着说
+            segment(
+                "s3",
+                Speaker::Candidate,
+                105_000,
+                110_000,
+                "主要做后端开发。",
+            ),
+        ];
+        let refs: Vec<&Segment> = segments.iter().collect();
+        let held = [(6_000, 86_000), (93_500, 103_500)];
+        let timing = question_timing(&refs, &held);
+        assert_eq!(timing.response_latency_ms, Some(3_000));
+        assert_eq!(timing.longest_pause_ms, Some(2_000));
+        assert_eq!(timing.held_ms, 90_000);
+        // 候选人说了多久、说了多少字不受影响
+        assert_eq!(timing.candidate_speaking_ms, 10_000);
+
+        // 不在这道题里的那一段不算
+        let timing = question_timing(&refs, &[(200_000, 260_000)]);
+        assert_eq!(timing.response_latency_ms, Some(83_000));
+        assert_eq!(timing.held_ms, 0);
     }
 
     #[test]
@@ -446,7 +588,7 @@ mod tests {
             "请介绍一下你自己。",
         )];
         let refs: Vec<&Segment> = segments.iter().collect();
-        let timing = question_timing(&refs);
+        let timing = question_timing(&refs, &[]);
         assert_eq!(timing.response_latency_ms, None);
         assert_eq!(timing.candidate_speaking_ms, 0);
         assert_eq!(timing.chars_per_minute, None);
@@ -467,7 +609,7 @@ mod tests {
             segment("s4", Speaker::Candidate, 16_000, 20_000, "我负责存储层。"),
         ];
         let refs: Vec<&Segment> = segments.iter().collect();
-        let timing = question_timing(&refs);
+        let timing = question_timing(&refs, &[]);
         assert_eq!(timing.response_latency_ms, Some(1_000));
         assert_eq!(timing.longest_pause_ms, None);
     }

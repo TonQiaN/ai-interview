@@ -31,8 +31,8 @@ use crate::report::{
     ReviewFlagCode, RiskLevel, SCHEMA_VERSION, ScoreRange, StageFailure, Usage, null_as_default,
 };
 use crate::transcript::{
-    Assignment, QuestionGroup, clock, group_by_question, lookup_by_alias, provided_assignment,
-    question_timing, render_context, segment_alias, timing_overview,
+    Assignment, QuestionGroup, clock, group_by_question, held_intervals, lookup_by_alias,
+    provided_assignment, question_timing, render_context, segment_alias, timing_overview,
 };
 
 /// 分析的选项。
@@ -131,6 +131,7 @@ pub async fn analyze(
         )
         .await;
 
+    let held = held_intervals(&record.events);
     let mut questions = Vec::with_capacity(groups.len());
     for (group, outcome) in groups.iter().zip(question_judgements) {
         let judgement = match outcome {
@@ -148,7 +149,7 @@ pub async fn analyze(
             question_text: group.root.text.clone(),
             asked: !group.segments.is_empty(),
             segment_ids: group.segments.iter().map(|s| s.id.clone()).collect(),
-            timing: question_timing(&group.segments),
+            timing: question_timing(&group.segments, &held),
             judgement,
         });
     }
