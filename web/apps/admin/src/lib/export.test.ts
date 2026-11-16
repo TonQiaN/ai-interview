@@ -8,6 +8,7 @@ const interview = (patch: Partial<InterviewSummary> = {}): InterviewSummary => (
   candidate_name: "周明远",
   position_id: "p1",
   position_title: "后端工程师",
+  stage: "screening",
   status: "completed",
   decision: "advance",
   recommendation: "advance",
