@@ -121,6 +121,7 @@ cargo test -p interview-server --features sherpa --test live -- --ignored --noca
 - 候选人的简历、录像、声音是个人信息：不进日志，不进测试数据，发给大模型的内容只带任务需要的部分。
 - 前端调后端只用 `@ai-interview/api-client`（`createApiClient()` 给 HR 后台，`createRoomClient(token)` 给面试间），类型由 OpenAPI 生成，不手写接口类型。生成结果在 `web/packages/api-client/src/generated/`，不进 Git。
 - 改了引擎清单或能力限制，`tts/engines.json`、`crates/interview-tts` 和 `tts/README.md` 要一起改，有测试检查前两个对不对得上。
+- shell 脚本要在 macOS 自带的 bash 3.2 上能跑：变量名后面紧跟中文或全角标点时写成 `${name}`，不然在 UTF-8 的终端里会报 unbound variable（卫生检查会拦）。
 - 一个 PR 一件事。修 bug 先写一个会失败的测试，再修。
 - 改了约定、命令或目录结构，同一个 PR 里更新这个文件。
 

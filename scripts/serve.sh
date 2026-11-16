@@ -126,9 +126,9 @@ stt_models="${stt_models:-$HOME/.cache/ai-interview/stt-models}"
 features=()
 if [ "$stt_backend" = "sherpa" ]; then
   features=(--features sherpa)
-  ok "语音识别用真模型（模型放在 $stt_models，没有会自动下载，约 170 MB）"
+  ok "语音识别用真模型（模型放在 ${stt_models}，没有会自动下载，约 170 MB）"
 else
-  warn "语音识别是假的（AI_INTERVIEW_STT_BACKEND=$stt_backend）：听不到候选人说了什么，报告没有内容可写"
+  warn "语音识别是假的（AI_INTERVIEW_STT_BACKEND=${stt_backend}）：听不到候选人说了什么，报告没有内容可写"
 fi
 
 # ── 语音合成：配了就用配的；没配，在 Mac 上备好了上游代码就用 tts/worker/run.sh 起 worker ──
