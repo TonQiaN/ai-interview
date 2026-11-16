@@ -39,4 +39,5 @@ pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin
 - 报告里的判断下面跟着原话，点一下跳到回看的那个时间。新加的报告内容也照这个做，简历里的原文没有时间，不做成可点的。
 - 报告可以打印或存成 PDF（`src/lib/print.ts` 和 `admin.css` 末尾的打印样式）：打印前把收起来的内容展开、换成浅色主题。报告里新加了要点开才看得到的内容，要么用 `<details>`，要么读 `PrintingContext`，不然印不出来。
 - 面试概览里的「归档」和「彻底删除」是两回事：归档（`DELETE /interviews/{id}`）只是不在列表里显示，数据还在；彻底删除（`POST /interviews/{id}/purge`）把录像、题目、对话和报告真的删掉，只有管理员看得到，要输候选人的名字才能点。文案别把两个说混。
+- 候选人对比（`/positions/:id/comparison`，`pages/PositionComparison.tsx`）：对比的正文里候选人是代号 A、B、C，页面用 `src/lib/comparison.ts` 的 `namesInText` 换成姓名。按建议的档次分组，组里不显示名次；`close_to` 标成「分不出先后」；诚信迹象只说「要人工复核」；`caveats` 直接摆出来。这几条是报告线实测后提的要求（issue #238），改展示时别丢。
 - 诚信相关的内容写成「值得核对的迹象」，带上别的可能解释，不写成结论。
