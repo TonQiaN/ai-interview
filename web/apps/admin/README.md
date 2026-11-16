@@ -51,6 +51,7 @@ pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin
 - 录像不完整（候选人没传完，后端把收到的部分合并出来）或者有一段没保存下来时，原因在录像的 `error` 字段里，后端已经写成给 HR 看的话。回看页用 `src/lib/recordings.ts` 的 `recordingNotes` 原样显示在播放器下面，不要自己再编一套说法。
 - 候选人的上行网速慢时，面试页会有意把录像的画面降下来（`interview_started` 事件里 `video_reduced` 为 true）。回看页在播放器下面说明画面糊不是摄像头的问题（`reducedVideoNote`），过程记录里那一条「面试开始」后面也写着降到了多少。
 - 报告里的判断下面跟着原话，点一下跳到回看的那个时间。新加的报告内容也照这个做，简历里的原文没有时间，不做成可点的。
+- 页面的脚本跑起来之前，`index.html` 里先有一句「正在打开招聘工作台…」；脚本取不到、一上来就报错或者十几秒还没好，`<head>` 里那一小段不经过打包的脚本把它换成说明和「刷新页面」（`src/boot.test.ts` 照着 `index.html` 跑一遍）。这一段要排在页面的脚本前面，用老写法（`var`、`function`），不要引用打包后的东西。
 - 某一页画到一半抛了错（多半是后端返回了页面没料到的内容），只有这一页换成一句说明，侧栏和别的页面照常用：`src/components/PageError.tsx` 的 `PageErrorBoundary` 包在外框的 `<Outlet />` 外面，换了地址自己复位，「再试一次」先扔掉没人在用的查询结果再重画。外框自己出错时是路由上的 `AppCrashed`（`main.tsx` 和测试用的 `TestRouter` 都挂了）。新加的页面不用管这件事；不要在页面里自己接住渲染错误再显示空白。
 - 面试结果可以导出成表格（`src/components/ExportInterviews.tsx`，「面试」列表和岗位页都有）：`fetchAllInterviews` 把符合筛选条件的面试一页一页取完，不只是眼前这一页；`src/lib/export.ts` 的 `csv` 开头带 BOM（没有的话 Excel 里中文是乱码），以 `=`、`+`、`-`、`@` 开头的格子前面加单引号，不让 Excel 当公式算。再加别的导出也用这两个函数，不要自己拼逗号。页面测试里用 `src/test/download.ts` 的 `catchDownload` 接住存下来的文件。
 - 报告可以打印或存成 PDF（`src/lib/print.ts` 和 `admin.css` 末尾的打印样式）：打印前把收起来的内容展开、换成浅色主题。报告里新加了要点开才看得到的内容，要么用 `<details>`，要么读 `PrintingContext`，不然印不出来。候选人对比也能打印，两处共用 `src/lib/print.ts` 里的 `usePrinting`；只在屏幕上有用的东西（选人的那一块、跳到别处的链接）加 `adm-no-print`，只印在纸上的抬头用 `adm-print-only`。表格在纸上不能横向滚动，新加的宽表格要在打印样式里让长的那一列换行。
@@ -58,5 +59,6 @@ pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin
 - 候选人对比（`/positions/:id/comparison`，`pages/PositionComparison.tsx`）：对比的正文里候选人是代号 A、B、C，页面用 `src/lib/comparison.ts` 的 `namesInText` 换成姓名。按建议的档次分组，组里不显示名次；`close_to` 标成「分不出先后」；诚信迹象只说「要人工复核」；`caveats` 直接摆出来。这几条是报告线实测后提的要求（issue #238），改展示时别丢。
 - 出题不会去读候选人之前的面试，只看这一场的设置。所以从一场面试接着安排时，要带的东西都放进设置里：`/interviews/new?from=<面试 id>`（「再安排一场」）把人、岗位、设置和声音原样带过去；再加 `&round=next`（「安排下一轮」）按那一场的报告把设置改成深入面试，改法在 `src/lib/nextRound.ts`（报告建议的方向进重点考察、建议的问题进必须问的题、结论记进「之前已经了解到的情况」、流程说明换掉）。报告里新加了对下一轮有用的内容，也在这里接进去。面试详情最上面的「下一步」提示在决定记成「进入下一轮」后会接着提示安排下一轮，已经有更晚安排的一场时改成说那一场的状态。
 - 完整的面试链接后端只在生成时返回一次，页面上拿到以后要让 HR 当场复制，不能指望之后再取。单场在面试详情的「链接」里生成；一个岗位下题目准备好、还没发链接的，岗位页可以一起生成（`BatchInvitesDialog`）：一场一场来，没成的不影响后面的，生成完窗口只能点底下的按钮关，还有没复制过的会先提醒。两处给候选人的那段话是同一份，在 `src/lib/invite.ts`，改措辞只改那里。
+- 链接到期以后后端不改面试的状态，还是 `invited`。列表上显示面试到哪一步用 `InterviewStatusBadge`（`src/components/common.tsx`），它拿列表项的 `invite_expires_at` 看，过期的标成「链接已过期」；要自己判断就用 `src/lib/format.ts` 的 `inviteExpired`。不要直接拿 `status` 去写「已发链接」。深入面试用 `StageBadge` 标出来，第一轮初筛不标。演示数据里的到期时间是假后端按链接现算的，和后端一样取没撤销的链接里最晚的那个。
 - 一批面试一起做的事都放在岗位页「这个岗位的面试」上面：准备失败的「一起重试」、草稿「一起准备」（`PrepareAll`）、准备好的「一起生成链接」。做法一样：按状态各取一页（最多 100 场）来数，动手时用 `src/lib/schedule.ts` 的 `scheduleAll` 一场一场来，没成的不影响后面的，最后说明是谁、为什么，全部做完再刷新一次列表。
 - 诚信相关的内容写成「值得核对的迹象」，带上别的可能解释，不写成结论。

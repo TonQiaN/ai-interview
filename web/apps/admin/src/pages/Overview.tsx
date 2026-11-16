@@ -7,13 +7,14 @@ import { Person, QueryView } from "../components/common";
 import { PageTitle } from "../components/PageHeader";
 import { hasVerdict, InterviewTags, ReportVerdict } from "../components/ReportVerdict";
 import { SystemStatusList } from "../components/SystemStatusList";
-import { relativeTime } from "../lib/format";
+import { inviteExpired, relativeTime } from "../lib/format";
 
 /** 需要 HR 动手的面试，和该做的事 */
 function todoOf(i: InterviewSummary): string | null {
   if (i.status === "prepare_failed") return "题目没准备好，去重试";
   if (i.status === "draft") return "还没生成题目";
   if (i.status === "ready") return "可以发链接了";
+  if (inviteExpired(i)) return "链接过期了，候选人还没面试，去换一个新链接";
   const ended = i.status === "completed" || i.status === "abandoned";
   if (ended && i.report_status === "failed") return "报告生成失败，去重新生成";
   if (ended && i.report_status === "done" && i.decision === "pending") return "报告好了，等你决定";
@@ -124,7 +125,7 @@ export function OverviewPage() {
         {({ items }) => {
           const todos = items.filter((i) => todoOf(i));
           const live = items.filter((i) => i.status === "in_progress").length;
-          const waiting = items.filter((i) => i.status === "invited").length;
+          const waiting = items.filter((i) => i.status === "invited" && !inviteExpired(i)).length;
           const done = items.filter((i) => i.status === "completed");
           const advanced = items.filter((i) => i.decision === "advance").length;
           return (

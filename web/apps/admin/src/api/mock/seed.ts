@@ -1301,9 +1301,9 @@ export function buildSeed(): Seed {
     const it = add("叶南乔", "analyst-nervous", "ready", -3 * HOUR, { updated_at: iso(-2 * HOUR) });
     planned(it, "analyst-nervous");
   }
-  // 链接过期，后来重新安排时准备失败
+  // 链接过期了候选人也没来（后端不会因此改状态，还是已发链接），后来重新安排时准备失败
   {
-    const it = add("程一鸣", "frontend-injection", "expired", -12 * DAY, {
+    const it = add("程一鸣", "frontend-injection", "invited", -12 * DAY, {
       updated_at: iso(-5 * DAY),
     });
     planned(it, "frontend-injection");

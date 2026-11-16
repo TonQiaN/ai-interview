@@ -1,5 +1,13 @@
 import type { InterviewSummary } from "../api/types";
-import { decisionLabel, elapsedMs, fullTime, recommendationLabel, statusLabel } from "./format";
+import {
+  decisionLabel,
+  elapsedMs,
+  fullTime,
+  inviteExpired,
+  recommendationLabel,
+  stageLabelOf,
+  statusLabel,
+} from "./format";
 
 /**
  * 把几行格子写成 Excel 能直接打开的 CSV。
@@ -31,6 +39,7 @@ export function interviewsSheet(
     [
       "候选人",
       "岗位",
+      "轮次",
       "状态",
       "报告的建议",
       "综合分",
@@ -46,7 +55,8 @@ export function interviewsSheet(
       return [
         i.candidate_name,
         i.position_title,
-        `${statusLabel[i.status]}${i.archived_at ? "（已归档）" : ""}`,
+        stageLabelOf[i.stage],
+        `${statusLabel[i.status]}${inviteExpired(i) ? "（链接已过期）" : ""}${i.archived_at ? "（已归档）" : ""}`,
         i.recommendation ? recommendationLabel[i.recommendation] : "",
         typeof i.overall_score === "number" ? String(i.overall_score) : "",
         decisionLabel[i.decision],

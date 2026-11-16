@@ -189,7 +189,14 @@ describe("假后端", () => {
     });
     expect(invite.data.url).toMatch(/\/i\/#\w+/);
     expect(invite.data.invite.status).toBe("active");
-    expect((await call<Interview>(server, "GET", `/interviews/${id}`)).data.status).toBe("invited");
+    const invited = (await call<Interview>(server, "GET", `/interviews/${id}`)).data;
+    expect(invited.status).toBe("invited");
+    // 详情和列表项都带着链接的到期时间，列表上靠它看链接过期了没有
+    expect(invited.invite_expires_at).toBe(invite.data.invite.expires_at);
+    const listed0 = await call<Page<InterviewSummary>>(server, "GET", "/interviews?page_size=100");
+    expect(listed0.data.items.find((x) => x.id === id)?.invite_expires_at).toBe(
+      invite.data.invite.expires_at,
+    );
     // 之后再查，拿不到完整的链接
     const listed = await call<{ items: Invite[] }>(server, "GET", `/interviews/${id}/invites`);
     expect(listed.data.items).toHaveLength(1);

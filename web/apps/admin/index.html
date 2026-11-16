@@ -5,9 +5,65 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="robots" content="noindex" />
     <title>AI 面试 · 招聘工作台</title>
+    <script>
+      // 这一段不经过打包，页面的脚本没加载出来时也能跑（所以要放在页面的脚本前面）：
+      // 脚本加载失败、一上来就报错，或者十几秒还没好，把上面那句换成说明和「刷新页面」，不让人对着一片空白。
+      (() => {
+        function say(text) {
+          var box = document.getElementById("adm-boot");
+          if (!box) return; // 页面已经画出来了，不去动它
+          box.textContent = text;
+          var button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "刷新页面";
+          button.style.cssText =
+            "display:block;margin:16px auto 0;padding:8px 20px;font:inherit;color:inherit;" +
+            "background:transparent;border:1px solid currentColor;border-radius:8px;cursor:pointer";
+          button.onclick = () => {
+            location.reload();
+          };
+          box.appendChild(button);
+        }
+        window.addEventListener(
+          "error",
+          (event) => {
+            var target = event.target;
+            // 脚本文件没取到（target 是那个 script），或者脚本一上来就报错（target 是 window）
+            if (target === window || (target && target.tagName === "SCRIPT")) {
+              say(
+                "页面没有加载出来。可能是网络断了一下，或者系统刚更新过，请刷新页面；一直这样的话，换成新版的 Chrome 或 Edge 再试。",
+              );
+            }
+          },
+          true,
+        );
+        setTimeout(() => {
+          say("还在加载，网络可能比较慢。可以再等一会儿，或者刷新页面再试。");
+        }, 15000);
+      })();
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- 页面的脚本跑起来之前先显示这一句，跑起来以后整块被换掉 -->
+      <div
+        id="adm-boot"
+        role="status"
+        style="
+          padding: 38vh 24px 0;
+          text-align: center;
+          font: 16px/1.7 system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+          color: #5a4c3f;
+        "
+      >
+        正在打开招聘工作台…
+      </div>
+    </div>
+    <noscript>
+      <p style="padding: 0 24px; text-align: center; font: 16px/1.7 system-ui, sans-serif">
+        这个页面要开着 JavaScript 才能用。请在浏览器设置里打开，再刷新页面。
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
