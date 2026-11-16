@@ -820,3 +820,8 @@ export function resumeQuote(quote: string): string {
     .join("\n")
     .trim();
 }
+
+/** 账号的角色。后端以后加了新的角色，不认识的原样显示 */
+export function roleLabel(role: string): string {
+  return role === "admin" ? "管理员" : role === "recruiter" ? "普通账号" : role;
+}

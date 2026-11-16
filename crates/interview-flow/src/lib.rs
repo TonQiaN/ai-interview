@@ -24,10 +24,12 @@ use interview_tts::Synthesizer;
 use utoipa_axum::router::OpenApiRouter;
 
 mod answer_audio;
+pub mod comparison;
 mod context;
 pub mod finalize;
 pub mod model;
 pub mod prepare;
+mod purge;
 mod record;
 pub mod report;
 mod review;
@@ -57,6 +59,7 @@ pub struct Deps {
 pub fn router(deps: Deps) -> OpenApiRouter {
     routes::router()
         .merge(review::router())
+        .merge(comparison::router())
         .merge(templates::router())
         .with_state(deps)
 }
@@ -78,8 +81,13 @@ pub fn register_tasks(registry: &mut TaskRegistry, deps: Deps) {
         let deps = task_deps.clone();
         async move { finalize::run(&deps, &task).await }
     });
+    let task_deps = deps.clone();
     registry.register_fn(task_kind::REPORT_GENERATE, move |task| {
-        let deps = deps.clone();
+        let deps = task_deps.clone();
         async move { report::run(&deps, &task).await }
+    });
+    registry.register_fn(task_kind::POSITION_COMPARE, move |task| {
+        let deps = deps.clone();
+        async move { comparison::run(&deps, &task).await }
     });
 }

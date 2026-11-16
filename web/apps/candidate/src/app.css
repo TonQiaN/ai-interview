@@ -48,7 +48,40 @@ body,
   gap: var(--oil-space-3);
 }
 
-/* 面试中：自己的小画面和音量条并排 */
+/*
+ * 面试中的主体：面试官、题目、自己的画面和音量。版面有三种，见 src/lib/flow/layout.ts。
+ * 默认（屏幕够高）从上到下一列。
+ */
+.app-scene {
+  --app-presence-size: min(46vw, 220px, 22vh);
+  --app-presence-size: min(46vw, 220px, 22dvh);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "presence" "hint" "caption" "live";
+  gap: var(--oil-space-4);
+}
+.app-scene__presence {
+  grid-area: presence;
+}
+/* 提示占一行的位置，有没有字下面的题目都不跳 */
+.app-scene__hint {
+  grid-area: hint;
+  margin: 0;
+  min-height: 1.5em;
+  line-height: 1.5;
+  text-align: center;
+  text-wrap: balance;
+  font-size: var(--oil-text-md);
+  color: var(--oil-on-night-2);
+}
+.app-scene__caption {
+  grid-area: caption;
+}
+.app-scene__live {
+  grid-area: live;
+}
+
+/* 自己的小画面和音量条并排 */
 .app-live {
   display: flex;
   align-items: center;
@@ -64,4 +97,75 @@ body,
   display: grid;
   place-items: center;
   min-width: 120px;
+}
+
+/* 作答的按钮，贴在页面底部 */
+.app-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--oil-space-3);
+}
+
+/*
+ * 手机浏览器里：面试官在左，自己的画面和音量在右，题目在下面。
+ * 这样「我答完了」和倒计时不用往下滑就看得到。
+ */
+.app-scene[data-layout="short"] {
+  --app-presence-size: min(34vw, 18vh, 150px);
+  --app-presence-size: min(34vw, 18dvh, 150px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas: "presence live" "hint hint" "caption caption";
+  align-items: center;
+  gap: var(--oil-space-3) var(--oil-space-4);
+}
+.app-scene:not([data-layout="tall"]) .app-live {
+  flex-direction: column;
+  gap: var(--oil-space-2);
+  min-height: 0;
+}
+.app-scene:not([data-layout="tall"]) .app-live__self {
+  width: 96px;
+}
+.app-scene:not([data-layout="tall"]) .app-live__meter {
+  min-width: 0;
+  /* 音量条和倒计时的圆圈换来换去时高度不变，下面的题目不跳 */
+  height: 48px;
+}
+
+/* 手机横过来：面试官和自己的画面在左，提示和题目在右 */
+.app-scene[data-layout="wide"] {
+  --app-presence-size: min(26vh, 110px);
+  --app-presence-size: min(26dvh, 110px);
+  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "presence live hint" "presence live caption";
+  align-items: center;
+  gap: var(--oil-space-2) var(--oil-space-5);
+}
+.app-scene[data-layout="wide"] .app-scene__hint {
+  text-align: left;
+}
+.app-scene[data-layout="wide"] .app-scene__caption {
+  align-self: start;
+  padding: var(--oil-space-3) var(--oil-space-4);
+}
+
+/*
+ * 矮屏上题目长了还是会超出一屏。按钮一直贴在屏幕底部，题目从它下面滚过去。
+ * 底色一直铺到屏幕边上（抵掉外壳的内边距），上沿渐变，不会齐刷刷切一刀。
+ */
+.app-foot:not([data-layout="tall"]) {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-inline: calc(-1 * var(--oil-space-4));
+  margin-bottom: calc(-1 * (var(--oil-space-5) + env(safe-area-inset-bottom, 0px)));
+  padding: var(--oil-space-4) var(--oil-space-4)
+    calc(var(--oil-space-5) + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to bottom, rgb(23 19 15 / 0), rgb(23 19 15 / 0.94) var(--oil-space-4));
+}
+.app-foot[data-layout="wide"] {
+  flex-direction: row;
+  align-items: center;
 }

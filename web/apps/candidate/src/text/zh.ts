@@ -243,7 +243,6 @@ export const zh = {
       paused: "已暂停",
       noSpeech: "请开始回答。如果已经在说，请靠近麦克风",
       maxWarning: "这道题的时间快到了，请尽快收尾",
-      hearing: "正在听",
       countdown: "说完了吗？还想补充就继续说",
       answer: "请回答",
     },
