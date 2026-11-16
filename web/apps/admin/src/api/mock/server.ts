@@ -1368,6 +1368,14 @@ export function createMockServer(options: MockOptions = {}) {
     db.interviews = db.interviews.filter((x) => x !== i);
     return null;
   });
+  on("POST", "/interviews/:id/purge", ({ params }) => {
+    requireAdmin();
+    const i = find.interview(params[0]);
+    if (i.status === "preparing" || i.status === "in_progress")
+      throw conflict("正在准备或者正在面试，先取消再删除");
+    db.interviews = db.interviews.filter((x) => x !== i);
+    return null;
+  });
   on("POST", "/interviews/:id/prepare", ({ params, body }) => {
     const i = find.interview(params[0]);
     ensureEditable(i);

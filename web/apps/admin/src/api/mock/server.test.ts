@@ -667,6 +667,27 @@ describe("假后端", () => {
   });
 });
 
+describe("彻底删除面试", () => {
+  it("正在准备或正在面试的删不了，别的删掉以后就查不到了", async () => {
+    const server = createMockServer({ latencyMs: 0, jobMs: 60_000 });
+    await login(server);
+    const created = await call<Interview>(server, "POST", "/interviews", {
+      candidate_id: server.db.candidates[0]?.id,
+      position_id: server.db.positions[0]?.id,
+    });
+    const id = created.data.id;
+    const interview = server.db.interviews.find((i) => i.id === id);
+    if (!interview) throw new Error("刚建的面试不见了");
+
+    interview.status = "in_progress";
+    expect((await call(server, "POST", `/interviews/${id}/purge`)).status).toBe(409);
+    interview.status = "completed";
+    expect((await call(server, "POST", `/interviews/${id}/purge`)).status).toBe(204);
+    expect((await call(server, "GET", `/interviews/${id}`)).status).toBe(404);
+    expect((await call(server, "POST", `/interviews/${id}/purge`)).status).toBe(404);
+  });
+});
+
 describe("账号", () => {
   let server: Server;
   beforeEach(async () => {
