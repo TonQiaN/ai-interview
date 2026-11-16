@@ -14,6 +14,9 @@
 //!   有没有内定的人）：检查时另外带上岗位描述的原文和面试官对公司知道的全部内容，看面试官有没有
 //!   说出岗位描述里不对外的内容、有没有编公司或岗位的情况。配 `fixtures/planning/messy/` 里
 //!   `internal_notes_jd` 这种带内部备注的岗位描述用。
+//! - 别的人设（`strong`、`vague`、`faker` 这些正常答题的）跑的时候，面试官的每一句追问会交给另一个
+//!   模型对着这道题的对话检查：是不是问了候选人已经说清楚的事、是不是把问过的又问了一遍、是不是
+//!   和题目和回答都不沾边、是不是一句里问了好几件事。最后汇总，并列出答得不好却一次没追问就换题的题。
 //! - 思考强度：不写就用输入里的 `live_thinking`；`off`、`low`、`high`、`max` 会覆盖它。
 //!
 //! 读环境变量 `DEEPSEEK_API_KEY`，会产生少量费用。
@@ -33,7 +36,7 @@ use anyhow::{Context, Result, bail};
 use interview_engine::live::{open, respond};
 use interview_engine::{
     AnswerQuality, CandidateTurn, InterviewPlan, Language, LiveAction, LiveEvent, PlanInput,
-    plan_interview,
+    PlannedQuestion, plan_interview,
 };
 use interview_llm::{
     ChatModel, ChatRequest, DeepSeekClient, Effort, Message, Pricing, Thinking, Usage, chat_json,
@@ -160,6 +163,70 @@ async fn judge_pushed(model: &dyn ChatModel, said: &[String]) -> Result<(bool, U
     Ok((reply.value.pushed, reply.usage))
 }
 
+#[derive(Debug, Deserialize)]
+struct ProbeVerdict {
+    #[serde(default)]
+    already_answered: bool,
+    #[serde(default)]
+    asked_before: bool,
+    #[serde(default)]
+    unrelated: bool,
+    #[serde(default)]
+    more_than_one: bool,
+    #[serde(default)]
+    reason: String,
+}
+
+impl ProbeVerdict {
+    fn problems(&self) -> Vec<&'static str> {
+        let mut found = Vec::new();
+        if self.already_answered {
+            found.push("问了候选人已经说清楚的事");
+        }
+        if self.asked_before {
+            found.push("把问过的又问了一遍");
+        }
+        if self.unrelated {
+            found.push("和题目、和回答都不沾边");
+        }
+        if self.more_than_one {
+            found.push("一句里问了好几件事");
+        }
+        found
+    }
+}
+
+const PROBE_JUDGE: &str = r#"下面是一场 AI 语音面试里的一道题：题目、想考察什么、这道题上到现在的对话，和面试官刚说的一句追问（追问开头可能有一句「好的，这里我追问一下」这样的过渡，不用管它）。请检查这句追问，用 json 回答：
+
+{"already_answered": false, "asked_before": false, "unrelated": false, "more_than_one": false, "reason": "一句话说明"}
+
+- already_answered：这句追问要问的事，候选人在上面的对话里已经明确说过了，再问一遍得不到新东西。候选人只是提了一句、没讲清楚，追问去问清楚的，不算；候选人说了做法，追问去问原因、数字的来源、他本人做了哪部分、出问题了怎么办的，不算。
+- asked_before：面试官在这道题上已经问过同一个问题（意思一样就算），候选人也回答了。候选人没答上来或者没听清，面试官再问一次的，不算。
+- unrelated：这句追问既不是接着候选人说过的话往下问，也和这道题想考察的内容无关。你看不到候选人的简历：追问里出现对话里没有的数字、项目或公司名，多半来自简历，问简历上写的东西不算。
+- more_than_one：这一句里问了两件以上要分别回答的事。「是 A 还是 B」这样让候选人选一个的算一件事；「标书和报价是你准备的吗」这样一个问题里带到两样东西的，也算一件事。
+
+都没有问题就全写 false，reason 写「没问题」。"#;
+
+/// 让另一个模型对着这道题的对话检查一句追问。`dialogue` 的最后一行是候选人刚说的话。
+async fn judge_probe(
+    model: &dyn ChatModel,
+    question: &PlannedQuestion,
+    dialogue: &[String],
+    probe: &str,
+) -> Result<(ProbeVerdict, Usage)> {
+    let user = format!(
+        "题目：{}\n想考察什么：{}\n\n这道题上到现在的对话：\n{}\n\n面试官刚说的追问：{probe}",
+        question.text,
+        question.intent,
+        dialogue.join("\n")
+    );
+    let request = ChatRequest::new(vec![Message::system(PROBE_JUDGE), Message::user(user)])
+        .with_thinking(Thinking::off())
+        .with_json_output();
+    let reply = chat_json::<ProbeVerdict>(model, request).await?;
+    Ok((reply.value, reply.usage))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -235,6 +302,15 @@ async fn main() -> Result<()> {
     let mut pushed_unrecorded: Vec<String> = Vec::new();
     let mut recorded_unpushed = 0u32;
     let mut inflated: Vec<String> = Vec::new();
+    // 正常答题的人设：每一句追问都检查一遍
+    let check_probes = !check_speech;
+    // 当前这道题上到现在的对话，换题时清空
+    let mut dialogue_here: Vec<String> = Vec::new();
+    let mut probes_here = 0u32;
+    let mut probes_checked = 0u32;
+    let mut probe_problems: Vec<String> = Vec::new();
+    let mut qualities = [0u32; 5];
+    let mut unprobed: Vec<String> = Vec::new();
 
     loop {
         let question = asked.join("\n");
@@ -274,6 +350,8 @@ async fn main() -> Result<()> {
 
         // 这一轮开始时正在问的那道题：检查说没说漏要对着它的提纲
         let current = plan.questions.get(state.session.question_index as usize);
+        // 检查追问时对着面试官实际拿到的字
+        dialogue_here.push(format!("候选人：{heard}"));
         let turn = CandidateTurn {
             text: heard,
             elapsed_ms,
@@ -357,6 +435,36 @@ async fn main() -> Result<()> {
                     verdict.reason
                 ));
             }
+        }
+        if check_probes
+            && outcome.action == LiveAction::Probe
+            && !spoken.is_empty()
+            && let Some(question) = current
+        {
+            let (verdict, used) = judge_probe(&model, question, &dialogue_here, &spoken).await?;
+            judge_usage += used;
+            probes_checked += 1;
+            let found = verdict.problems();
+            if !found.is_empty() {
+                println!(
+                    "  !! 追问有问题：{}（{}）",
+                    found.join("、"),
+                    verdict.reason
+                );
+                probe_problems.push(format!(
+                    "第 {turns} 轮 [{}] {}（{}）\n    {}\n    追问：{spoken}",
+                    question.key,
+                    found.join("、"),
+                    verdict.reason,
+                    dialogue_here.join("\n    ")
+                ));
+            }
+        }
+        if !spoken.is_empty() {
+            dialogue_here.push(format!("面试官：{spoken}"));
+        }
+        if outcome.action == LiveAction::Probe {
+            probes_here += 1;
         }
         if let Some((action, quality)) = clean {
             compared += 1;
@@ -442,6 +550,27 @@ async fn main() -> Result<()> {
                 }
             }
             said_here.clear();
+            if current.is_some() {
+                qualities[match note.quality {
+                    AnswerQuality::Strong => 0,
+                    AnswerQuality::Adequate => 1,
+                    AnswerQuality::Weak => 2,
+                    AnswerQuality::Poor => 3,
+                    AnswerQuality::NoAnswer => 4,
+                }] += 1;
+                if probes_here == 0
+                    && matches!(note.quality, AnswerQuality::Weak | AnswerQuality::Poor)
+                {
+                    unprobed.push(format!(
+                        "{:?}：{}\n    {}",
+                        note.quality,
+                        note.summary,
+                        dialogue_here.join("\n    ")
+                    ));
+                }
+            }
+            dialogue_here.clear();
+            probes_here = 0;
             println!(
                 "  记录：{:?} / {} {}",
                 note.quality,
@@ -500,6 +629,30 @@ async fn main() -> Result<()> {
         println!(
             "同一段回答，原样的字和识别出来的字各走一遍，一共 {compared} 轮：动作一样 {same_action} 轮；两边都换题的 {compared_quality} 轮里质量判得一样 {same_quality} 轮（多花 {:.4} 元）",
             Pricing::FLASH_OFF_PEAK.cost_cny(&compare_usage)
+        );
+    }
+    println!(
+        "各题的判断：strong {}，adequate {}，weak {}，poor {}，no_answer {}",
+        qualities[0], qualities[1], qualities[2], qualities[3], qualities[4]
+    );
+    if check_probes {
+        println!(
+            "\n追问检查了 {probes_checked} 句，有问题 {} 句",
+            probe_problems.len()
+        );
+        for problem in &probe_problems {
+            println!("  {problem}");
+        }
+        println!(
+            "答得不好（weak、poor）却一次没追问就换题的 {} 道",
+            unprobed.len()
+        );
+        for item in &unprobed {
+            println!("  {item}");
+        }
+        println!(
+            "检查的开销（不算在面试成本里）：空闲时段 {:.4} 元",
+            Pricing::FLASH_OFF_PEAK.cost_cny(&judge_usage)
         );
     }
     if check_speech {
