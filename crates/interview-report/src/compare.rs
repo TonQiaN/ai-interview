@@ -119,6 +119,7 @@ pub struct Difference {
     pub topic: String,
     /// 涉及的候选人（代号）。
     #[serde(default, deserialize_with = "null_as_default")]
+    #[schema(required = true)]
     pub labels: Vec<String>,
     /// 具体差在哪。
     pub detail: String,
@@ -129,11 +130,13 @@ pub struct Difference {
 pub struct TieBreaker {
     /// 要分的是哪几位（代号）。
     #[serde(default, deserialize_with = "null_as_default")]
+    #[schema(required = true)]
     pub labels: Vec<String>,
     /// 人工面试里建议问的问题。
     pub question: String,
     /// 问这个是为了分清什么。
     #[serde(default, deserialize_with = "null_as_default")]
+    #[schema(required = true)]
     pub purpose: String,
 }
 
