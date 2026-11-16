@@ -149,8 +149,12 @@ describe("对比候选人", () => {
       expect(link.classList.contains("adm-no-print")).toBe(true);
 
     document.documentElement.dataset.theme = "dark";
-    window.dispatchEvent(new Event("beforeprint"));
-    expect(document.documentElement.dataset.theme).toBe("light");
+    // 打印前后的监听是页面画出来之后才挂上的（useEffect）。按钮刚出现的那一下可能还没挂好，
+    // 机器忙的时候这里会先跑到（CI 上失败过），所以等到它起作用为止。
+    await waitFor(() => {
+      window.dispatchEvent(new Event("beforeprint"));
+      expect(document.documentElement.dataset.theme).toBe("light");
+    });
     window.dispatchEvent(new Event("afterprint"));
     expect(document.documentElement.dataset.theme).toBe("dark");
     delete document.documentElement.dataset.theme;
