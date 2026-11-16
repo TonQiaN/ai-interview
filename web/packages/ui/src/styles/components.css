@@ -537,13 +537,15 @@
   }
   .oil-card__head {
     display: flex;
+    /* 右边的按钮一多，一行放不下就换到下一行。不换行的话标题会被挤成一个字一行，按钮伸到卡片外面 */
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--oil-space-3);
     padding: var(--oil-space-4) var(--oil-space-5);
     border-bottom: 1px solid var(--oil-line);
   }
   .oil-card__title {
-    flex: 1 1 0;
+    flex: 1 1 auto;
     min-width: 0;
     font-family: var(--oil-font-display);
     font-size: var(--oil-text-lg);
