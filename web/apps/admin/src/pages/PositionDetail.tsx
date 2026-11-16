@@ -11,7 +11,7 @@ import {
   PageHeader,
   useToast,
 } from "@ai-interview/ui";
-import { Download, Pencil, Plus, Scale, Trash2 } from "lucide-react";
+import { Archive, Download, Pencil, Plus, Scale } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api/http";
@@ -153,6 +153,8 @@ function Detail({ position }: { position: Position }) {
   const [importing, setImporting] = useState(false);
   // 只有从 RAAS 导入的岗位才查得到 RAAS 里谁投过
   const fromRaas = position.source === "raas" && Boolean(position.external_ref);
+  // 归档的岗位后端不让改，也不让再安排面试，这些按钮就不给了
+  const archived = Boolean(position.archived_at);
 
   return (
     <>
@@ -164,6 +166,7 @@ function Detail({ position }: { position: Position }) {
             <Badge tone={positionStatusTone[position.status]}>
               {positionStatusLabel[position.status]}
             </Badge>
+            {archived && <Badge plain>已归档</Badge>}
             <span>
               {[position.extra.client_name, position.department, position.location]
                 .filter(Boolean)
@@ -172,24 +175,32 @@ function Detail({ position }: { position: Position }) {
           </span>
         }
         actions={
-          <>
-            <Button
-              variant="secondary"
-              icon={<Pencil aria-hidden="true" />}
-              onClick={() => setEditing(true)}
-            >
-              改岗位
-            </Button>
-            <Button
-              icon={<Plus aria-hidden="true" />}
-              disabled={position.status !== "open"}
-              onClick={() => navigate(`/interviews/new?position=${position.id}`)}
-            >
-              安排面试
-            </Button>
-          </>
+          !archived && (
+            <>
+              <Button
+                variant="secondary"
+                icon={<Pencil aria-hidden="true" />}
+                onClick={() => setEditing(true)}
+              >
+                改岗位
+              </Button>
+              <Button
+                icon={<Plus aria-hidden="true" />}
+                disabled={position.status !== "open"}
+                onClick={() => navigate(`/interviews/new?position=${position.id}`)}
+              >
+                安排面试
+              </Button>
+            </>
+          )
         }
       />
+      {archived && (
+        <Banner tone="info" title="这个岗位已经归档" className="adm-gap-below">
+          归档的岗位不在列表里显示，不能再修改，也不能再安排面试。岗位的内容和已经安排的面试都还在，在岗位列表勾上「带上已归档的」能找到。
+          {fromRaas && "从 RAAS 重新导入这个岗位，会把它恢复回来。"}
+        </Banner>
+      )}
       <div className="adm-split">
         <div
           className="oil-stack"
@@ -254,7 +265,7 @@ function Detail({ position }: { position: Position }) {
                       对比候选人
                     </Link>
                   )}
-                  {fromRaas && (
+                  {fromRaas && !archived && (
                     <Button
                       variant="secondary"
                       size="sm"
@@ -299,16 +310,18 @@ function Detail({ position }: { position: Position }) {
               </QueryView>
             </CardBody>
           </Card>
-          <div>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Trash2 aria-hidden="true" />}
-              onClick={() => setDeleting(true)}
-            >
-              删除岗位
-            </Button>
-          </div>
+          {!archived && (
+            <div>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Archive aria-hidden="true" />}
+                onClick={() => setDeleting(true)}
+              >
+                归档
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -322,15 +335,14 @@ function Detail({ position }: { position: Position }) {
       )}
       <Confirm
         open={deleting}
-        title={`删除「${position.title}」？`}
-        confirmLabel="删除"
-        danger
+        title={`归档「${position.title}」？`}
+        confirmLabel="归档"
         loading={remove.isPending}
         onClose={() => setDeleting(false)}
         onConfirm={() =>
           remove.mutate(position.id, {
             onSuccess: () => {
-              toast("已删除");
+              toast("已归档");
               navigate("/positions", { replace: true });
             },
             onError: (e) => {
@@ -340,7 +352,7 @@ function Detail({ position }: { position: Position }) {
           })
         }
       >
-        删掉之后列表里不再显示这个岗位，已经安排的面试不受影响。
+        归档以后列表里不再显示这个岗位，安排面试时也选不到，已经安排的面试不受影响。岗位的内容还留着，没有删掉。
       </Confirm>
     </>
   );

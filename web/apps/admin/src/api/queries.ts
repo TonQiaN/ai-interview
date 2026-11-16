@@ -213,7 +213,11 @@ export function useDeletePosition() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/positions/{id}", at(id))),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["positions"] }),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ["positions"] });
+      // 详情也要重新取，不然马上再打开时还是归档前的样子
+      qc.invalidateQueries({ queryKey: ["position", id] });
+    },
   });
 }
 
