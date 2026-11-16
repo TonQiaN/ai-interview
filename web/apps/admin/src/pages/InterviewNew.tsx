@@ -22,7 +22,7 @@ import {
   usePositions,
   useTemplates,
 } from "../api/queries";
-import type { Candidate, InterviewConfig, Position } from "../api/types";
+import type { CandidateListItem, InterviewConfig, Position } from "../api/types";
 import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import { QueryView, SearchInput } from "../components/common";
 import { useLeaveGuard } from "../components/LeaveGuard";
@@ -31,16 +31,33 @@ import { VoicePicker } from "../components/VoicePicker";
 import { sameForm } from "../lib/form";
 import { scheduleAll } from "../lib/schedule";
 
+/**
+ * 出题看的是主简历的文字，不是画像：没有简历或者没解析出来，就只能按岗位要求出题；
+ * 还在解析的，出题会等它解析完。
+ */
+function resumeState(c: CandidateListItem): "ready" | "reading" | "missing" {
+  const status = c.primary_resume?.parse_status;
+  if (status === "done") return "ready";
+  return status === "pending" || status === "running" ? "reading" : "missing";
+}
+
+/** 选人的时候就写在名字下面，不用等到下一步才知道。简历没问题的不用写 */
+function resumeNote(c: CandidateListItem): string | null {
+  if (!c.primary_resume) return "还没有简历";
+  if (c.primary_resume.parse_status === "failed") return "简历没解析出来";
+  return resumeState(c) === "reading" ? "简历还在解析" : null;
+}
+
 function PickCandidates({
   selected,
   onToggle,
 }: {
-  selected: Candidate[];
-  onToggle: (c: Candidate) => void;
+  selected: CandidateListItem[];
+  onToggle: (c: CandidateListItem) => void;
 }) {
   const [q, setQ] = useState("");
   const candidates = useCandidates({ q, page_size: 50 });
-  const isSelected = (c: Candidate) => selected.some((s) => s.id === c.id);
+  const isSelected = (c: CandidateListItem) => selected.some((s) => s.id === c.id);
   return (
     <Card>
       <CardHeader
@@ -90,8 +107,9 @@ function PickCandidates({
                     <span className="oil-grow">
                       <strong>{c.name}</strong>
                       <span className="adm-person__sub" style={{ display: "block" }}>
-                        {[c.current_title, c.current_company].filter(Boolean).join(" · ") ||
-                          "还没有简历"}
+                        {[c.current_title, c.current_company, resumeNote(c)]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </span>
                     </span>
                     {isSelected(c) && <Check aria-hidden="true" size={18} />}
@@ -172,10 +190,10 @@ export function InterviewNewPage() {
   const presetPositions = usePositions({ page_size: 100 });
 
   const [step, setStep] = useState(0);
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidates, setCandidates] = useState<CandidateListItem[]>([]);
   // 正在一位一位安排时的进度，和没安排上的人
   const [progress, setProgress] = useState<{ finished: number; total: number } | null>(null);
-  const [failures, setFailures] = useState<{ person: Candidate; error: unknown }[]>([]);
+  const [failures, setFailures] = useState<{ person: CandidateListItem; error: unknown }[]>([]);
   const busy = progress !== null;
   const [position, setPosition] = useState<Position | null>(null);
   const [templateId, setTemplateId] = useState<string | null>(null);
@@ -222,7 +240,7 @@ export function InterviewNewPage() {
     setBaseConfig(base);
   }
 
-  function toggleCandidate(c: Candidate) {
+  function toggleCandidate(c: CandidateListItem) {
     setCandidates((now) =>
       now.some((s) => s.id === c.id) ? now.filter((s) => s.id !== c.id) : [...now, c],
     );
@@ -263,7 +281,9 @@ export function InterviewNewPage() {
     }
   }
 
-  const noResume = candidates.filter((c) => !c.profile);
+  const noResume = candidates.filter((c) => resumeState(c) === "missing");
+  const reading = candidates.filter((c) => resumeState(c) === "reading");
+  const names = (list: CandidateListItem[]) => list.map((c) => c.name).join("、");
 
   return (
     <>
@@ -304,17 +324,25 @@ export function InterviewNewPage() {
           style={{ "--oil-gap": "var(--oil-space-5)" } as React.CSSProperties}
         >
           {candidates.length === 1 ? (
-            <Banner tone="info" title={`${candidates[0]?.name} 面试 ${position.title}`}>
-              {noResume.length === 0
-                ? "面试官会结合这份简历和岗位要求出题。"
-                : "这位候选人还没有解析好的简历，面试官只能按岗位要求出题。"}
+            <Banner
+              tone={noResume.length > 0 ? "warning" : "info"}
+              title={`${candidates[0]?.name} 面试 ${position.title}`}
+            >
+              {noResume.length > 0
+                ? "这位候选人还没有解析好的简历，面试官只能按岗位要求出题。"
+                : reading.length > 0
+                  ? "这位候选人的简历还在解析，面试官会等它解析完再出题。"
+                  : "面试官会结合这份简历和岗位要求出题。"}
             </Banner>
           ) : (
-            <Banner tone="info" title={`${candidates.length} 位候选人面试 ${position.title}`}>
-              {candidates.map((c) => c.name).join("、")}
+            <Banner
+              tone={noResume.length > 0 ? "warning" : "info"}
+              title={`${candidates.length} 位候选人面试 ${position.title}`}
+            >
+              {names(candidates)}
               。每人一场，用同一份设置，题目按各自的简历出。
-              {noResume.length > 0 &&
-                `${noResume.map((c) => c.name).join("、")}还没有解析好的简历，只能按岗位要求出题。`}
+              {noResume.length > 0 && `${names(noResume)}还没有解析好的简历，只能按岗位要求出题。`}
+              {reading.length > 0 && `${names(reading)}的简历还在解析，会等解析完再出题。`}
             </Banner>
           )}
           <Card>
