@@ -170,6 +170,22 @@ async fn the_page_that_resumes_takes_over_and_the_old_one_is_told_to_stop(pool: 
     assert_eq!(session.status, 200);
     assert_eq!(session.header(ELSEWHERE), Some("1"));
 
+    // 语音平时让浏览器存几分钟。带着提醒的那一份不能存：候选人回到这个页面重新接手之后，
+    // 浏览器从缓存里拿出来的还是这句旧提醒，页面会把自己停掉
+    let audio_url = question["utterance"]["audio_url"].as_str().unwrap();
+    let noticed = old.send(TestRequest::get(audio_url)).await;
+    assert_eq!(noticed.status, 200, "{}", noticed.text());
+    assert_eq!(noticed.header(ELSEWHERE), Some("1"));
+    assert_eq!(noticed.header("cache-control"), Some("no-store"));
+    let cached = new.send(TestRequest::get(audio_url)).await;
+    assert_eq!(cached.status, 200, "{}", cached.text());
+    assert_eq!(cached.header(ELSEWHERE), None);
+    assert_eq!(
+        cached.header("cache-control"),
+        Some("private, max-age=300"),
+        "在面试的页面取的语音照常让浏览器存着"
+    );
+
     // 接过去的页面把面试面完
     let mut step = resumed;
     let mut at_ms = 400;

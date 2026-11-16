@@ -292,14 +292,18 @@ struct Notice(Arc<AtomicBool>);
 ///
 /// 被接走的页面多半正开着摄像头在录，它不一定马上有推进面试的请求，但每隔几秒就传一片录像：
 /// 在所有响应上都提醒，它几秒之内就能知道该停了。
+///
+/// 带着提醒的响应不让浏览器存。提醒说的是这一刻的事，面试官的语音平时却让浏览器存几分钟：
+/// 被接走的那一刻页面正好在取语音的话，这句提醒就跟着进了缓存，候选人回到这个页面重新接手之后，
+/// 再取同一句语音拿到的还是它，页面会把自己停掉，两个页面都面不了。
 pub(crate) async fn mark_active_elsewhere(mut request: Request, next: Next) -> Response {
     let notice = Notice::default();
     request.extensions_mut().insert(notice.clone());
     let mut response = next.run(request).await;
     if notice.0.load(Ordering::Relaxed) {
-        response
-            .headers_mut()
-            .insert(ACTIVE_ELSEWHERE_HEADER, HeaderValue::from_static("1"));
+        let headers = response.headers_mut();
+        headers.insert(ACTIVE_ELSEWHERE_HEADER, HeaderValue::from_static("1"));
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     }
     response
 }
