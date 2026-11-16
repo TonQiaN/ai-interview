@@ -1,5 +1,6 @@
 import { Spinner, Stage, UiTextProvider, uiTextEn, uiTextZh } from "@ai-interview/ui";
 import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { CrashBoundary } from "./components/CrashBoundary";
 import { ConsentPage } from "./pages/ConsentPage";
 import { DevicePage } from "./pages/DevicePage";
 import { DonePage, FinishingPage } from "./pages/FinishPages";
@@ -43,6 +44,19 @@ function Loading() {
 }
 
 export function App() {
+  // 还不知道是哪场面试时，按浏览器的语言
+  const fallback = useMemo(() => browserLanguage(), []);
+  return (
+    <InLanguage language={fallback}>
+      {/* 会话还没建起来就出了错：没有面试可以按住，也没有地方记事件，只把「请刷新」显示出来 */}
+      <CrashBoundary>
+        <Session fallback={fallback} />
+      </CrashBoundary>
+    </InLanguage>
+  );
+}
+
+function Session({ fallback }: { fallback: Language }) {
   const [session, setSession] = useState<InterviewSession | null>(null);
 
   useEffect(() => {
@@ -52,15 +66,7 @@ export function App() {
     return () => created.dispose();
   }, []);
 
-  // 还不知道是哪场面试时，按浏览器的语言
-  const fallback = useMemo(() => browserLanguage(), []);
-  if (!session) {
-    return (
-      <InLanguage language={fallback}>
-        <Loading />
-      </InLanguage>
-    );
-  }
+  if (!session) return <Loading />;
   return <LocalizedSession session={session} fallback={fallback} />;
 }
 
@@ -76,7 +82,9 @@ function LocalizedSession({
   const { room } = snapshot;
   return (
     <InLanguage language={room ? pageLanguage(room.language) : fallback}>
-      <SessionView session={session} snapshot={snapshot} />
+      <CrashBoundary onCrash={session.pageCrashed}>
+        <SessionView session={session} snapshot={snapshot} />
+      </CrashBoundary>
     </InLanguage>
   );
 }

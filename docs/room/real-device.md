@@ -172,6 +172,7 @@
 | `interview_started` | `video_kbps`、`video_reduced`：这一段录像的画面用了多少码率，是不是因为上行慢降过 |
 | `screen_wake_lock` | `supported`、`held`：屏幕常亮申请到了没有 |
 | `audio_format_fallback` | 出现了说明这个浏览器解不了压缩过的面试官语音（MP3），页面改取了没压缩的。面试能照常进行，但要记下是哪种浏览器 |
+| `page_error` | 页面渲染出错了，候选人看到的是「页面出了点问题，请刷新」。`stage` 是出错时在哪一步，`name` 是错误的类型名。真机上出现了要记下机型和浏览器，这是页面的毛病 |
 | `recording_gap`、`device_recovered` | `device` 是 `camera`、`microphone` 还是 `audio_output`（声音被系统停掉），`cause` 是原因，`duration_ms` 是停了多久 |
 | `recording_error` | 录制器报的错误名；带 `kept_in_memory: true` 的是本机存不下录像、分片改放内存接着传（录像应该还是完整的） |
 | `upload_stalled`、`upload_recovered`、`upload_finished` | 录像传不动的原因、攒了多少片、结束后等了多久才传完 |

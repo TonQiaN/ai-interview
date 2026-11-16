@@ -4,6 +4,7 @@
  * 页面只做两件事：订阅这里的快照来画界面，把按钮点击转成这里的方法调用。
  * 摄像头、音频、录制、上传、过程事件这些资源都由它创建和释放。
  */
+
 import {
   ACTIVE_ELSEWHERE,
   HttpRoomApi,
@@ -32,6 +33,7 @@ import { CaptureError, requestCapture, stopStream } from "../lib/media/capture";
 import type { MediaErrorKind } from "../lib/media/errors";
 import type { OutputHalt, OutputWatch } from "../lib/media/output-watch";
 import { ScreenWakeLock } from "../lib/media/wake-lock";
+import { randomId } from "../lib/random-id";
 import { type FittedBitrate, fitRecordingBitrate } from "../lib/recording/bitrate";
 import { recorderFactory } from "../lib/recording/create-recorder";
 import { SegmentRecorder } from "../lib/recording/segment-recorder";
@@ -119,6 +121,9 @@ export interface SessionSnapshot {
   finishReason: string | null;
 }
 
+/** 面试为什么被按住：设备断了、声音被系统停掉了、页面渲染出错了。 */
+type HoldReason = "device" | "audio" | "page";
+
 /** 面试换到另一个页面里继续了，这个页面停了下来。 */
 export const TAKEN_OVER = "taken_over";
 
@@ -186,7 +191,7 @@ export class InterviewSession {
   /** 声音是什么时候被系统停掉的（performance.now()）；没停是 null。 */
   private outputHaltedAt: number | null = null;
   /** 面试因为什么被按住了。全都放开了才接着走。 */
-  private readonly holds = new Set<"device" | "audio">();
+  private readonly holds = new Set<HoldReason>();
   /** 面试是什么时候结束的（performance.now()）；这次打开页面时面试已经结束是 null。 */
   private finishedAt: number | null = null;
   private readonly cleanups: Array<() => void> = [];
@@ -196,7 +201,7 @@ export class InterviewSession {
   constructor(options: InterviewSessionOptions) {
     this.hash = options.hash;
     this.createApi = options.createApi ?? ((token, hooks) => new HttpRoomApi({ token, ...hooks }));
-    this.pageId = options.pageId ?? crypto.randomUUID();
+    this.pageId = options.pageId ?? randomId();
   }
 
   getSnapshot = (): SessionSnapshot => this.snapshot;
@@ -715,13 +720,13 @@ export class InterviewSession {
   }
 
   /** 按住面试：计时停下，下一句先不播。 */
-  private hold(reason: "device" | "audio"): void {
+  private hold(reason: HoldReason): void {
     const first = this.holds.size === 0;
     this.holds.add(reason);
     if (first) this.runner?.pause();
   }
 
-  private release(reason: "device" | "audio"): void {
+  private release(reason: HoldReason): void {
     if (!this.holds.delete(reason)) return;
     if (this.holds.size === 0) this.runner?.resume();
   }
@@ -893,6 +898,20 @@ export class InterviewSession {
     this.uploader?.start();
     await this.drainUploads();
   }
+
+  /**
+   * 页面渲染时出错，候选人面前已经换成了「请刷新」那一页（见 CrashBoundary）。
+   * 面试按住，免得在候选人看不见的地方接着问、接着算作答时间；刷新之后按续面接上。
+   * 只记出错时在哪一步、错误是哪一类，不记错误的内容。
+   */
+  pageCrashed = (error: unknown): void => {
+    this.collector?.record("page_error", {
+      stage: this.snapshot.stage,
+      name: error instanceof Error ? error.name : "unknown",
+    });
+    void this.collector?.flush();
+    this.hold("page");
+  };
 
   /** 页面卸载。 */
   dispose(): void {
