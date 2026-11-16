@@ -17,7 +17,17 @@ import {
   Textarea,
   useToast,
 } from "@ai-interview/ui";
-import { Archive, ArchiveRestore, Ban, Link2, Pencil, RefreshCw, Send, Trash2 } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  Ban,
+  CalendarPlus,
+  Link2,
+  Pencil,
+  RefreshCw,
+  Send,
+  Trash2,
+} from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { errorMessage, fieldErrors } from "../api/http";
@@ -102,6 +112,10 @@ const editable = (i: Interview) =>
 const cancellable = (i: Interview) =>
   !archived(i) && !["completed", "abandoned", "expired", "cancelled"].includes(i.status);
 const ended = (i: Interview) => i.status === "completed" || i.status === "abandoned";
+/** 这一场已经走到头了（面完、中途离开、取消、过期），想再面只能另外安排一场 */
+const over = (i: Interview) => ended(i) || i.status === "cancelled" || i.status === "expired";
+/** 给同一位候选人、同一个岗位再安排一场，设置沿用这一场的 */
+const againPath = (i: Interview) => `/interviews/new?from=${i.id}`;
 const reportBusy = (i: Interview) =>
   i.report?.status === "running" || i.report?.status === "pending";
 const gap = (size: number) => ({ "--oil-gap": `var(--oil-space-${size})` }) as React.CSSProperties;
@@ -181,6 +195,7 @@ function InvitedStep({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
 }
 
 function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) => void }) {
+  const navigate = useNavigate();
   const prepare = usePrepareInterview(interview.id);
   const toast = useToast();
   const run = () => prepare.mutate(false, { onError: (e) => toast(errorMessage(e)) });
@@ -288,9 +303,25 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
       </Banner>
     );
   }
+  // 没面完就结束了的，多半要再来一次：给一个一步到位的入口
+  const unfinished = status === "abandoned" || status === "cancelled" || status === "expired";
   return (
-    <Banner tone={status === "abandoned" || status === "expired" ? "warning" : "info"}>
+    <Banner
+      tone={status === "abandoned" || status === "expired" ? "warning" : "info"}
+      actions={
+        unfinished && !archived(interview) ? (
+          <Button
+            size="sm"
+            icon={<CalendarPlus aria-hidden="true" />}
+            onClick={() => navigate(againPath(interview))}
+          >
+            再安排一场
+          </Button>
+        ) : undefined
+      }
+    >
       {statusHint[status]}
+      {unfinished && !archived(interview) && "想让候选人重新面，可以再安排一场，设置沿用这一场的。"}
     </Banner>
   );
 }
@@ -689,6 +720,16 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
             </CardBody>
           </Card>
           <div className="oil-row oil-row--wrap">
+            {over(interview) && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<CalendarPlus aria-hidden="true" />}
+                onClick={() => navigate(againPath(interview))}
+              >
+                再安排一场
+              </Button>
+            )}
             {cancellable(interview) && (
               <Button
                 variant="secondary"
