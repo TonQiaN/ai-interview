@@ -1323,7 +1323,7 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
         </Banner>
       )}
       {done.length > 1 && (
-        <div className="oil-row oil-row--wrap">
+        <div className="oil-row oil-row--wrap adm-no-print">
           <span className="oil-muted">这场面试生成过 {done.length} 版报告，现在看的是</span>
           <Select
             aria-label="看哪一版报告"

@@ -135,4 +135,39 @@ describe("分析报告", () => {
     expect(screen.getByText(/分别是 3、3.5、4 分/)).toBeTruthy();
     expect(container.textContent?.match(/回答介于两档之间/g)?.length).toBe(1);
   });
+  it("打印时把收着的出处和每道题的点评都摆出来，打印完收回去", () => {
+    const report = sampleReport("backend-strong", "i-1", Date.now());
+    const reason = report.recommendation.key_reasons[0];
+    const first = reason?.evidence[0];
+    if (!reason || !first) throw new Error("样例里第一条理由应该有出处");
+    // 同一个判断下三处出处，平时只摆两处
+    reason.evidence = [
+      first,
+      { ...first, quote: "第二处出处的原话" },
+      { ...first, quote: "第三处出处的原话" },
+    ];
+    const { container } = render(<ReportView report={report} onSeek={() => {}} />);
+    const closed = () => container.querySelectorAll("details:not([open])").length;
+    expect(screen.queryByText("“第三处出处的原话”")).toBeNull();
+    expect(closed()).toBeGreaterThan(0);
+
+    fireEvent(window, new Event("beforeprint"));
+    expect(screen.getByText("“第三处出处的原话”")).toBeTruthy();
+    expect(closed()).toBe(0);
+
+    fireEvent(window, new Event("afterprint"));
+    expect(screen.queryByText("“第三处出处的原话”")).toBeNull();
+    expect(closed()).toBeGreaterThan(0);
+  });
+
+  it("点「打印 / 存成 PDF」调出浏览器的打印", () => {
+    const print = vi.fn();
+    vi.stubGlobal("print", print);
+    render(
+      <ReportView report={sampleReport("backend-strong", "i-1", Date.now())} onSeek={() => {}} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打印 / 存成 PDF" }));
+    expect(print).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
 });
