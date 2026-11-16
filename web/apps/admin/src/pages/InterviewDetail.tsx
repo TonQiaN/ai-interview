@@ -22,6 +22,7 @@ import {
   ArchiveRestore,
   Ban,
   CalendarPlus,
+  CircleArrowRight,
   Link2,
   Pencil,
   RefreshCw,
@@ -116,6 +117,10 @@ const ended = (i: Interview) => i.status === "completed" || i.status === "abando
 const over = (i: Interview) => ended(i) || i.status === "cancelled" || i.status === "expired";
 /** 给同一位候选人、同一个岗位再安排一场，设置沿用这一场的 */
 const againPath = (i: Interview) => `/interviews/new?from=${i.id}`;
+/** 出了报告、候选人面完了的，可以按报告的建议安排下一轮（设置页会把建议填好） */
+const canNextRound = (i: Interview) =>
+  !archived(i) && i.status === "completed" && i.report?.status === "done";
+const nextRoundPath = (i: Interview) => `/interviews/new?from=${i.id}&round=next`;
 const reportBusy = (i: Interview) =>
   i.report?.status === "running" || i.report?.status === "pending";
 const gap = (size: number) => ({ "--oil-gap": `var(--oil-space-${size})` }) as React.CSSProperties;
@@ -720,6 +725,16 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
             </CardBody>
           </Card>
           <div className="oil-row oil-row--wrap">
+            {canNextRound(interview) && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<CircleArrowRight aria-hidden="true" />}
+                onClick={() => navigate(nextRoundPath(interview))}
+              >
+                安排下一轮
+              </Button>
+            )}
             {over(interview) && (
               <Button
                 variant="secondary"
@@ -1516,6 +1531,7 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
     [interview.id, frameEvents.data],
   );
   const regenerate = useRegenerateReport(interview.id);
+  const navigate = useNavigate();
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
   const busy = reportBusy(interview);
@@ -1591,6 +1607,11 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
                 report={data.content}
                 onSeek={onSeek}
                 onRegenerate={busy ? undefined : () => setConfirming(true)}
+                onNextRound={
+                  canNextRound(interview) && picked === undefined
+                    ? () => navigate(nextRoundPath(interview))
+                    : undefined
+                }
                 frames={frames}
               />
             ) : null

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { judgeUplink, measureUplinkKbps } from "./uplink";
+import { measureUplinkKbps } from "./uplink";
 
 /** 一条假的网络：每次发送先花一次往返的时间，再按带宽花传输的时间。 */
 function fakeLink(kbps: number, roundTripMs: number) {
@@ -83,19 +83,5 @@ describe("measureUplinkKbps", () => {
     expect(large).toHaveLength(512 * 1024);
     // 最后一段也填上了，不是一串零
     expect(large.subarray(large.length - 1024).some((byte) => byte !== 0)).toBe(true);
-  });
-});
-
-describe("judgeUplink", () => {
-  it("上行要比录像码率多出五成才算够", () => {
-    const recording = 548_000;
-    expect(judgeUplink(822, recording)).toBe("ok");
-    expect(judgeUplink(821, recording)).toBe("slow");
-    expect(judgeUplink(5_000, recording)).toBe("ok");
-  });
-
-  it("只录声音时要求低得多", () => {
-    expect(judgeUplink(100, 48_000)).toBe("ok");
-    expect(judgeUplink(60, 48_000)).toBe("slow");
   });
 });

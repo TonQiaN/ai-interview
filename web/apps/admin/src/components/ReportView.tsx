@@ -11,6 +11,7 @@
 import { Badge, Banner, Button, Card, CardBody, CardHeader, ScoreBar } from "@ai-interview/ui";
 import {
   ChevronDown,
+  CircleArrowRight,
   FileText,
   Flag,
   ListChecks,
@@ -488,13 +489,21 @@ export interface ReportViewProps {
   onSeek: Seek;
   /** 有它才显示「重新生成」 */
   onRegenerate?: () => void;
+  /** 有它才在「下一轮可以接着问」下面显示「按这些安排下一轮」 */
+  onNextRound?: () => void;
   /** 画面检查存了图的帧（见 lib/frames 的 framesByEvent）。给了就在引用它的证据旁边显示 */
   frames?: Map<string, Frame[]>;
 }
 
 const noFrames = new Map<string, Frame[]>();
 
-export function ReportView({ report, onSeek, onRegenerate, frames = noFrames }: ReportViewProps) {
+export function ReportView({
+  report,
+  onSeek,
+  onRegenerate,
+  onNextRound,
+  frames = noFrames,
+}: ReportViewProps) {
   const rec = report.recommendation;
   const failed = report.meta.failed_stages;
   const failedStage = (stage: string) => failed.some((f) => f.stage === stage);
@@ -766,6 +775,18 @@ export function ReportView({ report, onSeek, onRegenerate, frames = noFrames }: 
                     </li>
                   ))}
                 </ol>
+              )}
+              {onNextRound && (
+                <div className="adm-meta__actions adm-no-print">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={<CircleArrowRight aria-hidden="true" />}
+                    onClick={onNextRound}
+                  >
+                    按这些安排下一轮
+                  </Button>
+                </div>
               )}
             </Section>
           )}
