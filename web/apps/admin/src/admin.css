@@ -683,6 +683,43 @@
     font-weight: 700;
     color: var(--oil-ink-3);
   }
+  /* 录像里不正常的那几帧 */
+  .adm-frames {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--oil-space-2);
+    align-items: center;
+    margin-top: var(--oil-space-2);
+  }
+  .adm-frame {
+    display: block;
+    padding: 0;
+    border: 1px solid var(--oil-line-strong);
+    border-radius: var(--oil-radius-sm);
+    background: var(--oil-sunken);
+    overflow: hidden;
+    line-height: 0;
+  }
+  button.adm-frame {
+    cursor: pointer;
+  }
+  button.adm-frame:hover {
+    border-color: var(--oil-primary);
+  }
+  button.adm-frame:focus-visible {
+    outline: 2px solid var(--oil-focus);
+    outline-offset: 2px;
+  }
+  .adm-frame img {
+    display: block;
+    width: 128px;
+    height: 72px;
+    object-fit: cover;
+  }
+  .adm-frames__more {
+    font-size: var(--oil-text-xs);
+    color: var(--oil-ink-3);
+  }
   .adm-quotes__more {
     display: inline-block;
     margin-top: var(--oil-space-2);

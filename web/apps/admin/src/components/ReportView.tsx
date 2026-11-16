@@ -17,7 +17,7 @@ import {
   MousePointerClick,
   RefreshCw,
 } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import type {
   AspectRating,
   ClaimCheck,
@@ -64,8 +64,13 @@ import {
   speakerLabel,
   stageName,
 } from "../lib/format";
+import type { Frame } from "../lib/frames";
+import { FrameThumbs } from "./FrameThumbs";
 
 type Seek = (ms: number) => void;
+
+/** 画面检查存了图的帧，按报告证据里的 event_id 找 */
+const FramesContext = createContext<Map<string, Frame[]>>(new Map());
 
 const matchNote: Partial<Record<NonNullable<Evidence["quote_match"]>, string>> = {
   approximate: "大意，和原话不完全一样",
@@ -74,6 +79,7 @@ const matchNote: Partial<Record<NonNullable<Evidence["quote_match"]>, string>> =
 };
 
 function Quote({ evidence, onSeek }: { evidence: Evidence; onSeek: Seek }) {
+  const frames = useContext(FramesContext).get(evidence.event_id ?? "");
   const note = evidence.quote_match ? matchNote[evidence.quote_match] : undefined;
   const mark = note && (
     <span className="adm-quote__mark" title={note}>
@@ -114,6 +120,7 @@ function Quote({ evidence, onSeek }: { evidence: Evidence; onSeek: Seek }) {
           {who && <span className="adm-quote__who">{who}</span>}
           {text}
           {mark}
+          <FrameThumbs frames={frames} />
         </span>
       </div>
     );
@@ -130,6 +137,7 @@ function Quote({ evidence, onSeek }: { evidence: Evidence; onSeek: Seek }) {
         {who && <span className="adm-quote__who">{who}</span>}
         {text}
         {mark}
+        <FrameThumbs frames={frames} />
       </span>
     </button>
   );
@@ -443,9 +451,13 @@ export interface ReportViewProps {
   onSeek: Seek;
   /** 有它才显示「重新生成」 */
   onRegenerate?: () => void;
+  /** 画面检查存了图的帧（见 lib/frames 的 framesByEvent）。给了就在引用它的证据旁边显示 */
+  frames?: Map<string, Frame[]>;
 }
 
-export function ReportView({ report, onSeek, onRegenerate }: ReportViewProps) {
+const noFrames = new Map<string, Frame[]>();
+
+export function ReportView({ report, onSeek, onRegenerate, frames = noFrames }: ReportViewProps) {
   const rec = report.recommendation;
   const failed = report.meta.failed_stages;
   const failedStage = (stage: string) => failed.some((f) => f.stage === stage);
@@ -470,284 +482,291 @@ export function ReportView({ report, onSeek, onRegenerate }: ReportViewProps) {
   );
 
   return (
-    <div
-      ref={root}
-      className="oil-stack adm-report"
-      style={{ "--oil-gap": "var(--oil-space-5)" } as React.CSSProperties}
-    >
-      <ReportNav root={root} version={`${report.interview_id}:${report.generated_at_ms}`} />
-      {failed.length > 0 && (
-        <Banner tone="danger" title="有几部分分析没有成功" actions={regenerate}>
-          {failed.map((f) => stageName(f.stage)).join("、")}
-          没有生成出来，下面对应的位置是空的。可以重新生成报告。
-        </Banner>
-      )}
+    <FramesContext.Provider value={frames}>
+      <div
+        ref={root}
+        className="oil-stack adm-report"
+        style={{ "--oil-gap": "var(--oil-space-5)" } as React.CSSProperties}
+      >
+        <ReportNav root={root} version={`${report.interview_id}:${report.generated_at_ms}`} />
+        {failed.length > 0 && (
+          <Banner tone="danger" title="有几部分分析没有成功" actions={regenerate}>
+            {failed.map((f) => stageName(f.stage)).join("、")}
+            没有生成出来，下面对应的位置是空的。可以重新生成报告。
+          </Banner>
+        )}
 
-      {flags.length > 0 && (
-        <Banner tone="warning" title="下结论前，建议你先看这几处">
-          <ul className="adm-flags">
-            {flags.map((flag) => (
-              <li key={flag.code}>
-                <Flag aria-hidden="true" size={14} />
-                <span>
-                  <strong>{reviewFlagLabel[flag.code] ?? flag.code}</strong>
-                  {flag.message}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Banner>
-      )}
+        {flags.length > 0 && (
+          <Banner tone="warning" title="下结论前，建议你先看这几处">
+            <ul className="adm-flags">
+              {flags.map((flag) => (
+                <li key={flag.code}>
+                  <Flag aria-hidden="true" size={14} />
+                  <span>
+                    <strong>{reviewFlagLabel[flag.code] ?? flag.code}</strong>
+                    {flag.message}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Banner>
+        )}
 
-      <Card>
-        <CardBody>
-          <div className="oil-row oil-row--wrap adm-verdict__badges">
-            <Badge tone={recommendationTone[rec.decision]}>
-              {recommendationLabel[rec.decision]}
-            </Badge>
-            <Badge plain>{confidenceLabel[rec.confidence]}</Badge>
-            {report.integrity && (
-              <Badge tone={riskTone[report.integrity.risk_level]} plain>
-                诚信风险：{riskLabel[report.integrity.risk_level]}
+        <Card>
+          <CardBody>
+            <div className="oil-row oil-row--wrap adm-verdict__badges">
+              <Badge tone={recommendationTone[rec.decision]}>
+                {recommendationLabel[rec.decision]}
               </Badge>
+              <Badge plain>{confidenceLabel[rec.confidence]}</Badge>
+              {report.integrity && (
+                <Badge tone={riskTone[report.integrity.risk_level]} plain>
+                  诚信风险：{riskLabel[report.integrity.risk_level]}
+                </Badge>
+              )}
+            </div>
+            <h2 className="adm-verdict__headline">{rec.headline}</h2>
+            <p className="adm-verdict__overview">{rec.overview}</p>
+            <dl className="adm-facts">
+              <div>
+                <dt>综合分</dt>
+                <dd>
+                  {report.overall_score === null ? "没有评分" : `${report.overall_score} / 100`}
+                  <small>
+                    {range
+                      ? `重新生成大多落在 ${range} 之间，仅供参考`
+                      : "重新生成会有几分的浮动，仅供参考"}
+                  </small>
+                </dd>
+              </div>
+              <div>
+                <dt>时长</dt>
+                <dd>
+                  {duration(t.duration_ms)}
+                  <small>预计 {duration(t.expected_ms)}</small>
+                </dd>
+              </div>
+              <div>
+                <dt>题目</dt>
+                <dd>
+                  问了 {t.questions_asked} / {t.questions_planned} 道
+                  <small>作答 {t.questions_answered} 道</small>
+                </dd>
+              </div>
+              <div>
+                <dt>候选人说话</dt>
+                <dd>
+                  {duration(t.candidate_speaking_ms)}
+                  <small>面试官 {duration(t.interviewer_speaking_ms)}</small>
+                </dd>
+              </div>
+            </dl>
+            <p className="adm-report-note">
+              <MousePointerClick aria-hidden="true" size={14} />
+              这是给你参考的初筛意见，决定由你来做。每条判断下面是候选人的原话，点一下可以跳到回看里听。
+            </p>
+          </CardBody>
+        </Card>
+
+        <div
+          className="adm-split adm-split--even adm-report__section"
+          data-report-section="理由和顾虑"
+        >
+          <Section title="主要理由" nav={false}>
+            <Findings items={rec.key_reasons} onSeek={onSeek} empty="没有列出理由。" />
+          </Section>
+          <Section title="风险和顾虑" nav={false}>
+            <Findings items={rec.risks} onSeek={onSeek} empty="没有明显的顾虑。" />
+          </Section>
+        </div>
+
+        {report.focus_checks.length > 0 && (
+          <Section
+            title="你要求重点考察的"
+            nav="重点考察"
+            intro="安排面试时写下的考察重点，逐条看有没有考察到、结果怎样。"
+          >
+            {report.focus_checks.map((item) => (
+              <Focus key={item.focus} item={item} onSeek={onSeek} />
+            ))}
+          </Section>
+        )}
+
+        <Section title="能力评分" intro="每项 1 到 5 分。没有考察到的不打分。">
+          {report.competencies.map((item) => (
+            <Competency key={item.name} item={item} onSeek={onSeek} />
+          ))}
+        </Section>
+
+        {report.requirement_match ? (
+          <Section
+            title="和岗位要求对照"
+            nav="岗位要求"
+            aside={
+              <Badge tone={matchLevelTone[report.requirement_match.match_level]}>
+                {matchLevelLabel[report.requirement_match.match_level]}
+              </Badge>
+            }
+            intro={report.requirement_match.summary}
+          >
+            {report.requirement_match.items.map((item) => (
+              <Requirement key={item.requirement} item={item} onSeek={onSeek} />
+            ))}
+          </Section>
+        ) : (
+          failedStage("requirements") && <Missing title="和岗位要求对照" nav="岗位要求" />
+        )}
+
+        {report.resume_verification ? (
+          <Section
+            title="简历上的经历是不是真的"
+            nav="简历核实"
+            aside={
+              <Badge tone={credibilityTone[report.resume_verification.credibility]}>
+                {credibilityLabel[report.resume_verification.credibility]}
+              </Badge>
+            }
+            intro={report.resume_verification.summary}
+          >
+            {report.resume_verification.claims.map((item) => (
+              <Claim key={item.claim} item={item} onSeek={onSeek} />
+            ))}
+          </Section>
+        ) : (
+          failedStage("resume") && <Missing title="简历上的经历是不是真的" nav="简历核实" />
+        )}
+
+        {report.integrity ? (
+          <Section
+            title="诚信观察"
+            aside={
+              <Badge tone={riskTone[report.integrity.risk_level]}>
+                风险：{riskLabel[report.integrity.risk_level]}
+              </Badge>
+            }
+            intro={report.integrity.summary}
+          >
+            {report.integrity.signals.length === 0 ? (
+              <p className="oil-muted adm-flat">没有发现值得注意的迹象。</p>
+            ) : (
+              <>
+                <p className="adm-caution">
+                  下面是值得你去回看里核对的迹象，不是结论。每一条都写了别的可能解释。
+                </p>
+                {report.integrity.signals.map((item) => (
+                  <Signal key={`${item.kind}-${item.description}`} item={item} onSeek={onSeek} />
+                ))}
+              </>
             )}
-          </div>
-          <h2 className="adm-verdict__headline">{rec.headline}</h2>
-          <p className="adm-verdict__overview">{rec.overview}</p>
-          <dl className="adm-facts">
+          </Section>
+        ) : (
+          failedStage("integrity") && <Missing title="诚信观察" />
+        )}
+
+        {report.communication ? (
+          <Section title="表达和状态" intro={report.communication.summary}>
+            {report.communication.aspects.map((item) => (
+              <Aspect key={item.aspect} item={item} onSeek={onSeek} />
+            ))}
+            {report.communication.reliability_note && (
+              <p className="adm-caution adm-caution--end">
+                {report.communication.reliability_note}
+              </p>
+            )}
+          </Section>
+        ) : (
+          failedStage("communication") && <Missing title="表达和状态" />
+        )}
+
+        <Section
+          title="逐题点评"
+          intro="追问和它所属的题目算在一起。点开看每道题的回答和评分理由。"
+        >
+          {report.questions.map((item, index) => (
+            <Question
+              key={item.question_id}
+              item={item}
+              index={index}
+              failed={failedStage(`question:${item.question_id}`)}
+              onSeek={onSeek}
+            />
+          ))}
+        </Section>
+
+        {(report.next_round.focus_areas.length > 0 || report.next_round.questions.length > 0) && (
+          <Section
+            title="下一轮可以接着问"
+            nav="下一轮"
+            aside={<ListChecks aria-hidden="true" size={18} />}
+          >
+            {report.next_round.focus_areas.length > 0 && (
+              <ul className="adm-bullets">
+                {report.next_round.focus_areas.map((area) => (
+                  <li key={area}>{area}</li>
+                ))}
+              </ul>
+            )}
+            {report.next_round.questions.length > 0 && (
+              <ol className="adm-next">
+                {report.next_round.questions.map((q) => (
+                  <li key={q.question}>
+                    <span>{q.question}</span>
+                    <small>{q.purpose}</small>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Section>
+        )}
+
+        {report.limitations.length > 0 && (
+          <Section title="这份报告的局限" nav="局限">
+            <ul className="adm-bullets adm-bullets--muted">
+              {report.limitations.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        <details className="adm-meta">
+          <summary>这份报告是怎么生成的</summary>
+          <dl className="adm-facts adm-facts--small">
             <div>
-              <dt>综合分</dt>
+              <dt>生成时间</dt>
+              <dd>{fullTime(new Date(report.generated_at_ms).toISOString())}</dd>
+            </div>
+            <div>
+              <dt>模型</dt>
               <dd>
-                {report.overall_score === null ? "没有评分" : `${report.overall_score} / 100`}
+                {report.meta.model}
+                <small>思考强度 {report.meta.thinking}</small>
+              </dd>
+            </div>
+            <div>
+              <dt>用量</dt>
+              <dd>
+                用时 {duration(report.meta.elapsed_ms)}
                 <small>
-                  {range
-                    ? `重新生成大多落在 ${range} 之间，仅供参考`
-                    : "重新生成会有几分的浮动，仅供参考"}
+                  输入 {usage.prompt_tokens.toLocaleString("zh-CN")}、输出{" "}
+                  {usage.completion_tokens.toLocaleString("zh-CN")} token
                 </small>
               </dd>
             </div>
             <div>
-              <dt>时长</dt>
+              <dt>出处核对</dt>
               <dd>
-                {duration(t.duration_ms)}
-                <small>预计 {duration(t.expected_ms)}</small>
-              </dd>
-            </div>
-            <div>
-              <dt>题目</dt>
-              <dd>
-                问了 {t.questions_asked} / {t.questions_planned} 道
-                <small>作答 {t.questions_answered} 道</small>
-              </dd>
-            </div>
-            <div>
-              <dt>候选人说话</dt>
-              <dd>
-                {duration(t.candidate_speaking_ms)}
-                <small>面试官 {duration(t.interviewer_speaking_ms)}</small>
+                引用 {cited.cited} 处，{cited.exact} 处和原话逐字对上
+                <small>
+                  大意 {cited.approximate} 处，整段 {cited.whole_segment} 处，对不上被丢掉{" "}
+                  {cited.dropped} 处
+                </small>
               </dd>
             </div>
           </dl>
-          <p className="adm-report-note">
-            <MousePointerClick aria-hidden="true" size={14} />
-            这是给你参考的初筛意见，决定由你来做。每条判断下面是候选人的原话，点一下可以跳到回看里听。
-          </p>
-        </CardBody>
-      </Card>
-
-      <div
-        className="adm-split adm-split--even adm-report__section"
-        data-report-section="理由和顾虑"
-      >
-        <Section title="主要理由" nav={false}>
-          <Findings items={rec.key_reasons} onSeek={onSeek} empty="没有列出理由。" />
-        </Section>
-        <Section title="风险和顾虑" nav={false}>
-          <Findings items={rec.risks} onSeek={onSeek} empty="没有明显的顾虑。" />
-        </Section>
+          {regenerate && <div className="adm-meta__actions">{regenerate}</div>}
+        </details>
       </div>
-
-      {report.focus_checks.length > 0 && (
-        <Section
-          title="你要求重点考察的"
-          nav="重点考察"
-          intro="安排面试时写下的考察重点，逐条看有没有考察到、结果怎样。"
-        >
-          {report.focus_checks.map((item) => (
-            <Focus key={item.focus} item={item} onSeek={onSeek} />
-          ))}
-        </Section>
-      )}
-
-      <Section title="能力评分" intro="每项 1 到 5 分。没有考察到的不打分。">
-        {report.competencies.map((item) => (
-          <Competency key={item.name} item={item} onSeek={onSeek} />
-        ))}
-      </Section>
-
-      {report.requirement_match ? (
-        <Section
-          title="和岗位要求对照"
-          nav="岗位要求"
-          aside={
-            <Badge tone={matchLevelTone[report.requirement_match.match_level]}>
-              {matchLevelLabel[report.requirement_match.match_level]}
-            </Badge>
-          }
-          intro={report.requirement_match.summary}
-        >
-          {report.requirement_match.items.map((item) => (
-            <Requirement key={item.requirement} item={item} onSeek={onSeek} />
-          ))}
-        </Section>
-      ) : (
-        failedStage("requirements") && <Missing title="和岗位要求对照" nav="岗位要求" />
-      )}
-
-      {report.resume_verification ? (
-        <Section
-          title="简历上的经历是不是真的"
-          nav="简历核实"
-          aside={
-            <Badge tone={credibilityTone[report.resume_verification.credibility]}>
-              {credibilityLabel[report.resume_verification.credibility]}
-            </Badge>
-          }
-          intro={report.resume_verification.summary}
-        >
-          {report.resume_verification.claims.map((item) => (
-            <Claim key={item.claim} item={item} onSeek={onSeek} />
-          ))}
-        </Section>
-      ) : (
-        failedStage("resume") && <Missing title="简历上的经历是不是真的" nav="简历核实" />
-      )}
-
-      {report.integrity ? (
-        <Section
-          title="诚信观察"
-          aside={
-            <Badge tone={riskTone[report.integrity.risk_level]}>
-              风险：{riskLabel[report.integrity.risk_level]}
-            </Badge>
-          }
-          intro={report.integrity.summary}
-        >
-          {report.integrity.signals.length === 0 ? (
-            <p className="oil-muted adm-flat">没有发现值得注意的迹象。</p>
-          ) : (
-            <>
-              <p className="adm-caution">
-                下面是值得你去回看里核对的迹象，不是结论。每一条都写了别的可能解释。
-              </p>
-              {report.integrity.signals.map((item) => (
-                <Signal key={`${item.kind}-${item.description}`} item={item} onSeek={onSeek} />
-              ))}
-            </>
-          )}
-        </Section>
-      ) : (
-        failedStage("integrity") && <Missing title="诚信观察" />
-      )}
-
-      {report.communication ? (
-        <Section title="表达和状态" intro={report.communication.summary}>
-          {report.communication.aspects.map((item) => (
-            <Aspect key={item.aspect} item={item} onSeek={onSeek} />
-          ))}
-          {report.communication.reliability_note && (
-            <p className="adm-caution adm-caution--end">{report.communication.reliability_note}</p>
-          )}
-        </Section>
-      ) : (
-        failedStage("communication") && <Missing title="表达和状态" />
-      )}
-
-      <Section title="逐题点评" intro="追问和它所属的题目算在一起。点开看每道题的回答和评分理由。">
-        {report.questions.map((item, index) => (
-          <Question
-            key={item.question_id}
-            item={item}
-            index={index}
-            failed={failedStage(`question:${item.question_id}`)}
-            onSeek={onSeek}
-          />
-        ))}
-      </Section>
-
-      {(report.next_round.focus_areas.length > 0 || report.next_round.questions.length > 0) && (
-        <Section
-          title="下一轮可以接着问"
-          nav="下一轮"
-          aside={<ListChecks aria-hidden="true" size={18} />}
-        >
-          {report.next_round.focus_areas.length > 0 && (
-            <ul className="adm-bullets">
-              {report.next_round.focus_areas.map((area) => (
-                <li key={area}>{area}</li>
-              ))}
-            </ul>
-          )}
-          {report.next_round.questions.length > 0 && (
-            <ol className="adm-next">
-              {report.next_round.questions.map((q) => (
-                <li key={q.question}>
-                  <span>{q.question}</span>
-                  <small>{q.purpose}</small>
-                </li>
-              ))}
-            </ol>
-          )}
-        </Section>
-      )}
-
-      {report.limitations.length > 0 && (
-        <Section title="这份报告的局限" nav="局限">
-          <ul className="adm-bullets adm-bullets--muted">
-            {report.limitations.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </Section>
-      )}
-
-      <details className="adm-meta">
-        <summary>这份报告是怎么生成的</summary>
-        <dl className="adm-facts adm-facts--small">
-          <div>
-            <dt>生成时间</dt>
-            <dd>{fullTime(new Date(report.generated_at_ms).toISOString())}</dd>
-          </div>
-          <div>
-            <dt>模型</dt>
-            <dd>
-              {report.meta.model}
-              <small>思考强度 {report.meta.thinking}</small>
-            </dd>
-          </div>
-          <div>
-            <dt>用量</dt>
-            <dd>
-              用时 {duration(report.meta.elapsed_ms)}
-              <small>
-                输入 {usage.prompt_tokens.toLocaleString("zh-CN")}、输出{" "}
-                {usage.completion_tokens.toLocaleString("zh-CN")} token
-              </small>
-            </dd>
-          </div>
-          <div>
-            <dt>出处核对</dt>
-            <dd>
-              引用 {cited.cited} 处，{cited.exact} 处和原话逐字对上
-              <small>
-                大意 {cited.approximate} 处，整段 {cited.whole_segment} 处，对不上被丢掉{" "}
-                {cited.dropped} 处
-              </small>
-            </dd>
-          </div>
-        </dl>
-        {regenerate && <div className="adm-meta__actions">{regenerate}</div>}
-      </details>
-    </div>
+    </FramesContext.Provider>
   );
 }
