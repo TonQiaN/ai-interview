@@ -123,6 +123,8 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `GET /api/v1/interviews/{id}/reports` | 报告的所有版本和各自的状态 |
 | `POST /api/v1/interviews/{id}/report/regenerate` | 重新生成报告 |
 | `PUT /api/v1/interviews/{id}/decision` | HR 的结论 |
+| `GET /api/v1/interviews/{id}/frame-events` | 录像画面检查的结果：画面里人数不对、看得到手机的时间段 |
+| `GET /api/v1/interviews/{id}/frames/{at_ms}` | 画面检查时存下来的那一帧（JPEG），可以直接当 `<img>` 的地址 |
 | `GET /api/v1/interview-templates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` | 配置模板 |
 | `GET /api/v1/interview-config/defaults` | 默认配置和各选项的取值范围，给配置表单用 |
 
@@ -140,6 +142,8 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 - `POST .../report/regenerate` 只有面试结束后（`completed`、`abandoned`）才能点，否则 409，`code` 是 `interview_not_finished`。返回 202 和面试详情。每次重新生成加一个版本，旧版本留着；上一版还在生成时不会再加，直接返回当前状态。
 - 候选人一句都没答、或者没配大模型时，报告直接是 `failed`，`error` 里写了原因，不会一直转圈。
 - `PUT .../decision` 请求体 `{"decision": "advance" | "hold" | "reject" | "pending", "note": "…"}`，`note` 可以不传，最长 2000 字。返回面试详情。改回 `pending` 会清掉决定人和时间。
+- `GET .../frame-events` 返回 `{checked, items}`。出报告之前会从摄像头录像里抽帧让模型看，结果在这里；没有录像、还没出报告或者检查没做成时 `checked` 是 false、`items` 是空的。每条是 `{id, kind, at_ms, duration_ms, payload, frame_at_ms}`，按 `at_ms` 从早到晚排，时间和录像、过程事件（`GET .../events`）是同一条时间轴，两边按 `at_ms` 就能排在一起。`id` 就是报告证据里的 `event_id`（比如 `frame-phone-95000`）。`kind` 是 `face_count_changed`、`phone_visible`、`frames_checked`；`payload` 里有 `people`、`frames`、`note`、`unclear`（`frames_checked` 是 `frames`、`interval_ms`、`flagged`、`unreadable`）。只在一帧里看到的 `duration_ms` 是 null。`frame_at_ms` 是这一段里存了图的帧，只有不正常的帧存图，`frames_checked` 这一条不带。
+- `GET .../frames/{at_ms}` 的 `at_ms` 用 `frame_at_ms` 里的值。这一刻没存图返回 404。画面是候选人的个人信息，要登录才能取。
 
 ### ② 岗位和候选人（interview-talent、interview-raas）
 

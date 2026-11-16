@@ -17,7 +17,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use interview_core::blob_key;
 use interview_llm::{DEFAULT_MODEL, Pricing};
-use interview_platform::blob::SharedBlobStore;
+use interview_platform::blob::{BlobError, SharedBlobStore};
 use interview_platform::tasks::Task;
 use interview_platform::usage::{self, LlmUsage};
 use interview_report::frames::{FrameObservations, FrameOptions, VideoSegment, observe_video};
@@ -133,6 +133,32 @@ async fn record_usage(
         },
     )
     .await;
+}
+
+/// 存下来的检查结果，给 HR 后台看：过程事件，和存了图的帧各在哪一刻（从早到晚）。
+/// 还没检查过是 `None`。
+pub(crate) async fn saved(
+    blobs: &SharedBlobStore,
+    interview_id: Uuid,
+) -> Result<Option<(Vec<ProctorEvent>, Vec<u64>)>, BlobError> {
+    let bytes = match blobs.get(&blob_key::frame_events(interview_id)).await {
+        Ok(bytes) => bytes,
+        Err(BlobError::NotFound(_)) => return Ok(None),
+        Err(err) => return Err(err),
+    };
+    let saved: Saved = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+    let prefix = blob_key::frames_prefix(interview_id);
+    let mut frames: Vec<u64> = blobs
+        .list(&prefix)
+        .await?
+        .iter()
+        .filter_map(|blob| {
+            let name = blob.key.strip_prefix(&prefix)?.strip_prefix('/')?;
+            name.strip_suffix(".jpg")?.parse().ok()
+        })
+        .collect();
+    frames.sort_unstable();
+    Ok(Some((saved.events, frames)))
 }
 
 /// 上次存下来的结果。没存过、读不出来都当没有。

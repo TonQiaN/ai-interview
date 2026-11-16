@@ -1,18 +1,23 @@
 //! 面试结束后 HR 看的东西：对话记录、分析报告、结论。
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::Response;
+use interview_core::blob_key;
 use interview_platform::auth::AdminUser;
-use interview_platform::http::{ApiError, ApiResult, ErrorBody, Json, Path, Query};
+use interview_platform::http::{ApiError, ApiResult, ErrorBody, Json, Path, Query, serve_blob};
+use interview_report::frames::KIND_FRAMES_CHECKED;
+use serde_json::{Value, json};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::model::{
-    DecisionRequest, InterviewDetail, ReportList, ReportQuery, ReportView, TranscriptView, TurnView,
+    DecisionRequest, FrameEvent, FrameEventList, InterviewDetail, ReportList, ReportQuery,
+    ReportView, TranscriptView, TurnView,
 };
 use crate::store::{self, InterviewRow};
-use crate::{Deps, finalize, report};
+use crate::{Deps, finalize, report, video_check};
 
 pub(crate) fn router() -> OpenApiRouter<Deps> {
     OpenApiRouter::new()
@@ -21,6 +26,8 @@ pub(crate) fn router() -> OpenApiRouter<Deps> {
         .routes(routes!(list_reports))
         .routes(routes!(regenerate_report))
         .routes(routes!(put_decision))
+        .routes(routes!(list_frame_events))
+        .routes(routes!(get_frame))
 }
 
 async fn load(deps: &Deps, id: Uuid) -> ApiResult<InterviewRow> {
@@ -161,6 +168,107 @@ async fn regenerate_report(
         StatusCode::ACCEPTED,
         Json(store::detail(&deps.ctx.db, row).await?),
     ))
+}
+
+/// 录像画面检查的结果
+///
+/// 出报告之前会从摄像头录像里抽帧，看画面里有几个人、有没有手机。这里是整理出来的事件，
+/// 按时间从早到晚排，时间和录像、过程事件是同一条时间轴。报告里证据的 `event_id` 对得上这里的 `id`。
+/// 还没检查过时 `checked` 是 false。
+#[utoipa::path(
+    get,
+    path = "/api/v1/interviews/{id}/frame-events",
+    tag = "interviews",
+    params(("id" = Uuid, Path, description = "面试 ID")),
+    responses(
+        (status = 200, description = "画面检查的结果", body = FrameEventList),
+        (status = 404, description = "没有这场面试", body = ErrorBody),
+    )
+)]
+async fn list_frame_events(
+    State(deps): State<Deps>,
+    _user: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<FrameEventList>> {
+    let row = load(&deps, id).await?;
+    let Some((events, frames)) = video_check::saved(&deps.ctx.blobs, row.id).await? else {
+        return Ok(Json(FrameEventList {
+            checked: false,
+            items: Vec::new(),
+        }));
+    };
+    let mut items: Vec<FrameEvent> = events
+        .into_iter()
+        .map(|event| {
+            // 「整段检查过了」这一条盖住全部录像，不算哪一帧的事
+            let frame_at_ms = match event.at_ms {
+                Some(start) if event.kind != KIND_FRAMES_CHECKED => {
+                    let end = start.saturating_add(event.duration_ms.unwrap_or(0));
+                    frames
+                        .iter()
+                        .copied()
+                        .filter(|at_ms| (start..=end).contains(at_ms))
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
+            FrameEvent {
+                id: event.id,
+                kind: event.kind,
+                at_ms: event.at_ms,
+                duration_ms: event.duration_ms,
+                payload: payload_of(event.detail),
+                frame_at_ms,
+            }
+        })
+        .collect();
+    items.sort_by_key(|event| event.at_ms);
+    Ok(Json(FrameEventList {
+        checked: true,
+        items,
+    }))
+}
+
+/// 事件的补充说明存的是一段 JSON 文字，还原成对象。不是 JSON 对象的原样放在 `note` 里。
+fn payload_of(detail: Option<String>) -> Value {
+    let Some(detail) = detail else {
+        return json!({});
+    };
+    match serde_json::from_str::<Value>(&detail) {
+        Ok(value) if value.is_object() => value,
+        _ => json!({ "note": detail }),
+    }
+}
+
+/// 画面检查时存下来的一帧
+///
+/// 只有不正常的帧（人数不对、看得到手机）存了图，哪几帧有图看「录像画面检查的结果」里的 `frame_at_ms`。
+/// 返回 JPEG，可以直接当图片的地址。
+#[utoipa::path(
+    get,
+    path = "/api/v1/interviews/{id}/frames/{at_ms}",
+    tag = "interviews",
+    params(
+        ("id" = Uuid, Path, description = "面试 ID"),
+        ("at_ms" = u64, Path, description = "这一帧在面试时间轴上的毫秒"),
+    ),
+    responses(
+        (status = 200, description = "这一帧的图", content_type = "image/jpeg"),
+        (status = 404, description = "没有这场面试，或者这一刻没有存图", body = ErrorBody),
+    )
+)]
+async fn get_frame(
+    State(deps): State<Deps>,
+    _user: AdminUser,
+    Path((id, at_ms)): Path<(Uuid, u64)>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    let row = load(&deps, id).await?;
+    let key = blob_key::frame(row.id, at_ms);
+    if deps.ctx.blobs.head(&key).await?.is_none() {
+        return Err(ApiError::not_found("这一帧的图"));
+    }
+    serve_blob(deps.ctx.blobs.as_ref(), &key, "image/jpeg", &headers).await
 }
 
 /// 记下 HR 的结论
