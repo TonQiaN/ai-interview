@@ -841,13 +841,21 @@ function VoiceRow({
           size="sm"
           variant="ghost"
           icon={<Play aria-hidden="true" />}
+          // 每个音色一行，按钮念出来带上音色的名字
+          aria-label={`试听${voice.name}`}
           disabled={!voice.ready || (preview.pending && preview.request?.voice_id !== voice.id)}
           loading={preview.request?.voice_id === voice.id}
           onClick={onListen}
         >
           试听
         </Button>
-        <Button size="sm" variant="ghost" icon={<Pencil aria-hidden="true" />} onClick={onEdit}>
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<Pencil aria-hidden="true" />}
+          aria-label={`修改${voice.name}`}
+          onClick={onEdit}
+        >
           修改
         </Button>
         {!voice.is_default && (
@@ -856,6 +864,7 @@ function VoiceRow({
               size="sm"
               variant="ghost"
               icon={<Star aria-hidden="true" />}
+              aria-label={`把${voice.name}设为默认`}
               loading={update.isPending}
               disabled={!voice.ready}
               onClick={() =>

@@ -166,7 +166,12 @@ function Quotes({ items, onSeek, limit = 2 }: { items: Evidence[]; onSeek: Seek;
         <Quote key={index} evidence={e} onSeek={onSeek} />
       ))}
       {items.length > limit && (
-        <button type="button" className="adm-link adm-quotes__more" onClick={() => setOpen(!open)}>
+        <button
+          type="button"
+          className="adm-link adm-quotes__more"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
           {open ? "收起" : `还有 ${items.length - limit} 处出处`}
         </button>
       )}

@@ -51,7 +51,7 @@ async function editWithBreeze() {
   open();
   const row = (await screen.findByText("默认面试官")).closest("li");
   if (!row) throw new Error("列表里没有「默认面试官」");
-  fireEvent.click(within(row).getByRole("button", { name: "修改" }));
+  fireEvent.click(within(row).getByRole("button", { name: "修改默认面试官" }));
   const dialog = within(await screen.findByRole("dialog"));
   fireEvent.change(dialog.getByLabelText("用哪个引擎"), { target: { value: "breeze2" } });
   return dialog;
@@ -156,5 +156,18 @@ describe("声音：引擎不可用", () => {
     expect(await screen.findByText("原因甲")).toBeTruthy();
     expect(screen.getByText("原因乙")).toBeTruthy();
     expect(screen.queryByText(/、.* 现在不可用$/)).toBeNull();
+  });
+});
+
+describe("声音：每个音色一行", () => {
+  it("每一行的按钮念出来带着音色的名字，分得清是哪一个", async () => {
+    open();
+    await screen.findByText("默认面试官");
+    expect(screen.getByRole("button", { name: "试听默认面试官" })).toBeTruthy();
+    const names = screen
+      .getAllByRole("button", { name: /^(试听|修改|删除|把.+设为默认$)/ })
+      .map((button) => button.getAttribute("aria-label"));
+    expect(names.length).toBeGreaterThan(4);
+    expect(new Set(names).size).toBe(names.length);
   });
 });

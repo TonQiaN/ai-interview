@@ -98,6 +98,12 @@ describe("总览：链接过期了的面试", () => {
     );
     if (!todo) throw new Error("没找到那一条");
     expect(within(todo).getByText(expired.candidate.name)).toBeTruthy();
+    // 打开面试的按钮念出来带着岗位：同一位候选人有两场面试时分得清
+    expect(
+      within(todo).getByRole("button", {
+        name: `打开${expired.candidate.name}应聘${expired.position.title}的面试`,
+      }),
+    ).toBeTruthy();
 
     const stat = screen.getByText("已发链接，等候选人").parentElement;
     if (!stat) throw new Error("没找到那个数字");

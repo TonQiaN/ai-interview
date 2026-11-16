@@ -498,6 +498,8 @@ export function AccountsPage() {
                             <button
                               type="button"
                               className="adm-link"
+                              // 每个账号一行，按钮念出来带上是谁的账号
+                              aria-label={`改${account.display_name}的名字和角色`}
                               onClick={() => setEditing(account)}
                             >
                               改名字和角色
@@ -511,6 +513,7 @@ export function AccountsPage() {
                                 <button
                                   type="button"
                                   className="adm-link"
+                                  aria-label={`给${account.display_name}重设密码`}
                                   onClick={() => setResetting(account)}
                                 >
                                   重设密码
@@ -519,6 +522,7 @@ export function AccountsPage() {
                                   <button
                                     type="button"
                                     className="adm-link"
+                                    aria-label={`恢复${account.display_name}的账号`}
                                     disabled={update.isPending}
                                     onClick={() => setDisabled(account, false)}
                                   >
@@ -528,6 +532,7 @@ export function AccountsPage() {
                                   <button
                                     type="button"
                                     className="adm-link"
+                                    aria-label={`停用${account.display_name}的账号`}
                                     onClick={() => setDisabling(account)}
                                   >
                                     停用
