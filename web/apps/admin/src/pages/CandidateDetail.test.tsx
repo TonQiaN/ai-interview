@@ -1,7 +1,7 @@
 import { ToastProvider } from "@ai-interview/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { Link, MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setFetch } from "../api/http";
 import { createMockServer } from "../api/mock/server";
@@ -41,7 +41,10 @@ afterEach(cleanup);
 
 /** me 不传就是演示数据里登录的管理员；传了就当成那个人在看 */
 function open(id: string, me?: AdminUser) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // 和正式页面一样，刚取过的数据十秒内不重新取
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: 10_000 } },
+  });
   if (me) client.setQueryData(["me"], me);
   render(
     <QueryClientProvider client={client}>
@@ -49,7 +52,14 @@ function open(id: string, me?: AdminUser) {
         <MemoryRouter initialEntries={[`/candidates/${id}`]}>
           <Routes>
             <Route path="/candidates/:id" element={<CandidateDetailPage />} />
-            <Route path="/candidates" element={<p>候选人列表</p>} />
+            <Route
+              path="/candidates"
+              element={
+                <p>
+                  候选人列表 <Link to={`/candidates/${id}`}>回到这位候选人</Link>
+                </p>
+              }
+            />
           </Routes>
         </MemoryRouter>
       </ToastProvider>
@@ -162,5 +172,18 @@ describe("候选人详情", () => {
     expect(await screen.findByText("候选人列表")).toBeTruthy();
     expect(screen.getByText("已归档")).toBeTruthy();
     expect(server.db.candidates.find((c) => c.id === candidate.id)?.archived_at).toBeTruthy();
+  });
+
+  it("归档以后马上再打开这位候选人，看到的是归档后的样子", async () => {
+    const candidate = busyCandidate();
+    open(candidate.id);
+
+    fireEvent.click(await screen.findByRole("button", { name: "归档" }));
+    const dialog = within(await screen.findByRole("dialog", { name: `归档${candidate.name}？` }));
+    fireEvent.click(dialog.getByRole("button", { name: "归档" }));
+    fireEvent.click(await screen.findByRole("link", { name: "回到这位候选人" }));
+
+    expect(await screen.findByText("这位候选人已经归档")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "归档" })).toBeNull();
   });
 });
