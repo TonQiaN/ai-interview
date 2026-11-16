@@ -41,6 +41,11 @@ pub struct InterviewReport {
     pub integrity: Option<IntegrityAssessment>,
     /// 沟通表达和应对难题时的稳定性。
     pub communication: Option<CommunicationAssessment>,
+    /// 候选人在面试里向公司提的问题，按提出的先后。面试官一般会说「记下了，会转给负责招聘的同事」，
+    /// HR 要照着这一栏答复候选人。候选人没提问时是空数组；这一步分析失败，或者报告是加这一栏之前
+    /// 生成的，为空（不代表候选人没提问）。这一栏只是转达，不参与评分和建议。
+    #[serde(default)]
+    pub candidate_questions: Option<Vec<CandidateQuestion>>,
     /// 给下一轮人工面试官的建议。
     pub next_round: NextRound,
     /// 整场面试的计时数据。
@@ -479,6 +484,38 @@ pub struct AspectRating {
     /// 1 到 5 分，无法判断时为空。
     pub rating: Option<u8>,
     pub observation: String,
+    #[serde(default, deserialize_with = "null_as_default")]
+    #[schema(required = true)]
+    pub evidence: Vec<Evidence>,
+}
+
+/// 面试官当场是怎么回应候选人提的问题的。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidateQuestionReply {
+    /// 面试官当场给了具体的回答。回答的内容见 `reply`，HR 要核对面试官说得对不对。
+    Answered,
+    /// 面试官说记下了、会转达，没有当场回答。
+    Noted,
+    /// 面试官没有回应这个问题。
+    Unaddressed,
+}
+
+/// 候选人向公司提的一个问题。
+///
+/// 接口文档里叫 `ReportCandidateQuestion`：面试设置里「要不要请候选人提问」的那个类型叫
+/// `CandidateQuestions`，只差一个字母，容易看混。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[schema(as = ReportCandidateQuestion)]
+pub struct CandidateQuestion {
+    /// 候选人问的是什么，整理成一句通顺的话。原话在 `evidence` 里。
+    pub question: String,
+    /// 面试官当场是怎么回应的。
+    pub handling: CandidateQuestionReply,
+    /// 面试官当场说了什么，一句话。面试官没有回应时为空。
+    #[serde(default)]
+    pub reply: Option<String>,
+    /// 第一条是候选人提问的原话，面试官当场回答了的话后面是面试官的原话。
     #[serde(default, deserialize_with = "null_as_default")]
     #[schema(required = true)]
     pub evidence: Vec<Evidence>,
