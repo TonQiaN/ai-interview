@@ -449,6 +449,10 @@ export function ReportView({ report, onSeek, onRegenerate }: ReportViewProps) {
   const rec = report.recommendation;
   const failed = report.meta.failed_stages;
   const failedStage = (stage: string) => failed.some((f) => f.stage === stage);
+  // 有步骤失败时上面已经用中文说了缺哪几块，报告里那条「分析不完整」带的是英文步骤名，不再重复
+  const flags = report.review_flags.filter(
+    (flag) => !(flag.code === "incomplete_analysis" && failed.length > 0),
+  );
   const t = report.timing;
   const range = scoreRangeText(report.score_range);
   const usage = report.meta.usage;
@@ -479,10 +483,10 @@ export function ReportView({ report, onSeek, onRegenerate }: ReportViewProps) {
         </Banner>
       )}
 
-      {report.review_flags.length > 0 && (
+      {flags.length > 0 && (
         <Banner tone="warning" title="下结论前，建议你先看这几处">
           <ul className="adm-flags">
-            {report.review_flags.map((flag) => (
+            {flags.map((flag) => (
               <li key={flag.code}>
                 <Flag aria-hidden="true" size={14} />
                 <span>

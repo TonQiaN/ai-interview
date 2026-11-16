@@ -529,7 +529,7 @@ export function eventNote(event: EventLike): string | null {
     const bytes = num(p.uploaded_bytes);
     if (bytes !== null) parts.push(`共 ${fileSize(bytes)}`);
     const wait = num(p.wait_ms);
-    if (wait !== null) parts.push(`面试结束后等了 ${duration(wait)}`);
+    if (wait !== null && wait >= 1000) parts.push(`面试结束后等了 ${duration(wait)}`);
   }
   if (Array.isArray(p.kinds)) {
     const names = p.kinds.map((k) => deviceKindLabel[String(k)] ?? String(k));
@@ -756,6 +756,7 @@ export const componentLabel: Record<string, string> = {
   llm: "大模型（DeepSeek）",
   tts: "语音合成",
   stt: "语音识别",
+  ffmpeg: "录像和声音处理（ffmpeg）",
   raas: "RAAS",
   storage: "文件存储",
   jobs: "后台任务",
