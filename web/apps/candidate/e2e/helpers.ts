@@ -223,3 +223,22 @@ export const sessionKeyOf = (page: Page, token: string): Promise<string> =>
       .join("")
       .slice(0, 32);
   }, token);
+
+/** 把一场面试的经过排成几行字：谁在什么时候说了哪一句，候选人答完之后等了多久。 */
+export function timeline(state: RoomState): string {
+  const seconds = (ms: number | null) => (ms === null ? "?" : (ms / 1000).toFixed(1));
+  const lines = [`结束原因：${state.end_reason}`];
+  state.turns.forEach((turn, index) => {
+    const who = turn.speaker === "interviewer" ? "面试官" : "候选人";
+    let line = `${seconds(turn.start_ms).padStart(6)} → ${seconds(turn.end_ms).padStart(6)}  ${who}  ${turn.utterance_key}`;
+    if (turn.speaker === "candidate") {
+      line += `  ${turn.end_reason}  ${turn.has_text ? `有文字（${turn.stt_engine}）` : "没有文字"}`;
+      const next = state.turns[index + 1];
+      if (turn.end_ms !== null && next) {
+        line += `  答完 ${seconds(next.start_ms - turn.end_ms)} 秒后面试官开口`;
+      }
+    }
+    lines.push(line);
+  });
+  return lines.join("\n");
+}

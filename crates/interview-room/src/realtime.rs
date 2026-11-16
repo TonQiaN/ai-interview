@@ -328,7 +328,9 @@ pub(crate) async fn enabled(deps: &Deps, config: &InterviewConfig) -> bool {
     if config.mode != InterviewMode::Conversational {
         return false;
     }
-    let (Some(_), Some(_), Some(transcriber)) = (&deps.llm, &deps.voice, &deps.transcriber) else {
+    let (Some(_), Some(_), Some(transcriber)) =
+        (deps.live_model(), &deps.voice, &deps.transcriber)
+    else {
         return false;
     };
     transcriber.available().await
@@ -971,8 +973,7 @@ async fn run_turn(deps: &Deps, interview_id: Uuid) -> ApiResult<()> {
         answer_ms: turn.answer_ms,
     };
     let model: std::sync::Arc<dyn ChatModel> = deps
-        .llm
-        .clone()
+        .live_model()
         .unwrap_or_else(|| std::sync::Arc::new(NoModel));
     let settled = TurnContext {
         paused: false,
@@ -1539,7 +1540,9 @@ pub(crate) async fn check_pause(
     interview_id: Uuid,
     request: &PauseCheckRequest,
 ) -> ApiResult<PauseVerdict> {
-    if deps.config.realtime_pause_check_ms == 0 || deps.llm.is_none() || deps.transcriber.is_none()
+    if deps.config.realtime_pause_check_ms == 0
+        || deps.live_model().is_none()
+        || deps.transcriber.is_none()
     {
         return Ok(PauseVerdict::Unknown);
     }
@@ -1682,7 +1685,7 @@ impl AheadJob {
             outlet,
             verdict,
         } = self;
-        let Some(model) = deps.llm.clone() else {
+        let Some(model) = deps.live_model() else {
             return;
         };
         let Outlet::Ahead { pipe, .. } = &outlet else {
