@@ -52,6 +52,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use uuid::Uuid;
 
 use crate::Deps;
+use crate::access::RoomAccess;
 use crate::conduct::{
     self, AdvanceRequest, AnswerEndReason, BeatTimes, NoModel, Row, at_elapsed, audio_url,
     clamp_i64, engine_error, finish_reason, utterance_kind,
@@ -626,16 +627,17 @@ enum Once {
 /// 下一句还没准备好就等着。
 pub(crate) async fn advance(
     deps: &Deps,
-    interview_id: Uuid,
+    access: &RoomAccess,
     request: &AdvanceRequest,
 ) -> ApiResult<NextStep> {
+    let interview_id = access.interview_id;
     let deadline = Instant::now() + ADVANCE_WAIT;
     let mut changes = deps.realtime.watch(interview_id);
     let mut attempts = 0;
     loop {
         // 先记下「看过了」再去读库：读库之后才排进来的句子会让下面的等待马上醒
         changes.borrow_and_update();
-        match advance_once(deps, interview_id, request).await? {
+        match advance_once(deps, access, request).await? {
             Once::Step(state) => return current_step(deps, interview_id, &state).await,
             Once::Finished(step) => {
                 deps.realtime.forget(interview_id);
@@ -659,14 +661,18 @@ pub(crate) async fn advance(
 
 async fn advance_once(
     deps: &Deps,
-    interview_id: Uuid,
+    access: &RoomAccess,
     request: &AdvanceRequest,
 ) -> ApiResult<Once> {
+    let interview_id = access.interview_id;
     let mut tx = deps.ctx.db.begin().await?;
     let row = conduct::load(&mut tx, interview_id, true).await?;
     if row.is_finished() {
         return Ok(Once::Finished(Box::new(row.finish_step())));
     }
+    // 这次上报可能已经等了一阵（等面试官想好）。等的时候面试换到了另一个页面的话，
+    // 下一句不再交给这个页面
+    access.recheck_active_page(&mut tx).await?;
     let mut state = match (row.status, parse(interview_id, &row)?) {
         (InterviewStatus::InProgress, Some(state)) => state,
         _ => return Err(ApiError::conflict("面试还没有开始")),

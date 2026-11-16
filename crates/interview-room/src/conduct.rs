@@ -596,9 +596,7 @@ async fn advance_interview(
     access.require_active_page()?;
     let interview_id = access.interview_id;
     if is_realtime(&deps, interview_id).await? {
-        return Ok(Json(
-            realtime::advance(&deps, interview_id, &request).await?,
-        ));
+        return Ok(Json(realtime::advance(&deps, &access, &request).await?));
     }
     // 最多走三遍：判断完一段回答之后要重新看一次状态，才知道该给页面什么
     for _ in 0..3 {

@@ -4,6 +4,7 @@ import {
   enterInterview,
   eventKinds,
   expectRecordingsReady,
+  open,
   passPreflight,
   roomState,
   spokenKeys,
@@ -246,4 +247,66 @@ test("实时对话里网络断了几秒、接口出了几次错：面试官晚�
     expect(answer.has_text, `回答 ${answer.utterance_key} 没有文字`).toBe(true);
   }
   expect(eventKinds(state)).toEqual(expect.arrayContaining(["network_offline", "network_online"]));
+});
+
+test("实时对话到一半换到另一个页面：那边接着对话，这边停下来不再问服务端，一句不多一句不少", async ({
+  page,
+  browser,
+}) => {
+  await politeCandidate(page);
+  const interview = await enterInterview(page, { realtime: true });
+
+  // 另一个页面（像是换了一台设备）打开同一条链接，检查好设备，先不点「继续面试」
+  const context = await browser.newContext();
+  const other = await context.newPage();
+  await politeCandidate(other);
+  await open(other, interview.token);
+  await passPreflight(other, { resuming: true });
+  // 等这边的面试官现场追问过了再换过去
+  await expect.poll(() => spokenKeys(roomState(interview)), { timeout: 30_000 }).toContain("q1.p1");
+  await button(other, "继续面试").click();
+  await expect(other.getByText("录制中")).toBeVisible();
+
+  // 这边几秒之内停下来；停下来以后不再向服务端报回答、问「说完没有」
+  await expect(page.getByRole("heading", { name: "面试已经在另一个页面里继续了" })).toBeVisible();
+  await expect(page.getByText("录制中")).toBeHidden();
+  const late: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith("/room/advance") || path.endsWith("/room/pause-check")) late.push(path);
+  });
+
+  await expect(other.getByText("面试完成，谢谢你")).toBeVisible({ timeout: 110_000 });
+  expect(late).toEqual([]);
+
+  const state = await expectRecordingsReady(interview, 2);
+  await test.info().attach("面试经过", { body: timeline(state), contentType: "text/plain" });
+  expect(state.end_reason).toBe("completed");
+  expect(eventKinds(state).filter((kind) => kind === "page_taken_over")).toHaveLength(1);
+  // 换页面时正在说的那一句在那边重说一遍，别的不重复、不漏
+  expect(spokenInOrder(spokenKeys(state))).toEqual([
+    "opening",
+    "q1",
+    "q1.p1",
+    "q2",
+    "q2.p1",
+    "q3",
+    "q3.p1",
+    "candidate_questions",
+    "closing",
+  ]);
+  const answers = state.turns.filter((turn) => turn.speaker === "candidate");
+  expect(answers.map((turn) => turn.utterance_key)).toEqual([
+    "q1",
+    "q1.p1",
+    "q2",
+    "q2.p1",
+    "q3",
+    "q3.p1",
+    "candidate_questions",
+  ]);
+  for (const answer of answers) {
+    expect(answer.has_text, `回答 ${answer.utterance_key} 没有文字`).toBe(true);
+  }
+  await context.close();
 });
