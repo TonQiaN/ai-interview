@@ -5,7 +5,7 @@ import { Route, Routes } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setFetch } from "../api/http";
 import { createMockServer } from "../api/mock/server";
-import type { InterviewSummary, Page } from "../api/types";
+import type { CandidateListItem, InterviewSummary, Page } from "../api/types";
 import { TestRouter } from "../test/router";
 import { InterviewNewPage } from "./InterviewNew";
 
@@ -161,6 +161,82 @@ describe("安排面试", () => {
       expect(screen.queryByRole("dialog", { name: "这一页的内容还没保存" })).toBeNull(),
     );
     expect(screen.getByRole("list", { name: "已选 2 位" }).textContent).toContain(names[0]);
+  });
+
+  describe("候选人的简历", () => {
+    /** 把列表里排在最前面的几位（pick() 选的就是他们）的简历改成要测的样子，返回他们的名字 */
+    async function resumesOf(states: ("done" | "running" | "failed" | "none")[]) {
+      const response = await server.fetch("/api/v1/candidates?page_size=50");
+      const { items } = (await response.json()) as Page<CandidateListItem>;
+      return states.map((state, index) => {
+        const candidate = items[index];
+        if (!candidate) throw new Error("演示数据里的候选人不够");
+        if (state === "none") {
+          server.db.resumes = server.db.resumes.filter((r) => r.candidate_id !== candidate.id);
+        } else {
+          const resume = server.db.resumes.find(
+            (r) => r.candidate_id === candidate.id && r.is_primary,
+          );
+          if (!resume) throw new Error("演示数据里这位候选人没有简历");
+          resume.parse_status = state;
+        }
+        return candidate.name;
+      });
+    }
+
+    it("简历解析好了：说会结合简历出题", async () => {
+      await resumesOf(["done"]);
+      open();
+      await pick(1);
+      expect(screen.getByText("面试官会结合这份简历和岗位要求出题。")).toBeTruthy();
+    });
+
+    it("没有简历：提醒只能按岗位要求出题", async () => {
+      await resumesOf(["none"]);
+      open();
+      await pick(1);
+      expect(
+        screen.getByText("这位候选人还没有解析好的简历，面试官只能按岗位要求出题。"),
+      ).toBeTruthy();
+      expect(screen.queryByText(/会结合这份简历/)).toBeNull();
+    });
+
+    it("简历没解析出来：也提醒只能按岗位要求出题", async () => {
+      await resumesOf(["failed"]);
+      open();
+      await pick(1);
+      expect(screen.getByText(/还没有解析好的简历，面试官只能按岗位要求出题/)).toBeTruthy();
+    });
+
+    it("简历还在解析：说明出题会等它解析完", async () => {
+      await resumesOf(["running"]);
+      open();
+      await pick(1);
+      expect(screen.getByText("这位候选人的简历还在解析，面试官会等它解析完再出题。")).toBeTruthy();
+    });
+
+    it("选了几位：说出谁没有简历、谁的简历还在解析", async () => {
+      const [, missing, reading] = await resumesOf(["done", "none", "running"]);
+      open();
+      await pick(3);
+      const banner = screen.getByText(/3 位候选人面试/).closest(".oil-banner");
+      expect(banner?.textContent).toContain(`${missing}还没有解析好的简历，只能按岗位要求出题。`);
+      expect(banner?.textContent).toContain(`${reading}的简历还在解析，会等解析完再出题。`);
+    });
+
+    it("第一步的候选人那一栏：有简历但没填职位的人不说成没有简历", async () => {
+      const [filled, missing] = await resumesOf(["done", "none"]);
+      for (const c of server.db.candidates)
+        if (c.name === filled) Object.assign(c, { current_title: null, current_company: null });
+      open();
+      await waitFor(() => expect(document.querySelectorAll(".adm-pick").length).toBeGreaterThan(1));
+      const rowOf = (name: string | undefined) =>
+        Array.from(document.querySelectorAll<HTMLElement>(".adm-split .oil-card .adm-pick")).find(
+          (row) => row.querySelector("strong")?.textContent === name,
+        );
+      expect(rowOf(filled)?.textContent).not.toContain("还没有简历");
+      expect(rowOf(missing)?.textContent).toContain("还没有简历");
+    });
   });
 
   it("只选了一位候选人和岗位、没动设置，点到别的页面直接走", async () => {
