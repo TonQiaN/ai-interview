@@ -29,7 +29,7 @@ import {
   Send,
   Trash2,
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { errorMessage, fieldErrors } from "../api/http";
 import {
@@ -1059,6 +1059,15 @@ function QuestionsTab({ interview }: { interview: Interview }) {
   useEffect(() => {
     if (interview.has_plan) void plan.refetch();
   }, [interview.has_plan, interview.status]);
+
+  // 每句话的合成状态只在准备中的时候定时取。准备结束的那一下要再取一次：
+  // 不然最后一次定时取可能赶在合成完之前，页面上那一行就一直停在「待合成」
+  const wasPreparing = useRef(preparing);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在准备结束的那一下取
+  useEffect(() => {
+    if (wasPreparing.current && !preparing) void utterances.refetch();
+    wasPreparing.current = preparing;
+  }, [preparing]);
 
   if (interview.has_plan && plan.error)
     return <LoadError error={plan.error} onRetry={() => plan.refetch()} />;

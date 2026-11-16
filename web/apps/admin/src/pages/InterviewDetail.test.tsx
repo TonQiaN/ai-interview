@@ -612,6 +612,35 @@ describe("面试详情", () => {
       expect(screen.getByRole("button", { name: "去掉这道备用题" })).toBeTruthy();
     });
 
+    it("改完一句，等它合成好，这一行显示合成好的语音，不停在「待合成」", async () => {
+      // 让演示数据的后端和真的差不多快：保存以后不到一秒就合成好、回到待发送
+      server = createMockServer({ latencyMs: 0, jobMs: 300 });
+      await call("POST", "/auth/login", { email: "hr@example.com", password: "demo" });
+      setFetch((request) => server.fetch(request));
+      const { target, plan } = readyWithPlan();
+      await openQuestions(target.id);
+
+      const opening = screen.getByText(plan.phrases.opening).closest(".adm-utter") as HTMLElement;
+      fireEvent.click(within(opening).getByRole("button", { name: "改" }));
+      const dialog = await screen.findByRole("dialog", { name: "改开场白" });
+      fireEvent.change(within(dialog).getByLabelText("面试官会这样说"), {
+        target: { value: "你好，我们开始吧。" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "保存并重新合成" }));
+
+      await waitFor(
+        () => {
+          const line = screen
+            .getAllByText("你好，我们开始吧。")
+            .map((el) => el.closest(".adm-utter"))
+            .find((el) => el !== null) as HTMLElement;
+          expect(server.db.interviews.find((i) => i.id === target.id)?.status).toBe("ready");
+          expect(within(line).getByText(/^语音 \d+ 秒$/)).toBeTruthy();
+        },
+        { timeout: 4000 },
+      );
+    });
+
     it("链接发出以后题目不能改，也没有「去掉」", async () => {
       const target = server.db.interviews.find((i) => i.status === "invited" && i.has_plan);
       if (!target) throw new Error("演示数据里没有已发链接的面试");
