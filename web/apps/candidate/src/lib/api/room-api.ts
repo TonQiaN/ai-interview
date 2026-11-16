@@ -338,12 +338,16 @@ export class HttpRoomApi implements RoomApi {
 
     const { response } = outcome;
     // 成功和失败的响应都可能带着这个提醒：被接走的页面多半是在传录像时知道的
-    if (response.headers.get(ACTIVE_ELSEWHERE_HEADER) === "1") this.onActiveElsewhere?.();
+    const reminded = response.headers.get(ACTIVE_ELSEWHERE_HEADER) === "1";
+    if (reminded) this.onActiveElsewhere?.();
     if (response.ok) return outcome.data;
 
     // 不是约定的错误结构（例如反向代理返回的错误页）时，ApiError 会给一句通用的提示
     const failure = new ApiError(outcome.error, response.status);
     const code = failure.code === "unknown" ? null : failure.code;
+    // 提醒用的响应头可能到不了页面（中间的代理会去掉不认识的头）。服务端因为这件事拒绝请求时，
+    // 原因里写着同一件事，照样报一声：不然往下走的请求被拒，会被当成链接失效
+    if (!reminded && code === ACTIVE_ELSEWHERE) this.onActiveElsewhere?.();
     throw new RoomApiError(
       classifyHttpError(response.status, code),
       failure.message,
