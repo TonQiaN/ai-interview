@@ -56,6 +56,8 @@
        *
        * 放在页面脚本的前面，这样脚本一开始加载就已经在听它出没出错。
        * 要在很旧的浏览器上也能跑，所以只用老写法，不放进打包的脚本里。
+       * body 末尾带 nomodule 的那一段，只有连 module 脚本都不认识的浏览器才会跑。
+       * body 里的脚本和注释不写中文：英文面试的测试会查 body 里还有没有中文。
        */
       (() => {
         // 和页面里一样：浏览器的语言偏好里只要有中文就用中文
@@ -137,7 +139,6 @@
       if (window.__boot) window.__boot.placed();
     </script>
     <script type="module" src="/src/main.tsx"></script>
-    <!-- 连 module 脚本都不认识的浏览器只会跑这一段 -->
     <script nomodule>
       if (window.__boot) window.__boot.failed();
     </script>
