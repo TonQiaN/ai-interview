@@ -494,6 +494,22 @@
     gap: var(--oil-space-2);
     margin-top: var(--oil-space-2);
   }
+  /* 某一页画不出来时，说明底下收着的那句原话 */
+  .adm-page-error__reason {
+    max-width: 60ch;
+    margin: 0 auto;
+    color: var(--oil-ink-3);
+    font-size: var(--oil-text-sm);
+    text-align: center;
+  }
+  .adm-page-error__reason summary {
+    cursor: pointer;
+  }
+  .adm-page-error__reason code {
+    display: block;
+    margin-top: var(--oil-space-2);
+    overflow-wrap: anywhere;
+  }
   .adm-utter__more {
     margin-top: var(--oil-space-2);
     color: var(--oil-ink-2);
