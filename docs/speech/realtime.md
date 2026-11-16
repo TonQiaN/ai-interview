@@ -117,7 +117,7 @@ BargeInDetector::push ──► Detected ─────────► 发 inte
 5. **下行音频的采样率看合成引擎**：IndexTTS 是 22050 Hz，BreezeTTS2 是 24000 Hz。`speak_begin` 里的 `content_type` 要按实际的填（`audio/pcm;rate=22050` 或 `rate=24000`），接口文档里的例子写的是 24000，不要写死。每块音频自己带着采样率（`Audio::sample_rate()`）。
 6. **打断以后引擎要知道面试官那句话实际播到了哪里。** 语音线给出发现打断的时刻（`BargeInDetector::detected_at_ms()`）和候选人已经说的字；浏览器在 `playback` 消息里报播到了哪里。把这些填进 `TurnContext::interrupted`（哪一句、播了多少毫秒、全长多少毫秒），同一轮里每次调 `respond_with` 都要带上。
 7. **回声。** 浏览器取麦克风时要打开回声消除（`getUserMedia` 的 `echoCancellation: true`），建议候选人戴耳机。`BargeInDetector::interviewer_says` 告诉它面试官正在说什么，漏进麦克风的同样的字不算打断，这是第二道保险，不是替代。
-8. **一台 Mac 同时只能合成一句。** 模型一次跑一条，两场实时面试同时进行时现场合成会排队。实时模式先按一台 Mac 一场来用。
+8. **一台 Mac 同时只能合成一句。** 模型一次跑一条，几场实时面试同时进行时现场合成要排队。实测一台 Mac 同时带 4 场，现场的话互相几乎不用等；这时要是后台正在给另一场面试备题，现场的话多等 2 到 5 秒（worker 让现场的话排在备题前面，但不打断正在合成的那一道）。数字见 `tts/worker/README.md` 的「几场面试同时用一个 worker」。
 
 ## 第一版先怎么做
 
