@@ -7,7 +7,6 @@ import {
   Dropzone,
   Field,
   Input,
-  PageHeader,
   Table,
   Textarea,
   useToast,
@@ -32,6 +31,7 @@ import type {
   RaasCandidate,
 } from "../api/types";
 import { Empty, Pager, Person, QueryView, SearchInput } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { RaasImportDialog } from "../components/RaasImportDialog";
 import { relativeTime } from "../lib/format";
 

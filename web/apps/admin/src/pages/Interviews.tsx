@@ -1,4 +1,4 @@
-import { Button, PageHeader, Select, Table } from "@ai-interview/ui";
+import { Button, Select, Table } from "@ai-interview/ui";
 import { Plus } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useInterviews } from "../api/queries";
@@ -12,6 +12,7 @@ import {
   SearchInput,
   StatusBadge,
 } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { ReportVerdict } from "../components/ReportVerdict";
 import { duration, elapsedMs, relativeTime, statusLabel } from "../lib/format";
 

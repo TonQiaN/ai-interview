@@ -8,7 +8,6 @@ import {
   CardHeader,
   Dialog,
   KeyValue,
-  PageHeader,
   useToast,
 } from "@ai-interview/ui";
 import { Archive, ArchiveRestore, Download, Pencil, Plus, Scale } from "lucide-react";
@@ -24,6 +23,7 @@ import {
 } from "../api/queries";
 import type { Position, PositionExtra } from "../api/types";
 import { Confirm, Person, QueryView } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { RaasApplicantsDialog } from "../components/RaasApplicantsDialog";
 import { hasVerdict, InterviewTags } from "../components/ReportVerdict";
 import { fullTime, positionStatusLabel, positionStatusTone, relativeTime } from "../lib/format";

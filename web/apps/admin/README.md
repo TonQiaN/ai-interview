@@ -15,6 +15,8 @@ pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin
 
 后台默认请求真实后端。所有请求都走 `@ai-interview/api-client` 的客户端（`src/api/http.ts` 里的 `api`），路径、参数和返回的类型由后端的 OpenAPI 文档生成，后端改了接口这里编译就会报错。
 
+页面顶上的标题用 `src/components/PageHeader.tsx` 里的 `PageHeader`（不是设计系统里的那个），它顺带把浏览器标签页的标题换成这一页的名字。没有标题栏的页面放一个 `<PageTitle title="…" />`。
+
 登录用到一半失效了（会话过期、密码改过），请求会返回 401「请先登录」。这时不回登录页，`src/api/session.ts` 记下来，`ReLoginDialog` 在当前页面上让人再输一次密码，页面上填了一半的内容不丢。本来就没登录的照常去登录页。
 
 ## 演示数据
