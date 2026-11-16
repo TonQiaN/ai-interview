@@ -432,7 +432,6 @@ function EditConfigDialog({
         <VoicePicker
           value={voiceId}
           onChange={setVoiceId}
-          allowDefault={!interview.voice_id}
           disabled={save.isPending}
           error={fieldErrors(save.error).voice_id}
         />

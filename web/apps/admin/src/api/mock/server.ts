@@ -30,6 +30,7 @@ import type {
   PositionDraft,
   PositionInput,
   PreviewRequest,
+  RaasCandidate,
   RaasCandidateImportItem,
   RaasPositionImportItem,
   ReportEnvelope,
@@ -711,15 +712,49 @@ export function createMockServer(options: MockOptions = {}) {
     });
     return { items };
   });
+  on("GET", "/raas/positions/:ref", ({ params }) => {
+    raasReady();
+    const r = raasPositions.find((x) => x.external_ref === params[0]);
+    if (!r) throw notFound("RAAS 里的岗位");
+    return {
+      external_ref: r.external_ref,
+      job_requisition_ref: r.job_requisition_ref ?? null,
+      imported_position_id: importedPosition(r.external_ref)?.id ?? null,
+      status: r.status,
+      draft: { title: r.title ?? "没有名称" },
+    };
+  });
   on("GET", "/raas/candidates", ({ query }) => {
     raasReady();
+    const imported = (c: RaasCandidate) => ({
+      ...c,
+      imported_candidate_id: importedCandidate(c.external_ref)?.id ?? null,
+    });
+    // 给了需求编号就只列投了那个岗位的人，带着投递走到哪一步和匹配分
+    const requisition = query.get("job_requisition_ref");
+    if (requisition) {
+      const title = raasPositions.find((p) => p.job_requisition_ref === requisition)?.title;
+      const steps = [
+        ["client_screening", "screening_passed"],
+        ["job_matching", "pending"],
+        ["client_interview", "interview_scheduled"],
+      ] as const;
+      return paginate(
+        raasCandidates
+          .filter((c) => title && c.latest_application_job_title === title)
+          .map((c, index) => ({
+            ...imported(c),
+            application_stage: steps[index % steps.length]?.[0] ?? null,
+            application_status: steps[index % steps.length]?.[1] ?? null,
+            matching_score: 86 - index * 7,
+          })),
+        query,
+      );
+    }
     return paginate(
       raasCandidates
         .filter((c) => matches(query.get("q"), c.name, c.current_title, c.current_company))
-        .map((c) => ({
-          ...c,
-          imported_candidate_id: importedCandidate(c.external_ref)?.id ?? null,
-        })),
+        .map(imported),
       query,
     );
   });
@@ -1151,7 +1186,8 @@ export function createMockServer(options: MockOptions = {}) {
     const issues = configIssues(config);
     if (issues) throw new HttpError(422, "validation_failed", "面试设置不合要求", issues);
     const resumeId = patch.resume_id ?? i.resume_id ?? null;
-    const voiceId = patch.voice_id ?? i.voice_id ?? null;
+    // 没带 voice_id 是不改，带 null 是改回默认音色
+    const voiceId = "voice_id" in patch ? (patch.voice_id ?? null) : (i.voice_id ?? null);
     // 题目已经出好时，看这次改动让不让它作废（规则和后端一样，见 lib/replan.ts）
     const reasons = i.has_plan
       ? [
