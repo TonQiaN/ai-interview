@@ -168,7 +168,7 @@
 | `device_check`、`device_report` | 设备检测卡在哪一步、失败的原因、测出来的上行网速 |
 | `screen_wake_lock` | `supported`、`held`：屏幕常亮申请到了没有 |
 | `recording_gap`、`device_recovered` | `device` 是 `camera`、`microphone` 还是 `audio_output`（声音被系统停掉），`cause` 是原因，`duration_ms` 是停了多久 |
-| `recording_error` | 录制器报的错误名 |
+| `recording_error` | 录制器报的错误名；带 `kept_in_memory: true` 的是本机存不下录像、分片改放内存接着传（录像应该还是完整的） |
 | `upload_stalled`、`upload_recovered`、`upload_finished` | 录像传不动的原因、攒了多少片、结束后等了多久才传完 |
 | `visibility_hidden`、`visibility_visible` | 切后台、锁屏的时间点 |
 

@@ -552,6 +552,8 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
   const [deleting, setDeleting] = useState(false);
   const [purging, setPurging] = useState(false);
   const isAdmin = useMe().data?.role === "admin";
+  // 归档的候选人后端不让改、不让上传简历、不让再安排面试，这些按钮就不给了
+  const archived = Boolean(candidate.archived_at);
 
   const primary = candidate.primary_resume;
   const reading = primary?.parse_status === "pending" || primary?.parse_status === "running";
@@ -578,26 +580,28 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
             .join(" · ") || undefined
         }
         actions={
-          <>
-            <Button
-              variant="secondary"
-              icon={<Pencil aria-hidden="true" />}
-              onClick={() => setEditing(true)}
-            >
-              改信息
-            </Button>
-            <Button
-              icon={<Plus aria-hidden="true" />}
-              onClick={() => navigate(`/interviews/new?candidate=${candidate.id}`)}
-            >
-              安排面试
-            </Button>
-          </>
+          !archived && (
+            <>
+              <Button
+                variant="secondary"
+                icon={<Pencil aria-hidden="true" />}
+                onClick={() => setEditing(true)}
+              >
+                改信息
+              </Button>
+              <Button
+                icon={<Plus aria-hidden="true" />}
+                onClick={() => navigate(`/interviews/new?candidate=${candidate.id}`)}
+              >
+                安排面试
+              </Button>
+            </>
+          )
         }
       />
-      {candidate.archived_at && (
+      {archived && (
         <Banner tone="info" title="这位候选人已经归档" className="adm-gap-below">
-          归档的候选人不在列表里显示，资料和简历还留在服务器上。在候选人列表勾上「带上已归档的」能找到。
+          归档的候选人不在列表里显示，不能再修改、上传简历或安排面试。资料和简历还留在服务器上，在候选人列表勾上「带上已归档的」能找到。
         </Banner>
       )}
       {candidate.possible_duplicates.length > 0 && (
@@ -614,6 +618,7 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
             <CardHeader
               title="画像"
               actions={
+                !archived &&
                 hasProfile &&
                 primary?.parse_status === "done" && (
                   <Button
@@ -667,17 +672,19 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
                       ? "还没有画像。可以让大模型按简历归纳一份，面试官出题时会用到。"
                       : "还没有画像。上传一份简历，大模型会读出经历、技能和值得核实的地方，面试官出题时也会用到。"}
                   </p>
-                  <div>
-                    {primary ? (
-                      <Button variant="secondary" onClick={regenerateProfile}>
-                        生成画像
-                      </Button>
-                    ) : (
-                      <Button variant="secondary" onClick={() => setUploading(true)}>
-                        上传简历
-                      </Button>
-                    )}
-                  </div>
+                  {!archived && (
+                    <div>
+                      {primary ? (
+                        <Button variant="secondary" onClick={regenerateProfile}>
+                          生成画像
+                        </Button>
+                      ) : (
+                        <Button variant="secondary" onClick={() => setUploading(true)}>
+                          上传简历
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </CardBody>
@@ -741,9 +748,11 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
             <CardHeader
               title="简历"
               actions={
-                <Button size="sm" variant="secondary" onClick={() => setUploading(true)}>
-                  上传
-                </Button>
+                !archived && (
+                  <Button size="sm" variant="secondary" onClick={() => setUploading(true)}>
+                    上传
+                  </Button>
+                )
               }
             />
             <CardBody>
@@ -795,7 +804,7 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
           </Card>
 
           <div className="oil-row">
-            {!candidate.archived_at && (
+            {!archived && (
               <Button
                 variant="ghost"
                 size="sm"
