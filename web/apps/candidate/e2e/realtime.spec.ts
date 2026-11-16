@@ -128,14 +128,10 @@ test("实时对话：面试官在每道题上现场追问一句，候选人答�
     "q3.p1",
     "candidate_questions",
   ]);
-  // 回答主问题的那几段从录像里转写出了文字。回答追问的那几段这里不查：假的识别后端一次只有一句话
-  // 的字可分，录像里面试官自己的声音也算声音，追问说得久，字在候选人开口之前就分完了（#401）。
-  // 真的识别后端没有这个限制
-  for (const key of ["q1", "q2", "q3"]) {
-    expect(
-      answers.find((turn) => turn.utterance_key === key)?.has_text,
-      `回答 ${key} 没有文字`,
-    ).toBe(true);
+  // 每一段都从录像里转写出了文字，回答现场追问的那几段也一样：录像里面试官自己的声音也算声音，
+  // 假的识别后端的字分完以后会从头再分（#401），不然追问说得久，轮到候选人时就没字了
+  for (const answer of answers) {
+    expect(answer.has_text, `回答 ${answer.utterance_key} 没有文字`).toBe(true);
   }
 
   // 停顿时先问了服务端，服务端说「说完了」，不用等满静音时长
@@ -245,5 +241,9 @@ test("实时对话里网络断了几秒、接口出了几次错：面试官晚�
     "q3.p1",
     "candidate_questions",
   ]);
+  // 断网时说的那一段也在录像里，网络恢复后传上去，照样转写出了文字
+  for (const answer of answers) {
+    expect(answer.has_text, `回答 ${answer.utterance_key} 没有文字`).toBe(true);
+  }
   expect(eventKinds(state)).toEqual(expect.arrayContaining(["network_offline", "network_online"]));
 });
