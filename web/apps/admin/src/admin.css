@@ -218,6 +218,12 @@
     -webkit-line-clamp: 2;
     overflow: hidden;
   }
+  .adm-arrange__options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--oil-space-1) var(--oil-space-3);
+  }
   .adm-arrange__moves {
     flex: none;
     display: flex;

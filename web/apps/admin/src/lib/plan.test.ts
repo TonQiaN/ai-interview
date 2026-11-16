@@ -5,10 +5,12 @@ import {
   addQuestion,
   answerTimeChoices,
   canMoveQuestion,
+  canSetReserve,
   moveQuestion,
   nextQuestionKey,
   type QuestionDraft,
   setRequired,
+  setReserve,
 } from "./plan";
 
 function plan(): InterviewPlan {
@@ -189,5 +191,53 @@ describe("改一道题时间紧的时候问不问", () => {
     const count = plan().questions.length;
     const source = numbered(plan(), count - 1);
     expect(setRequired(source, `q${count}`, true).questions.at(-1)?.required).toBe(false);
+  });
+});
+
+describe("主问题和备用题互换", () => {
+  it("主问题改成备用题：排到备用题的最前面，不再是必问", () => {
+    const count = plan().questions.length;
+    // 最后一道是备用题，前面都是主问题
+    const source = setRequired(numbered(plan(), count - 1), "q1", true);
+    const moved = setReserve(source, "q1", true);
+    expect(moved.questions.map((q) => q.key)).toEqual([
+      ...source.questions.slice(1, count - 1).map((q) => q.key),
+      "q1",
+      `q${count}`,
+    ]);
+    const q1 = moved.questions.find((q) => q.key === "q1");
+    expect(q1?.reserve).toBe(true);
+    expect(q1?.required).toBe(false);
+    // 别的题和这道题要说的话都没动
+    expect(q1?.text).toBe(source.questions[0]?.text);
+    expect(source.questions[0]?.reserve).toBe(false);
+  });
+
+  it("备用题改成主问题：排到主问题的最后，先不标必问", () => {
+    const count = plan().questions.length;
+    // 最后两道是备用题
+    const source = numbered(plan(), count - 2);
+    const moved = setReserve(source, `q${count}`, false);
+    expect(moved.questions.map((q) => q.key)).toEqual([
+      ...source.questions.slice(0, count - 2).map((q) => q.key),
+      `q${count}`,
+      `q${count - 1}`,
+    ]);
+    const promoted = moved.questions.find((q) => q.key === `q${count}`);
+    expect(promoted?.reserve).toBe(false);
+    expect(promoted?.required).toBe(false);
+    // 备用题还是都排在主问题后面
+    const firstReserve = moved.questions.findIndex((q) => q.reserve);
+    expect(moved.questions.slice(firstReserve).every((q) => q.reserve)).toBe(true);
+  });
+
+  it("主问题只剩一道时不能再改成备用题；已经在那一边的不动", () => {
+    const source = numbered(plan(), 1);
+    expect(canSetReserve(source, "q1", true)).toBe(false);
+    expect(setReserve(source, "q1", true)).toBe(source);
+    expect(canSetReserve(source, "q2", true)).toBe(false);
+    expect(setReserve(source, "q2", true)).toBe(source);
+    expect(canSetReserve(source, "q2", false)).toBe(true);
+    expect(canSetReserve(source, "没有这道题", false)).toBe(false);
   });
 });

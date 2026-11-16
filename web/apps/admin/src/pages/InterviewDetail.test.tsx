@@ -775,6 +775,70 @@ describe("面试详情", () => {
       );
     });
 
+    it("主问题和备用题互换：换完焦点跟着这道题走，存下来备用题还排在主问题后面", async () => {
+      const { target, plan } = readyWithPlan();
+      const count = plan.questions.length;
+      if (count < 3) throw new Error("演示数据里的题不够三道");
+      // 演示数据里没有备用题：把最后一道改成备用的
+      const last = plan.questions[count - 1];
+      const first = plan.questions[0];
+      if (!last || !first) throw new Error("演示数据里没有题");
+      last.reserve = true;
+      last.required = false;
+      const texts = new Map(plan.questions.map((q) => [q.key, q.text]));
+      await openQuestions(target.id);
+
+      fireEvent.click(screen.getByRole("button", { name: "调先后和必问" }));
+      const inDialog = within(await screen.findByRole("dialog", { name: "调先后和必问" }));
+      const button = (name: string) => inDialog.getByRole("button", { name }) as HTMLButtonElement;
+      const rows = (name: string) =>
+        within(inDialog.getByRole("list", { name })).getAllByRole("listitem");
+      expect(rows("主问题")).toHaveLength(count - 1);
+      expect(rows("备用题")).toHaveLength(1);
+
+      // 备用题改成主问题：排到主问题最后，焦点落在能把它换回去的按钮上
+      fireEvent.click(button("第 1 道备用题改成主问题"));
+      await waitFor(() => expect(document.activeElement).toBe(button(`第 ${count} 题改成备用题`)));
+      expect(inDialog.getByText(`改成了主问题，排在第 ${count} 题`)).toBeTruthy();
+      expect(inDialog.queryByRole("list", { name: "备用题" })).toBeNull();
+      const check = inDialog.getByRole("checkbox", {
+        name: `第 ${count} 题时间紧也要问`,
+      }) as HTMLInputElement;
+      expect(check.checked).toBe(false);
+
+      // 第 1 题改成备用题
+      fireEvent.click(button("第 1 题改成备用题"));
+      await waitFor(() => expect(document.activeElement).toBe(button("第 1 道备用题改成主问题")));
+      expect(inDialog.getByText("改成了备用题")).toBeTruthy();
+      expect(rows("备用题")).toHaveLength(1);
+
+      fireEvent.click(inDialog.getByRole("button", { name: "保存" }));
+      await waitFor(() =>
+        expect(server.db.plans.get(target.id)?.questions.at(-1)?.key).toBe(first.key),
+      );
+      const saved = server.db.plans.get(target.id)?.questions ?? [];
+      expect(saved).toHaveLength(count);
+      expect(saved.at(-1)?.reserve).toBe(true);
+      expect(saved.at(-1)?.required).toBe(false);
+      expect(saved.at(-2)?.key).toBe(last.key);
+      expect(saved.slice(0, -1).every((q) => !q.reserve)).toBe(true);
+      for (const q of saved) expect(q.text).toBe(texts.get(q.key));
+    });
+
+    it("主问题只剩一道时不能再改成备用题", async () => {
+      const { target, plan } = readyWithPlan();
+      plan.questions.forEach((q, index) => {
+        if (index === 0) return;
+        q.reserve = true;
+        q.required = false;
+      });
+      await openQuestions(target.id);
+      fireEvent.click(screen.getByRole("button", { name: "调先后和必问" }));
+      const inDialog = within(await screen.findByRole("dialog", { name: "调先后和必问" }));
+      const only = inDialog.getByRole("button", { name: "第 1 题改成备用题" }) as HTMLButtonElement;
+      expect(only.disabled).toBe(true);
+    });
+
     it("调到一半取消：什么都不存", async () => {
       const { target, plan } = readyWithPlan();
       const before = plan.questions.map((q) => q.key);

@@ -1,4 +1,4 @@
-// 题目出好以后 HR 自己调：加一道题、调先后、改哪些题时间紧也要问。都不调模型，
+// 题目出好以后 HR 自己调：加一道题、调先后、改哪些题时间紧也要问、主问题和备用题互换。都不调模型，
 // 改完整份计划存回去，后端只给文字变了的和新增的句子合成语音。
 import type { InterviewPlan, PlannedQuestion, QuestionCategory } from "../api/types";
 
@@ -104,6 +104,32 @@ export function setRequired(plan: InterviewPlan, key: string, required: boolean)
   return {
     ...plan,
     questions: plan.questions.map((q) => (q.key === key && !q.reserve ? { ...q, required } : q)),
+  };
+}
+
+/** 这道题能不能换到另一边：主问题只剩一道时不能再改成备用题（后端要求至少一道主问题） */
+export function canSetReserve(plan: InterviewPlan, key: string, reserve: boolean): boolean {
+  const question = plan.questions.find((q) => q.key === key);
+  if (!question || question.reserve === reserve) return false;
+  return !reserve || plan.questions.filter((q) => !q.reserve).length > 1;
+}
+
+/**
+ * 把一道主问题改成备用题（时间有富余才问），或者把一道备用题改成主问题。换不了时原样返回。
+ * 备用题要排在所有主问题后面（后端会检查）：改成备用的排到备用题的最前面，改成主问题的排到主问题的最后。
+ * 备用题不能是必问的，改成备用时一起去掉；改成主问题以后要不要「时间紧也要问」由 HR 再定。
+ * 面试官要说的话没有变，后端不会重新合成语音。
+ */
+export function setReserve(plan: InterviewPlan, key: string, reserve: boolean): InterviewPlan {
+  if (!canSetReserve(plan, key, reserve)) return plan;
+  const moving = plan.questions.find((q) => q.key === key);
+  if (!moving) return plan;
+  const rest = plan.questions.filter((q) => q.key !== key);
+  const firstReserve = rest.findIndex((q) => q.reserve);
+  const at = firstReserve === -1 ? rest.length : firstReserve;
+  return {
+    ...plan,
+    questions: [...rest.slice(0, at), { ...moving, reserve, required: false }, ...rest.slice(at)],
   };
 }
 
