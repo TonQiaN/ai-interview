@@ -367,6 +367,99 @@ describe("岗位详情", () => {
     });
   });
 
+  describe("一起重试、一起准备", () => {
+    /** 这个岗位下原来的草稿和准备失败的先挪开，数得清楚 */
+    function clearUnprepared(positionId: string) {
+      for (const i of server.db.interviews)
+        if (i.position.id === positionId && (i.status === "draft" || i.status === "prepare_failed"))
+          i.status = "cancelled";
+    }
+    /** 给这个岗位安排几场停在某个状态的面试，一位候选人一场 */
+    async function stuck(positionId: string, count: number, status: "draft" | "prepare_failed") {
+      const made = [];
+      for (const candidate of server.db.candidates.filter((c) => !c.archived_at).slice(0, count)) {
+        const response = await server.fetch("/api/v1/interviews", {
+          method: "POST",
+          body: JSON.stringify({ candidate_id: candidate.id, position_id: positionId }),
+        });
+        const { id } = (await response.json()) as { id: string };
+        const interview = server.db.interviews.find((i) => i.id === id);
+        if (!interview) throw new Error("没建成");
+        interview.status = status;
+        made.push({ interview, candidate });
+      }
+      if (made.length < count) throw new Error("演示数据里的候选人不够");
+      return made;
+    }
+
+    it("没有草稿也没有准备失败的：不提示", async () => {
+      const position = firstPosition();
+      clearUnprepared(position.id);
+      open(position.id);
+
+      await screen.findByText("这个岗位的面试");
+      await waitFor(() => expect(screen.queryByText("加载中")).toBeNull());
+      expect(screen.queryByText(/没准备好/)).toBeNull();
+      expect(screen.queryByText(/还是草稿/)).toBeNull();
+    });
+
+    it("准备失败的一起重试：每一场都重新开始准备，提示跟着消失", async () => {
+      const position = firstPosition();
+      clearUnprepared(position.id);
+      const made = await stuck(position.id, 3, "prepare_failed");
+      open(position.id);
+
+      expect(await screen.findByText(/^3 场的题目或语音没准备好。/)).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "一起重试" }));
+
+      expect(await screen.findByText("3 场开始准备题目和语音")).toBeTruthy();
+      for (const { interview } of made) expect(interview.status).toBe("preparing");
+      await waitFor(() => expect(screen.queryByText(/题目或语音没准备好/)).toBeNull());
+    });
+
+    it("草稿一起准备：先问一句，确认了才开始", async () => {
+      const position = firstPosition();
+      clearUnprepared(position.id);
+      const made = await stuck(position.id, 2, "draft");
+      open(position.id);
+
+      expect(await screen.findByText("2 场还是草稿，题目和语音还没准备。")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "一起准备" }));
+      const dialog = within(
+        await screen.findByRole("dialog", { name: "给 2 场草稿准备题目和语音？" }),
+      );
+      // 还没确认，什么都没动
+      for (const { interview } of made) expect(interview.status).toBe("draft");
+      fireEvent.click(dialog.getByRole("button", { name: "开始准备" }));
+
+      expect(await screen.findByText("2 场开始准备题目和语音")).toBeTruthy();
+      for (const { interview } of made) expect(interview.status).toBe("preparing");
+      await waitFor(() => expect(screen.queryByText(/还是草稿/)).toBeNull());
+    });
+
+    it("中间有一场没成：别的照常开始，没成的写明是谁、为什么", async () => {
+      const position = firstPosition();
+      clearUnprepared(position.id);
+      const made = await stuck(position.id, 3, "prepare_failed");
+      open(position.id);
+
+      await screen.findByText(/^3 场的题目或语音没准备好。/);
+      // 打开页面以后，有一场在别处开始面试了
+      const [, gone] = made;
+      if (!gone) throw new Error("没有第二位");
+      gone.interview.status = "in_progress";
+      fireEvent.click(screen.getByRole("button", { name: "一起重试" }));
+
+      const problem = (await screen.findByText("1 场没能开始准备")).closest(".oil-banner");
+      expect(problem?.textContent).toContain(gone.candidate.name);
+      expect(await screen.findByText("2 场开始准备题目和语音")).toBeTruthy();
+      expect(made.filter((m) => m.interview.status === "preparing")).toHaveLength(2);
+
+      fireEvent.click(within(problem as HTMLElement).getByRole("button", { name: "知道了" }));
+      expect(screen.queryByText("1 场没能开始准备")).toBeNull();
+    });
+  });
+
   it("改岗位什么都没改，按 Esc 就关", async () => {
     const position = firstPosition();
     open(position.id);

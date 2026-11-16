@@ -2,6 +2,7 @@
 
 import type { paths } from "@ai-interview/api-client";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { scheduleAll } from "../lib/schedule";
 import { ApiError, api, errorMessage, unwrap, unwrapBlob } from "./http";
 import { clearSessionEnded, markSessionEnded } from "./session";
 import type {
@@ -863,6 +864,28 @@ export function useIssueInvite() {
         }),
       );
       return { interview, candidate, created };
+    },
+  });
+}
+/**
+ * 让几场面试一起开始准备（草稿，或者准备失败要重试的）。出好的题目不重出，只补没合成好的语音。
+ * 一场一场发，有没成的不影响后面的，结果里分开给出；全部发完再刷新列表和详情。
+ */
+export function usePrepareMany() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (interviews: InterviewSummary[]) =>
+      scheduleAll(interviews, (i) =>
+        unwrap(
+          api.POST("/api/v1/interviews/{id}/prepare", {
+            ...at(i.id),
+            body: { regenerate_plan: false },
+          }),
+        ),
+      ),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["interviews"] });
+      qc.invalidateQueries({ queryKey: ["interview"] });
     },
   });
 }
