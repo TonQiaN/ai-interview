@@ -25,6 +25,7 @@ import type { Position, PositionExtra } from "../api/types";
 import { BatchInvitesDialog } from "../components/BatchInvitesDialog";
 import { Confirm, Pager, Person, QueryView } from "../components/common";
 import { PageHeader } from "../components/PageHeader";
+import { PrepareAll } from "../components/PrepareAll";
 import { RaasApplicantsDialog } from "../components/RaasApplicantsDialog";
 import { hasVerdict, InterviewTags } from "../components/ReportVerdict";
 import { sameForm } from "../lib/form";
@@ -317,6 +318,7 @@ function Detail({ position }: { position: Position }) {
               }
             />
             <CardBody>
+              {!archived && <PrepareAll positionId={position.id} />}
               {readyTotal > 0 && !archived && (
                 <Banner
                   tone="info"

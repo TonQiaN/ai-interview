@@ -28,7 +28,7 @@ import {
   turnNote,
 } from "../lib/format";
 import { isFrameEvent, type TimelineEvent } from "../lib/frames";
-import { recordingName, recordingNotes } from "../lib/recordings";
+import { recordingName, recordingNotes, reducedVideoNote } from "../lib/recordings";
 import { FrameThumbs } from "./FrameThumbs";
 
 const rates = [0.75, 1, 1.25, 1.5, 2];
@@ -102,6 +102,11 @@ export function ReplayPlayer({
   const notes = useMemo(
     () => recordingNotes(recordings).filter((x) => x.tone === "warning" || segments.length > 0),
     [recordings, segments],
+  );
+  // 只有录音的时候没有画面，不用说画面糊
+  const reduced = useMemo(
+    () => (videos.length > 0 ? reducedVideoNote(rawEvents) : null),
+    [rawEvents, videos],
   );
   const problems = notes.filter((x) => x.tone === "warning");
   const waiting = notes.filter((x) => x.tone === "info");
@@ -310,6 +315,7 @@ export function ReplayPlayer({
             {x.text}
           </Banner>
         ))}
+        {reduced && <Banner className="adm-section">{reduced}</Banner>}
 
         {(events.length > 0 || recordings.length > 0) && (
           <Card className="adm-section" flat>

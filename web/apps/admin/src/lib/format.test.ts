@@ -334,4 +334,16 @@ describe("面试换到另一个页面继续", () => {
     expect(text("interview_started", { resumed: false })).toBe("面试开始");
     expect(text("interview_started", {})).toBe("面试开始");
   });
+
+  it("上行网速慢、画面降了清晰度的那一段，在开始那一条上说明", () => {
+    expect(text("interview_started", { video_kbps: 300, video_reduced: true })).toBe(
+      "面试开始（上行网速慢，这一段的画面降到约 300 kbps，比平时糊）",
+    );
+    expect(text("interview_started", { resumed: true, video_reduced: true })).toBe(
+      "回来接着面试（上行网速慢，这一段的画面降了清晰度，比平时糊）",
+    );
+    // 没降的不提码率，没有摄像头的（码率是 0）也不提
+    expect(text("interview_started", { video_kbps: 900, video_reduced: false })).toBe("面试开始");
+    expect(text("interview_started", { video_kbps: 0, video_reduced: false })).toBe("面试开始");
+  });
 });

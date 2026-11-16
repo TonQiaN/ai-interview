@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createMockServer } from "../api/mock/server";
 import type { Recording } from "../api/types";
-import { recordingNotes } from "./recordings";
+import { recordingNotes, reducedVideoNote } from "./recordings";
 
 let n = 0;
 function recording(patch: Partial<Recording>): Recording {
@@ -84,5 +84,36 @@ describe("录制情况的说明", () => {
     expect(notes).toHaveLength(1);
     expect(notes[0]?.tone).toBe("info");
     expect(notes[0]?.text).toMatch(/^录像、录音还在上传和整理/);
+  });
+});
+
+describe("画面降过清晰度的说明", () => {
+  const started = (at_ms: number | null, payload: Record<string, unknown>) => ({
+    kind: "interview_started",
+    at_ms,
+    payload,
+  });
+
+  it("没降过就不说", () => {
+    expect(reducedVideoNote([])).toBeNull();
+    expect(reducedVideoNote([started(0, { video_kbps: 900, video_reduced: false })])).toBeNull();
+    expect(reducedVideoNote([{ kind: "tab_hidden", at_ms: 5000, payload: {} }])).toBeNull();
+  });
+
+  it("整场都降了，说这场面试", () => {
+    expect(reducedVideoNote([started(0, { video_kbps: 300, video_reduced: true })])).toBe(
+      "候选人的上行网速慢，面试页把这场面试录像的画面降了清晰度（声音没有降）。画面比平时糊，不是候选人的摄像头有问题。",
+    );
+  });
+
+  it("只有接着面的那一段降了，说从什么时候开始", () => {
+    expect(
+      reducedVideoNote([
+        started(0, { video_kbps: 900, video_reduced: false }),
+        started(185_000, { resumed: true, video_kbps: 300, video_reduced: true }),
+      ]),
+    ).toBe(
+      "候选人的上行网速慢，面试页把从 03:05 开始的那一段录像的画面降了清晰度（声音没有降）。画面比平时糊，不是候选人的摄像头有问题。",
+    );
   });
 });
