@@ -163,6 +163,122 @@ async fn serves_the_built_frontends(pool: PgPool) {
     assert!(!response.text().contains("候选人页面") || response.status != StatusCode::OK);
 }
 
+/// 把 gzip 压过的响应体解开。
+fn gunzip(body: &[u8]) -> String {
+    use std::io::Read;
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(body)
+        .read_to_string(&mut text)
+        .expect("响应体不是 gzip");
+    text
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn compresses_frontend_text_for_browsers_that_accept_it(pool: PgPool) {
+    let script = "console.log('面试');\n".repeat(400);
+    let style = ".card { color: #333; }\n".repeat(400);
+    let page = format!(
+        "<!doctype html><title>候选人页面</title>{}",
+        "<p>面试</p>".repeat(400)
+    );
+    // 字体和图片本身就是压缩格式，再压一遍白花时间
+    let font: Vec<u8> = (0..8000u32).map(|i| (i % 251) as u8).collect();
+
+    let web = tempfile::tempdir().unwrap();
+    for app in ["admin", "candidate"] {
+        let dir = web.path().join(app);
+        std::fs::create_dir_all(dir.join("assets")).unwrap();
+        std::fs::write(dir.join("index.html"), &page).unwrap();
+        std::fs::write(dir.join("assets/app-abc123.js"), &script).unwrap();
+        std::fs::write(dir.join("assets/app-abc123.css"), &style).unwrap();
+        std::fs::write(dir.join("assets/font-abc123.woff2"), &font).unwrap();
+    }
+    let ctx = context(pool, web.path());
+    let router = interview_server::build(&ctx, &Shared::none()).router;
+    let get = |uri: &'static str, accept: Option<&'static str>| {
+        let router = router.clone();
+        async move {
+            let mut request = TestRequest::get(uri);
+            if let Some(accept) = accept {
+                request = request.header("accept-encoding", accept);
+            }
+            request.send(&router).await
+        }
+    };
+
+    for prefix in ["/i", "/admin"] {
+        for (path, original) in [
+            ("/assets/app-abc123.js", &script),
+            ("/assets/app-abc123.css", &style),
+            ("/", &page),
+            // 前端自己的路由，给的也是 index.html
+            ("/somewhere/else", &page),
+        ] {
+            let uri: &'static str = Box::leak(format!("{prefix}{path}").into_boxed_str());
+            let response = get(uri, Some("gzip, deflate, br")).await;
+            assert_eq!(response.status, StatusCode::OK, "{uri}");
+            assert_eq!(response.header("content-encoding"), Some("gzip"), "{uri}");
+            assert!(
+                response.body.len() < original.len() / 4,
+                "{uri} 压缩后 {} 字节，原来 {} 字节",
+                response.body.len(),
+                original.len()
+            );
+            assert_eq!(
+                &gunzip(&response.body),
+                original,
+                "{uri} 解开后和原文件一样"
+            );
+            // 中间的缓存要知道同一个地址有压缩和不压缩两种
+            let vary = response.header("vary").unwrap_or_default().to_lowercase();
+            assert!(
+                vary.contains("accept-encoding"),
+                "{uri} 的 Vary 是 {vary:?}"
+            );
+
+            // 不说自己能解压的，照旧给原文
+            let response = get(uri, None).await;
+            assert_eq!(response.status, StatusCode::OK, "{uri}");
+            assert_eq!(response.header("content-encoding"), None, "{uri}");
+            assert_eq!(&response.text(), original, "{uri}");
+        }
+    }
+
+    // 压缩不影响缓存的设置
+    let response = get("/i/assets/app-abc123.js", Some("gzip")).await;
+    assert_eq!(
+        response.header("cache-control"),
+        Some("public, max-age=31536000, immutable")
+    );
+    let response = get("/i/", Some("gzip")).await;
+    assert_eq!(response.header("cache-control"), Some("no-cache"));
+
+    // 字体不压
+    let response = get("/i/assets/font-abc123.woff2", Some("gzip")).await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.header("content-encoding"), None);
+    assert_eq!(response.body.as_ref(), font.as_slice());
+
+    // 只要文件的一段时不压，给的就是原文件里的那一段
+    let response = TestRequest::get("/i/assets/app-abc123.js")
+        .header("accept-encoding", "gzip")
+        .header("range", "bytes=0-99")
+        .send(&router)
+        .await;
+    assert_eq!(response.status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(response.header("content-encoding"), None);
+    assert_eq!(response.body.as_ref(), &script.as_bytes()[..100]);
+
+    // 接口不过这一层：录像、语音、接口文档都照旧
+    let response = get("/api/openapi.json", Some("gzip")).await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.header("content-encoding"), None);
+    assert_eq!(response.json()["info"]["title"], "AI 面试");
+    let response = get("/healthz", Some("gzip")).await;
+    assert_eq!(response.header("content-encoding"), None);
+    assert_eq!(response.text(), "ok");
+}
+
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn explains_when_the_frontend_is_not_built(pool: PgPool) {
     let web = tempfile::tempdir().unwrap();
