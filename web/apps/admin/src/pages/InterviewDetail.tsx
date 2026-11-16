@@ -69,6 +69,7 @@ import type {
   PlannedQuestion,
   Utterance,
 } from "../api/types";
+import { AddFollowUpDialog } from "../components/AddFollowUpDialog";
 import { AddQuestionDialog } from "../components/AddQuestionDialog";
 import { ArrangeQuestionsDialog } from "../components/ArrangeQuestionsDialog";
 import { ConfigForm, cleanConfig } from "../components/ConfigForm";
@@ -110,6 +111,7 @@ import {
 } from "../lib/format";
 import { framesByEvent, withFrameEvents } from "../lib/frames";
 import { inviteMessage } from "../lib/invite";
+import { canAddFollowUp } from "../lib/plan";
 import { updateOutcome } from "../lib/replan";
 
 type Tab = "overview" | "questions" | "invites" | "replay" | "report";
@@ -1058,6 +1060,10 @@ function QuestionsTab({ interview }: { interview: Interview }) {
   const [removing, setRemoving] = useState<Removing | null>(null);
   const [adding, setAdding] = useState(false);
   const [arranging, setArranging] = useState(false);
+  /** 正在给哪道题加追问 */
+  const [following, setFollowing] = useState<{ key: string; name: string; text: string } | null>(
+    null,
+  );
   const canEdit = editable(interview);
 
   // 出题的那一步结束后，把题目取回来
@@ -1156,7 +1162,11 @@ function QuestionsTab({ interview }: { interview: Interview }) {
           {followUps > 0 && `，${followUps} 句追问`}
           {speech > 0 && `；面试官说话约 ${duration(speech)}`}。
           {canEdit
-            ? "可以改措辞，改完那一句会重新合成语音；不想问的题和追问可以去掉，也可以加自己的题。时间不够时，标着「时间紧时可能跳过」的题会被跳过，越靠后越容易轮不上；先后、哪些题一定要问、主问题和备用题互换都可以调。"
+            ? `可以改措辞，改完那一句会重新合成语音；不想问的题和追问可以去掉，也可以加自己的题${
+                interview.config.follow_ups.enabled
+                  ? `和追问（每道题最多 ${interview.config.follow_ups.max_per_question} 句）`
+                  : ""
+              }。时间不够时，标着「时间紧时可能跳过」的题会被跳过，越靠后越容易轮不上；先后、哪些题一定要问、主问题和备用题互换都可以调。`
             : preparing
               ? ""
               : "链接发出之后题目不能再改。"}
@@ -1242,6 +1252,19 @@ function QuestionsTab({ interview }: { interview: Interview }) {
                   </div>
                   {q.intent && <div className="adm-utter__intent">想考察：{q.intent}</div>}
                   <Signals question={q} />
+                  {canEdit && canAddFollowUp(q, interview.config.follow_ups) && (
+                    <div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Plus aria-hidden="true" />}
+                        aria-label={`给${name}加一句追问`}
+                        onClick={() => setFollowing({ key: q.key, name, text: q.text })}
+                      >
+                        加一句追问
+                      </Button>
+                    </div>
+                  )}
                 </Line>
                 {(q.follow_ups ?? []).map((f, fIndex) => (
                   <Line
@@ -1265,7 +1288,7 @@ function QuestionsTab({ interview }: { interview: Interview }) {
                     onRemove={remove({
                       title: "去掉这句追问？",
                       confirmLabel: "去掉这句追问",
-                      body: `${name}还在，只是候选人答得笼统时不会再追问这一句。去掉以后想要回来，只能重新出题。`,
+                      body: `${name}还在，只是面试官不会再追问这一句。去掉以后想要回来，可以自己再加一句。`,
                       apply: (current) => ({
                         ...current,
                         questions: current.questions.map((x) =>
@@ -1443,6 +1466,13 @@ function QuestionsTab({ interview }: { interview: Interview }) {
         maxAnswerSec={interview.config.answer.max_sec}
         open={adding && canEdit}
         onClose={() => setAdding(false)}
+      />
+      <AddFollowUpDialog
+        interviewId={interview.id}
+        plan={data}
+        target={following}
+        conversational={interview.config.mode === "conversational"}
+        onClose={() => setFollowing(null)}
       />
       <ArrangeQuestionsDialog
         interviewId={interview.id}

@@ -648,6 +648,7 @@ describe("面试详情", () => {
 
       expect(screen.queryAllByRole("button", { name: /^去掉/ })).toEqual([]);
       expect(screen.queryByRole("button", { name: "加一道题" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /加一句追问/ })).toBeNull();
       expect(screen.queryByRole("button", { name: "调先后和必问" })).toBeNull();
     });
 
@@ -773,6 +774,89 @@ describe("面试详情", () => {
       await waitFor(() =>
         expect(screen.queryByRole("dialog", { name: "调先后和必问" })).toBeNull(),
       );
+    });
+
+    it("给一道题加追问：写了要说的话才能保存，加在这道题下面，别的题不动", async () => {
+      const { target, plan } = readyWithPlan();
+      const first = plan.questions[0];
+      if (!first) throw new Error("演示数据里没有题");
+      // 第 1 题先不带追问，还有位置可以加
+      first.follow_ups = [];
+      const others = JSON.stringify(plan.questions.slice(1));
+      await openQuestions(target.id);
+
+      fireEvent.click(screen.getByRole("button", { name: "给第 1 题加一句追问" }));
+      const dialog = await screen.findByRole("dialog", { name: "给第 1 题加一句追问" });
+      // 窗口里摆着是哪道题，也说了这一句面试时怎么用
+      expect(within(dialog).getByText(new RegExp(first.text.slice(0, 12)))).toBeTruthy();
+      expect(within(dialog).getByText(/照你写的原话追问这一句/)).toBeTruthy();
+      const saveButton = within(dialog).getByRole("button", { name: "加进去并合成语音" });
+      expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.change(within(dialog).getByLabelText("面试官会这样追问"), {
+        target: { value: "这里面你自己做的是哪一部分？" },
+      });
+      expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+      fireEvent.change(within(dialog).getByLabelText(/^什么情况下问/), {
+        target: { value: "只说了团队做了什么，没说自己做了什么" },
+      });
+      fireEvent.click(saveButton);
+
+      await waitFor(() =>
+        expect(server.db.plans.get(target.id)?.questions[0]?.follow_ups).toEqual([
+          {
+            key: `${first.key}.f1`,
+            text: "这里面你自己做的是哪一部分？",
+            ask_when: "只说了团队做了什么，没说自己做了什么",
+          },
+        ]),
+      );
+      expect(JSON.stringify(server.db.plans.get(target.id)?.questions.slice(1))).toBe(others);
+      // 这一句等着合成语音，别的都还是合成好的
+      const pending = (server.db.utterances.get(target.id) ?? []).filter(
+        (u) => u.synth_status !== "done",
+      );
+      expect(pending.map((u) => u.key)).toEqual([`${first.key}.f1`]);
+      // 题目清单里多了这一句和它什么时候问
+      expect(
+        await screen.findByText("什么时候问：只说了团队做了什么，没说自己做了什么"),
+      ).toBeTruthy();
+    });
+
+    it("追问到了每题的上限，或者设置里关了追问，就没有「加一句追问」", async () => {
+      const { target, plan } = readyWithPlan();
+      const [first, second] = plan.questions;
+      if (!first || !second) throw new Error("演示数据里的题不够两道");
+      const limit = target.config.follow_ups.max_per_question;
+      first.follow_ups = Array.from({ length: limit }, (_, n) => ({
+        key: `${first.key}.f${n + 1}`,
+        text: `第 ${n + 1} 句追问`,
+        ask_when: "回答比较笼统的时候",
+      }));
+      second.follow_ups = [];
+      await openQuestions(target.id);
+      expect(screen.getByText(new RegExp(`每道题最多 ${limit} 句`))).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "给第 1 题加一句追问" })).toBeNull();
+      expect(screen.getByRole("button", { name: "给第 2 题加一句追问" })).toBeTruthy();
+
+      cleanup();
+      target.config.follow_ups.enabled = false;
+      await openQuestions(target.id);
+      expect(screen.queryByRole("button", { name: /加一句追问/ })).toBeNull();
+      expect(screen.queryByText(/每道题最多/)).toBeNull();
+    });
+
+    it("实时对话的面试里，加追问的窗口说明这一句只是方向", async () => {
+      const { target, plan } = readyWithPlan();
+      const first = plan.questions[0];
+      if (!first) throw new Error("演示数据里没有题");
+      first.follow_ups = [];
+      target.config.mode = "conversational";
+      await openQuestions(target.id);
+      fireEvent.click(screen.getByRole("button", { name: "给第 1 题加一句追问" }));
+      const dialog = await screen.findByRole("dialog", { name: "给第 1 题加一句追问" });
+      expect(within(dialog).getByText(/不一定照原话问/)).toBeTruthy();
+      expect(within(dialog).queryByText(/照你写的原话追问这一句/)).toBeNull();
     });
 
     it("主问题和备用题互换：换完焦点跟着这道题走，存下来备用题还排在主问题后面", async () => {

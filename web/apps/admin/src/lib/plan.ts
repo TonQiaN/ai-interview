@@ -1,4 +1,4 @@
-// 题目出好以后 HR 自己调：加一道题、调先后、改哪些题时间紧也要问、主问题和备用题互换。都不调模型，
+// 题目出好以后 HR 自己调：加一道题、给一道题加追问、调先后、改哪些题时间紧也要问、主问题和备用题互换。都不调模型，
 // 改完整份计划存回去，后端只给文字变了的和新增的句子合成语音。
 import type { InterviewPlan, PlannedQuestion, QuestionCategory } from "../api/types";
 
@@ -51,6 +51,59 @@ export function addQuestion(plan: InterviewPlan, draft: QuestionDraft): Intervie
   return {
     ...plan,
     questions: [...plan.questions.slice(0, at), question, ...plan.questions.slice(at)],
+  };
+}
+
+/** 加一句追问时页面上填的 */
+export interface FollowUpDraft {
+  /** 面试官追问时要说的话 */
+  text: string;
+  /** 什么情况下问这一句。判断回答的模型会看，不念给候选人；可以不填 */
+  askWhen: string;
+}
+
+/** 没写什么情况下问时用的那一句 */
+export const DEFAULT_ASK_WHEN = "候选人的回答里没有讲到这一点的时候";
+
+/** 这道题还能不能再加追问：设置里关了追问、或者已经到了每题的上限就不能（后端会拒绝超过上限的） */
+export function canAddFollowUp(
+  question: PlannedQuestion,
+  followUps: { enabled: boolean; max_per_question: number },
+): boolean {
+  return followUps.enabled && (question.follow_ups ?? []).length < followUps.max_per_question;
+}
+
+/** 给新追问起名字：后端要求以所属题目的 key 开头，出题时用的是 q1.f1、q1.f2……，接着往后排 */
+export function nextFollowUpKey(plan: InterviewPlan, questionKey: string): string {
+  const used = new Set(
+    plan.questions.flatMap((q) => [q.key, ...(q.follow_ups ?? []).map((f) => f.key)]),
+  );
+  let number = 1;
+  while (used.has(`${questionKey}.f${number}`)) number += 1;
+  return `${questionKey}.f${number}`;
+}
+
+/**
+ * 给一道题加一句 HR 写的追问，排在这道题已有追问的后面。找不到这道题时原样返回。
+ * 逐题问答里，候选人的回答符合「什么情况下问」时面试官照原话追问；
+ * 实时对话里面试官现场组织追问，这一句是给它的方向。
+ */
+export function addFollowUp(
+  plan: InterviewPlan,
+  questionKey: string,
+  draft: FollowUpDraft,
+): InterviewPlan {
+  if (!plan.questions.some((q) => q.key === questionKey)) return plan;
+  const followUp = {
+    key: nextFollowUpKey(plan, questionKey),
+    text: draft.text.trim(),
+    ask_when: draft.askWhen.trim() || DEFAULT_ASK_WHEN,
+  };
+  return {
+    ...plan,
+    questions: plan.questions.map((q) =>
+      q.key === questionKey ? { ...q, follow_ups: [...(q.follow_ups ?? []), followUp] } : q,
+    ),
   };
 }
 

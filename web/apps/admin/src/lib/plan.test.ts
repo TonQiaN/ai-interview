@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import { createMockServer } from "../api/mock/server";
 import type { InterviewPlan } from "../api/types";
 import {
+  addFollowUp,
   addQuestion,
   answerTimeChoices,
+  canAddFollowUp,
   canMoveQuestion,
   canSetReserve,
+  DEFAULT_ASK_WHEN,
   moveQuestion,
+  nextFollowUpKey,
   nextQuestionKey,
   type QuestionDraft,
   setRequired,
@@ -239,5 +243,84 @@ describe("主问题和备用题互换", () => {
     expect(setReserve(source, "q2", true)).toBe(source);
     expect(canSetReserve(source, "q2", false)).toBe(true);
     expect(canSetReserve(source, "没有这道题", false)).toBe(false);
+  });
+});
+
+describe("给一道题加追问", () => {
+  it("排在这道题已有追问的后面，名字以这道题的 key 开头，别的题不动", () => {
+    const source = numbered(plan(), plan().questions.length);
+    const target = source.questions[1];
+    if (!target) throw new Error("演示数据里的题不够两道");
+    const withOne: InterviewPlan = {
+      ...source,
+      questions: source.questions.map((q) =>
+        q.key === target.key
+          ? {
+              ...q,
+              follow_ups: [{ key: `${q.key}.f1`, text: "原来的追问", ask_when: "笼统的时候" }],
+            }
+          : q,
+      ),
+    };
+    const added = addFollowUp(withOne, target.key, {
+      text: "  这里面你自己做的是哪一部分？ ",
+      askWhen: " 只说了团队做了什么 ",
+    });
+    const question = added.questions.find((q) => q.key === target.key);
+    expect(question?.follow_ups).toEqual([
+      { key: `${target.key}.f1`, text: "原来的追问", ask_when: "笼统的时候" },
+      {
+        key: `${target.key}.f2`,
+        text: "这里面你自己做的是哪一部分？",
+        ask_when: "只说了团队做了什么",
+      },
+    ]);
+    expect(added.questions.filter((q) => q.key !== target.key)).toEqual(
+      withOne.questions.filter((q) => q.key !== target.key),
+    );
+    // 原来那一份没被改
+    expect(withOne.questions[1]?.follow_ups).toHaveLength(1);
+  });
+
+  it("名字不和别的话撞：中间去掉过一句，新的补那个空位也不重名", () => {
+    const source = numbered(plan(), plan().questions.length);
+    const withGap: InterviewPlan = {
+      ...source,
+      questions: source.questions.map((q) =>
+        q.key === "q1"
+          ? { ...q, follow_ups: [{ key: "q1.f2", text: "还在的那一句", ask_when: "笼统的时候" }] }
+          : q,
+      ),
+    };
+    expect(nextFollowUpKey(withGap, "q1")).toBe("q1.f1");
+    const keys = addFollowUp(withGap, "q1", { text: "再问一句", askWhen: "" }).questions.flatMap(
+      (q) => [q.key, ...(q.follow_ups ?? []).map((f) => f.key)],
+    );
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("没写什么情况下问，用默认的那一句；找不到这道题就原样返回", () => {
+    const source = numbered(plan(), plan().questions.length);
+    const added = addFollowUp(source, "q1", { text: "再具体说说", askWhen: "   " });
+    expect(added.questions[0]?.follow_ups?.at(-1)?.ask_when).toBe(DEFAULT_ASK_WHEN);
+    expect(addFollowUp(source, "没有这道题", { text: "再具体说说", askWhen: "" })).toBe(source);
+  });
+
+  it("设置里关了追问、或者到了每题的上限，就不能再加", () => {
+    const question = numbered(plan(), plan().questions.length).questions[0];
+    if (!question) throw new Error("演示数据里没有题");
+    const two = {
+      ...question,
+      follow_ups: [
+        { key: "q1.f1", text: "一", ask_when: "笼统的时候" },
+        { key: "q1.f2", text: "二", ask_when: "笼统的时候" },
+      ],
+    };
+    expect(canAddFollowUp(two, { enabled: true, max_per_question: 3 })).toBe(true);
+    expect(canAddFollowUp(two, { enabled: true, max_per_question: 2 })).toBe(false);
+    expect(canAddFollowUp(two, { enabled: false, max_per_question: 3 })).toBe(false);
+    expect(
+      canAddFollowUp({ ...question, follow_ups: [] }, { enabled: true, max_per_question: 1 }),
+    ).toBe(true);
   });
 });
