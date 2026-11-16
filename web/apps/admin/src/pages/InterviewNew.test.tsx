@@ -350,6 +350,86 @@ describe("安排面试", () => {
     });
   });
 
+  describe("从一场面试点「再安排一场」过来", () => {
+    /** 演示数据里的一场面试，候选人没归档、岗位在招；顺手给它填上专门的设置 */
+    function source() {
+      const target = server.db.interviews.find((i) => {
+        const candidate = server.db.candidates.find((c) => c.id === i.candidate.id);
+        const position = server.db.positions.find((p) => p.id === i.position.id);
+        return candidate && !candidate.archived_at && position?.status === "open";
+      });
+      if (!target) throw new Error("演示数据里没有能再安排的面试");
+      target.config = {
+        ...target.config,
+        target_duration_minutes: 35,
+        focus_instructions: ["合成的考察要求：看看带人的经验"],
+      };
+      return target;
+    }
+
+    it("人、岗位都选好了，直接停在设置那一步，设置沿用上一场的", async () => {
+      const target = source();
+      const before = await interviewCount();
+      open(`/interviews/new?from=${target.id}`);
+
+      expect(
+        await screen.findByText(`${target.candidate.name} 面试 ${target.position.title}`),
+      ).toBeTruthy();
+      expect(await screen.findByDisplayValue("合成的考察要求：看看带人的经验")).toBeTruthy();
+      const start = screen.getByLabelText(/^从哪份设置开始/) as HTMLSelectElement;
+      expect(start.selectedOptions[0]?.textContent).toBe("上一场面试的设置");
+
+      fireEvent.click(screen.getByRole("button", { name: "先存草稿" }));
+      await screen.findByText("面试详情页");
+      expect(await interviewCount()).toBe(before + 1);
+      const made = server.db.interviews.find(
+        (i) => i.id !== target.id && i.status === "draft" && i.candidate.id === target.candidate.id,
+      );
+      expect(made?.config.target_duration_minutes).toBe(35);
+      expect(made?.config.focus_instructions).toEqual(["合成的考察要求：看看带人的经验"]);
+      expect(made?.position.id).toBe(target.position.id);
+    });
+
+    it("换成别的模板以后，还能选回上一场的设置", async () => {
+      const target = source();
+      open(`/interviews/new?from=${target.id}`);
+      await screen.findByDisplayValue("合成的考察要求：看看带人的经验");
+
+      const start = screen.getByLabelText(/^从哪份设置开始/) as HTMLSelectElement;
+      fireEvent.change(start, { target: { value: "" } });
+      await waitFor(() =>
+        expect(screen.queryByDisplayValue("合成的考察要求：看看带人的经验")).toBeNull(),
+      );
+      const again = Array.from(start.options).find((o) => o.textContent === "上一场面试的设置");
+      fireEvent.change(start, { target: { value: again?.value } });
+      expect(await screen.findByDisplayValue("合成的考察要求：看看带人的经验")).toBeTruthy();
+    });
+
+    it("候选人已经归档：不替人选，停在第一步", async () => {
+      const target = source();
+      const candidate = server.db.candidates.find((c) => c.id === target.candidate.id);
+      if (!candidate) throw new Error("没找到候选人");
+      candidate.archived_at = new Date().toISOString();
+      open(`/interviews/new?from=${target.id}`);
+
+      const list = await screen.findByRole("list", { name: "已选的岗位" });
+      expect(list.textContent).toContain(target.position.title);
+      expect(screen.queryByRole("list", { name: "已选 1 位" })).toBeNull();
+      expect(screen.getByRole("button", { name: "下一步" })).toHaveProperty("disabled", true);
+    });
+
+    it("没动设置就点到别的页面，直接走，不拦", async () => {
+      const target = source();
+      target.voice_id = server.db.voices.find((v) => v.ready)?.id ?? null;
+      open(`/interviews/new?from=${target.id}`);
+      await screen.findByDisplayValue("合成的考察要求：看看带人的经验");
+
+      fireEvent.click(screen.getByRole("button", { name: "上一步" }));
+      fireEvent.click(await screen.findByRole("link", { name: "去上传简历" }));
+      expect(await screen.findByText("候选人列表页")).toBeTruthy();
+    });
+  });
+
   it("只选了一位候选人和岗位、没动设置，点到别的页面直接走", async () => {
     open();
     await pick(1);
