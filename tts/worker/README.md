@@ -10,7 +10,28 @@ Rust 那边对应的是 `crates/interview-tts` 的 `WorkerBackend`。
 
 ## 启动
 
-IndexTTS 和 Breeze 的依赖不能装进同一个环境（见 [../README.md](../README.md) 的「已知的坑」），所以起两个进程，各占一个端口：
+IndexTTS 和 Breeze 的依赖不能装进同一个环境（见 [../README.md](../README.md) 的「已知的坑」），所以是两个进程，各占一个端口：IndexTTS 2 和 2.5 在 7801，BreezeTTS2 在 7802。默认的引擎是 IndexTTS 2，只用它的话起前一个就够了。
+
+用 `run.sh` 起，它把进程放到后台，等模型加载完才返回：
+
+```bash
+tts/worker/run.sh start          # 起 IndexTTS 的 worker；start breeze 起 BreezeTTS2 的，start all 两个都起
+tts/worker/run.sh status         # 哪些在跑、此刻忙不忙、有几条在排队
+tts/worker/run.sh stop           # 都停掉；stop index、stop breeze 只停一个
+eval "$(tts/worker/run.sh env)"  # 给后端设好 AI_INTERVIEW_TTS_BACKEND 和 AI_INTERVIEW_TTS_WORKER_URLS
+```
+
+日志和进程号在 `.runtime/tts-worker/` 下（`index.log`、`breeze.log`），起不来时脚本会把日志最后几行打出来。可以用环境变量改的：
+
+| 变量 | 含义 |
+| --- | --- |
+| `AI_INTERVIEW_TTS_HOME` | `vendor/` 和 `models/` 所在的目录，默认是脚本所在的这个仓库。在别的工作区（git worktree）里跑时，指到放着模型的那个仓库，日志和参考录音也放在它的 `.runtime/tts-worker/` 下 |
+| `AI_INTERVIEW_TTS_INDEX_PORT`、`AI_INTERVIEW_TTS_BREEZE_PORT` | 端口，默认 7801 和 7802 |
+| `AI_INTERVIEW_TTS_WORKER_HOST` | 监听地址，默认 `127.0.0.1`。后端不在这台 Mac 上时改成 `0.0.0.0`，并且必须设令牌 |
+| `AI_INTERVIEW_TTS_WORKER_TOKEN` | 令牌，worker 和后端要一致 |
+| `AI_INTERVIEW_TTS_WORKER_FAKE=1` | 不加载模型，用系统的 `python3` 起假引擎。没有 Mac 时测流程用 |
+
+脚本做的事就是下面两条命令，要自己起（比如前台看日志、调内存上限）也可以：
 
 ```bash
 REPO=~/Desktop/ai-interview    # 仓库在 Mac 上的位置，vendor/ 和 models/ 都在它下面
