@@ -33,6 +33,7 @@ import { useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { isMock } from "../api/http";
 import { useInterviews, useLogout, useMe } from "../api/queries";
+import { PageErrorBoundary } from "../components/PageError";
 import { ReLoginDialog } from "../components/ReLoginDialog";
 
 interface Item {
@@ -154,7 +155,9 @@ export function Layout() {
         </>
       }
     >
-      <Outlet />
+      <PageErrorBoundary>
+        <Outlet />
+      </PageErrorBoundary>
       <ReLoginDialog email={me.data.email} />
     </AppShell>
   );

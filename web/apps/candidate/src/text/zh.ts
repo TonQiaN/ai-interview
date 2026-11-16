@@ -325,6 +325,14 @@ export const zh = {
     },
   },
 
+  /** 页面渲染到一半出错时换上的那一页。脚本没加载出来时的提示在 index.html 里，两处的说法要对得上。 */
+  crash: {
+    title: "页面出了点问题",
+    description:
+      "请刷新页面。已经录下和回答过的内容都保存着；面试还没结束的话，重新检查设备后会从中断的地方继续。",
+    reload: "刷新页面",
+  },
+
   problem: {
     unsupportedTitle: "这个浏览器不支持面试",
     unsupportedBody: "请用最新版的 Chrome、Edge 或 Safari 打开这条链接。",

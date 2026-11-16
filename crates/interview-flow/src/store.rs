@@ -106,6 +106,11 @@ const LIST_LATEST_REPORT: &str = " LEFT JOIN LATERAL ( \
        ORDER BY r.version DESC LIMIT 1 \
      ) rep ON true";
 
+/// 一场面试没撤销的链接里最晚的到期时间。链接归面试间管，这里只读。
+/// 过期的链接也算在内：读的人拿它和现在比，就知道候选人还打不打得开。
+const INVITE_EXPIRES_AT: &str = "(SELECT max(v.expires_at) FROM interview_invites v \
+     WHERE v.interview_id = i.id AND v.revoked_at IS NULL)";
+
 /// 报告里的综合得分。报告的内容是 JSON，这里取出来当数字用。
 const LIST_SCORE: &str = "(rep.content->>'overall_score')::int";
 
@@ -134,6 +139,8 @@ pub(crate) async fn list_interviews(
     let mut list = QueryBuilder::new(format!(
         "SELECT i.id, i.status, i.decision, i.candidate_id, c.name AS candidate_name, \
          i.position_id, p.title AS position_title, \
+         COALESCE(i.config->'stage', to_jsonb('screening'::text)) AS stage, \
+         {INVITE_EXPIRES_AT} AS invite_expires_at, \
          (SELECT r.status FROM interview_reports r WHERE r.interview_id = i.id \
           ORDER BY r.version DESC LIMIT 1) AS report_status, \
          {LIST_SCORE} AS overall_score, \
@@ -180,6 +187,12 @@ pub(crate) async fn detail(
             .await?;
     let report = list_reports(db, row.id).await?.into_iter().next();
     let synth = synth_progress(db, row.id).await?;
+    let invite_expires_at: Option<DateTime<Utc>> = sqlx::query_scalar(&format!(
+        "SELECT {INVITE_EXPIRES_AT} FROM interviews i WHERE i.id = $1"
+    ))
+    .bind(row.id)
+    .fetch_one(db)
+    .await?;
     let config = row.config()?;
 
     Ok(InterviewDetail {
@@ -211,6 +224,7 @@ pub(crate) async fn detail(
         decision_note: row.decision_note,
         decided_at: row.decided_at,
         report,
+        invite_expires_at,
         archived_at: row.archived_at,
         created_at: row.created_at,
         updated_at: row.updated_at,

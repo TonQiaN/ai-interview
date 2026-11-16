@@ -24,6 +24,7 @@ import {
 import type { Position, PositionExtra } from "../api/types";
 import { BatchInvitesDialog } from "../components/BatchInvitesDialog";
 import { Confirm, Pager, Person, QueryView } from "../components/common";
+import { ExportInterviewsButton } from "../components/ExportInterviews";
 import { PageHeader } from "../components/PageHeader";
 import { PrepareAll } from "../components/PrepareAll";
 import { RaasApplicantsDialog } from "../components/RaasApplicantsDialog";
@@ -303,6 +304,13 @@ function Detail({ position }: { position: Position }) {
                       <Scale aria-hidden="true" />
                       对比候选人
                     </Link>
+                  )}
+                  {(interviews.data?.total ?? 0) > 0 && (
+                    <ExportInterviewsButton
+                      size="sm"
+                      name={position.title}
+                      query={{ position_id: position.id, sort: "-score" }}
+                    />
                   )}
                   {fromRaas && !archived && (
                     <Button
