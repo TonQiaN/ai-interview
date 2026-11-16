@@ -902,7 +902,7 @@ describe("面试详情", () => {
       expect(screen.queryByText(/每道题最多/)).toBeNull();
     });
 
-    it("实时对话的面试里，加追问的窗口说明这一句只是方向", async () => {
+    it("实时对话的面试里，加追问的窗口照实说：这一句只是方向，多半不会照着问，条件也用不上", async () => {
       const { target, plan } = readyWithPlan();
       const first = plan.questions[0];
       if (!first) throw new Error("演示数据里没有题");
@@ -911,8 +911,12 @@ describe("面试详情", () => {
       await openQuestions(target.id);
       fireEvent.click(screen.getByRole("button", { name: "给第 1 题加一句追问" }));
       const dialog = await screen.findByRole("dialog", { name: "给第 1 题加一句追问" });
-      expect(within(dialog).getByText(/不一定照原话问/)).toBeTruthy();
+      expect(within(dialog).getByText(/多半不会照着问/)).toBeTruthy();
+      expect(within(dialog).getByText(/一定要问到的话，改用「加一道题」/)).toBeTruthy();
+      expect(within(dialog).getByText(/实时对话里面试官不看这一条/)).toBeTruthy();
+      // 逐题问答才成立的两句话不能出现
       expect(within(dialog).queryByText(/照你写的原话追问这一句/)).toBeNull();
+      expect(within(dialog).queryByText(/就会问。$/)).toBeNull();
     });
 
     it("主问题和备用题互换：换完焦点跟着这道题走，存下来备用题还排在主问题后面", async () => {
