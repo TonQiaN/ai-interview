@@ -208,7 +208,6 @@ export const en: Texts = {
       noSpeech:
         "Please start answering. If you are already speaking, move closer to the microphone",
       maxWarning: "Time for this question is almost up. Please wrap up",
-      hearing: "Listening",
       countdown: "Finished? Keep talking if you have more to add",
       answer: "Your turn",
     },
