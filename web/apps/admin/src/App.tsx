@@ -4,6 +4,7 @@ import { AccountPage } from "./pages/Account";
 import { AccountsPage } from "./pages/Accounts";
 import { CandidateDetailPage } from "./pages/CandidateDetail";
 import { CandidatesPage } from "./pages/Candidates";
+import { HelpPage } from "./pages/Help";
 import { InterviewDetailPage } from "./pages/InterviewDetail";
 import { InterviewNewPage } from "./pages/InterviewNew";
 import { InterviewsPage } from "./pages/Interviews";
@@ -39,6 +40,7 @@ export function App() {
         <Route path="settings" element={<SettingsPage />} />
         <Route path="accounts" element={<AccountsPage />} />
         <Route path="account" element={<AccountPage />} />
+        <Route path="help" element={<HelpPage />} />
         <Route path="home" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

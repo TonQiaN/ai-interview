@@ -15,6 +15,7 @@ import {
   type Theme,
 } from "@ai-interview/ui";
 import {
+  BookOpen,
   Briefcase,
   ClipboardList,
   LayoutDashboard,
@@ -114,6 +115,8 @@ export function Layout() {
               : []),
           ]}
         />
+        <NavSection>帮助</NavSection>
+        <Links items={[{ to: "/help", label: "使用说明", icon: BookOpen }]} />
       </Nav>
       <SidebarFooter>
         <div className="oil-row">
