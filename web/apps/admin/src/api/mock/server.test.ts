@@ -596,5 +596,34 @@ describe("假后端", () => {
       });
       expect(created.data.voice_id).toBe(voice?.id);
     });
+
+    it("面试选了音色之后能改回用默认音色：带 null 是改回去，不带是不改", async () => {
+      await login(server);
+      const candidate = server.db.candidates[0];
+      const position = server.db.positions[0];
+      const voice = server.db.voices.find((v) => v.ready && !v.is_default);
+      const created = await call<Interview>(server, "POST", "/interviews", {
+        candidate_id: candidate?.id,
+        position_id: position?.id,
+        voice_id: voice?.id,
+      });
+      const id = created.data.id;
+      await call(server, "POST", `/interviews/${id}/prepare`);
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      const untouched = await call<Interview>(server, "PATCH", `/interviews/${id}`, {
+        config: created.data.config,
+      });
+      expect(untouched.data.voice_id).toBe(voice?.id);
+      expect(untouched.data.status).toBe("ready");
+
+      // 改回默认音色等于换了声音：题目留着，语音要重新合成，所以回到草稿
+      const cleared = await call<Interview>(server, "PATCH", `/interviews/${id}`, {
+        voice_id: null,
+      });
+      expect(cleared.data.voice_id ?? null).toBeNull();
+      expect(cleared.data.has_plan).toBe(true);
+      expect(cleared.data.status).toBe("draft");
+    });
   });
 });

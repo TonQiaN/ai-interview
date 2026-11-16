@@ -24,20 +24,12 @@ export interface VoicePickerProps {
   /** null 是跟着默认音色走 */
   value: string | null;
   onChange: (voiceId: string | null) => void;
-  /** 能不能选「跟着默认音色」。已经指定过音色的面试不能再改回去，只能换成另一个 */
-  allowDefault?: boolean;
   disabled?: boolean;
   error?: string;
 }
 
 /** 这场面试的面试官用哪个音色说话。音色自己带着引擎，所以选音色也就选了引擎。 */
-export function VoicePicker({
-  value,
-  onChange,
-  allowDefault = true,
-  disabled,
-  error,
-}: VoicePickerProps) {
+export function VoicePicker({ value, onChange, disabled, error }: VoicePickerProps) {
   const voices = useVoices();
   const voiceName = useVoiceName();
   const items = voices.data?.items ?? [];
@@ -63,7 +55,7 @@ export function VoicePicker({
           disabled={disabled || voices.isPending}
           onChange={(e) => onChange(e.target.value || null)}
         >
-          {allowDefault && <option value="">{voiceName(null)}</option>}
+          <option value="">{voiceName(null)}</option>
           {items.map((v) => (
             <option key={v.id} value={v.id} disabled={!v.ready && v.id !== value}>
               {voiceName(v.id)}
