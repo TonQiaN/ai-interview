@@ -170,6 +170,79 @@ test("回来检查设备时发的请求，响应等面试接回来之后才到�
   await context.close();
 });
 
+test("被接走的那一刻页面正好在取后面的语音：回来之后不被浏览器缓存里那句旧提醒停掉", async ({
+  page,
+  browser,
+}) => {
+  // 这条测试不能用 page.route：一拦请求，浏览器的缓存就关了，要测的正是缓存
+  const audio: { url: string; headers: Record<string, string> }[] = [];
+  page.on("request", (request) => {
+    if (/\/utterances\/[^/]+\/audio$/.test(new URL(request.url()).pathname)) {
+      audio.push({ url: request.url(), headers: request.headers() });
+    }
+  });
+  const interview = await enterInterview(page, { silenceSec: 30 });
+  await expectQuestion(page, 1);
+  // 第二题的语音是提前取好的，回来之后页面还会再取一次
+  await expect.poll(() => audio.some((request) => request.url.includes("/q2/"))).toBe(true);
+  const preload = audio.find((request) => request.url.includes("/q2/"));
+  if (!preload) throw new Error("页面没有提前取第二题的语音");
+
+  const context = await browser.newContext();
+  const other = await context.newPage();
+  await openElsewhere(other, interview);
+  await button(other, "继续面试").click();
+  await expect(other.getByText("录制中")).toBeVisible();
+  await expect(button(page, "回到这个页面继续面试")).toBeVisible({ timeout: 30_000 });
+
+  // 页面刚报完上一句、正要取后面几句的语音，面试就被接走了：这几个请求到服务端时面试已经在那边。
+  // 这里用页面自己那个请求的地址和请求头重新取一次，和它晚一步到是一回事
+  const noticed = await page.evaluate(async ({ url, headers }) => {
+    const response = await fetch(
+      new Request(url, {
+        headers: {
+          Authorization: headers.authorization ?? "",
+          "X-Room-Page": headers["x-room-page"] ?? "",
+          Accept: headers.accept ?? "",
+        },
+        credentials: "omit",
+        cache: "reload",
+      }),
+    );
+    await response.arrayBuffer();
+    return {
+      status: response.status,
+      reminder: response.headers.get("x-room-active-elsewhere"),
+      cache: response.headers.get("cache-control"),
+    };
+  }, preload);
+  // 带着提醒的这一份不让浏览器存
+  expect(noticed).toEqual({ status: 200, reminder: "1", cache: "no-store" });
+
+  await button(page, "回到这个页面继续面试").click();
+  await passPreflight(page, { resuming: true });
+  await button(page, "继续面试").click();
+  await expect(page.getByText("录制中")).toBeVisible();
+  await expectQuestion(page, 1);
+  // 页面接回面试后马上又取了一次第二题的语音。等一会儿，它没有把自己停掉
+  await expect
+    .poll(() => audio.filter((request) => request.url.includes("/q2/")).length)
+    .toBeGreaterThan(1);
+  await page.waitForTimeout(1500);
+  await expect(movedNotice(page)).toHaveCount(0);
+  await expect(page.getByText("录制中")).toBeVisible();
+  // 停下来的是那边
+  await expect(movedNotice(other)).toBeVisible();
+
+  await button(page, "我答完了，下一题").click();
+  await expectQuestion(page, 2);
+  await button(page, "结束").click();
+  await button(page, "结束面试").click();
+  await expect(page.getByText("面试已结束")).toBeVisible({ timeout: 30_000 });
+  expect(takenOver(interview)).toBe(2);
+  await context.close();
+});
+
 test("留在后面的页面点「结束面试」结束不了面试：它被告知面试在另一个页面里", async ({
   page,
   browser,
