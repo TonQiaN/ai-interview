@@ -337,3 +337,58 @@ async fn the_worker_accepts_a_step_count_and_rejects_a_bad_one() {
     let error = backend.synthesize(&request).await.unwrap_err();
     assert!(error.to_string().contains("diffusion_steps"), "{error}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn requests_someone_is_waiting_for_go_ahead_of_background_ones() {
+    let worker = FakeWorker::start("breeze2", None);
+    let backend = Arc::new(WorkerBackend::new(&[&worker.url], None).unwrap());
+    let finished = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    // 文本里带 [slow] 时假引擎先等 1 秒再出声。第一条后台的占着模型时，先来一条后台的，
+    // 再来一条有人等的：有人等的那条要排到前面。三条都慢，完成的先后差着 1 秒，不会看错
+    let send = |name: &'static str, delay_ms: u64, request: SynthesisRequest| {
+        let backend = Arc::clone(&backend);
+        let finished = Arc::clone(&finished);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            backend.synthesize(&request).await.unwrap();
+            finished.lock().unwrap().push(name);
+        })
+    };
+    let tasks = [
+        send(
+            "后台一",
+            0,
+            design_request("[slow]第一条预先合成的。").in_background(),
+        ),
+        send(
+            "后台二",
+            300,
+            design_request("[slow]第二条预先合成的。").in_background(),
+        ),
+        send("现场", 600, design_request("[slow]现场要说的话。")),
+    ];
+    for task in tasks {
+        task.await.unwrap();
+    }
+
+    assert_eq!(*finished.lock().unwrap(), ["后台一", "现场", "后台二"]);
+}
+
+#[tokio::test]
+async fn the_worker_rejects_a_priority_it_does_not_know() {
+    let worker = FakeWorker::start("breeze2", None);
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/synthesize", worker.url))
+        .json(&serde_json::json!({
+            "engine": "breeze2",
+            "text": "你好。",
+            "voice": {"kind": "design", "description": "温和的女声"},
+            "priority": "urgent",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    assert!(response.text().await.unwrap().contains("priority"));
+}

@@ -241,6 +241,11 @@ pub struct SynthesisRequest {
     /// 步数少了合成快、音质会有变化，只给实时对话里现场合成的句子用
     /// （见 [`crate::Synthesizer::synthesize_live`]）。不支持的引擎忽略它。
     pub diffusion_steps: Option<u32>,
+    /// 后台合成：没有人正等着听（比如面试前预先合成题目）。
+    ///
+    /// worker 上排队时，这样的请求让着有人等的（实时对话里现场要说的话、试听）。
+    /// 不影响合成结果，不进缓存键。
+    pub background: bool,
 }
 
 impl SynthesisRequest {
@@ -259,7 +264,14 @@ impl SynthesisRequest {
             style: Style::natural(),
             options: SynthesisOptions::default(),
             diffusion_steps: None,
+            background: false,
         }
+    }
+
+    /// 标成后台合成，见 [`SynthesisRequest::background`]。
+    pub fn in_background(mut self) -> Self {
+        self.background = true;
+        self
     }
 
     /// 这次请求实际生效的步数：引擎不支持指定步数时是 `None`。
@@ -573,6 +585,12 @@ mod tests {
         let mut other = base.clone();
         other.text.push('吗');
         assert_ne!(base.content_hash(), other.content_hash());
+
+        // 后台合成只影响排队的先后，合成出来的东西一样
+        assert_eq!(
+            base.content_hash(),
+            base.clone().in_background().content_hash()
+        );
 
         let mut other = base.clone();
         other.engine = EngineId::Index25;
