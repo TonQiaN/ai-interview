@@ -1,4 +1,5 @@
-import { Banner, Button, InterviewerPresence, Stage, Steps } from "@ai-interview/ui";
+import { Banner, Button, InterviewerPresence, Stage } from "@ai-interview/ui";
+import { StepBar } from "../components/StepBar";
 import type { RoomSession } from "../lib/api/room-types";
 import { useText } from "../text";
 
@@ -16,7 +17,7 @@ export function ReadyPage({ room, busy, error, onBegin }: ReadyPageProps) {
   const silence = Math.round(room.answer.silence_sec);
   return (
     <Stage
-      header={<Steps compact steps={t.steps} current={3} />}
+      header={<StepBar current={3} />}
       footer={
         <>
           {error && (

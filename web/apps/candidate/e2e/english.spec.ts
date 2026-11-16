@@ -25,7 +25,8 @@ test("英文面试：从须知到结束页都是英文", async ({ page }) => {
 
   await expect(page.getByText("Backend Engineer (Rust)")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Hello, Test Candidate" })).toBeVisible();
-  await expect(page).toHaveTitle("AI Interview");
+  await expect(page).toHaveTitle("Intro · AI Interview");
+  await expect(page.getByRole("img", { name: "Step 1 of 4: Intro", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.lang)).toBe("en");
   await expectNoChinese(page, "须知页");
   await button(page, "Get ready").click();

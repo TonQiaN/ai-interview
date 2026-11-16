@@ -1,15 +1,9 @@
-import {
-  Banner,
-  Button,
-  DeviceCheckCard,
-  type DeviceCheckState,
-  Stage,
-  Steps,
-} from "@ai-interview/ui";
+import { Banner, Button, DeviceCheckCard, type DeviceCheckState, Stage } from "@ai-interview/ui";
 import { Camera, Mic, Volume2, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CameraPreview } from "../components/CameraPreview";
 import { MicMeter } from "../components/MicMeter";
+import { StepBar } from "../components/StepBar";
 import type { RoomSession } from "../lib/api/room-types";
 import { type FittedBitrate, fitRecordingBitrate } from "../lib/recording/bitrate";
 import type { DeviceState, NetworkState } from "../session/interview-session";
@@ -85,7 +79,7 @@ export function DevicePage(props: DevicePageProps) {
 
   return (
     <Stage
-      header={<Steps compact steps={t.steps} current={2} />}
+      header={<StepBar current={2} />}
       footer={
         granted ? (
           <Button size="lg" block variant="accent" disabled={!canContinue} onClick={onNext}>
