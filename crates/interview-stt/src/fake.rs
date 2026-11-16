@@ -24,8 +24,11 @@ const IN_SPEECH_SLACK_MS: u64 = 150;
 ///
 /// 它不听内容，只按音量找出哪里有声音，然后把事先给的文字（或者一句固定的话）
 /// 按顺序铺在有声音的地方：每段声音按时长分到一些字，最后一段拿走剩下的全部。
-/// 所以只要音频里有声音，转写出来的文字就和事先给的一字不差；完全没有声音时返回空的转写，
-/// 和真后端的表现一致。云端容器和 CI 用它测面试流程。
+/// 所以音频里有声音、又没有长到把这句话分完时，转写出来的文字就和事先给的一字不差；
+/// 完全没有声音时返回空的转写，和真后端的表现一致。云端容器和 CI 用它测面试流程。
+///
+/// 字分完了后面还有声音，就把这句话从头再分一遍，所以每一段声音都有字。面试的录像是
+/// 麦克风和面试官声音的混音，面试官说得久也不会让后面候选人的回答没有文字。
 ///
 /// 边录边转时，一段声音要等到后面又出现一段声音才定下来（真后端是停顿半秒多就定下来），
 /// 最后一段在 `finish` 时给出。开了中间结果的会话里，还没定下来的那段声音按到现在的时长
@@ -43,14 +46,14 @@ struct Shared {
 }
 
 impl Shared {
-    fn next_tokens(&self) -> VecDeque<String> {
+    fn next_tokens(&self) -> Vec<String> {
         let text = self
             .script
             .lock()
             .ok()
             .and_then(|mut script| script.pop_front())
             .unwrap_or_else(|| DEFAULT_TEXT.to_owned());
-        plain_tokens(&text).into()
+        plain_tokens(&text)
     }
 }
 
@@ -127,7 +130,8 @@ impl Transcriber for FakeTranscriber {
             pending_start_ms: 0,
             total_samples: 0,
             last_speech_end_ms: None,
-            tokens: None,
+            script: None,
+            tokens: VecDeque::new(),
             segments: Vec::new(),
             partials: streaming.partials,
             partial: None,
@@ -144,8 +148,10 @@ struct FakeSession {
     total_samples: u64,
     /// 最近一段声音的结尾；还没听到过声音时是 `None`。
     last_speech_end_ms: Option<u64>,
-    /// 这次会话还没用掉的文字；听到第一段声音时才从脚本里取。
-    tokens: Option<VecDeque<String>>,
+    /// 这次会话用的那句话；听到第一段声音时才从脚本里取。
+    script: Option<Vec<String>>,
+    /// 这句话里还没分出去的字。分完了后面还有声音，就从头再来一遍。
+    tokens: VecDeque<String>,
     segments: Vec<Segment>,
     /// 要不要中间结果。
     partials: bool,
@@ -182,10 +188,15 @@ impl FakeSession {
         self.pending_start_ms += drop_samples as u64 * 1_000 / u64::from(REALTIME_SAMPLE_RATE);
     }
 
-    /// 这次会话还没用掉的文字。第一次用到时才从脚本里取。
+    /// 这次会话还没分出去的字。第一次用到时才从脚本里取；分完了就把这句话从头再放一遍，
+    /// 让后面的声音也有字（这句话本身是空的时，放了也还是空的）。
     fn remaining(&mut self) -> &mut VecDeque<String> {
-        let shared = Arc::clone(&self.shared);
-        self.tokens.get_or_insert_with(|| shared.next_tokens())
+        if self.tokens.is_empty() {
+            let shared = Arc::clone(&self.shared);
+            let script = self.script.get_or_insert_with(|| shared.next_tokens());
+            self.tokens.extend(script.iter().cloned());
+        }
+        &mut self.tokens
     }
 
     /// 一段声音分到几个字。`take_all` 表示这是最后一段，剩下的字全给它。
@@ -398,8 +409,10 @@ mod tests {
         assert!(transcript.is_empty());
         assert_eq!(transcript.audio_duration_ms, 3_000);
 
+        // 一段声音：两段的话，这么短的一句在第一段就分完了，第二段会从头再来一遍
+        let speech = Audio::tone(16_000, 220.0, 2_000, 0.3).unwrap();
         let transcript = stt
-            .transcribe(&two_bursts(), &TranscribeOptions::default())
+            .transcribe(&speech, &TranscribeOptions::default())
             .await
             .unwrap();
         assert_eq!(transcript.text(), "第一句。");
@@ -478,6 +491,99 @@ mod tests {
         assert_eq!(transcript.segments[0], so_far.segments[0]);
         assert!(transcript.segments[1].start_ms >= 3_800);
         assert_eq!(stt.calls(), 1);
+    }
+
+    /// 「面试官说了 5 秒，停一下，候选人回答 3 秒」：录像是混音，面试官的声音也算声音。
+    fn long_talk_then_an_answer() -> Audio {
+        let mut audio = Audio::silence(16_000, 300).unwrap();
+        audio
+            .append(&Audio::tone(16_000, 220.0, 5_000, 0.3).unwrap())
+            .unwrap();
+        audio
+            .append(&Audio::silence(16_000, 1_200).unwrap())
+            .unwrap();
+        audio
+            .append(&Audio::tone(16_000, 220.0, 3_000, 0.3).unwrap())
+            .unwrap();
+        audio
+    }
+
+    #[tokio::test]
+    async fn speech_after_the_text_ran_out_still_gets_words() {
+        // 默认那句话 22 个字，前面 5 秒的声音就把它分完了（issue #401）
+        let stt = FakeTranscriber::new();
+        let mut session = stt
+            .start_streaming_session(
+                &TranscribeOptions::default(),
+                &StreamingOptions {
+                    partials: true,
+                    ..StreamingOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+        let audio = long_talk_then_an_answer();
+        feed_in_chunks(&mut session, &audio).await;
+
+        // 后面那段声音还没定下来时，中间结果里也要有字：停顿时判断「说完没有」靠它
+        let partial = session.partial();
+        assert!(
+            partial.as_deref().is_some_and(|text| !text.is_empty()),
+            "{partial:?}"
+        );
+
+        let transcript = session.finish().await.unwrap();
+        assert_eq!(transcript.segments.len(), 2, "{transcript:?}");
+        assert_eq!(transcript.segments[0].text, DEFAULT_TEXT);
+        let answer = &transcript.segments[1];
+        assert!(answer.start_ms >= 6_300, "{answer:?}");
+        // 字分完了就从头再来一遍
+        assert_eq!(answer.text, DEFAULT_TEXT);
+
+        // 整段转写和边录边转一致
+        let whole = stt
+            .transcribe(&audio, &TranscribeOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(whole.text(), transcript.text());
+    }
+
+    #[tokio::test]
+    async fn every_stretch_of_speech_gets_words_however_long_the_session_runs() {
+        let stt = FakeTranscriber::with_script(["好的，我说完了。"]);
+        let mut audio = Audio::silence(16_000, 300).unwrap();
+        for _ in 0..6 {
+            audio
+                .append(&Audio::tone(16_000, 220.0, 2_000, 0.3).unwrap())
+                .unwrap();
+            audio
+                .append(&Audio::silence(16_000, 1_200).unwrap())
+                .unwrap();
+        }
+        let transcript = stt
+            .transcribe(&audio, &TranscribeOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(transcript.segments.len(), 6, "{transcript:?}");
+        for segment in &transcript.segments {
+            assert!(
+                segment.text.chars().any(char::is_alphanumeric),
+                "{segment:?}"
+            );
+        }
+        // 一次会话只用脚本里的一条：重复的是这一条，不会去拿下一条
+        assert!(transcript.text().starts_with("好的，我说完了。"));
+        assert_eq!(stt.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_script_with_nothing_to_say_does_not_loop_forever() {
+        let stt = FakeTranscriber::with_script([""]);
+        let transcript = stt
+            .transcribe(&long_talk_then_an_answer(), &TranscribeOptions::default())
+            .await
+            .unwrap();
+        assert!(transcript.is_empty());
     }
 
     #[tokio::test]
