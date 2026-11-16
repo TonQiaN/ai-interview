@@ -9,7 +9,7 @@
 - **时间**：`TIMESTAMPTZ`，存 UTC。接口里是 RFC 3339 字符串。
 - **JSONB 列**：存一个有明确 Rust 类型的结构，类型归哪条线就由哪条线保证向后兼容（加字段要有默认值）。
 - **软删除**：有 `archived_at` 的表不物理删除，列表默认不显示已归档的。
-- **彻底删除面试**：面试是例外，除了归档还能物理删除（`POST /api/v1/interviews/{id}/purge`，候选人要求删除录像时用）。面试名下的表都是 `REFERENCES interviews (id) ON DELETE CASCADE`，文件都放在 `interviews/{id}/` 下面，删的时候按这两条清。新加的表和文件要守住这两条，不然会删不干净。`llm_usage` 只去掉关联，费用记录留着。
+- **彻底删除面试**：面试是例外，除了归档还能物理删除（`POST /api/v1/interviews/{id}/purge`，候选人要求删除录像时用）。面试名下的表都是 `REFERENCES interviews (id) ON DELETE CASCADE`，文件都放在 `interviews/{id}/` 下面，删的时候按这两条清。新加的表和文件要守住这两条，不然会删不干净。`llm_usage` 只去掉关联，费用记录留着。比过这场面试的候选人对比（`position_comparisons`）跟着删。
 - **`updated_at`**：由触发器 `set_updated_at()` 维护，应用里不用管。新表需要的话照着现有的表加触发器。
 - **迁移**：只加新文件，文件名 `<UTC 时间戳 14 位>_<线名>_<说明>.sql`。只改自己归属的表；要动别人的表，找那条线。
 
@@ -34,6 +34,7 @@
 | `interview_turns` | ⑤ 写入，④ 的转写结果由 ① 的流水线回填 | 对话记录，带时间戳 |
 | `interview_events` | ⑤ | 面试过程事件 |
 | `interview_reports` | ① 存取，`content` 的结构归 ⑦ | 分析报告 |
+| `position_comparisons` | ① 存取，`content` 的结构归 ⑦ | 同一个岗位几位候选人的横向对比。一个岗位只留最近一份生成好的，和它之后的那次请求 |
 
 关系：
 
@@ -136,6 +137,7 @@ BlobStore 用字符串键，全小写，斜杠分层。库里只存键。约定�
 | `interviews.plan` | `interview_engine::InterviewPlan` | ③ |
 | `interviews.runtime_state` | 面试间的进度：逐题模式是 `interview_engine` 的会话状态，实时对话是面试间自己的结构（带 `live` 键）。只有 `interview-room` 读写 | ⑤ |
 | `interview_reports.content` | `interview_report::InterviewReport` | ⑦ |
+| `position_comparisons.content` | `interview_report::Comparison` | ⑦ |
 | `candidates.profile`、`resumes.parsed`、`positions.extra` | `interview_talent` 里的类型 | ② |
 | `voices.settings` | `interview_tts` 里的类型 | ④ |
 

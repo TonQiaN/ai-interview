@@ -14,3 +14,5 @@ pub const RECORDING_ASSEMBLE: &str = "recording.assemble";
 pub const INTERVIEW_FINALIZE: &str = "interview.finalize";
 /// 生成分析报告。payload：`{ "interview_id": "…", "report_id": "…" }`
 pub const REPORT_GENERATE: &str = "report.generate";
+/// 同一个岗位几位候选人的横向对比。payload：`{ "comparison_id": "…" }`
+pub const POSITION_COMPARE: &str = "position.compare";
