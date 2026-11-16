@@ -142,3 +142,43 @@ test("留在后面的页面点「结束面试」结束不了面试：它被告�
   await expect(movedNotice(other)).toHaveCount(0);
   await context.close();
 });
+
+test("同一个浏览器里开两个标签页：各管各的录像，先开的那个页面录下的一片不少", async ({
+  page,
+  context,
+}) => {
+  const interview = await enterInterview(page, { silenceSec: 30 });
+  const startedAt = Date.now();
+  await expectQuestion(page, 1);
+  const first = () => roomState(interview).recordings[0];
+
+  // 同一个浏览器里的第二个标签页：和第一个共用本机的录像队列
+  const tab = await context.newPage();
+  await openElsewhere(tab, interview);
+  // 它只是打开了链接：第一个页面正在录的那一段不能被它收尾，之后录的照样传得上去
+  const before = first()?.chunks.length ?? 0;
+  await page.waitForTimeout(4000);
+  expect(first()?.total_chunks ?? null).toBeNull();
+  expect(first()?.chunks.length ?? 0).toBeGreaterThan(before + 1);
+  await expect(page.getByText("录制中")).toBeVisible();
+
+  await button(tab, "继续面试").click();
+  await expect(tab.getByText("录制中")).toBeVisible();
+  await expect(movedNotice(page)).toBeVisible();
+  const stoppedAt = Date.now();
+  // 第一个页面传完自己的录像就显示完成，不等第二个页面还在录的那一段
+  await expect(button(page, "回到这个页面继续面试")).toBeVisible({ timeout: 30_000 });
+  // 它那一段这时候已经完整地在服务端了：每秒一片，盖得住它面试的那段时间
+  await expect.poll(() => first()?.status, { timeout: 30_000 }).toBe("ready");
+  const seconds = Math.floor((stoppedAt - startedAt) / 1000);
+  expect(first()?.total_chunks ?? 0).toBeGreaterThanOrEqual(seconds - 2);
+  expect(first()?.chunks.length).toBe(first()?.total_chunks);
+
+  await button(tab, "我答完了，下一题").click();
+  await expectQuestion(tab, 2);
+  await button(tab, "结束").click();
+  await button(tab, "结束面试").click();
+  await expect(tab.getByText("面试已结束")).toBeVisible({ timeout: 30_000 });
+  await expectRecordingsReady(interview, 2);
+  expect(takenOver(interview)).toBe(1);
+});
