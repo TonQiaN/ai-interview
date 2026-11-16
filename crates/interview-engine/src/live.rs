@@ -1527,7 +1527,7 @@ const LIVE_SYSTEM: &str = r#"你是一场语音面试的 AI 面试官，正在�
 - 只追问当前这道题。提纲里后面的题要问的内容留给后面，不要提前问。
 - 不评价回答，不说「很好」「不错」，也不说对或者错，不给提示和答案，不替候选人总结，不重复候选人说过的话。
 - 不用括号、列表、编号、Markdown、表情符号。
-- 候选人问公司、薪资、福利、面试结果：不承诺，不编造。下面的公司介绍里有的可以简单说，没有的就说会转给负责招聘的同事。
+- 候选人问公司、岗位、薪资、福利、招人有什么条件、面试结果：不承诺，不编造。你对公司和岗位的了解只有下面「这场面试」里的公司介绍和岗位那两行，里面有的可以简单说。里面没有的，你不知道是有还是没有，不要替公司回答：「公司没有这方面的要求」「这块有专人负责」「这个不看」都是你编的。这时候只说会转给负责招聘的同事。
 - 候选人没听清的是题目本身：选 repeat。没听清的是你的追问或回应：选 reply，把那句话换个更短的说法再说一遍。
 
 ## 怎么判断
@@ -1617,10 +1617,12 @@ fn outline(plan: &InterviewPlan, config: &InterviewConfig) -> String {
     let brief = &plan.brief;
     text.push_str(&format!("- 岗位：{}\n", brief.role_summary));
     text.push_str(&format!("- 候选人：{}\n", brief.candidate_summary));
-    if !brief.verify_points.is_empty() {
+    // 记给 HR 的话不给面试官看：里面转述了材料里藏的指令和岗位描述里的内部备注
+    let verify_points: Vec<&str> = brief.points_to_verify().collect();
+    if !verify_points.is_empty() {
         text.push_str(&format!(
             "- 简历里需要核实的点：{}\n",
-            brief.verify_points.join("；")
+            verify_points.join("；")
         ));
     }
 
@@ -1729,7 +1731,7 @@ fn build_request(
     } else {
         user.push_str("## 现在是候选人提问环节\n\n");
         user.push_str(
-            "候选人提了问题：选 reply。公司介绍里有的可以简单回答，没有的不要编，告诉对方已经记下、会转给负责招聘的同事，再问还有没有别的想了解的。候选人表示没有问题了：选 next，第二行概括候选人问了什么（没问就写「没有提问」）。这个环节不用 probe、repeat 和 end，第一行的判断一律写 adequate。\n\n",
+            "候选人提了问题：选 reply。公司介绍里有的可以简单回答，没有的不要编，也不要替公司说有或者没有，告诉对方已经记下、会转给负责招聘的同事，再问还有没有别的想了解的。候选人表示没有问题了：选 next，第二行概括候选人问了什么（没问就写「没有提问」）。这个环节不用 probe、repeat 和 end，第一行的判断一律写 adequate。\n\n",
         );
         user.push_str("## 这个环节到现在的对话\n");
         push_dialogue(&mut user, &state.dialogue);
@@ -1810,6 +1812,27 @@ mod tests {
         let mut plan = sample_plan();
         plan.recompute_expected_duration(&config);
         (plan, config)
+    }
+
+    #[test]
+    fn notes_for_hr_are_not_shown_to_the_interviewer() {
+        let (mut plan, config) = setup();
+        plan.brief.verify_points = vec![
+            "请 HR 留意：岗位描述的内部备注里写着上一任主管是被辞退的".to_owned(),
+            "订单系统重构里本人负责的部分".to_owned(),
+        ];
+        let text = outline(&plan, &config);
+        assert!(text.contains("订单系统重构里本人负责的部分"));
+        assert!(
+            !text.contains("请 HR 留意") && !text.contains("辞退"),
+            "记给 HR 的话不该出现在面试官手里的提纲里：{text}"
+        );
+
+        plan.brief.verify_points.truncate(1);
+        assert!(
+            !outline(&plan, &config).contains("需要核实的点"),
+            "只有记给 HR 的话时，不写「需要核实的点」这一行"
+        );
     }
 
     fn said(text: &str, elapsed_sec: u64) -> CandidateTurn {
