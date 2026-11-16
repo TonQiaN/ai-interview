@@ -381,6 +381,7 @@ export const eventLabel: Record<string, string> = {
   answer_continued: "要求继续回答",
   events_dropped: "有事件没有记下来",
   face_count_changed: "画面里的人数变了",
+  phone_visible: "画面里看得到手机",
   frames_checked: "抽查录像画面",
   screen_wake_lock: "屏幕常亮",
   upload_stalled: "录像传不上去",
@@ -399,7 +400,15 @@ export type EventSeverity = "info" | "notice" | "warning";
 
 /** 事件在时间轴上有多醒目。只是提示 HR 去看，不代表结论 */
 export function eventSeverity(kind: string): EventSeverity {
-  if (["visibility_hidden", "paste", "face_count_changed", "fullscreen_exit"].includes(kind))
+  if (
+    [
+      "visibility_hidden",
+      "paste",
+      "face_count_changed",
+      "phone_visible",
+      "fullscreen_exit",
+    ].includes(kind)
+  )
     return "warning";
   if (
     [
@@ -471,8 +480,11 @@ export function eventNote(event: EventLike): string | null {
   if (event.kind === "face_count_changed" && count !== null) parts.push(`变成 ${count} 个人`);
   // 报告分析录像画面时记下来的：这一段画面里有几个人、一共几帧
   const people = num(p.people);
-  if (event.kind === "face_count_changed" && people !== null) {
-    parts.push(people === 0 ? "没有人" : `${people} 个人`);
+  const frameRun =
+    event.kind === "phone_visible" ||
+    (event.kind === "face_count_changed" && (people !== null || p.unclear === true));
+  if (frameRun) {
+    if (people !== null) parts.push(people === 0 ? "没有人" : `${people} 个人`);
     const frames = num(p.frames);
     if (frames !== null) parts.push(`共 ${frames} 帧`);
     const note = str(p.note);
@@ -593,14 +605,23 @@ export function eventEvidenceText(quote: string): string {
     const parsed: unknown = JSON.parse(match?.[2] ?? "{}");
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
       payload = parsed as Record<string, unknown>;
+    // 报告线的样例里，人数变化只写了一个数
+    else if (kind === "face_count_changed" && typeof parsed === "number")
+      payload = { count: parsed };
   } catch {
     // 内容读不出来，只说是哪一类事件
   }
   return eventText({ kind, payload });
 }
 
+/** 事件叫什么。同一类事件里说法不一样的（画面看不清记在人数变化里）在这里分开 */
+export function eventName(event: EventLike): string {
+  if (event.kind === "face_count_changed" && event.payload?.unclear === true) return "画面看不清";
+  return eventLabel[event.kind] ?? event.kind;
+}
+
 export function eventText(event: EventLike): string {
-  const name = eventLabel[event.kind] ?? event.kind;
+  const name = eventName(event);
   const note = eventNote(event);
   return note ? `${name}（${note}）` : name;
 }

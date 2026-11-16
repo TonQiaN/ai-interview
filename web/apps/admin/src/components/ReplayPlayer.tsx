@@ -16,7 +16,7 @@ import { activeTurnIndex, useClock } from "../lib/clock";
 import {
   clock,
   duration,
-  eventLabel,
+  eventName,
   eventNote,
   eventSeverity,
   eventText,
@@ -263,7 +263,7 @@ export function ReplayPlayer({
               className={`adm-track__mark${eventSeverity(e.kind) === "notice" ? " adm-track__mark--info" : ""}`}
               style={{ left: pct(e.at_ms ?? 0) }}
               title={`${clock(e.at_ms ?? 0)} ${eventText(e)}`}
-              aria-label={`跳到 ${clock(e.at_ms ?? 0)}：${eventLabel[e.kind] ?? e.kind}`}
+              aria-label={`跳到 ${clock(e.at_ms ?? 0)}：${eventName(e)}`}
               onClick={() => seek((e.at_ms ?? 0) - 3000)}
             />
           ))}
@@ -295,14 +295,14 @@ export function ReplayPlayer({
                     <span className="adm-turn__time">{eventWhen(e, events)}</span>
                     <span>
                       {typeof e.at_ms !== "number" ? (
-                        (eventLabel[e.kind] ?? e.kind)
+                        eventName(e)
                       ) : (
                         <button
                           type="button"
                           className="adm-chip-btn"
                           onClick={() => seek((e.at_ms ?? 0) - 3000)}
                         >
-                          {eventLabel[e.kind] ?? e.kind}
+                          {eventName(e)}
                         </button>
                       )}
                       {eventNote(e) && <span className="adm-item__sub"> {eventNote(e)}</span>}
