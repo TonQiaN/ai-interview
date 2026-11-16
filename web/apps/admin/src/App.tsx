@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from "react-router";
 import { Layout } from "./layout/Layout";
+import { AccountPage } from "./pages/Account";
+import { AccountsPage } from "./pages/Accounts";
 import { CandidateDetailPage } from "./pages/CandidateDetail";
 import { CandidatesPage } from "./pages/Candidates";
 import { InterviewDetailPage } from "./pages/InterviewDetail";
@@ -33,6 +35,8 @@ export function App() {
         <Route path="templates/:id" element={<TemplateEditPage />} />
         <Route path="voices" element={<VoicesPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="accounts" element={<AccountsPage />} />
+        <Route path="account" element={<AccountPage />} />
         <Route path="home" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

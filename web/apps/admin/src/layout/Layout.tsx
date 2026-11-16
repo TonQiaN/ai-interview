@@ -26,6 +26,7 @@ import {
   Settings,
   SlidersHorizontal,
   Sun,
+  UserCog,
   Users,
 } from "lucide-react";
 import { useState } from "react";
@@ -106,16 +107,22 @@ export function Layout() {
             { to: "/templates", label: "面试设置", icon: SlidersHorizontal },
             { to: "/voices", label: "声音", icon: Mic2 },
             { to: "/settings", label: "系统", icon: Settings },
+            // 账号只有管理员能管，普通账号调那组接口是 403
+            ...(me.data.role === "admin"
+              ? [{ to: "/accounts", label: "账号", icon: UserCog }]
+              : []),
           ]}
         />
       </Nav>
       <SidebarFooter>
         <div className="oil-row">
-          <Avatar name={me.data.display_name} />
-          <div className="oil-grow">
-            <div className="adm-ellipsis">{me.data.display_name}</div>
-            <div className="adm-sidebar-sub adm-ellipsis">{me.data.email}</div>
-          </div>
+          <NavLink to="/account" className="oil-row oil-grow adm-me" title="我的账号，修改密码">
+            <Avatar name={me.data.display_name} />
+            <div className="oil-grow">
+              <div className="adm-ellipsis">{me.data.display_name}</div>
+              <div className="adm-sidebar-sub adm-ellipsis">{me.data.email}</div>
+            </div>
+          </NavLink>
           <Button
             variant="ghost"
             iconOnly
