@@ -272,6 +272,63 @@ describe("面试详情", () => {
     });
   });
 
+  describe("发了链接、候选人还没来", () => {
+    const HOUR = 3_600_000;
+    /** 把一场待发送的面试改成发过链接的，链接什么时候过期、候选人打开过几次由参数定 */
+    function invited(expiresInMs: number, openCount = 0) {
+      const target = server.db.interviews.find((i) => i.status === "ready");
+      if (!target) throw new Error("演示数据里没有待发送的面试");
+      target.status = "invited";
+      const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+      server.db.invites.set(target.id, [
+        {
+          id: "00000000-0000-4000-8000-000000000001",
+          interview_id: target.id,
+          status: "active",
+          expires_at: at(expiresInMs),
+          revoked_at: null,
+          first_opened_at: openCount > 0 ? at(-30 * HOUR) : null,
+          last_opened_at: openCount > 0 ? at(-26 * HOUR) : null,
+          open_count: openCount,
+          created_at: at(-72 * HOUR),
+        },
+      ]);
+      return target;
+    }
+
+    it("链接过期了：提醒 HR，点一下去换新链接", async () => {
+      const target = invited(-2 * HOUR, 2);
+      open(target.id);
+
+      expect(await screen.findByText("链接过期了，候选人还没有面试")).toBeTruthy();
+      expect(screen.getByText(/候选人打开过链接，但没有开始面试/)).toBeTruthy();
+      expect(screen.queryByText("链接已经生成，等候选人来面试。")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "换一个新链接" }));
+      expect(await screen.findByText("发出过的链接")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "生成链接" }));
+      expect(await screen.findByText("链接生成好了")).toBeTruthy();
+    });
+
+    it("链接过期了、候选人没打开过：照实说", async () => {
+      const target = invited(-2 * HOUR);
+      open(target.id);
+
+      expect(await screen.findByText("链接过期了，候选人还没有面试")).toBeTruthy();
+      expect(screen.getByText(/候选人没有打开过链接/)).toBeTruthy();
+    });
+
+    it("链接还有效：写着什么时候过期、候选人打开过没有", async () => {
+      const target = invited(50 * HOUR);
+      open(target.id);
+
+      expect(
+        await screen.findByText("链接已经生成，等候选人来面试。链接 2 天后过期，候选人还没打开。"),
+      ).toBeTruthy();
+      expect(screen.queryByText("链接过期了，候选人还没有面试")).toBeNull();
+    });
+  });
+
   it("没归档的面试不显示归档的说明", async () => {
     const target = server.db.interviews.find((i) => i.status === "ready");
     if (!target) throw new Error("演示数据里没有待发送的面试");
