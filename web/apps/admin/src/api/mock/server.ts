@@ -1581,6 +1581,8 @@ export function createMockServer(options: MockOptions = {}) {
     if (Object.keys(details).length > 0)
       throw new HttpError(422, "validation_failed", "题目里有没填的内容", details);
     db.plans.set(i.id, plan);
+    // 和后端一样，保存的同时就把每句话对好：文字变了的和新增的马上是「待合成」
+    syncUtterances(i, plan);
     // 改过的句子重新合成，没改的不动
     prepare(i);
     return plan;
