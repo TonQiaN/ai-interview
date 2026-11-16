@@ -147,5 +147,10 @@ describe("候选人详情", () => {
     const dialog = within(await screen.findByRole("dialog", { name: `归档${candidate.name}？` }));
     expect(dialog.getByText(/还留在服务器上，没有删掉/)).toBeTruthy();
     expect(dialog.getByText(/请找管理员彻底删除/)).toBeTruthy();
+
+    fireEvent.click(dialog.getByRole("button", { name: "归档" }));
+    expect(await screen.findByText("候选人列表")).toBeTruthy();
+    expect(screen.getByText("已归档")).toBeTruthy();
+    expect(server.db.candidates.find((c) => c.id === candidate.id)?.archived_at).toBeTruthy();
   });
 });

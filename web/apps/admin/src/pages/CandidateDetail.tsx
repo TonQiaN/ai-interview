@@ -401,7 +401,7 @@ function ResumeRow({ resume, candidateId }: { resume: Resume; candidateId: strin
         onConfirm={() =>
           remove.mutate(resume.id, {
             onSuccess: () => {
-              toast("已归档");
+              toast("已删除");
               setDeleting(false);
             },
             onError: (e) => {
@@ -844,7 +844,7 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
         onConfirm={() =>
           remove.mutate(candidate.id, {
             onSuccess: () => {
-              toast("已删除");
+              toast("已归档");
               navigate("/candidates", { replace: true });
             },
             onError: (e) => {
