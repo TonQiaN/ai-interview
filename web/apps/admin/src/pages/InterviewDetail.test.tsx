@@ -205,6 +205,73 @@ describe("面试详情", () => {
     expect(listed.items.some((i) => i.id === target.id)).toBe(true);
   });
 
+  describe("准备失败", () => {
+    const failedOne = () => {
+      const target = server.db.interviews.find((i) => i.status === "prepare_failed" && i.has_plan);
+      if (!target) throw new Error("演示数据里没有语音没合成全的面试");
+      return target;
+    };
+
+    it("语音没合成全：先说几句没合成、该怎么办，后端的原话收在「详细原因」里", async () => {
+      const target = failedOne();
+      target.prepare_error =
+        "12 句语音合成失败：opening（index2 现在用不了：连不上）、q1（index2 现在用不了：连不上）";
+      open(target.id);
+
+      const banner = (await screen.findByText("语音没有全部合成出来")).closest(".oil-banner");
+      if (!(banner instanceof HTMLElement)) throw new Error("没找到提示");
+      expect(
+        within(banner).getByText(
+          new RegExp(
+            `${target.synth.failed} 句语音没合成出来。题目已经保留，点「重试」只补没合成的这几句。`,
+          ),
+        ),
+      ).toBeTruthy();
+      const details = within(banner).getByText("详细原因").closest("details");
+      expect(details?.open).toBe(false);
+      expect(details?.textContent).toContain("opening（index2 现在用不了：连不上）");
+      expect(within(banner).getByRole("button", { name: "重试" })).toBeTruthy();
+    });
+
+    it("这场面试的音色用的引擎现在不可用：说是哪个引擎、等它恢复或者换音色", async () => {
+      const target = failedOne();
+      const engine = server.db.voices.find((v) =>
+        target.voice_id ? v.id === target.voice_id : v.is_default,
+      )?.engine;
+      setFetch(async (request) => {
+        const response = await server.fetch(request);
+        if (new URL(request.url).pathname !== "/api/v1/speech/engines") return response;
+        const body = await response.json();
+        for (const item of body.items)
+          if (item.id === engine)
+            Object.assign(item, { available: false, unavailable_reason: "连不上 worker" });
+        return new Response(JSON.stringify(body), {
+          headers: { "content-type": "application/json" },
+        });
+      });
+      open(target.id);
+
+      const text = await screen.findByText(/现在不可用，\d+ 句语音没合成出来/);
+      expect(text.textContent).toContain("等它恢复以后点「重试」");
+      expect(text.textContent).toContain("也可以在「改设置」里换一个音色");
+      expect(within(text).getByRole("link", { name: "「声音」" })).toBeTruthy();
+    });
+
+    it("题目没出成：直接显示后端给的原因", async () => {
+      const target = server.db.interviews.find((i) => i.status === "draft" && !i.has_plan);
+      if (!target) throw new Error("演示数据里没有还没出题的面试");
+      Object.assign(target, {
+        status: "prepare_failed",
+        prepare_error: "大模型没有回应，稍后再试",
+      });
+      open(target.id);
+
+      expect(await screen.findByText("题目没有准备好")).toBeTruthy();
+      expect(screen.getByText("大模型没有回应，稍后再试")).toBeTruthy();
+      expect(screen.queryByText("详细原因")).toBeNull();
+    });
+  });
+
   it("没归档的面试不显示归档的说明", async () => {
     const target = server.db.interviews.find((i) => i.status === "ready");
     if (!target) throw new Error("演示数据里没有待发送的面试");
