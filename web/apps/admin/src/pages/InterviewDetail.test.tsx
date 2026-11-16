@@ -369,6 +369,42 @@ describe("面试详情", () => {
     });
   });
 
+  describe("安排下一轮", () => {
+    function reported() {
+      const target = server.db.interviews.find(
+        (i) => i.status === "completed" && i.report?.status === "done" && !i.archived_at,
+      );
+      if (!target) throw new Error("演示数据里没有出了报告的面试");
+      return target;
+    }
+
+    it("出了报告的面试：概览上有「安排下一轮」，点了带着这一场和「下一轮」去安排面试页", async () => {
+      const target = reported();
+      open(target.id);
+
+      fireEvent.click(await screen.findByRole("button", { name: "安排下一轮" }));
+      expect(await screen.findByText(`安排面试页?from=${target.id}&round=next`)).toBeTruthy();
+    });
+
+    it("报告里「下一轮可以接着问」下面也能点", async () => {
+      const target = reported();
+      open(target.id);
+
+      fireEvent.click(await screen.findByRole("tab", { name: "报告" }));
+      fireEvent.click(await screen.findByRole("button", { name: "按这些安排下一轮" }));
+      expect(await screen.findByText(`安排面试页?from=${target.id}&round=next`)).toBeTruthy();
+    });
+
+    it("报告还没出来、或者候选人中途离开的，没有这个按钮", async () => {
+      const target = reported();
+      target.status = "abandoned";
+      open(target.id);
+
+      await screen.findAllByRole("button", { name: "再安排一场" });
+      expect(screen.queryByRole("button", { name: "安排下一轮" })).toBeNull();
+    });
+  });
+
   describe("可以直接发给候选人的话", () => {
     /** 给一场待发送的面试生成链接，返回那段话 */
     async function message(stage: Interview["config"]["stage"]) {
