@@ -1201,6 +1201,44 @@ async fn a_broken_voice_is_reported_to_hr(pool: PgPool) {
     assert_eq!(h.tts.calls(), 0);
 }
 
+/// 刚装好的系统里没有任何音色，只起了 IndexTTS：兜底的声音要 BreezeTTS2，用不了。
+/// HR 要做的是去建一个默认音色，提示里要直接说出来。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn says_to_set_a_default_voice_when_the_fallback_engine_is_down(pool: PgPool) {
+    let h = Harness::new(
+        pool,
+        Some(planner()),
+        FakeBackend::new().with_unavailable(interview_tts::EngineId::Breeze2),
+    )
+    .await;
+    let id = h.create(config()).await;
+    let detail = h.prepare(&id).await;
+    assert_eq!(detail["status"], "prepare_failed", "{detail}");
+    let error = detail["prepare_error"].as_str().unwrap();
+    assert!(error.contains("还没有默认音色"), "{error}");
+    assert!(error.contains("「声音」页"), "{error}");
+    assert_eq!(detail["has_plan"], true, "题目已经出好了，不用重出");
+
+    // 建了默认音色（设计音色不需要参考录音，这里借假后端放开 BreezeTTS2 的另一个实例来合成）
+    sqlx::query(
+        "INSERT INTO voices (name, engine, kind, instruction, is_default) \
+         VALUES ('默认音色', 'breeze2', 'designed', '沉稳的女声', true)",
+    )
+    .execute(&h.ctx.db)
+    .await
+    .unwrap();
+    // 指定了音色（这里是默认音色）而它的引擎用不了：这是另一回事，不提「还没有默认音色」
+    let detail = h.prepare(&id).await;
+    assert_eq!(detail["status"], "prepare_failed", "{detail}");
+    let error = detail["prepare_error"].as_str().unwrap();
+    assert!(!error.contains("还没有默认音色"), "{error}");
+    assert!(error.contains("现在用不了"), "{error}");
+
+    // 引擎起来了，再点一次准备就好了
+    let again = h.with(None, FakeBackend::new());
+    assert_eq!(again.prepare(&id).await["status"], "ready");
+}
+
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn uses_the_default_voice_when_none_is_chosen(pool: PgPool) {
     let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;

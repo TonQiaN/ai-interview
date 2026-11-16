@@ -18,7 +18,7 @@ use interview_engine::{
 use interview_llm::Pricing;
 use interview_platform::tasks::{NewTask, Task, TaskError, TaskQueue, TaskResult};
 use interview_platform::usage::{self, LlmUsage};
-use interview_tts::BatchItem;
+use interview_tts::{BatchItem, TtsError};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgConnection;
@@ -245,6 +245,8 @@ async fn synthesize(
     let outcomes = deps.synth.synthesize_batch(items).await;
 
     let mut failures: Vec<String> = Vec::new();
+    // 兜底音色的引擎用不了：HR 要做的是建一个默认音色，不是等引擎恢复
+    let mut fallback_engine_down = false;
     for outcome in &outcomes {
         let saved = match &outcome.result {
             Ok(audio) => {
@@ -269,6 +271,8 @@ async fn synthesize(
             }
             Err(err) => {
                 let message = err.to_string();
+                fallback_engine_down |=
+                    voice.fallback && matches!(err, TtsError::EngineUnavailable { .. });
                 failures.push(format!("{}（{message}）", outcome.key));
                 store::save_synth_result(
                     db,
@@ -290,6 +294,12 @@ async fn synthesize(
 
     if failures.is_empty() {
         Ok(outcomes.len())
+    } else if fallback_engine_down {
+        Err(failed(format!(
+            "还没有默认音色。没有默认音色时面试官用 {} 的通用声音，而它现在用不了。\
+             到「声音」页建一个音色并设成默认，再点一次准备。题目已经保留，只会补合成语音",
+            voice.engine.spec().name,
+        )))
     } else {
         let shown: Vec<&str> = failures.iter().take(3).map(String::as_str).collect();
         Err(failed(format!(
