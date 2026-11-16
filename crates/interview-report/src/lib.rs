@@ -7,8 +7,14 @@
 //! 这是纯库，不碰数据库和 HTTP。入口是 [`analyze`]：输入 [`InterviewRecord`]，输出 [`InterviewReport`]。
 //! 判断全部交给模型；程序只做计时算术和证据核对，保证报告里每条证据都能在转写里找到原话和时间点。
 //!
+//! 同一个岗位有几位候选人时，[`compare`] 拿他们各自的报告做横向对比。
+//!
+//! [`calibration`] 是拿真人面试校准报告用的：评审的评分表、和报告的对照统计。
+//!
 //! 报告的设计依据、各部分的可靠性说明、实测结果见这个 crate 的 `README.md`。
 
+pub mod calibration;
+pub mod compare;
 mod evidence;
 pub mod frames;
 mod pipeline;
@@ -18,6 +24,7 @@ pub mod record;
 pub mod report;
 mod transcript;
 
+pub use compare::{CompareError, Comparison, compare};
 pub use pipeline::{AnalyzeError, AnalyzeOptions, analyze};
 pub use prompts::PROMPT_VERSION;
 pub use record::InterviewRecord;

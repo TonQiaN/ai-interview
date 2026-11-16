@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 use interview_audio::{Audio, Ffmpeg, decode_wav, encode_wav};
 use interview_stt::{
     ASR_MODEL_DIR_NAME, BargeInConfig, BargeInDetector, BargeInEvent, MODEL_DIR_ENV_VAR,
-    RecordingTranscript, SherpaConfig, SherpaTranscriber, SttError, TranscribeOptions, Transcriber,
-    Transcript, TurnConfig, TurnEnd, TurnEvent, TurnListener,
+    RecordingTranscript, SherpaConfig, SherpaTranscriber, StreamingOptions, SttError,
+    TranscribeOptions, Transcriber, Transcript, TurnConfig, TurnEnd, TurnEvent, TurnListener,
 };
 
 fn model_dir() -> PathBuf {
@@ -535,6 +535,117 @@ async fn speaking_over_the_interviewer_is_noticed_within_a_second_and_a_half() {
 }
 
 // 这一条不需要模型，带 sherpa 特性的 CI 会跑
+/// 一段切不开的长话：停顿判得很宽，也不强行切段，示例录音一段紧接一段，接到 `seconds` 秒以上。
+///
+/// 真实面试里出现在声音一直很满的时候（语速快、背景里一直有人声或音乐）：「说满 15 秒切一段」
+/// 要等声音弱下去一下才切得开。
+fn speech_without_a_break(seconds: u64) -> (SherpaConfig, Audio) {
+    let mut config = SherpaConfig::new(model_dir());
+    config.min_silence_ms = 5_000;
+    config.max_segment_ms = 120_000;
+    let clips = sample_wavs();
+    let gap = Audio::silence(16_000, 200).unwrap();
+    let mut audio = Audio::silence(16_000, 300).unwrap();
+    let mut next = 0;
+    while audio.duration_ms() < seconds * 1_000 {
+        audio
+            .append(&clips[next % clips.len()].resample(16_000).unwrap())
+            .unwrap();
+        audio.append(&gap).unwrap();
+        next += 1;
+    }
+    (config, audio)
+}
+
+/// 识别模型一次吃不下 40 秒以上的音频：报错是从 C++ 里抛出来的，Rust 接不住，整个进程直接退出，
+/// 同一个进程里别的面试也跟着没了（issue #258）。所以这个测试没修好时不是失败，是测试进程崩掉。
+#[tokio::test]
+#[ignore = "需要真模型"]
+async fn a_stretch_of_speech_longer_than_the_model_can_take_is_still_transcribed() {
+    let (config, audio) = speech_without_a_break(70);
+    let stt = SherpaTranscriber::load(config).await.expect("模型加载失败");
+
+    let transcript = stt
+        .transcribe(&audio, &TranscribeOptions::default())
+        .await
+        .unwrap();
+    assert_well_formed(&transcript);
+    assert_eq!(transcript.segments.len(), 1, "这段话本来就不该被切开");
+    let segment = &transcript.segments[0];
+    assert!(
+        segment.end_ms - segment.start_ms > 65_000,
+        "这段话有 {} 秒",
+        (segment.end_ms - segment.start_ms) / 1_000
+    );
+
+    // 和每段录音单独识别出来的字基本一样：切开来识别没有丢掉或者重复一大截
+    let mut expected = String::new();
+    let plain = load().await;
+    let mut covered = 300;
+    for clip in sample_wavs().iter().cycle() {
+        if covered >= audio.duration_ms() {
+            break;
+        }
+        let alone = plain
+            .transcribe(clip, &TranscribeOptions::default())
+            .await
+            .unwrap();
+        expected.push_str(&alone.text());
+        covered += clip.duration_ms() + 200;
+    }
+    let (heard, expected) = (letters(&segment.text), letters(&expected));
+    let ratio = heard.len() as f32 / expected.len() as f32;
+    assert!((0.9..=1.1).contains(&ratio), "字数差得太多：{ratio}");
+    assert!(
+        overlap(&heard, &expected) > 0.9,
+        "和分开识别的结果差得太多：{}",
+        overlap(&heard, &expected)
+    );
+}
+
+/// 实时对话要中间结果，每次都从这段话的开头识别到现在，话还没切开时它先超过模型吃得下的长度。
+#[tokio::test]
+#[ignore = "需要真模型"]
+async fn captions_keep_coming_through_a_stretch_of_speech_without_a_break() {
+    let (config, audio) = speech_without_a_break(70);
+    let stt = SherpaTranscriber::load(config).await.expect("模型加载失败");
+    let streaming = StreamingOptions {
+        partials: true,
+        ..StreamingOptions::default()
+    };
+    let mut session = stt
+        .start_streaming_session(&TranscribeOptions::default(), &streaming)
+        .await
+        .unwrap();
+
+    let mut longest = 0;
+    let mut at_ms = 0;
+    while at_ms < audio.duration_ms() {
+        let settled = session
+            .push(&audio.slice_ms(at_ms, at_ms + 100))
+            .await
+            .unwrap();
+        assert!(settled.is_empty(), "这段话不该在中途定下来");
+        at_ms += 100;
+        if let Some(partial) = session.partial() {
+            let length = letters(&partial).len();
+            // 中间结果只会越来越长：前面识别过的不会因为话太长被丢掉
+            assert!(
+                length * 10 >= longest * 9,
+                "{at_ms} 毫秒时中间结果从 {longest} 个字缩到了 {length} 个字"
+            );
+            longest = longest.max(length);
+        }
+    }
+    let transcript = session.finish().await.unwrap();
+    assert_well_formed(&transcript);
+    let settled = letters(&transcript.text()).len();
+    assert!(
+        longest * 10 >= settled * 8,
+        "说到最后中间结果有 {longest} 个字，定下来的有 {settled} 个字"
+    );
+}
+
 #[tokio::test]
 async fn a_missing_model_directory_is_reported_as_unavailable() {
     let Err(error) = SherpaTranscriber::load(SherpaConfig::new("/nonexistent/stt-models")).await

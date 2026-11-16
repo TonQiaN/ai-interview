@@ -6,6 +6,7 @@ use interview_core::{
     UtteranceSource,
 };
 use interview_engine::{ConfigLimits, InterviewConfig, TimeBudget};
+use interview_report::report::{Decision, ScoreRange};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -22,6 +23,14 @@ pub struct InterviewSummary {
     pub position_title: String,
     /// 最新一份分析报告的状态。还没有报告时为空
     pub report_status: Option<ReportStatus>,
+    /// 报告的综合得分，0 到 100。取最新一份生成好的报告；还没有生成好的报告、或者报告里没有总分时为空
+    pub overall_score: Option<i32>,
+    /// 综合得分大概的浮动范围。早先生成的报告没有这一项，为空
+    #[sqlx(json(nullable))]
+    pub score_range: Option<ScoreRange>,
+    /// 报告里是否建议进入下一轮。还没有生成好的报告时为空
+    #[sqlx(json(nullable))]
+    pub recommendation: Option<Decision>,
     pub started_at: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -137,7 +146,19 @@ pub struct CreateInterview {
 pub struct UpdateInterview {
     pub config: Option<InterviewConfig>,
     pub resume_id: Option<Uuid>,
-    pub voice_id: Option<Uuid>,
+    /// 面试官音色。不带这个字段是不改；带 `null` 是改回用默认音色
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<Uuid>)]
+    pub voice_id: Option<Option<Uuid>>,
+}
+
+/// 区分「没带这个字段」（外层是 `None`）和「带了 null」（`Some(None)`）。和 `#[serde(default)]` 一起用。
+fn present<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 /// 改完之后的面试。

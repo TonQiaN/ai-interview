@@ -28,6 +28,7 @@ pub(crate) fn router() -> OpenApiRouter<Deps> {
         .routes(routes!(get_interview, update_interview, archive_interview))
         .routes(routes!(prepare_interview))
         .routes(routes!(cancel_interview))
+        .routes(routes!(purge_interview))
         .routes(routes!(get_plan, put_plan))
         .routes(routes!(list_utterances))
         .routes(routes!(utterance_audio))
@@ -203,7 +204,7 @@ async fn get_interview(
 /// 只能在发链接之前改。换了简历，或者改的配置写进了题目里（时长、面试官、考察要求等），
 /// 已经出好的题目会作废、面试回到草稿，要重新准备，`replan_reasons` 里是导致重新出题的字段。
 /// 改的配置不影响题目（早停、思考模式、单题最长时间等）时题目和语音都保留，状态不变。
-/// 只换音色的话题目保留，重新准备时只重新合成语音。
+/// 只换音色的话题目保留，重新准备时只重新合成语音。`voice_id` 带 `null` 是改回用默认音色，和换音色一样处理。
 #[utoipa::path(
     patch,
     path = "/api/v1/interviews/{id}",
@@ -232,8 +233,9 @@ async fn update_interview(
     if let Some(resume_id) = request.resume_id {
         check_resume(&deps, resume_id, row.candidate_id).await?;
     }
-    let voice_id = request.voice_id.or(row.voice_id);
-    if let Some(voice_id) = request.voice_id {
+    // 没带 voice_id 是不改，带 null 是改回默认音色
+    let voice_id = request.voice_id.unwrap_or(row.voice_id);
+    if let Some(Some(voice_id)) = request.voice_id {
         check_voice(&deps, voice_id).await?;
     }
 
@@ -444,6 +446,42 @@ async fn cancel_interview(
         }
     }
     Ok(Json(detail(&deps, id).await?))
+}
+
+/// 彻底删除面试
+///
+/// 只有管理员能用，删了不能恢复。这场面试的录像、面试官的语音、候选人每段回答的声音、
+/// 画面检查的帧，和题目、对话记录、过程事件、面试链接、报告一起删掉。候选人和岗位不动。
+/// 还没结束的面试会先取消（发出去的链接失效）。正在准备或者正在面试的不能删，先取消。
+/// 只想在列表里藏起来用归档（`DELETE /api/v1/interviews/{id}`）。
+#[utoipa::path(
+    post,
+    path = "/api/v1/interviews/{id}/purge",
+    tag = "interviews",
+    params(("id" = Uuid, Path, description = "面试 ID")),
+    responses(
+        (status = 204, description = "删掉了"),
+        (status = 403, description = "不是管理员", body = ErrorBody),
+        (status = 404, description = "没有这场面试", body = ErrorBody),
+        (status = 409, description = "正在准备、正在面试，或者后台正在处理它", body = ErrorBody),
+    )
+)]
+async fn purge_interview(
+    State(deps): State<Deps>,
+    user: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<StatusCode> {
+    user.require_admin()?;
+    let row = load(&deps, id).await?;
+    if matches!(
+        row.status,
+        InterviewStatus::Preparing | InterviewStatus::InProgress
+    ) {
+        return Err(ApiError::conflict("正在准备或者正在面试，先取消再删除"));
+    }
+    crate::purge::purge(&deps.ctx, id).await?;
+    tracing::info!(interview_id = %id, by = %user.id, "管理员彻底删除了一场面试");
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn load_plan(row: &InterviewRow) -> ApiResult<InterviewPlan> {

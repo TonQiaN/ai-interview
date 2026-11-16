@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  Account,
   Candidate,
   CandidateDetail,
   CreatedInvite,
@@ -93,6 +94,44 @@ describe("假后端", () => {
     const firstPage = await call<Page<InterviewSummary>>(server, "GET", "/interviews?page_size=3");
     expect(firstPage.data.items).toHaveLength(3);
     expect(firstPage.data.total).toBe(all.data.total);
+  });
+
+  it("面试列表带着最新一份报告的结论和综合分，能按分数排，没有分数的排最后", async () => {
+    await login(server);
+    type Row = InterviewSummary;
+    const all = await call<Page<Row>>(server, "GET", "/interviews?page_size=100");
+    const scored = all.data.items.filter((i) => typeof i.overall_score === "number");
+    expect(scored.length).toBeGreaterThan(1);
+    for (const i of scored) {
+      expect(i.report_status).toBe("done");
+      expect(i.recommendation).toBeTruthy();
+      const report = await call<ReportEnvelope>(server, "GET", `/interviews/${i.id}/report`);
+      expect(i.overall_score).toBe(report.data.content.overall_score);
+      expect(i.recommendation).toBe(report.data.content.recommendation.decision);
+    }
+    // 还没面的没有报告，三项都是 null
+    const draft = all.data.items.find((i) => i.status === "draft");
+    expect([draft?.overall_score, draft?.score_range, draft?.recommendation]).toEqual([
+      null,
+      null,
+      null,
+    ]);
+
+    const scores = (rows: Row[]) => rows.map((i) => i.overall_score ?? null);
+    const high = scores(
+      (await call<Page<Row>>(server, "GET", "/interviews?page_size=100&sort=-score")).data.items,
+    );
+    const low = scores(
+      (await call<Page<Row>>(server, "GET", "/interviews?page_size=100&sort=score")).data.items,
+    );
+    const numbers = (list: (number | null)[]) => list.filter((x): x is number => x !== null);
+    expect(numbers(high)).toEqual([...numbers(high)].sort((a, b) => b - a));
+    expect(numbers(low)).toEqual([...numbers(low)].sort((a, b) => a - b));
+    for (const list of [high, low]) {
+      const firstMissing = list.indexOf(null);
+      expect(firstMissing).toBe(numbers(list).length);
+      expect(list.slice(firstMissing).every((x) => x === null)).toBe(true);
+    }
   });
 
   it("安排面试：草稿，准备，生成链接，链接只在生成时给一次", async () => {
@@ -596,5 +635,123 @@ describe("假后端", () => {
       });
       expect(created.data.voice_id).toBe(voice?.id);
     });
+
+    it("面试选了音色之后能改回用默认音色：带 null 是改回去，不带是不改", async () => {
+      await login(server);
+      const candidate = server.db.candidates[0];
+      const position = server.db.positions[0];
+      const voice = server.db.voices.find((v) => v.ready && !v.is_default);
+      const created = await call<Interview>(server, "POST", "/interviews", {
+        candidate_id: candidate?.id,
+        position_id: position?.id,
+        voice_id: voice?.id,
+      });
+      const id = created.data.id;
+      await call(server, "POST", `/interviews/${id}/prepare`);
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      const untouched = await call<Interview>(server, "PATCH", `/interviews/${id}`, {
+        config: created.data.config,
+      });
+      expect(untouched.data.voice_id).toBe(voice?.id);
+      expect(untouched.data.status).toBe("ready");
+
+      // 改回默认音色等于换了声音：题目留着，语音要重新合成，所以回到草稿
+      const cleared = await call<Interview>(server, "PATCH", `/interviews/${id}`, {
+        voice_id: null,
+      });
+      expect(cleared.data.voice_id ?? null).toBeNull();
+      expect(cleared.data.has_plan).toBe(true);
+      expect(cleared.data.status).toBe("draft");
+    });
+  });
+});
+
+describe("彻底删除面试", () => {
+  it("正在准备或正在面试的删不了，别的删掉以后就查不到了", async () => {
+    const server = createMockServer({ latencyMs: 0, jobMs: 60_000 });
+    await login(server);
+    const created = await call<Interview>(server, "POST", "/interviews", {
+      candidate_id: server.db.candidates[0]?.id,
+      position_id: server.db.positions[0]?.id,
+    });
+    const id = created.data.id;
+    const interview = server.db.interviews.find((i) => i.id === id);
+    if (!interview) throw new Error("刚建的面试不见了");
+
+    interview.status = "in_progress";
+    expect((await call(server, "POST", `/interviews/${id}/purge`)).status).toBe(409);
+    interview.status = "completed";
+    expect((await call(server, "POST", `/interviews/${id}/purge`)).status).toBe(204);
+    expect((await call(server, "GET", `/interviews/${id}`)).status).toBe(404);
+    expect((await call(server, "POST", `/interviews/${id}/purge`)).status).toBe(404);
+  });
+});
+
+describe("账号", () => {
+  let server: Server;
+  beforeEach(async () => {
+    server = createMockServer({ latencyMs: 0 });
+    await call(server, "POST", "/auth/login", {
+      email: "hr@example.com",
+      password: "old-password",
+    });
+  });
+
+  it("改自己的密码：现在的密码要对，新密码 8 位以上，不能和现在的一样", async () => {
+    const put = (current_password: string, new_password: string) =>
+      call<{ error: { details: Record<string, string> } }>(server, "PUT", "/auth/password", {
+        current_password,
+        new_password,
+      });
+    const wrong = await put("not-it", "new-password");
+    expect(wrong.status).toBe(422);
+    expect(wrong.data.error.details.current_password).toBeTruthy();
+    const short = await put("old-password", "short");
+    expect(short.status).toBe(422);
+    expect(short.data.error.details.new_password).toBeTruthy();
+    expect((await put("old-password", "old-password")).status).toBe(422);
+    expect((await put("old-password", "new-password")).status).toBe(204);
+    expect((await put("old-password", "another-password")).status).toBe(422);
+  });
+
+  it("开账号、改名字和角色、停用和恢复", async () => {
+    const created = await call<Account>(server, "POST", "/accounts", {
+      email: "new@example.com",
+      display_name: "新同事",
+      password: "long-enough",
+    });
+    expect(created.status).toBe(200);
+    expect(created.data.role).toBe("recruiter");
+    expect(created.data.disabled).toBe(false);
+    const dup = await call(server, "POST", "/accounts", {
+      email: "NEW@example.com",
+      display_name: "又一个",
+      password: "long-enough",
+    });
+    expect(dup.status).toBe(409);
+
+    const patched = await call<Account>(server, "PATCH", `/accounts/${created.data.id}`, {
+      display_name: "改过名字",
+      role: "admin",
+      disabled: true,
+    });
+    expect(patched.data).toMatchObject({ display_name: "改过名字", role: "admin", disabled: true });
+    const found = await call<Page<Account>>(server, "GET", "/accounts?q=new@example");
+    expect(found.data.items.map((a) => a.id)).toEqual([created.data.id]);
+  });
+
+  it("不能停用自己、不能把自己降成普通账号、不能在这里重设自己的密码", async () => {
+    const list = await call<Page<Account>>(server, "GET", "/accounts");
+    const me = list.data.items.find((a) => a.email === "hr@example.com");
+    if (!me) throw new Error("列表里没有自己");
+    for (const patch of [{ disabled: true }, { role: "recruiter" }, { password: "long-enough" }]) {
+      const result = await call(server, "PATCH", `/accounts/${me.id}`, patch);
+      expect(result.status).toBe(409);
+    }
+    // 改自己的名字可以，登录信息里的也跟着变
+    await call(server, "PATCH", `/accounts/${me.id}`, { display_name: "换了名字" });
+    const now = await call<{ display_name: string }>(server, "GET", "/auth/me");
+    expect(now.data.display_name).toBe("换了名字");
   });
 });

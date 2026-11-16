@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::sync::Arc;
 
@@ -7,6 +8,7 @@ use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 
 use crate::engine::{EngineId, EngineSpec, Language};
+use crate::pronounce::spoken_text;
 
 /// 声学生成的步数允许的范围。worker 那边的范围（`tts/worker/worker.py`）要和这里一致。
 pub const DIFFUSION_STEPS_MIN: u32 = 4;
@@ -285,6 +287,12 @@ impl SynthesisRequest {
         self.engine.spec().check(self)
     }
 
+    /// 交给引擎的文字：引擎读不准的多音字换成了带拼音的写法（见 `pronounce.rs`）。
+    /// 大多数时候就是 `text`。字幕和对话记录用 `text`，不用这个。
+    pub(crate) fn spoken_text(&self) -> Cow<'_, str> {
+        spoken_text(self.engine, &self.text)
+    }
+
     /// 内容哈希：引擎、文本、语言、音色、风格、选项都一样时哈希一样，用作合成缓存的键。
     pub fn content_hash(&self) -> String {
         // 改了影响合成结果的东西（比如 worker 的默认参数）时把版本号加一，旧缓存自然失效
@@ -312,7 +320,8 @@ impl SynthesisRequest {
         let mut canonical = vec![
             serde_json::json!(VERSION),
             serde_json::json!(self.engine),
-            serde_json::json!(self.text),
+            // 用交给引擎的那份文字：读音表改了，受影响的句子缓存自然失效；没受影响的哈希不变
+            serde_json::json!(self.spoken_text()),
             serde_json::json!(self.language),
             voice,
             serde_json::json!(emotion),
@@ -591,6 +600,12 @@ mod tests {
             base.content_hash(),
             base.clone().in_background().content_hash()
         );
+
+        // 哈希按交给引擎的写法算：读音表给「去重」标上拼音，和直接这样写是同一段音频
+        let plain = request(EngineId::Index2, "先去重。");
+        let mut spelled = plain.clone();
+        spelled.text = "先去CHONG2。".to_owned();
+        assert_eq!(plain.content_hash(), spelled.content_hash());
 
         let mut other = base.clone();
         other.engine = EngineId::Index25;

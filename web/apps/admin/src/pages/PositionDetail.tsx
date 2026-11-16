@@ -10,13 +10,15 @@ import {
   PageHeader,
   useToast,
 } from "@ai-interview/ui";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Download, Pencil, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api/http";
 import { useDeletePosition, useInterviews, usePosition, useSavePosition } from "../api/queries";
 import type { Position, PositionExtra } from "../api/types";
-import { Confirm, DecisionBadge, Person, QueryView, StatusBadge } from "../components/common";
+import { Confirm, Person, QueryView } from "../components/common";
+import { RaasApplicantsDialog } from "../components/RaasApplicantsDialog";
+import { hasVerdict, InterviewTags } from "../components/ReportVerdict";
 import { fullTime, positionStatusLabel, positionStatusTone, relativeTime } from "../lib/format";
 import { PositionFields, type PositionForm } from "./Positions";
 
@@ -142,10 +144,14 @@ function ExtraCard({ extra }: { extra: PositionExtra }) {
 function Detail({ position }: { position: Position }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const interviews = useInterviews({ position_id: position.id, page_size: 50 });
+  // 一个岗位下的人是要拿来比的：综合分高的在前，还没有报告的排在后面
+  const interviews = useInterviews({ position_id: position.id, page_size: 50, sort: "-score" });
   const remove = useDeletePosition();
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  // 只有从 RAAS 导入的岗位才查得到 RAAS 里谁投过
+  const fromRaas = position.source === "raas" && Boolean(position.external_ref);
 
   return (
     <>
@@ -233,7 +239,21 @@ function Detail({ position }: { position: Position }) {
             </CardBody>
           </Card>
           <Card>
-            <CardHeader title="这个岗位的面试" />
+            <CardHeader
+              title="这个岗位的面试"
+              actions={
+                fromRaas && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Download aria-hidden="true" />}
+                    onClick={() => setImporting(true)}
+                  >
+                    导入 RAAS 的投递
+                  </Button>
+                )
+              }
+            />
             <CardBody>
               <QueryView query={interviews}>
                 {({ items }) =>
@@ -242,21 +262,25 @@ function Detail({ position }: { position: Position }) {
                       还没有人面过这个岗位。
                     </p>
                   ) : (
-                    <ul className="adm-list">
-                      {items.map((i) => (
-                        <li key={i.id} className="adm-item">
-                          <div className="adm-item__main">
-                            <Person
-                              name={i.candidate_name}
-                              sub={relativeTime(i.updated_at)}
-                              to={`/interviews/${i.id}`}
-                            />
-                          </div>
-                          <DecisionBadge value={i.decision} />
-                          <StatusBadge status={i.status} />
-                        </li>
-                      ))}
-                    </ul>
+                    <>
+                      {items.some(hasVerdict) && (
+                        <p className="oil-muted adm-note">综合分高的在前，还没有报告的排在后面。</p>
+                      )}
+                      <ul className="adm-list">
+                        {items.map((i) => (
+                          <li key={i.id} className="adm-item adm-item--wrap">
+                            <div className="adm-item__main">
+                              <Person
+                                name={i.candidate_name}
+                                sub={relativeTime(i.updated_at)}
+                                to={`/interviews/${i.id}`}
+                              />
+                            </div>
+                            <InterviewTags interview={i} />
+                          </li>
+                        ))}
+                      </ul>
+                    </>
                   )
                 }
               </QueryView>
@@ -276,6 +300,13 @@ function Detail({ position }: { position: Position }) {
       </div>
 
       <EditDialog position={position} open={editing} onClose={() => setEditing(false)} />
+      {fromRaas && (
+        <RaasApplicantsDialog
+          position={position}
+          open={importing}
+          onClose={() => setImporting(false)}
+        />
+      )}
       <Confirm
         open={deleting}
         title={`删除「${position.title}」？`}

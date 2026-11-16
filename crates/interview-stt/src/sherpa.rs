@@ -18,6 +18,7 @@ use sherpa_onnx::{
 };
 use tokio::sync::oneshot;
 
+use crate::chunk::{chunks, first_cut};
 use crate::transcriber::{
     SessionProgress, StreamingOptions, SttError, SttStatus, TranscribeOptions, TranscribeSession,
     Transcriber,
@@ -45,6 +46,15 @@ const SAMPLE_RATE: u64 = REALTIME_SAMPLE_RATE as u64;
 const PREROLL_SAMPLES: usize = 6_400;
 /// 中间结果：至少攒够这么多新的采样（0.6 秒）才重新识别一次。
 const PARTIAL_MIN_STEP: usize = 9_600;
+/// 一次交给识别模型的音频最多这么多采样（30 秒）。X-ASR 吃不下 40 秒以上的音频：模型里报错，
+/// 而且这个错是从 C++ 里抛出来的，Rust 接不住，整个进程直接退出，同一个进程里别的面试也跟着没了
+/// （issue #258）。「说满 [`SherpaConfig::max_segment_ms`] 切一段」挡不住它：VAD 要等声音弱下去
+/// 一下才切得开，声音一直很满的时候一段话可以有五六十秒。所以更长的在这里切开分别识别。
+const MAX_DECODE_SAMPLES: usize = 30 * REALTIME_SAMPLE_RATE as usize;
+/// 切开时，在上限前面这么多采样（5 秒）的范围里找最安静的地方下刀。
+const CUT_SEARCH_SAMPLES: usize = 5 * REALTIME_SAMPLE_RATE as usize;
+/// 切出来的每一块至少这么多采样（1 秒）。
+const MIN_CHUNK_SAMPLES: usize = REALTIME_SAMPLE_RATE as usize;
 /// 一段话允许的最短停顿。再短的话，正常说话的换气都会把句子切开。
 const MIN_SILENCE_FLOOR_MS: u64 = 200;
 
@@ -57,7 +67,8 @@ pub struct SherpaConfig {
     pub num_threads: u32,
     /// 说话人停顿超过这么久，前面那段话就定下来。
     pub min_silence_ms: u64,
-    /// 一直不停顿时，最长说这么久就强行切一段。
+    /// 一直不停顿时，说满这么久就找机会切一段。不是硬切：要等声音弱下去一下，声音一直很满时
+    /// 一段话会比这个长。
     pub max_segment_ms: u64,
 }
 
@@ -305,6 +316,7 @@ fn run_session(
         partials,
         preroll: Vec::new(),
         speech: Vec::new(),
+        partial_head: String::new(),
         partial: None,
         partial_at: 0,
     };
@@ -342,8 +354,11 @@ struct Worker<'a> {
     partials: bool,
     /// 没人说话时，最近的一小截音频。开始说话时接在 `speech` 前面。
     preroll: Vec<f32>,
-    /// 正在说、还没定下来的这段话的音频（只在要中间结果时攒）。
+    /// 正在说、还没定下来的这段话的音频（只在要中间结果时攒）。话太长时前面的已经识别过、
+    /// 挪进了 `partial_head`，这里只留后面还会变的一截。
     speech: Vec<f32>,
+    /// 这段话太长时，前面已经识别好、不再重新识别的那一截的文字。
+    partial_head: String,
     /// 这段话到现在的中间结果。
     partial: Option<String>,
     /// 上次出中间结果时 `speech` 有多长。
@@ -374,6 +389,7 @@ impl Worker<'_> {
                 self.quiet_since = Some(end);
                 // 这段话定下来了，中间结果作废。被强行切开的长句，后半句从这里重新攒
                 self.speech.clear();
+                self.partial_head.clear();
                 self.partial = None;
                 self.partial_at = 0;
             }
@@ -411,16 +427,31 @@ impl Worker<'_> {
     ///
     /// 每次都是从这段话的开头识别，所以话越长越费时间。隔多久识别一次跟着话的长度涨
     /// （至少 0.6 秒，或者这段话长度的八分之一），保证花在中间结果上的 CPU 有上限。
+    ///
+    /// 话长到模型一次吃不下时（[`MAX_DECODE_SAMPLES`]），前面一截识别一次就记下来，
+    /// 以后只重新识别后面的。
     fn refresh_partial(&mut self) -> Result<(), SttError> {
+        while let Some(cut) = first_cut(
+            &self.speech,
+            MAX_DECODE_SAMPLES,
+            CUT_SEARCH_SAMPLES,
+            MIN_CHUNK_SAMPLES,
+        ) {
+            let (tokens, _) = self.decode_once(&self.speech[..cut])?;
+            append_text(&mut self.partial_head, &tokens.concat());
+            self.speech.drain(..cut);
+            // 剩下的这一截马上识别一遍，中间结果不会停在切开之前
+            self.partial_at = 0;
+        }
         let step = PARTIAL_MIN_STEP.max(self.speech.len() / 8);
         if self.speech.len() < self.partial_at + step {
             return Ok(());
         }
         self.partial_at = self.speech.len();
-        let (tokens, _) = self.decode(&self.speech)?;
-        let text = tokens.concat();
-        let text = text.trim();
-        self.partial = (!text.is_empty()).then(|| text.to_owned());
+        let (tokens, _) = self.decode_once(&self.speech)?;
+        let mut text = self.partial_head.clone();
+        append_text(&mut text, &tokens.concat());
+        self.partial = (!text.is_empty()).then_some(text);
         Ok(())
     }
 
@@ -455,7 +486,45 @@ impl Worker<'_> {
     }
 
     /// 识别一段音频，返回 token 和每个 token 的开始时间（秒，相对这段音频的开头；模型没给时是 `None`）。
+    ///
+    /// 多长的音频都可以：超过 [`MAX_DECODE_SAMPLES`] 的切成几块分别识别，再接起来。
     fn decode(&self, samples: &[f32]) -> Result<(Vec<String>, Option<Vec<f32>>), SttError> {
+        if samples.len() <= MAX_DECODE_SAMPLES {
+            return self.decode_once(samples);
+        }
+        let mut tokens = Vec::new();
+        let mut timestamps = Some(Vec::new());
+        for chunk in chunks(
+            samples,
+            MAX_DECODE_SAMPLES,
+            CUT_SEARCH_SAMPLES,
+            MIN_CHUNK_SAMPLES,
+        ) {
+            // 一段话最多几分钟，换成秒以后 f32 的精度够用
+            let offset = chunk.start as f32 / SAMPLE_RATE as f32;
+            let (chunk_tokens, chunk_timestamps) = self.decode_once(&samples[chunk])?;
+            match (&mut timestamps, chunk_timestamps) {
+                (Some(all), Some(chunk_timestamps)) => {
+                    all.extend(chunk_timestamps.iter().map(|at| at + offset));
+                }
+                // 有一块没给时间，整段就都按均匀铺开算
+                _ => timestamps = None,
+            }
+            tokens.extend(chunk_tokens);
+        }
+        Ok((tokens, timestamps))
+    }
+
+    /// 把一段音频交给识别模型。超过 [`MAX_DECODE_SAMPLES`] 的不交（交了进程会直接退出），返回错误：
+    /// 长的音频走 [`Worker::decode`]。
+    fn decode_once(&self, samples: &[f32]) -> Result<(Vec<String>, Option<Vec<f32>>), SttError> {
+        if samples.len() > MAX_DECODE_SAMPLES {
+            return Err(SttError::Backend(format!(
+                "一次交给识别模型的音频有 {} 秒，超过了 {} 秒的上限",
+                samples.len() as u64 / SAMPLE_RATE,
+                MAX_DECODE_SAMPLES as u64 / SAMPLE_RATE
+            )));
+        }
         let recognizer = &self.shared.recognizer;
         let stream = recognizer.create_stream();
         stream.accept_waveform(
@@ -523,6 +592,16 @@ impl Worker<'_> {
             silence_ms,
         }
     }
+}
+
+/// 把后一截的文字接在前一截后面。两边都是拉丁字母或数字时中间补一个空格，别的直接接上。
+fn append_text(text: &mut String, more: &str) {
+    let more = more.trim();
+    let latin = |c: char| c.is_ascii_alphanumeric();
+    if text.ends_with(latin) && more.starts_with(latin) {
+        text.push(' ');
+    }
+    text.push_str(more);
 }
 
 fn seconds_to_ms(seconds: f32) -> u64 {

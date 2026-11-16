@@ -6,6 +6,8 @@ import { ApiError, api, errorMessage, unwrap, unwrapBlob } from "./http";
 import type {
   CandidateInput,
   CandidateListItem,
+  ChangePasswordInput,
+  CreateAccountInput,
   CreateVoice,
   Decision,
   InterviewEvent,
@@ -17,6 +19,7 @@ import type {
   PreviewRequest,
   PreviewResult,
   TemplateInput,
+  UpdateAccountInput,
   UpdateVoice,
   Voice,
 } from "./types";
@@ -33,6 +36,7 @@ export type CandidateQuery = QueryOf<"/api/v1/candidates">;
 export type InterviewQuery = QueryOf<"/api/v1/interviews">;
 export type RaasPositionQuery = QueryOf<"/api/v1/raas/positions">;
 export type RaasCandidateQuery = QueryOf<"/api/v1/raas/candidates">;
+export type AccountQuery = QueryOf<"/api/v1/accounts">;
 
 /** 路径里只有一个 id 的接口 */
 const at = (id: string | undefined) => ({ params: { path: { id: id ?? "" } } });
@@ -73,6 +77,50 @@ export function useLogout() {
     onSuccess: () => {
       qc.clear();
       qc.setQueryData(["me"], null);
+    },
+  });
+}
+
+/** 改自己的密码。改完这个浏览器不用重新登录，别处的登录会失效 */
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (input: ChangePasswordInput) =>
+      unwrap(api.PUT("/api/v1/auth/password", { body: input })),
+  });
+}
+
+// ───────── HR 账号 ─────────
+
+/** 账号列表。只有管理员能看，普通账号调是 403，所以要等知道是管理员了再取 */
+export function useAccounts(query: AccountQuery = {}, enabled = true) {
+  return useQuery({
+    queryKey: ["accounts", query],
+    queryFn: () => unwrap(api.GET("/api/v1/accounts", { params: { query } })),
+    placeholderData: keepPreviousData,
+    enabled,
+  });
+}
+
+export function useCreateAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateAccountInput) =>
+      unwrap(api.POST("/api/v1/accounts", { body: input })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
+  });
+}
+
+/** 改名字和角色、停用和恢复、重设密码，只写要改的 */
+export function useUpdateAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateAccountInput }) =>
+      unwrap(api.PATCH("/api/v1/accounts/{id}", { ...at(id), body: patch })),
+    onSuccess: (account) => {
+      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      // 改的是自己的名字，侧栏上的也要跟着变
+      void qc.invalidateQueries({ queryKey: ["me"] });
+      return account;
     },
   });
 }
@@ -146,6 +194,16 @@ export function useRaasPositions(query: RaasPositionQuery, enabled: boolean) {
     queryFn: () => unwrap(api.GET("/api/v1/raas/positions", { params: { query } })),
     enabled,
     placeholderData: keepPreviousData,
+  });
+}
+
+/** RAAS 里的一个岗位。要它的 job_requisition_ref 才查得到投了这个岗位的人 */
+export function useRaasPosition(ref: string | null | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["raas-position", ref],
+    queryFn: () =>
+      unwrap(api.GET("/api/v1/raas/positions/{ref}", { params: { path: { ref: ref ?? "" } } })),
+    enabled: enabled && Boolean(ref),
   });
 }
 
@@ -643,6 +701,18 @@ export function useDeleteInterview() {
   });
 }
 
+/**
+ * 彻底删除：录像、语音、题目、对话记录、报告都从服务器上删掉，不能恢复。只有管理员能用。
+ * 和上面的归档不一样，归档只是不在列表里显示。
+ */
+export function usePurgeInterview() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => unwrap(api.POST("/api/v1/interviews/{id}/purge", at(id))),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["interviews"] }),
+  });
+}
+
 /** 题目计划。还没出题时是 null */
 export function usePlan(id: string, enabled = true) {
   return useQuery({
@@ -689,6 +759,15 @@ export function useRecordings(id: string, enabled = true) {
   return useQuery({
     queryKey: ["recordings", id],
     queryFn: () => unwrap(api.GET("/api/v1/interviews/{id}/recordings", at(id))),
+    enabled,
+  });
+}
+
+/** 出报告前检查录像画面的结果。还没检查过时 checked 是 false、items 是空的 */
+export function useFrameEvents(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["frame-events", id],
+    queryFn: () => unwrap(api.GET("/api/v1/interviews/{id}/frame-events", at(id))),
     enabled,
   });
 }

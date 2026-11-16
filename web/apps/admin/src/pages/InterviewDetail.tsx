@@ -8,6 +8,7 @@ import {
   CopyField,
   Dialog,
   Field,
+  Input,
   KeyValue,
   PageHeader,
   Progress,
@@ -17,7 +18,7 @@ import {
   Textarea,
   useToast,
 } from "@ai-interview/ui";
-import { Ban, Link2, Pencil, RefreshCw, Send, Trash2 } from "lucide-react";
+import { Archive, Ban, Link2, Pencil, RefreshCw, Send, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { errorMessage, fieldErrors } from "../api/http";
@@ -27,10 +28,13 @@ import {
   useDecide,
   useDeleteInterview,
   useEvents,
+  useFrameEvents,
   useInterview,
   useInvites,
+  useMe,
   usePlan,
   usePrepareInterview,
+  usePurgeInterview,
   useRecordings,
   useRegenerateReport,
   useReport,
@@ -84,6 +88,7 @@ import {
   synthStatusTone,
   thinkingLabel,
 } from "../lib/format";
+import { framesByEvent, withFrameEvents } from "../lib/frames";
 import { updateOutcome } from "../lib/replan";
 
 type Tab = "overview" | "questions" | "invites" | "replay" | "report";
@@ -430,7 +435,6 @@ function EditConfigDialog({
         <VoicePicker
           value={voiceId}
           onChange={setVoiceId}
-          allowDefault={!interview.voice_id}
           disabled={save.isPending}
           error={fieldErrors(save.error).voice_id}
         />
@@ -445,13 +449,104 @@ function EditConfigDialog({
   );
 }
 
+/**
+ * 彻底删除一场面试。删了找不回来，所以要把候选人的名字输一遍才能点。
+ * 只有管理员能做，按钮也只给管理员看。
+ */
+function PurgeDialog({
+  interview,
+  open,
+  onClose,
+}: {
+  interview: Interview;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const purge = usePurgeInterview();
+  const [typed, setTyped] = useState("");
+  const name = interview.candidate.name.trim();
+  const matched = typed.trim() === name;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 每次打开都要重新输一遍
+  useEffect(() => {
+    if (!open) return;
+    setTyped("");
+    purge.reset();
+  }, [open]);
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="彻底删除这场面试？"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} autoFocus>
+            先不
+          </Button>
+          <Button
+            variant="danger"
+            type="submit"
+            form="purge-interview"
+            loading={purge.isPending}
+            disabled={!matched}
+          >
+            彻底删除
+          </Button>
+        </>
+      }
+    >
+      <form
+        id="purge-interview"
+        className="oil-stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!matched) return;
+          purge.mutate(interview.id, {
+            onSuccess: () => {
+              toast("这场面试已经彻底删除");
+              navigate("/interviews", { replace: true });
+            },
+          });
+        }}
+      >
+        {purge.error && <Banner tone="danger">{errorMessage(purge.error)}</Banner>}
+        <p className="adm-flat">
+          这场面试的录像、语音、录像里截下来的画面、题目、对话记录和报告会从服务器上删掉，
+          <strong>删了不能恢复</strong>。{interview.candidate.name}的候选人资料和简历、
+          {interview.position.title}这个岗位都不会动。
+        </p>
+        {cancellable(interview) && (
+          <p className="adm-flat">这场面试还没结束，删除时会先取消，已经发出去的链接马上失效。</p>
+        )}
+        <p className="oil-muted adm-flat">
+          候选人要求删除自己的录像时用。只是不想让它出现在列表里，用「归档」就行。
+        </p>
+        <Field label={`输入候选人的名字「${name}」来确认`}>
+          {({ id }) => (
+            <Input
+              id={id}
+              autoComplete="off"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+            />
+          )}
+        </Field>
+      </form>
+    </Dialog>
+  );
+}
+
 function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) => void }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const me = useMe();
   const cancel = useCancelInterview(interview.id);
   const remove = useDeleteInterview();
   const [editing, setEditing] = useState(false);
-  const [confirming, setConfirming] = useState<"cancel" | "delete" | null>(null);
+  const [confirming, setConfirming] = useState<"cancel" | "delete" | "purge" | null>(null);
 
   return (
     <div className="oil-stack" style={gap(5)}>
@@ -526,14 +621,26 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
               </Button>
             )}
             {interview.status !== "in_progress" && interview.status !== "preparing" && (
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<Trash2 aria-hidden="true" />}
-                onClick={() => setConfirming("delete")}
-              >
-                删除
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Archive aria-hidden="true" />}
+                  onClick={() => setConfirming("delete")}
+                >
+                  归档
+                </Button>
+                {me.data?.role === "admin" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<Trash2 aria-hidden="true" />}
+                    onClick={() => setConfirming("purge")}
+                  >
+                    彻底删除
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -561,23 +668,30 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
       </Confirm>
       <Confirm
         open={confirming === "delete"}
-        title="删除这场面试？"
-        confirmLabel="删除"
-        danger
+        title="归档这场面试？"
+        confirmLabel="归档"
         loading={remove.isPending}
         onClose={() => setConfirming(null)}
         onConfirm={() =>
           remove.mutate(interview.id, {
             onSuccess: () => {
-              toast("已删除");
+              toast("已归档");
               navigate("/interviews", { replace: true });
             },
             onError: (e) => toast(errorMessage(e)),
           })
         }
       >
-        题目、录像、逐字稿和报告会一起删掉，找不回来。
+        归档以后这场面试不再出现在列表里，已经发出去的链接会失效。录像、逐字稿和报告还留在服务器上，没有删掉。
+        {me.data?.role === "admin"
+          ? "要把它们真的删掉，用旁边的「彻底删除」。"
+          : "候选人要求删除录像时，请找管理员彻底删除。"}
       </Confirm>
+      <PurgeDialog
+        interview={interview}
+        open={confirming === "purge"}
+        onClose={() => setConfirming(null)}
+      />
     </div>
   );
 }
@@ -1226,6 +1340,12 @@ function ReplayTab({
   const transcript = useTranscript(interview.id, started);
   const recordings = useRecordings(interview.id, started);
   const events = useEvents(interview.id, started);
+  // 画面检查的结果取不到不耽误回看，时间轴上少几条而已
+  const frameEvents = useFrameEvents(interview.id, started);
+  const timeline = useMemo(
+    () => withFrameEvents(interview.id, events.data?.items ?? [], frameEvents.data?.items ?? []),
+    [interview.id, events.data, frameEvents.data],
+  );
   if (!started)
     return <Banner tone="info">面试还没开始，结束后这里可以看录像、听录音、读逐字稿。</Banner>;
   if (transcript.data && recordings.data && events.data) {
@@ -1237,7 +1357,7 @@ function ReplayTab({
         <ReplayPlayer
           turns={transcript.data.items}
           recordings={recordings.data.items}
-          events={events.data.items}
+          events={timeline}
           candidateName={interview.candidate.name}
           elapsedMs={elapsedMs(interview)}
           seekTo={seekTo}
@@ -1258,6 +1378,12 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
   const [picked, setPicked] = useState<number | undefined>(undefined);
   const hasDone = latest?.status === "done" || done.length > 0;
   const report = useReport(interview.id, hasDone, picked);
+  // 证据里引用的录像画面。取不到不耽误看报告，只是证据旁边没有图
+  const frameEvents = useFrameEvents(interview.id, hasDone);
+  const frames = useMemo(
+    () => framesByEvent(interview.id, frameEvents.data?.items ?? []),
+    [interview.id, frameEvents.data],
+  );
   const regenerate = useRegenerateReport(interview.id);
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
@@ -1276,7 +1402,10 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
   // biome-ignore lint/correctness/useExhaustiveDependencies: 只在最新一版的状态变的时候重新取
   useEffect(() => {
     void versions.refetch();
-    if (hasDone) void report.refetch();
+    if (hasDone) {
+      void report.refetch();
+      void frameEvents.refetch();
+    }
   }, [latest?.id, latest?.status]);
 
   if (!ended(interview)) return <Banner tone="info">面试结束后会自动生成分析报告。</Banner>;
@@ -1307,7 +1436,7 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
         </Banner>
       )}
       {done.length > 1 && (
-        <div className="oil-row oil-row--wrap">
+        <div className="oil-row oil-row--wrap adm-no-print">
           <span className="oil-muted">这场面试生成过 {done.length} 版报告，现在看的是</span>
           <Select
             aria-label="看哪一版报告"
@@ -1331,6 +1460,7 @@ function ReportTab({ interview, onSeek }: { interview: Interview; onSeek: (ms: n
                 report={data.content}
                 onSeek={onSeek}
                 onRegenerate={busy ? undefined : () => setConfirming(true)}
+                frames={frames}
               />
             ) : null
           }

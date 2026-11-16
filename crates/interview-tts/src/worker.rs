@@ -400,7 +400,7 @@ fn request_body(request: &SynthesisRequest, stream: bool) -> serde_json::Value {
     };
     let mut body = json!({
         "engine": request.engine,
-        "text": request.text,
+        "text": request.spoken_text(),
         "language": request.language,
         "voice": voice,
         "style": {
@@ -585,6 +585,26 @@ mod tests {
                 "stream": true,
             })
         );
+    }
+
+    #[test]
+    fn the_engine_gets_pinyin_for_words_it_misreads_and_the_request_keeps_its_text() {
+        let text = "数据入库之前要先去重。";
+        let request = SynthesisRequest::new(
+            EngineId::Index2,
+            text,
+            Language::Zh,
+            Voice::Clone {
+                reference: reference(),
+                transcript: None,
+            },
+        );
+        assert_eq!(
+            request_body(&request, false)["text"],
+            json!("数据入库之前要先去CHONG2。")
+        );
+        // 字幕和对话记录用的是请求里的文字，里面没有拼音
+        assert_eq!(request.text, text);
     }
 
     #[test]

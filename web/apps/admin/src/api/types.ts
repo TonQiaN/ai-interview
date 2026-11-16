@@ -21,6 +21,13 @@ export interface ApiErrorBody {
 /** 这一段的类型直接取自后端的 OpenAPI 文档（@ai-interview/api-client），后端改了字段这里编译就会报错。 */
 export type AdminUser = Schemas["AdminUser"];
 export type LoginInput = Schemas["LoginRequest"];
+export type ChangePasswordInput = Schemas["ChangePasswordRequest"];
+
+// ───────── HR 账号：只有管理员能管 ─────────
+
+export type Account = Schemas["Account"];
+export type CreateAccountInput = Schemas["CreateAccount"];
+export type UpdateAccountInput = Schemas["UpdateAccount"];
 
 // ───────── 岗位 ─────────
 
@@ -81,7 +88,7 @@ export type Voice = Schemas["VoiceView"];
 export type VoiceSettings = Schemas["VoiceSettings"];
 export type VoiceStyle = Schemas["Style"];
 export type Emotion = Schemas["Emotion"];
-export type VoiceLanguage = Schemas["Language"];
+export type VoiceLanguage = Schemas["SpeechLanguage"];
 export type CreateVoice = Schemas["CreateVoice"];
 export type UpdateVoice = Schemas["UpdateVoice"];
 export type PreviewRequest = Schemas["PreviewRequest"];
@@ -159,6 +166,11 @@ export type Turn = Schemas["TurnView"];
 
 /** 事件的补充信息因种类而异，见 docs/architecture/api.md 的「过程事件」。 */
 export type InterviewEvent = Omit<Schemas["InterviewEvent"], "payload"> & {
+  payload: Record<string, unknown>;
+};
+
+/** 出报告前检查录像画面得到的一条结果 */
+export type FrameEvent = Omit<Schemas["FrameEvent"], "payload"> & {
   payload: Record<string, unknown>;
 };
 

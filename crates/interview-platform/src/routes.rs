@@ -1,4 +1,4 @@
-//! 平台自己的接口：HR 登录、全局设置、系统状态。
+//! 平台自己的接口：HR 登录、全局设置、系统状态。账号管理的接口在 [`crate::accounts`]，也挂在这里。
 
 use std::sync::Arc;
 
@@ -32,6 +32,7 @@ pub fn router(deps: Deps) -> OpenApiRouter {
         .routes(routes!(me))
         .routes(routes!(get_setting, put_setting))
         .routes(routes!(system_status))
+        .merge(crate::accounts::router())
         .with_state(deps)
 }
 

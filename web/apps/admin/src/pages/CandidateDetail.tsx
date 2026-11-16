@@ -37,7 +37,8 @@ import type {
   ParsedResume,
   Resume,
 } from "../api/types";
-import { Confirm, DecisionBadge, QueryView, StatusBadge } from "../components/common";
+import { Confirm, QueryView } from "../components/common";
+import { InterviewTags } from "../components/ReportVerdict";
 import {
   fileSize,
   parseStatusLabel,
@@ -644,15 +645,14 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
                   ) : (
                     <ul className="adm-list">
                       {items.map((i) => (
-                        <li key={i.id} className="adm-item">
+                        <li key={i.id} className="adm-item adm-item--wrap">
                           <div className="adm-item__main">
                             <Link to={`/interviews/${i.id}`} className="adm-link">
                               {i.position_title}
                             </Link>
                             <div className="adm-item__sub">{relativeTime(i.updated_at)}</div>
                           </div>
-                          <DecisionBadge value={i.decision} />
-                          <StatusBadge status={i.status} />
+                          <InterviewTags interview={i} />
                         </li>
                       ))}
                     </ul>

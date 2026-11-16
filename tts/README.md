@@ -131,7 +131,7 @@ for chunk in runtime.iter_audio_chunks(inputs, request_id=request_id):
 
 分段输出：IndexTTS 2.5 的模型有 `TTSRuntime.stream()`，每生成完一段给一段；IndexTTS 2 的模型没有这个入口，worker 是先用它的分词器切好段再逐段调 `generate()`。两个版本段内都不是流式。
 
-还没验证过、以后可以看的入口：`TTSRuntime.save_speaker()`（缓存参考音色的编码，也许能减掉 IndexTTS 每条请求约 1.4 秒的固定开销）和 `mlx_indextts/api_server.py`（HTTP 服务）。
+没用上的入口：`TTSRuntime.save_speaker()`（缓存参考音色的编码）和 `mlx_indextts/api_server.py`（HTTP 服务）。前一个省不了时间：参考录音的预处理本来就按路径缓存，worker 每次都命中；IndexTTS 每段约 1 秒的固定开销在声学生成那一步，见 `tts/worker/README.md` 的「IndexTTS 2 每段的用时花在哪」。
 
 ## 实测数据
 

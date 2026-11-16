@@ -16,6 +16,27 @@
     font-size: var(--oil-text-xs);
     opacity: 0.7;
   }
+  /* 侧栏底下自己的名字，点了去「我的账号」 */
+  .adm-me {
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+    border-radius: var(--oil-radius-sm);
+  }
+  .adm-me:hover .adm-ellipsis:first-child,
+  .adm-me[aria-current="page"] .adm-ellipsis:first-child {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .adm-me:focus-visible {
+    outline: 2px solid var(--oil-focus);
+    outline-offset: 2px;
+  }
+  .adm-account-actions {
+    --oil-gap: var(--oil-space-3);
+    font-size: var(--oil-text-sm);
+    justify-content: flex-end;
+  }
   .adm-link {
     color: inherit;
     text-decoration: none;
@@ -177,6 +198,29 @@
   .adm-item__sub {
     color: var(--oil-ink-3);
     font-size: var(--oil-text-sm);
+  }
+  /* 右边标签多的行：放不下就整组换到下一行，靠右 */
+  .adm-item--wrap {
+    flex-wrap: wrap;
+  }
+  .adm-item__tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--oil-space-2);
+    margin-left: auto;
+  }
+  /* 列表里报告的结论和综合分 */
+  .adm-verdict-brief {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--oil-space-2);
+  }
+  .adm-verdict-brief__score {
+    font-weight: 600;
+    white-space: nowrap;
   }
   .adm-item__sub--warn {
     display: flex;
@@ -683,6 +727,43 @@
     font-weight: 700;
     color: var(--oil-ink-3);
   }
+  /* 录像里不正常的那几帧 */
+  .adm-frames {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--oil-space-2);
+    align-items: center;
+    margin-top: var(--oil-space-2);
+  }
+  .adm-frame {
+    display: block;
+    padding: 0;
+    border: 1px solid var(--oil-line-strong);
+    border-radius: var(--oil-radius-sm);
+    background: var(--oil-sunken);
+    overflow: hidden;
+    line-height: 0;
+  }
+  button.adm-frame {
+    cursor: pointer;
+  }
+  button.adm-frame:hover {
+    border-color: var(--oil-primary);
+  }
+  button.adm-frame:focus-visible {
+    outline: 2px solid var(--oil-focus);
+    outline-offset: 2px;
+  }
+  .adm-frame img {
+    display: block;
+    width: 128px;
+    height: 72px;
+    object-fit: cover;
+  }
+  .adm-frames__more {
+    font-size: var(--oil-text-xs);
+    color: var(--oil-ink-3);
+  }
   .adm-quotes__more {
     display: inline-block;
     margin-top: var(--oil-space-2);
@@ -1051,6 +1132,35 @@
     border: 1px solid var(--oil-line);
     border-radius: var(--oil-radius-md);
   }
+  .adm-picked {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--oil-space-2);
+    margin: 0 0 var(--oil-space-3);
+    padding: 0;
+    list-style: none;
+  }
+  .adm-picked button {
+    display: inline-flex;
+    align-items: center;
+    margin-left: var(--oil-space-1);
+    padding: 2px;
+    border: 0;
+    border-radius: var(--oil-radius-sm);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  .adm-picked button:hover {
+    background: var(--oil-sunken);
+  }
+  .adm-picked button:focus-visible {
+    outline: 2px solid var(--oil-focus);
+  }
+  .adm-failures {
+    margin: 0 0 var(--oil-space-2);
+    padding-left: var(--oil-space-5);
+  }
   .adm-pick {
     display: flex;
     align-items: center;
@@ -1171,5 +1281,61 @@
   }
   .adm-voice__more[open] > summary {
     margin-bottom: var(--oil-space-3);
+  }
+
+  /* ───────── 打印 ─────────
+     打印或者在打印对话框里存成 PDF 时，只留内容：导航、页签、按钮都不印。
+     纸是白的，底色和阴影去掉；评分条和徽标的颜色要照样印出来。 */
+  .adm-print-only {
+    display: none;
+  }
+  .adm-verdict__print {
+    margin-left: auto;
+  }
+  @media print {
+    @page {
+      margin: 14mm 12mm;
+    }
+    body {
+      background: white;
+    }
+    .oil-shell {
+      display: block;
+      min-height: 0;
+    }
+    .oil-sidebar,
+    .oil-topbar,
+    .oil-tabs,
+    .oil-toasts,
+    .oil-crumbs,
+    .adm-no-print,
+    .adm-report-nav,
+    .adm-quotes__more,
+    .adm-meta__actions,
+    .adm-qa__chevron,
+    .oil-btn {
+      display: none !important;
+    }
+    .adm-print-only {
+      display: block;
+    }
+    .adm-report {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .oil-card {
+      background: none;
+      box-shadow: none;
+    }
+    .adm-quote,
+    .adm-frames,
+    .adm-facts > div {
+      break-inside: avoid;
+    }
+    h2,
+    h3,
+    summary {
+      break-after: avoid;
+    }
   }
 }

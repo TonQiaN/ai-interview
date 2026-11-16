@@ -4,6 +4,7 @@
 
 use axum::Router;
 use interview_engine::InterviewConfig;
+use interview_engine::config::Language;
 use interview_engine::plan::{
     FollowUp, GenerationInfo, InterviewBrief, InterviewPlan, PLAN_SCHEMA_VERSION, Phrases,
     PlannedQuestion, QuestionCategory, QuestionOrigin, ScoringGuide, keys,
@@ -247,7 +248,10 @@ pub async fn seed_script(
 
 /// 候选人确认全部同意事项。
 pub async fn agree(app: &TestApp, token: &str) {
-    let keys: Vec<String> = consent_items().into_iter().map(|item| item.key).collect();
+    let keys: Vec<String> = consent_items(Language::Zh)
+        .into_iter()
+        .map(|item| item.key)
+        .collect();
     let response = TestRequest::post("/api/v1/room/consent")
         .bearer(token)
         .json(&json!({ "consent_version": CONSENT_VERSION, "agreed_keys": keys }))

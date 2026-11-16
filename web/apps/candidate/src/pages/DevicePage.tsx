@@ -13,8 +13,7 @@ import { MicMeter } from "../components/MicMeter";
 import type { RoomSession } from "../lib/api/room-types";
 import { judgeUplink } from "../lib/flow/uplink";
 import type { DeviceState, NetworkState } from "../session/interview-session";
-import { MEDIA_ERROR_TEXT } from "../text";
-import { FLOW_STEPS } from "./WelcomePage";
+import { type Texts, useText } from "../text";
 
 export interface DevicePageProps {
   room: RoomSession;
@@ -45,6 +44,8 @@ export function DevicePage(props: DevicePageProps) {
     onRetestNetwork,
     onNext,
   } = props;
+  const t = useText();
+  const text = t.device;
   const granted = device.permission === "granted";
 
   // 麦克风迟迟没反应时，给出提示，也不把候选人卡死在这一步
@@ -76,15 +77,15 @@ export function DevicePage(props: DevicePageProps) {
       : device.permission === "failed"
         ? "failed"
         : "idle";
-  const error = device.error ? MEDIA_ERROR_TEXT[device.error] : null;
+  const error = device.error ? text.mediaErrors[device.error] : null;
 
   return (
     <Stage
-      header={<Steps compact steps={FLOW_STEPS} current={2} />}
+      header={<Steps compact steps={t.steps} current={2} />}
       footer={
         granted ? (
           <Button size="lg" block variant="accent" disabled={!canContinue} onClick={onNext}>
-            {allPassed || !canContinue ? "下一步" : "麦克风没反应，仍然继续"}
+            {allPassed || !canContinue ? text.next : text.nextWithoutMic}
           </Button>
         ) : (
           <Button
@@ -94,17 +95,15 @@ export function DevicePage(props: DevicePageProps) {
             loading={device.permission === "requesting"}
             onClick={onRequest}
           >
-            {device.permission === "failed" ? "重新检测" : "允许使用摄像头和麦克风"}
+            {device.permission === "failed" ? text.recheck : text.allow}
           </Button>
         )
       }
     >
       <div>
-        <h1 className="oil-display oil-title-md">检查设备</h1>
+        <h1 className="oil-display oil-title-md">{text.title}</h1>
         <p className="oil-muted" style={{ marginTop: 6 }}>
-          {granted
-            ? "确认画面和声音都正常，再开始面试。"
-            : "点下面的按钮后，浏览器会询问是否允许使用摄像头和麦克风，请选择「允许」。"}
+          {granted ? text.hintGranted : text.hintAsk}
         </p>
       </div>
 
@@ -121,15 +120,15 @@ export function DevicePage(props: DevicePageProps) {
       <DeviceCheckCard
         state={granted ? (device.hasVideo || !room.camera_required ? "passed" : "failed") : pending}
         icon={<Camera />}
-        title="摄像头"
+        title={text.camera.title}
         description={
           granted
             ? device.hasVideo
-              ? "能看到自己就可以了。请让脸在画面中间，光线尽量从正面来。"
-              : "没有找到摄像头，这场面试将只录音。"
+              ? text.camera.ok
+              : text.camera.missing
             : room.camera_required
-              ? "面试全程录像。"
-              : "有摄像头时会录像，没有也可以面试。"
+              ? text.camera.required
+              : text.camera.optional
         }
       >
         {granted && device.hasVideo && <CameraPreview stream={cameraStream} weight="thin" />}
@@ -138,21 +137,13 @@ export function DevicePage(props: DevicePageProps) {
       <DeviceCheckCard
         state={granted ? (device.micHeard ? "passed" : "checking") : pending}
         icon={<Mic />}
-        title="麦克风"
+        title={text.mic.title}
         description={
-          granted
-            ? device.micHeard
-              ? "听到你的声音了。"
-              : "请说一句话，比如「你好，我准备好了」。"
-            : "面试官通过麦克风听你的回答。"
+          granted ? (device.micHeard ? text.mic.heard : text.mic.speak) : text.mic.purpose
         }
       >
         {granted && <MicMeter subscribe={subscribeLevel} />}
-        {granted && !device.micHeard && micSlow && (
-          <p className="oil-muted">
-            一直没有听到声音。请检查麦克风有没有被静音、有没有选对设备，或者靠近一点说话。
-          </p>
-        )}
+        {granted && !device.micHeard && micSlow && <p className="oil-muted">{text.mic.slow}</p>}
       </DeviceCheckCard>
 
       <DeviceCheckCard
@@ -166,13 +157,9 @@ export function DevicePage(props: DevicePageProps) {
             : "idle"
         }
         icon={<Volume2 />}
-        title="扬声器或耳机"
+        title={text.speaker.title}
         description={
-          speakerDone
-            ? "声音正常。"
-            : played
-              ? "听到「叮」的一声了吗？没听到的话，调大音量、关掉静音再试一次。"
-              : "播放一段提示音，确认你能听到面试官的声音。"
+          speakerDone ? text.speaker.ok : played ? text.speaker.played : text.speaker.purpose
         }
       >
         {granted && !speakerDone && (
@@ -186,11 +173,11 @@ export function DevicePage(props: DevicePageProps) {
                 onPlayTestSound();
               }}
             >
-              {played ? "再播一次" : "播放提示音"}
+              {played ? text.speaker.playAgain : text.speaker.play}
             </Button>
             {played && (
               <Button size="sm" onClick={onConfirmSpeaker}>
-                听到了
+                {text.speaker.heard}
               </Button>
             )}
           </div>
@@ -208,13 +195,13 @@ export function DevicePage(props: DevicePageProps) {
               : "idle"
         }
         icon={<Wifi />}
-        title="网络"
-        description={networkText(network, networkSlow, room.mode === "realtime")}
+        title={text.network.title}
+        description={networkText(text.network, network, networkSlow, room.mode === "realtime")}
       >
         {(network.status === "failed" || networkSlow) && (
           <div className="oil-row oil-row--wrap">
             <Button variant="secondary" size="sm" onClick={onRetestNetwork}>
-              重新测速
+              {text.network.retest}
             </Button>
           </div>
         )}
@@ -224,17 +211,20 @@ export function DevicePage(props: DevicePageProps) {
 }
 
 /** 网络这一项的说明。网速慢或者量不出来都不拦候选人，只是提前说清楚会怎样、能怎么办。 */
-function networkText(network: NetworkState, slow: boolean, realtime: boolean): string {
+function networkText(
+  text: Texts["device"]["network"],
+  network: NetworkState,
+  slow: boolean,
+  realtime: boolean,
+): string {
   switch (network.status) {
     case "idle":
     case "testing":
-      return "正在测上传速度，面试的录像要边录边传。";
+      return text.testing;
     case "failed":
-      return "没有测出上传速度，可能是网络不稳定。可以继续，建议先确认网络正常。";
+      return text.failed;
     case "measured":
-      if (!slow) return "上传速度够用。";
-      return realtime
-        ? "上传速度偏慢，面试官的回应可能会变慢，结束后还要多等一会儿才能传完录像。建议换一个网络，比如靠近路由器，或者改用手机流量。"
-        : "上传速度偏慢，可以面试，但结束后要多等一会儿才能传完录像。建议换一个网络，比如靠近路由器，或者改用手机流量。";
+      if (!slow) return text.ok;
+      return realtime ? text.slowRealtime : text.slow;
   }
 }

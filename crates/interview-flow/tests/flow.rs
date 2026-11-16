@@ -616,6 +616,173 @@ async fn changing_config_drops_the_plan_but_changing_voice_keeps_it(pool: PgPool
     assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
+/// 选过音色的面试能改回「用默认音色」：`voice_id` 带 null 是清空，不带是不改。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_chosen_voice_can_be_cleared_back_to_the_default(pool: PgPool) {
+    let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;
+    let id = h.create(config()).await;
+    let voice_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO voices (name, engine, kind, instruction) \
+         VALUES ('温和女声', 'breeze2', 'designed', '温和的女声，语速偏慢') RETURNING id",
+    )
+    .fetch_one(&h.ctx.db)
+    .await
+    .unwrap();
+    let response = h
+        .patch(
+            &format!("/api/v1/interviews/{id}"),
+            json!({ "voice_id": voice_id }),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    assert_eq!(response.json()["voice_id"], json!(voice_id));
+    assert_eq!(h.prepare(&id).await["status"], "ready");
+    let total = h.utterances(&id).await.len();
+
+    // 不带 voice_id：音色不动，语音也不用重做
+    let response = h
+        .patch(&format!("/api/v1/interviews/{id}"), json!({}))
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    assert_eq!(response.json()["voice_id"], json!(voice_id));
+    assert_eq!(response.json()["status"], "ready");
+
+    // 带 null：改回默认音色。等于换了声音，题目留着，语音重新合成
+    let response = h
+        .patch(
+            &format!("/api/v1/interviews/{id}"),
+            json!({ "voice_id": null }),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let detail = response.json();
+    assert_eq!(detail["voice_id"], json!(null));
+    assert_eq!(detail["status"], "draft");
+    assert_eq!(detail["has_plan"], true);
+    assert_eq!(detail["replan_reasons"], json!([]));
+    assert_eq!(detail["synth"]["done"], 0);
+    assert_eq!(detail["synth"]["total"], total);
+
+    let again = h.with(None, FakeBackend::new());
+    let detail = again.prepare(&id).await;
+    assert_eq!(detail["status"], "ready", "{detail}");
+    assert_eq!(again.tts.calls(), total);
+
+    // 本来就是默认音色，再带一次 null：什么都没变
+    let response = h
+        .patch(
+            &format!("/api/v1/interviews/{id}"),
+            json!({ "voice_id": null }),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    assert_eq!(response.json()["status"], "ready");
+}
+
+/// 面试列表带上报告的结论和综合分，HR 不用一场一场点进去看。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn the_list_carries_the_report_verdict_and_score(pool: PgPool) {
+    let h = Harness::new(pool, None, FakeBackend::new()).await;
+    let high = h.create(config()).await;
+    let low = h.create(config()).await;
+    let old_report = h.create(config()).await;
+    let no_report = h.create(config()).await;
+
+    let report = |interview: &str, version: i32, status: &str, content: Option<Value>| {
+        let db = h.ctx.db.clone();
+        let interview: Uuid = interview.parse().unwrap();
+        let status = status.to_owned();
+        async move {
+            sqlx::query(
+                "INSERT INTO interview_reports (interview_id, version, status, content) \
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(interview)
+            .bind(version)
+            .bind(status)
+            .bind(content)
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+    };
+    // 报告里别的内容列表用不上，这里只放要取的那几项
+    report(
+        &high,
+        1,
+        "done",
+        Some(json!({
+            "overall_score": 82,
+            "score_range": { "low": 78, "high": 86 },
+            "recommendation": { "decision": "advance" },
+        })),
+    )
+    .await;
+    // 正在重新生成：新的一份还没好，先显示上一份的结论
+    report(&high, 2, "running", None).await;
+    report(
+        &low,
+        1,
+        "done",
+        Some(json!({
+            "overall_score": 41,
+            "score_range": { "low": 36, "high": 46 },
+            "recommendation": { "decision": "not_advance" },
+        })),
+    )
+    .await;
+    // 早先的报告没有浮动范围；一道题都没评上分时没有总分
+    report(
+        &old_report,
+        1,
+        "done",
+        Some(json!({
+            "overall_score": null,
+            "recommendation": { "decision": "borderline" },
+        })),
+    )
+    .await;
+    // 只有一份生成失败的报告
+    report(&no_report, 1, "failed", None).await;
+
+    let list = h.get("/api/v1/interviews?sort=-score").await.json();
+    let items = list["items"].as_array().unwrap();
+    let ids: Vec<&str> = items.iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert_eq!(&ids[..2], [high.as_str(), low.as_str()], "分数高的在前");
+    let row = |id: &str| items.iter().find(|i| i["id"] == id).unwrap().clone();
+
+    let item = row(&high);
+    assert_eq!(item["report_status"], "running");
+    assert_eq!(item["overall_score"], 82);
+    assert_eq!(item["score_range"], json!({ "low": 78, "high": 86 }));
+    assert_eq!(item["recommendation"], "advance");
+
+    let item = row(&low);
+    assert_eq!(item["overall_score"], 41);
+    assert_eq!(item["recommendation"], "not_advance");
+
+    let item = row(&old_report);
+    assert_eq!(item["overall_score"], json!(null));
+    assert_eq!(item["score_range"], json!(null));
+    assert_eq!(item["recommendation"], "borderline");
+
+    let item = row(&no_report);
+    assert_eq!(item["report_status"], "failed");
+    assert_eq!(item["overall_score"], json!(null));
+    assert_eq!(item["score_range"], json!(null));
+    assert_eq!(item["recommendation"], json!(null));
+
+    // 正序：分数低的在前，没有分数的还是排在最后
+    let list = h.get("/api/v1/interviews?sort=score").await.json();
+    let ids: Vec<&str> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(&ids[..2], [low.as_str(), high.as_str()]);
+}
+
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn config_changes_that_leave_the_questions_alone_keep_the_plan(pool: PgPool) {
     let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;
@@ -1032,6 +1199,44 @@ async fn a_broken_voice_is_reported_to_hr(pool: PgPool) {
     );
     assert_eq!(detail["has_plan"], true, "题目已经出好了，不用重出");
     assert_eq!(h.tts.calls(), 0);
+}
+
+/// 刚装好的系统里没有任何音色，只起了 IndexTTS：兜底的声音要 BreezeTTS2，用不了。
+/// HR 要做的是去建一个默认音色，提示里要直接说出来。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn says_to_set_a_default_voice_when_the_fallback_engine_is_down(pool: PgPool) {
+    let h = Harness::new(
+        pool,
+        Some(planner()),
+        FakeBackend::new().with_unavailable(interview_tts::EngineId::Breeze2),
+    )
+    .await;
+    let id = h.create(config()).await;
+    let detail = h.prepare(&id).await;
+    assert_eq!(detail["status"], "prepare_failed", "{detail}");
+    let error = detail["prepare_error"].as_str().unwrap();
+    assert!(error.contains("还没有默认音色"), "{error}");
+    assert!(error.contains("「声音」页"), "{error}");
+    assert_eq!(detail["has_plan"], true, "题目已经出好了，不用重出");
+
+    // 建了默认音色（设计音色不需要参考录音，这里借假后端放开 BreezeTTS2 的另一个实例来合成）
+    sqlx::query(
+        "INSERT INTO voices (name, engine, kind, instruction, is_default) \
+         VALUES ('默认音色', 'breeze2', 'designed', '沉稳的女声', true)",
+    )
+    .execute(&h.ctx.db)
+    .await
+    .unwrap();
+    // 指定了音色（这里是默认音色）而它的引擎用不了：这是另一回事，不提「还没有默认音色」
+    let detail = h.prepare(&id).await;
+    assert_eq!(detail["status"], "prepare_failed", "{detail}");
+    let error = detail["prepare_error"].as_str().unwrap();
+    assert!(!error.contains("还没有默认音色"), "{error}");
+    assert!(error.contains("现在用不了"), "{error}");
+
+    // 引擎起来了，再点一次准备就好了
+    let again = h.with(None, FakeBackend::new());
+    assert_eq!(again.prepare(&id).await["status"], "ready");
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]

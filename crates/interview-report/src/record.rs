@@ -84,8 +84,12 @@ pub struct Question {
 }
 
 /// 说话人。
+///
+/// 接口文档里叫 `ReportSpeaker`：对话记录里的说话人（`interview_core::Speaker`，没有第三个人）也叫
+/// `Speaker`，文档里类型按名字放，重名的只会留下一个。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = ReportSpeaker)]
 pub enum Speaker {
     Interviewer,
     Candidate,
@@ -225,6 +229,14 @@ impl Draft {
         self.kind == opening && self.duration_ms.is_none()
     }
 
+    /// 是不是说的同一个设备。有一边没写是哪个设备时，当成同一个。
+    fn same_device(&self, device: Option<&str>) -> bool {
+        match (device_of(&self.payload), device) {
+            (Some(mine), Some(theirs)) => mine == theirs,
+            _ => true,
+        }
+    }
+
     fn set(&mut self, key: &str, value: serde_json::Value) {
         if !self.payload.is_object() {
             self.payload = serde_json::Value::Object(serde_json::Map::new());
@@ -281,10 +293,13 @@ impl ProctorEvent {
                 continue;
             };
 
+            // 摄像头、麦克风、页面的声音各断各的，时间段可能重叠（手机来电话时麦克风被静音，
+            // 页面的声音也被系统停掉）：哪个设备恢复了，就去找那个设备最近的一条「断开」
+            let device = device_of(&payload);
             let open = drafts
                 .iter_mut()
                 .rev()
-                .find(|draft| draft.kind == pair.opening)
+                .find(|draft| draft.kind == pair.opening && draft.same_device(device))
                 .filter(|draft| draft.is_open(pair.opening));
             match (open, duration_ms) {
                 (Some(open), _) => {
@@ -325,6 +340,11 @@ impl ProctorEvent {
             })
             .collect()
     }
+}
+
+/// 事件说的是哪个设备（`recording_gap` 和 `device_recovered` 带着）。
+fn device_of(payload: &serde_json::Value) -> Option<&str> {
+    payload.get("device").and_then(|device| device.as_str())
 }
 
 /// 从事件带的数据里取走一个非负整数字段。
@@ -435,6 +455,90 @@ mod tests {
         assert_eq!(events[0].duration_ms, Some(2_000));
         assert_eq!(events[1].at_ms, Some(9_000));
         assert_eq!(events[1].duration_ms, Some(11_000));
+    }
+
+    /// 手机来电话：麦克风被静音，页面的声音也被系统停掉，两段时间是重叠的。
+    /// 返回整理好的事件，以及麦克风和声音各自断了多久。
+    fn phone_call(microphone_back_first: bool) -> (Vec<ProctorEvent>, u64, u64) {
+        let (microphone_back_at, sound_back_at) = if microphone_back_first {
+            (40_000, 41_000)
+        } else {
+            (41_000, 40_000)
+        };
+        let (microphone_ms, sound_ms) = (microphone_back_at - 10_000, sound_back_at - 10_500);
+        let mut events = vec![
+            raw(
+                "e1",
+                "recording_gap",
+                Some(10_000),
+                json!({"device": "audio", "cause": "muted"}),
+            ),
+            raw(
+                "e2",
+                "recording_gap",
+                Some(10_500),
+                json!({"device": "audio_output", "cause": "interrupted"}),
+            ),
+            raw(
+                "e3",
+                "device_recovered",
+                Some(microphone_back_at),
+                json!({"device": "audio", "duration_ms": microphone_ms}),
+            ),
+            raw(
+                "e4",
+                "device_recovered",
+                Some(sound_back_at),
+                json!({"device": "audio_output", "duration_ms": sound_ms}),
+            ),
+        ];
+        events.sort_by_key(|event| event.at_ms);
+        (ProctorEvent::from_raw(events), microphone_ms, sound_ms)
+    }
+
+    #[test]
+    fn overlapping_gaps_pair_by_device() {
+        for microphone_back_first in [true, false] {
+            let (events, microphone_ms, sound_ms) = phone_call(microphone_back_first);
+            assert_eq!(events.len(), 2, "两段各合成一条，不多出来也不留没恢复的");
+            assert_eq!(events[0].id, "e1");
+            assert_eq!(events[0].at_ms, Some(10_000));
+            assert_eq!(events[0].duration_ms, Some(microphone_ms));
+            assert!(events[0].detail.as_deref().unwrap().contains("muted"));
+            assert_eq!(events[1].id, "e2");
+            assert_eq!(events[1].at_ms, Some(10_500));
+            assert_eq!(events[1].duration_ms, Some(sound_ms));
+            assert!(
+                events[1]
+                    .detail
+                    .as_deref()
+                    .unwrap()
+                    .contains("audio_output")
+            );
+        }
+    }
+
+    #[test]
+    fn recovery_of_another_device_does_not_close_the_gap() {
+        let events = ProctorEvent::from_raw(vec![
+            raw(
+                "e1",
+                "recording_gap",
+                Some(10_000),
+                json!({"device": "video", "cause": "ended"}),
+            ),
+            raw(
+                "e2",
+                "device_recovered",
+                Some(20_000),
+                json!({"device": "audio", "duration_ms": 4_000}),
+            ),
+        ]);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].duration_ms, None, "摄像头到最后都没恢复");
+        assert_eq!(events[1].kind, "recording_gap");
+        assert_eq!(events[1].at_ms, Some(16_000));
+        assert_eq!(events[1].duration_ms, Some(4_000));
     }
 
     #[test]

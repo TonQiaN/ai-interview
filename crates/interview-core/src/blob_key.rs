@@ -84,6 +84,12 @@ pub fn tts_cache(content_hash: &str) -> String {
     format!("tts-cache/{}.wav", sanitize_segment(content_hash))
 }
 
+/// 一场面试名下所有文件的前缀：面试官的语音、录像、候选人每段回答的声音、画面检查的帧。
+/// 彻底删除一场面试时按它列出来逐个删。
+pub fn interview_prefix(interview_id: Uuid) -> String {
+    format!("interviews/{interview_id}")
+}
+
 /// 面试官的一句话。`utterance_key` 是 `interview_utterances.key`。
 ///
 /// 不同的 key 得到不同的文件：`q1` 和 `Q1` 清洗后是同一段，这时在后面加上原 key 的哈希，

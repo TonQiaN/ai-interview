@@ -41,7 +41,7 @@ use interview_report::record::{
 use interview_report::report::{
     Credibility, Decision, InterviewReport, ReviewFlagCode, RiskLevel, SignalKind, Usage,
 };
-use interview_report::{AnalyzeOptions, analyze};
+use interview_report::{AnalyzeOptions, analyze, compare};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -132,6 +132,22 @@ enum Command {
         record: Option<PathBuf>,
         #[arg(long, value_enum, default_value = "high")]
         thinking: ThinkingArg,
+    },
+    /// 拿几份报告做同一个岗位的横向对比
+    Compare {
+        /// 各位候选人的报告（JSON 文件），至少两份
+        reports: Vec<PathBuf>,
+        /// 岗位取自这份面试记录
+        #[arg(long)]
+        job: PathBuf,
+        #[arg(long, value_enum, default_value = "high")]
+        thinking: ThinkingArg,
+        /// 比几遍。每一遍把传入的顺序往后挪一位（代号跟着变），用来看排序稳不稳、受不受传入顺序影响
+        #[arg(long, default_value_t = 1)]
+        rounds: usize,
+        /// 对比结果存到这个目录（round-1.json……）。不填就不存
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -252,6 +268,13 @@ async fn main() -> Result<()> {
             samples,
             out,
         } => noise_all(&model, &scenarios, &samples, &out, &only, percent).await,
+        Command::Compare {
+            reports,
+            job,
+            thinking,
+            rounds,
+            out,
+        } => compare_all(&model, &job, &reports, thinking, rounds, out.as_deref()).await,
         Command::Frames {
             video,
             start_ms,
@@ -1033,6 +1056,159 @@ fn check(expectation: &Expectation, report: &InterviewReport) -> Vec<(String, bo
         ));
     }
     checks
+}
+
+/// 拿几份报告做横向对比，把结果打印成 HR 能看的样子。比几遍时每一遍换一下传入的顺序。
+async fn compare_all(
+    model: &dyn ChatModel,
+    job: &Path,
+    paths: &[PathBuf],
+    thinking: ThinkingArg,
+    rounds: usize,
+    out: Option<&Path>,
+) -> Result<()> {
+    let job = read_json::<InterviewRecord>(job)?.job;
+    let reports: Vec<(String, InterviewReport)> = paths
+        .iter()
+        .map(|path| {
+            let name = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let dir = path
+                .parent()
+                .and_then(Path::file_name)
+                .map(|dir| dir.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok((format!("{dir}/{name}"), read_json(path)?))
+        })
+        .collect::<Result<_>>()?;
+    if let Some(dir) = out {
+        std::fs::create_dir_all(dir)?;
+    }
+    let options = AnalyzeOptions {
+        thinking: Some(thinking.thinking()),
+        ..Default::default()
+    };
+    let mut total = Usage::default();
+    let mut orders = Vec::new();
+    for round in 0..rounds.max(1) {
+        let mut rotated: Vec<&(String, InterviewReport)> = reports.iter().collect();
+        rotated.rotate_left(round % reports.len().max(1));
+        let input: Vec<&InterviewReport> = rotated.iter().map(|(_, report)| report).collect();
+        let comparison = compare(&job, &input, model, &options).await?;
+        add_usage(&mut total, &comparison.meta.usage);
+        let name_of = |label: &str| -> &str {
+            comparison
+                .candidates
+                .iter()
+                .find(|c| c.label == label)
+                .and_then(|c| {
+                    rotated
+                        .iter()
+                        .find(|(_, r)| r.interview_id == c.interview_id)
+                })
+                .map_or("?", |(name, _)| name.as_str())
+        };
+
+        println!(
+            "\n== 第 {} 遍（{} 秒）",
+            round + 1,
+            comparison.meta.elapsed_ms / 1000
+        );
+        println!("{}", comparison.summary);
+        for candidate in &comparison.candidates {
+            println!(
+                "{}. {}（{}）{:?}，总分 {}{}{}",
+                candidate.position,
+                candidate.label,
+                name_of(&candidate.label),
+                candidate.decision,
+                candidate
+                    .overall_score
+                    .map_or("无".to_owned(), |score| score.to_string()),
+                candidate
+                    .score_range
+                    .map_or(String::new(), |r| format!("（{} 到 {}）", r.low, r.high)),
+                if candidate.close_to.is_empty() {
+                    String::new()
+                } else {
+                    format!("，分数上和 {} 分不出先后", candidate.close_to.join("、"))
+                }
+            );
+            println!("   {}", candidate.standing);
+            for item in &candidate.advantages {
+                println!("   + {item}");
+            }
+            for item in &candidate.concerns {
+                println!("   - {item}");
+            }
+        }
+        println!("岗位要求对照：");
+        for row in &comparison.requirements {
+            let cells: Vec<String> = row
+                .cells
+                .iter()
+                .map(|cell| {
+                    format!(
+                        "{} {}",
+                        cell.label,
+                        cell.verdict
+                            .map_or("没有".to_owned(), |verdict| format!("{verdict:?}"))
+                    )
+                })
+                .collect();
+            println!(
+                "  [{:?}] {}：{}",
+                row.importance,
+                row.requirement,
+                cells.join("，")
+            );
+        }
+        println!("差别：");
+        for difference in &comparison.differences {
+            println!(
+                "  {}（{}）：{}",
+                difference.topic,
+                difference.labels.join("、"),
+                difference.detail
+            );
+        }
+        println!("怎么分出高下：");
+        for item in &comparison.tie_breakers {
+            println!(
+                "  {}：{}（{}）",
+                item.labels.join("、"),
+                item.question,
+                item.purpose
+            );
+        }
+        println!("注意：");
+        for caveat in &comparison.caveats {
+            println!("  {caveat}");
+        }
+        println!("{}", usage_line(&comparison.meta.usage));
+        orders.push(
+            comparison
+                .candidates
+                .iter()
+                .map(|c| name_of(&c.label).to_owned())
+                .collect::<Vec<_>>()
+                .join(" > "),
+        );
+        if let Some(dir) = out {
+            std::fs::write(
+                dir.join(format!("round-{}.json", round + 1)),
+                serde_json::to_string_pretty(&comparison)?,
+            )?;
+        }
+    }
+    println!("\n各遍的排序：");
+    for order in &orders {
+        println!("  {order}");
+    }
+    println!("合计：{}", usage_line(&total));
+    Ok(())
 }
 
 fn add_usage(total: &mut Usage, usage: &Usage) {

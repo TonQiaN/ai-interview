@@ -14,6 +14,7 @@
 
 ```bash
 scripts/dev.sh                         # 一键启动：开发数据库、迁移、后端（127.0.0.1:8080）
+scripts/serve.sh                       # 正式使用的一键启动：真语音识别，Mac 上顺带起语音合成的 worker。--check 只检查环境。见 docs/deploy.md
 scripts/dev-db.sh start                # 只起开发数据库。要数据库的测试靠它（DATABASE_URL=$(scripts/dev-db.sh url)）
 scripts/check.sh                       # 全量检查，和 CI 一样：卫生检查、fmt、clippy、测试。会自己起开发数据库
 cargo fmt --all                        # 格式化
@@ -27,9 +28,10 @@ cargo run -p interview-server -- openapi   # 打印 OpenAPI 文档，不用数�
 scripts/verify-repo-hygiene.sh         # 音频、权重、密钥、个人信息不进 Git
 
 pnpm -C web install                    # 装前端依赖（Node 22 以上，pnpm 10）
-pnpm -C web check                      # 前端全量检查：lint、类型检查、测试、构建
+pnpm -C web check                      # 前端全量检查：lint 和格式（没格式化会失败，跑下面的 format）、类型检查、测试、构建
 pnpm -C web gen:api                    # 由后端的 OpenAPI 文档生成 TypeScript 类型（typecheck 和 build 会自己先跑）
 pnpm -C web --filter <包名> test       # 只测一个包，比如 @ai-interview/api-client
+pnpm -C web/apps/candidate e2e         # 候选人面试页的浏览器测试：真的 Chromium 对着真的后端走完整场面试，自己起后端，两三分钟。CI 里是 candidate-e2e
 pnpm -C web format                     # 用 Biome 格式化并整理 import
 ```
 
@@ -114,6 +116,7 @@ cargo test -p interview-server --features sherpa --test live -- --ignored --noca
 - 不写 `unsafe`（workspace 里设了 forbid）。clippy 警告当错误处理，不要用 `#[allow]` 压掉，除非写明理由。
 - 云端容器的出网经过代理并重新签发证书：HTTP 客户端要信任系统证书（reqwest 0.13 默认的 rustls 就走系统证书校验，不要换成内置根证书的方案），不要关 TLS 校验。
 - JSON 字段用 `snake_case`；接口出错返回统一的错误结构（见 `docs/architecture/api.md`）。
+- 接口文档里类型按名字放，两个模块里重名的只会留下一个。新加的类型和别的模块重名、又都要进接口文档时，给其中一个加 `#[schema(as = 新名字)]`（`crates/interview-server/tests/app.rs` 里有测试拦着）。
 - 数据库查询用 sqlx 的运行时接口（`query_as` 等），不用要离线缓存的 `query!` 宏；要数据库的测试用 `#[sqlx::test]`。
 - 候选人的简历、录像、声音是个人信息：不进日志，不进测试数据，发给大模型的内容只带任务需要的部分。
 - 前端调后端只用 `@ai-interview/api-client`（`createApiClient()` 给 HR 后台，`createRoomClient(token)` 给面试间），类型由 OpenAPI 生成，不手写接口类型。生成结果在 `web/packages/api-client/src/generated/`，不进 Git。

@@ -295,8 +295,8 @@ async fn import_accepts_pasted_text_and_rejects_bad_files(pool: PgPool) {
     for (field, name, content, code) in [
         (
             "file",
-            Some("简历.docx"),
-            &b"PK\x03\x04...."[..],
+            Some("简历.doc"),
+            &b"\xD0\xCF\x11\xE0...."[..],
             "unsupported_file",
         ),
         ("file", Some("空.pdf"), &b""[..], "empty_file"),
@@ -405,6 +405,7 @@ async fn openapi_lists_candidate_paths(pool: PgPool) {
         "/api/v1/candidates/{id}",
         "/api/v1/candidates/import",
         "/api/v1/candidates/{id}/profile/regenerate",
+        "/api/v1/candidates/{id}/purge",
         "/api/v1/candidates/{id}/resumes",
         "/api/v1/resumes/{id}",
         "/api/v1/resumes/{id}/file",

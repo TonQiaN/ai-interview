@@ -87,6 +87,90 @@ jobs:
       - name: 构建
         run: pnpm build
 
+  # 候选人面试页的浏览器测试：真的 Chromium 加假的摄像头和麦克风，对着真的后端走完整场面试。
+  # 后端、面试页、接口约定任何一边改坏了，只有这里看得出来。
+  candidate-e2e:
+    name: candidate-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # PR 上检出的是合并提交，多取一层才能和它的第一个父提交（目标分支）比出改了哪些文件
+          fetch-depth: 2
+      - name: 这次改动要不要跑
+        id: scope
+        # 只改了文档、语音引擎清单这类东西的 PR 不用跑。跳过时这个 job 照样算通过，不卡总闸。
+        # 推到 main 的每次都跑。
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          run=true
+          if [ "$EVENT" = "pull_request" ]; then
+            pattern='^(crates/|migrations/|Cargo\.(toml|lock)$|web/(apps/candidate|packages)/|web/[^/]+$|scripts/dev-db\.sh$|\.github/workflows/ci\.yml$)'
+            git diff --name-only HEAD^1 HEAD | grep -Eq "$pattern" || run=false
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "要不要跑：$run"
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.scope.outputs.run == 'true'
+      - uses: Swatinem/rust-cache@v2
+        if: steps.scope.outputs.run == 'true'
+      - name: 系统工具
+        if: steps.scope.outputs.run == 'true'
+        # ffmpeg：合并录像分片、从分片里取声音；ffprobe 用来检查录出来的文件有画面有声音
+        # PostgreSQL：测试用 scripts/dev-db.sh 自己起一个实例，和本机跑法一样。runner 自带，没有再装
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ls /usr/lib/postgresql/*/bin/pg_ctl >/dev/null 2>&1 || sudo apt-get install -y --no-install-recommends postgresql
+      - uses: pnpm/action-setup@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: 安装依赖
+        if: steps.scope.outputs.run == 'true'
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Playwright 版本
+        if: steps.scope.outputs.run == 'true'
+        id: playwright
+        working-directory: web/apps/candidate
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: 浏览器缓存
+        if: steps.scope.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - name: 安装浏览器
+        if: steps.scope.outputs.run == 'true'
+        working-directory: web/apps/candidate
+        # 浏览器本身有缓存就不再下载，它依赖的系统库每次都要装
+        run: pnpm exec playwright install --with-deps chromium
+      - name: 编译后端
+        if: steps.scope.outputs.run == 'true'
+        # 测试自己也会编译（e2e/backend.sh），先编译好，编译错误在这一步就看得到
+        run: cargo build -p interview-server && cargo build -p interview-room --example demo
+      - name: 浏览器测试
+        if: steps.scope.outputs.run == 'true'
+        working-directory: web/apps/candidate
+        run: pnpm e2e
+      - name: 留下失败时的截图
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-e2e-results
+          path: web/apps/candidate/e2e-results
+          retention-days: 7
+          if-no-files-found: ignore
+
   # 语音识别的真后端在可选特性后面，上面的 rust 任务编不到它，这里单独检查，并用真模型跑一遍
   stt-sherpa:
     name: stt-sherpa
@@ -139,7 +223,7 @@ jobs:
   all-checks-passed:
     name: all-checks-passed
     if: always()
-    needs: [rust, web, stt-sherpa, hygiene]
+    needs: [rust, web, candidate-e2e, stt-sherpa, hygiene]
     runs-on: ubuntu-latest
     steps:
       - name: 上面的 job 都要通过

@@ -64,7 +64,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 
 两种身份，互不相通：
 
-**HR**：`POST /api/v1/auth/login` 成功后服务器种一个 HttpOnly、SameSite=Lax 的 cookie（`ai_interview_session`），之后的请求自动带上。除了登录和下面的候选人接口，`/api/v1` 下的接口都要求已登录。handler 里用提取器 `interview_platform::auth::AdminUser` 拿当前账号。
+**HR**：`POST /api/v1/auth/login` 成功后服务器种一个 HttpOnly、SameSite=Lax 的 cookie（`ai_interview_session`），之后的请求自动带上。除了登录和下面的候选人接口，`/api/v1` 下的接口都要求已登录。handler 里用提取器 `interview_platform::auth::AdminUser` 拿当前账号。账号有两种角色：`admin`（管理员）能改全局设置和管理账号，`recruiter`（普通账号）其余的都能做；只有管理员能做的操作在 handler 开头调 `user.require_admin()?`。
 
 **候选人**：面试链接里的令牌就是全部身份，不用登录。
 
@@ -104,6 +104,8 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `GET /readyz` | 数据库连得上 |
 | `GET /api/openapi.json`、`GET /api/docs` | 接口文档 |
 | `POST /api/v1/auth/login`、`POST /api/v1/auth/logout`、`GET /api/v1/auth/me` ★ | HR 登录 |
+| `PUT /api/v1/auth/password` | 登录的人改自己的密码，要带现在的密码。改完以后这个账号在别处的登录都失效，当前这一处保留 |
+| `GET /api/v1/accounts`、`POST /api/v1/accounts`、`PATCH /api/v1/accounts/{id}` | HR 账号，只有管理员能用。列出、开账号、改名字和角色、停用和恢复（`disabled`）、重设密码（`password`）。停用或重设密码后那个账号已有的登录马上失效。不能停用自己、不能把自己改成普通账号，系统里始终至少有一个能登录的管理员（违反时 409） |
 | `GET /api/v1/settings/{key}`、`PUT /api/v1/settings/{key}` | 全局设置 |
 | `GET /api/v1/system/status` ★ | 各依赖是否就绪：数据库、DeepSeek、TTS worker、STT 模型 |
 
@@ -111,10 +113,11 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 
 | 方法和路径 | 做什么 |
 | --- | --- |
-| `GET /api/v1/interviews`、`POST /api/v1/interviews` ★ | 列表（可按候选人、岗位、状态筛）、新建 |
+| `GET /api/v1/interviews`、`POST /api/v1/interviews` ★ | 列表（可按候选人、岗位、状态筛；每一行带报告的结论和综合分）、新建 |
 | `GET /api/v1/interviews/{id}`、`PATCH /api/v1/interviews/{id}`、`DELETE /api/v1/interviews/{id}` ★ | 详情（带候选人和岗位摘要、最新报告状态）、改配置、归档 |
 | `POST /api/v1/interviews/{id}/prepare` ★ | 出题加预合成语音 |
 | `POST /api/v1/interviews/{id}/cancel` | 取消 |
+| `POST /api/v1/interviews/{id}/purge` | 彻底删除，只有管理员能用，删了不能恢复：这场面试的录像、语音、画面检查的帧，和题目、对话记录、过程事件、面试链接、报告一起删掉，比过它的候选人对比也删，候选人和岗位不动。成功返回 204。正在准备、正在面试，或者后台正在处理它（转写、写报告）时返回 409，先取消或者等一会儿。只想在列表里藏起来用归档 |
 | `GET /api/v1/interviews/{id}/plan`、`PUT /api/v1/interviews/{id}/plan` | 看题、改题 |
 | `GET /api/v1/interviews/{id}/utterances` | 面试官的每句话和合成状态 |
 | `GET /api/v1/interviews/{id}/utterances/{key}/audio` | 试听 |
@@ -125,13 +128,15 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `PUT /api/v1/interviews/{id}/decision` | HR 的结论 |
 | `GET /api/v1/interviews/{id}/frame-events` | 录像画面检查的结果：画面里人数不对、看得到手机的时间段 |
 | `GET /api/v1/interviews/{id}/frames/{at_ms}` | 画面检查时存下来的那一帧（JPEG），可以直接当 `<img>` 的地址 |
+| `GET /api/v1/positions/{id}/comparison`、`POST /api/v1/positions/{id}/comparison` | 同一个岗位几位候选人的横向对比：取最近的一份、开始比一次 |
 | `GET /api/v1/interview-templates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` | 配置模板 |
 | `GET /api/v1/interview-config/defaults` | 默认配置和各选项的取值范围，给配置表单用 |
 
 几条前端要知道的规则：
 
 - 只有 `draft`、`prepare_failed`、`ready` 三个状态能改配置、改题、点准备，其他状态返回 409，`code` 是 `interview_not_editable`。
-- `PATCH` 换了简历，或者改的配置写进了题目里（时长、轮次、面试官、考察要求、必问题等），出好的题目作废，状态回到 `draft`。改的配置不影响题目（早停、思考模式、最短回答时间、单题最长时间、把追问上限调小等）时题目和语音都留着，状态不变；计划会跟着新配置收拾一下（去掉多出来的追问、压短预期回答时间），文字不变。只换音色的话题目保留，状态回到 `draft`，再点准备只重新合成语音。哪些配置算哪一类见 `crates/interview-engine/README.md` 的「改了配置，题目还能不能用」。
+- 列表的每一行带 `overall_score`（0 到 100）、`score_range`（`{low, high}`）和 `recommendation`（报告里 `recommendation.decision` 的值：`strong_advance`、`advance`、`borderline`、`not_advance`），取这场面试最新一份生成好的报告，没有就是 null。正在重新生成时显示的是上一份的，`report_status` 说的是最新那一份的状态。`sort=-score` 按综合分从高到低排，没有分数的排在最后（`sort=score` 时也在最后）。别的排序字段：`created_at`、`updated_at`、`started_at`、`candidate`、`position`、`status`。
+- `PATCH` 换了简历，或者改的配置写进了题目里（时长、轮次、面试官、考察要求、必问题等），出好的题目作废，状态回到 `draft`。改的配置不影响题目（早停、思考模式、最短回答时间、单题最长时间、把追问上限调小等）时题目和语音都留着，状态不变；计划会跟着新配置收拾一下（去掉多出来的追问、压短预期回答时间），文字不变。只换音色的话题目保留，状态回到 `draft`，再点准备只重新合成语音。`voice_id` 不带是不改，带 `null` 是改回用默认音色（和换音色一样处理）。哪些配置算哪一类见 `crates/interview-engine/README.md` 的「改了配置，题目还能不能用」。
 - `PATCH` 返回面试详情，外加 `replan_reasons`：这次改动让题目作废了的话，是哪些字段导致的（配置里的路径，比如 `interviewer.name`、`target_duration_minutes`；换简历是 `resume_id`）。题目还能用、或者本来就没出题时是空数组。
 - `POST .../prepare` 返回 202 和面试详情（状态 `preparing`），之后轮询详情。失败是 `prepare_failed`，原因在 `prepare_error`；语音合成失败时题目会保留，再点一次只补失败的那几句。请求体可以不传；传 `{"regenerate_plan": true}` 会重新出题。没配大模型又需要出题时返回 503。
 - `GET .../plan` 在还没出题时返回 404，`code` 是 `plan_not_ready`。`PUT .../plan` 要传完整的计划，校验不过返回 422，`details` 按位置（比如 `questions[1].text`）列出原因；保存后状态先变 `preparing`，文字变了的那几句重新合成完回到 `ready`。
@@ -144,6 +149,8 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 - `PUT .../decision` 请求体 `{"decision": "advance" | "hold" | "reject" | "pending", "note": "…"}`，`note` 可以不传，最长 2000 字。返回面试详情。改回 `pending` 会清掉决定人和时间。
 - `GET .../frame-events` 返回 `{checked, items}`。出报告之前会从摄像头录像里抽帧让模型看，结果在这里；没有录像、还没出报告或者检查没做成时 `checked` 是 false、`items` 是空的。每条是 `{id, kind, at_ms, duration_ms, payload, frame_at_ms}`，按 `at_ms` 从早到晚排，时间和录像、过程事件（`GET .../events`）是同一条时间轴，两边按 `at_ms` 就能排在一起。`id` 就是报告证据里的 `event_id`（比如 `frame-phone-95000`）。`kind` 是 `face_count_changed`、`phone_visible`、`frames_checked`；`payload` 里有 `people`、`frames`、`note`、`unclear`（`frames_checked` 是 `frames`、`interval_ms`、`flagged`、`unreadable`）。只在一帧里看到的 `duration_ms` 是 null。`frame_at_ms` 是这一段里存了图的帧，只有不正常的帧存图，`frames_checked` 这一条不带。
 - `GET .../frames/{at_ms}` 的 `at_ms` 用 `frame_at_ms` 里的值。这一刻没存图返回 404。画面是候选人的个人信息，要登录才能取。
+- 候选人对比：`POST /api/v1/positions/{id}/comparison` 的请求体是 `{ "interview_ids": [...] }`，2 到 20 场，都要是这个岗位的面试、都要有写好的报告，不满足是 422（原因在 `details.interview_ids`）。在后台生成（5 份报告约一分钟），返回 202；之后隔几秒 `GET` 一次看 `status`（`pending`、`running`、`done`、`failed`，失败原因在 `error`）。同样的几场正在比时再点一次不会多排一份；正在比别的几场时是 409，`code` 是 `comparison_in_progress`。从来没比过时 `GET` 是 404，`code` 是 `comparison_not_found`。
+- 对比的结果在 `result` 里：`comparison` 的结构是 `interview_report::Comparison`，正文里候选人用代号 A、B、C，每位带着 `interview_id`；`people` 按同样的顺序给出每场面试对应的候选人和姓名。一个岗位只留最近一份生成好的：新的一次还在生成或者失败了，`result` 里是上一份，`status` 和 `interview_ids` 说的是新的这一次。怎么展示见 issue #238 里报告线的说明（同一档里的先后只是参考）。
 
 ### ② 岗位和候选人（interview-talent、interview-raas）
 
@@ -152,10 +159,11 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `GET /api/v1/positions`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 岗位 |
 | `POST /api/v1/positions/draft` | 粘贴一段岗位描述，让大模型整理成岗位草稿（不保存，给新建岗位的表单预填） |
 | `GET /api/v1/candidates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 候选人 |
-| `GET /api/v1/candidates/{id}/resumes`、`POST /api/v1/candidates/{id}/resumes` | 简历列表、上传 |
+| `GET /api/v1/candidates/{id}/resumes`、`POST /api/v1/candidates/{id}/resumes` | 简历列表、上传。能收 PDF、Word（.docx）、图片（PNG、JPG、WebP）和纯文本，最大 20 MB；老格式的 Word（.doc）不收，返回 422 `unsupported_file`；Word 文档坏了或者里面没有文字，返回 422 `unreadable_file` |
 | `GET /api/v1/resumes/{id}`、`GET /api/v1/resumes/{id}/file`、`POST /api/v1/resumes/{id}/parse`、`DELETE /api/v1/resumes/{id}` | 简历详情、原件、重新解析、删除（连原件一起删）。`parse_status` 是 `failed` 时原因在 `parse_error`；是 `done` 但 `parse_warning` 有值时，要把这句话显示给 HR（比如 PDF 页数太多，只读了前 8 页） |
 | `POST /api/v1/candidates/import` | 直接传一份简历，自动建候选人 |
 | `POST /api/v1/candidates/{id}/profile/regenerate` | 重新生成画像 |
+| `POST /api/v1/candidates/{id}/purge` | 彻底删除候选人，只有管理员能用（别的账号 403），删了不能恢复。候选人要求删除个人信息时用：姓名、联系方式、画像、备注和他的每一份简历（原件、全文、解析结果）一起删。名下还有面试（归档的也算）时返回 409 `candidate_has_interviews`，要先把每场面试彻底删除（`POST /api/v1/interviews/{id}/purge`）再删人。从 RAAS 导入的候选人删掉以后，再导入会重新建一位。只想从列表里藏起来用 `DELETE /{id}` 归档 |
 | `GET /api/v1/raas/status` | RAAS 是否连得上 |
 | `GET /api/v1/raas/positions`、`GET /api/v1/raas/positions/{ref}`、`POST /api/v1/raas/positions/import` | 浏览和导入 RAAS 岗位 |
 | `GET /api/v1/raas/candidates`、`GET /api/v1/raas/candidates/{ref}`、`POST /api/v1/raas/candidates/import` | 浏览和导入 RAAS 候选人。列表可以带 `job_requisition_ref` 只看投了某个岗位的人 |
@@ -165,7 +173,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 - 列表和详情是实时去 RAAS 查的，`{ref}` 是 RAAS 里的编号（列表里的 `external_ref`）。已经导入过的带 `imported_position_id` 或 `imported_candidate_id`。候选人的列表和详情不带手机和邮箱，导入以后在我们这边看。
 - 导入是同步的，请求体 `{"refs": [...], "refresh": false}`，一次最多 20 条。每条各自成功或失败，返回 `items[]`，看 `outcome`：`created`、`already_imported`、`refreshed`、`restored`（原来归档了，这次恢复）、`failed`（原因在 `message`）。
 - 已经导入过的默认不动。`refresh` 为真时：岗位用 RAAS 的最新内容覆盖（用工形式 RAAS 里没有，留着我们这边填的）；候选人的基本信息只补空的，RAAS 里有新简历就导进来设成主简历。
-- 候选人的简历优先取 RAAS 里的原始文件，没有或者读不了（比如 Word）就用 RAAS 的解析结果拼一份文字版，都交给 `resume.parse` 任务。`items[].resume` 是 `queued`、`unchanged`、`none`（RAAS 里没有简历）或 `failed`（取简历时 RAAS 出错，人已经建好，稍后带 `refresh` 再导）。
+- 候选人的简历优先取 RAAS 里的原始文件，没有或者读不了（比如老格式的 Word .doc）就用 RAAS 的解析结果拼一份文字版，都交给 `resume.parse` 任务。`items[].resume` 是 `queued`、`unchanged`、`none`（RAAS 里没有简历）或 `failed`（取简历时 RAAS 出错，人已经建好，稍后带 `refresh` 再导）。
 - RAAS 没配置或登录不上是 503（`raas_unavailable`），RAAS 暂时访问不了是 502（`raas_error`）。
 
 ### ④ 语音（interview-tts、interview-stt）
@@ -205,7 +213,7 @@ HR 侧：
 
 | 方法和路径 | 做什么 |
 | --- | --- |
-| `GET /api/v1/room/session` | 会话信息：状态、岗位和公司的展示名、预期时长、模式、同意事项、静音秒数、断点位置 |
+| `GET /api/v1/room/session` | 会话信息：状态、岗位和公司的展示名、预期时长、模式、面试语言、同意事项、静音秒数、断点位置 |
 | `POST /api/v1/room/consent` | 记录同意：`{ "consent_version", "agreed_keys" }`。必须同意的少勾了返回 422；版本和服务端当前的不一样返回 409（`consent_outdated`） |
 | `POST /api/v1/room/device-check` | 上报设备检测结果，记成一条 `device_report` 事件 |
 | `POST /api/v1/room/uplink-probe` | 测上行网速用：请求体是一段字节（最多 1 MiB），服务端收完就丢，什么都不存。页面按花了多久算出网速，随设备检测结果一起上报 |
@@ -279,6 +287,7 @@ HR 侧：
 - 候选人答完之后，`advance` 马上返回一句过渡语，回答放到后台判断。页面报告过渡语播完时判断还没好，这次请求会等到判断完再返回；判断最多等 20 秒，等不到就按顺序问下一题。极少数情况下返回 503（`answer_pending`），页面过一会儿原样重试。
 - `advance` 是幂等的：同一个 `seq` 重复提交返回同样的下一步（断网重试用）；`seq` 不是当前这一句也不是上一句时返回 409（`seq_conflict`）。面试已经结束时返回 `finish`。
 - 断点续面：`GET /room/session` 的 `resume` 是当前该播的那一句；页面重新检查设备后调 `start`，从这一句继续。录像从新的一段开始录。续面时这一步里的 `progress.elapsed_ms` 是服务端现在的时间（面试开始到此刻过了多久），页面拿它当时间轴的起点，新的一段录像才不会和刷新前的那段叠在一起。
+- `GET /room/session` 的 `language` 是面试配置里的面试语言（`zh` 或 `en`）。面试页的文字按它显示，`consent.items` 也是这种语言的；候选人同意时存下来的标题就是他看到的那一份。两种语言的同意事项项目和顺序一样，共用一个 `consent.version`。
 - 面试结束之后 `GET /room/session` 的 `stage` 是 `finished`，`end_reason` 是结束的原因（取值和 `finish` 的 `reason` 一样），页面据此决定结束页说「面试完成」还是「面试已结束」。还没结束时 `end_reason` 是 null。
 - 面试结束（不管哪种原因）时，服务端在同一个事务里排一个 `interview.finalize` 任务，转写和出报告从那里开始。
 - 页面超过 15 分钟（`AI_INTERVIEW_ROOM_ABANDON_MINUTES`）没有任何动静（不上报、不传录像），后台任务 `room.watchdog` 把面试按 `connection_lost` 结束，并记一条服务端事件 `interview_abandoned`。结束语已经发给页面的不算中途离开，记成正常结束。

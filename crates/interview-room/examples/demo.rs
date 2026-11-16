@@ -1,7 +1,7 @@
 //! 本地联调和端到端测试用的小工具：造一场准备好的面试，或者看一场面试现在的状态。
 //!
 //! ```text
-//! cargo run -p interview-room --example demo -- seed [--silence-sec 2] [--min-sec 1] [--max-sec 60] [--tone-ms 800] [--realtime 1]
+//! cargo run -p interview-room --example demo -- seed [--silence-sec 2] [--min-sec 1] [--max-sec 60] [--tone-ms 800] [--realtime 1] [--english 1]
 //! cargo run -p interview-room --example demo -- state <面试的 ID>
 //! ```
 //!
@@ -50,6 +50,8 @@ struct SeedOptions {
     tone_ms: u32,
     /// 配成实时对话。服务进程接了大模型、语音识别和语音合成时才真的按实时对话进行
     realtime: bool,
+    /// 配成英文面试：题目、岗位名、候选人名字都换成英文的，页面文字和同意事项跟着面试语言走
+    english: bool,
 }
 
 impl SeedOptions {
@@ -60,6 +62,7 @@ impl SeedOptions {
             max_sec: 60,
             tone_ms: 800,
             realtime: false,
+            english: false,
         };
         let mut rest = args.iter();
         while let Some(name) = rest.next() {
@@ -74,6 +77,7 @@ impl SeedOptions {
                 "--max-sec" => options.max_sec = value,
                 "--tone-ms" => options.tone_ms = value,
                 "--realtime" => options.realtime = value != 0,
+                "--english" => options.english = value != 0,
                 _ => bail!("不认识的选项 {name}"),
             }
         }
@@ -81,14 +85,74 @@ impl SeedOptions {
     }
 }
 
+/// 面试官要说的话，中文和英文各一份。
+struct SampleText {
+    position: &'static str,
+    candidate: &'static str,
+    competency: &'static str,
+    intent: &'static str,
+    questions: [&'static str; 3],
+    follow_up: &'static str,
+    follow_up_when: &'static str,
+    opening: &'static str,
+    acks: [&'static str; 2],
+    nudge: &'static str,
+    repeat: &'static str,
+    candidate_questions: &'static str,
+    closing: &'static str,
+    closing_early: &'static str,
+}
+
+const SAMPLE_ZH: SampleText = SampleText {
+    position: "后端工程师（Rust）",
+    candidate: "测试候选人",
+    competency: "沟通表达",
+    intent: "看表达是否清楚",
+    questions: [
+        "请先简单介绍一下你自己，以及最近在做的工作。",
+        "讲一个你解决过的、印象最深的线上问题。",
+        "你为什么想来做这个岗位？",
+    ],
+    follow_up: "能再具体说说你自己做了什么吗？",
+    follow_up_when: "回答里只讲了团队，没讲本人的贡献",
+    opening: "你好，我是这次面试的 AI 面试官。接下来我会问你几个问题，答完停一会儿就会进入下一题。",
+    acks: ["好的，谢谢。", "明白了。"],
+    nudge: "我这边没有听到声音，你可以再说一遍吗？",
+    repeat: "好的，我再说一遍。",
+    candidate_questions: "我的问题问完了，你有什么想问的吗？",
+    closing: "今天的面试到这里，谢谢你的时间。",
+    closing_early: "今天先到这里，谢谢你的时间。",
+};
+
+const SAMPLE_EN: SampleText = SampleText {
+    position: "Backend Engineer (Rust)",
+    candidate: "Test Candidate",
+    competency: "Communication",
+    intent: "See whether the answer is clear",
+    questions: [
+        "Please introduce yourself briefly and tell me what you have been working on recently.",
+        "Tell me about the production incident you remember best and how you solved it.",
+        "Why do you want this role?",
+    ],
+    follow_up: "Could you be more specific about what you did yourself?",
+    follow_up_when: "The answer only covers the team, not the candidate's own contribution",
+    opening: "Hello, I am the AI interviewer for this interview. I will ask you a few questions. When you finish an answer, pause for a moment and the next question will start.",
+    acks: ["OK, thank you.", "Got it."],
+    nudge: "I could not hear anything. Could you say that again?",
+    repeat: "Sure, let me say that again.",
+    candidate_questions: "Those are all my questions. Is there anything you would like to ask?",
+    closing: "That is all for today. Thank you for your time.",
+    closing_early: "Let us stop here for today. Thank you for your time.",
+};
+
 /// 一份小的面试计划：三道题，第一道带一个追问。内容都是编的。
-fn sample_plan(config: &InterviewConfig) -> InterviewPlan {
-    let question = |number: usize, text: &str| PlannedQuestion {
+fn sample_plan(config: &InterviewConfig, text: &SampleText) -> InterviewPlan {
+    let question = |number: usize, question: &str| PlannedQuestion {
         key: keys::question(number),
-        text: text.to_owned(),
+        text: question.to_owned(),
         category: QuestionCategory::Behavioral,
-        competency: "沟通表达".to_owned(),
-        intent: "看表达是否清楚".to_owned(),
+        competency: text.competency.to_owned(),
+        intent: text.intent.to_owned(),
         origin: QuestionOrigin::Generated,
         required: true,
         // 不能超过单题最长时间，不然引擎不认这份计划
@@ -97,29 +161,28 @@ fn sample_plan(config: &InterviewConfig) -> InterviewPlan {
         scoring: ScoringGuide::default(),
         follow_ups: Vec::new(),
     };
-    let mut first = question(1, "请先简单介绍一下你自己，以及最近在做的工作。");
+    let mut first = question(1, text.questions[0]);
     first.follow_ups.push(FollowUp {
         key: keys::follow_up("q1", 1),
-        text: "能再具体说说你自己做了什么吗？".to_owned(),
-        ask_when: "回答里只讲了团队，没讲本人的贡献".to_owned(),
+        text: text.follow_up.to_owned(),
+        ask_when: text.follow_up_when.to_owned(),
     });
     let mut plan = InterviewPlan {
         schema_version: PLAN_SCHEMA_VERSION,
         brief: InterviewBrief::default(),
         phrases: Phrases {
-            opening: "你好，我是这次面试的 AI 面试官。接下来我会问你几个问题，答完停一会儿就会进入下一题。"
-                .to_owned(),
-            acks: vec!["好的，谢谢。".to_owned(), "明白了。".to_owned()],
-            nudge: "我这边没有听到声音，你可以再说一遍吗？".to_owned(),
-            repeat: "好的，我再说一遍。".to_owned(),
-            candidate_questions: Some("我的问题问完了，你有什么想问的吗？".to_owned()),
-            closing: "今天的面试到这里，谢谢你的时间。".to_owned(),
-            closing_early: "今天先到这里，谢谢你的时间。".to_owned(),
+            opening: text.opening.to_owned(),
+            acks: text.acks.iter().map(|&ack| ack.to_owned()).collect(),
+            nudge: text.nudge.to_owned(),
+            repeat: text.repeat.to_owned(),
+            candidate_questions: Some(text.candidate_questions.to_owned()),
+            closing: text.closing.to_owned(),
+            closing_early: text.closing_early.to_owned(),
         },
         questions: vec![
             first,
-            question(2, "讲一个你解决过的、印象最深的线上问题。"),
-            question(3, "你为什么想来做这个岗位？"),
+            question(2, text.questions[1]),
+            question(3, text.questions[2]),
         ],
         expected_duration_sec: 0,
         generation: GenerationInfo::default(),
@@ -184,6 +247,7 @@ async fn insert_invite(
 async fn seed(ctx: &AppContext, options: &SeedOptions) -> anyhow::Result<Value> {
     let config = json!({
         "mode": if options.realtime { "conversational" } else { "scripted" },
+        "language": if options.english { "en" } else { "zh" },
         "answer": {
             "silence_sec": options.silence_sec,
             "min_sec": options.min_sec,
@@ -191,21 +255,28 @@ async fn seed(ctx: &AppContext, options: &SeedOptions) -> anyhow::Result<Value> 
         }
     });
     let parsed: InterviewConfig = serde_json::from_value(config.clone()).context("面试配置不对")?;
-    let plan = sample_plan(&parsed);
+    let text = if options.english {
+        &SAMPLE_EN
+    } else {
+        &SAMPLE_ZH
+    };
+    let plan = sample_plan(&parsed, text);
     let issues = plan.validate(&parsed);
     if !issues.is_empty() {
         bail!("这组选项配不出能用的面试计划：{issues:?}");
     }
 
     let (position_id,): (Uuid,) =
-        sqlx::query_as("INSERT INTO positions (title) VALUES ('后端工程师（Rust）') RETURNING id")
+        sqlx::query_as("INSERT INTO positions (title) VALUES ($1) RETURNING id")
+            .bind(text.position)
             .fetch_one(&ctx.db)
             .await
             .context("建岗位失败")?;
     let (candidate_id,): (Uuid,) = sqlx::query_as(
         "INSERT INTO candidates (name, email, phone)
-         VALUES ('测试候选人', 'candidate@example.com', '13800000001') RETURNING id",
+         VALUES ($1, 'candidate@example.com', '13800000001') RETURNING id",
     )
+    .bind(text.candidate)
     .fetch_one(&ctx.db)
     .await
     .context("建候选人失败")?;

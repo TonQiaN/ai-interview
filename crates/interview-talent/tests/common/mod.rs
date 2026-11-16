@@ -3,9 +3,12 @@
 #![allow(dead_code, reason = "每个测试文件只用到其中一部分")]
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::Router;
-use interview_llm::ChatModel;
+use futures_util::future::BoxFuture;
+use interview_llm::testing::ScriptedModel;
+use interview_llm::{ChatModel, ChatRequest, ChatStream, LlmError};
 use interview_platform::AppContext;
 use interview_platform::testing;
 use interview_talent::Deps;
@@ -120,4 +123,38 @@ pub async fn run_tasks_with(deps: Deps) -> usize {
         .run_until_idle()
         .await
         .expect("任务跑得起来")
+}
+
+/// 在第 `at` 次调用大模型之前先做一件事的假模型。用来模拟「大模型还在算的时候，别处发生了变化」。
+pub struct Interrupted {
+    pub inner: ScriptedModel,
+    at: usize,
+    calls: AtomicUsize,
+    hook: Box<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>,
+}
+
+impl Interrupted {
+    pub fn new<F, Fut>(inner: ScriptedModel, at: usize, hook: F) -> Arc<Self>
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        Arc::new(Self {
+            inner,
+            at,
+            calls: AtomicUsize::new(0),
+            hook: Box::new(move || Box::pin(hook())),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl ChatModel for Interrupted {
+    async fn chat_stream(&self, request: ChatRequest) -> Result<ChatStream, LlmError> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        if call == self.at {
+            (self.hook)().await;
+        }
+        self.inner.chat_stream(request).await
+    }
 }

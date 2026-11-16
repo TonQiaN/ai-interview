@@ -3,6 +3,7 @@
 mod common;
 
 use common::*;
+use interview_engine::config::Language;
 use interview_platform::testing::TestRequest;
 use interview_room::RoomConfig;
 use interview_room::consent::{CONSENT_VERSION, consent_items};
@@ -20,7 +21,10 @@ async fn session(app: &TestApp, token: &str) -> Value {
 }
 
 fn all_keys() -> Vec<String> {
-    consent_items().into_iter().map(|item| item.key).collect()
+    consent_items(Language::Zh)
+        .into_iter()
+        .map(|item| item.key)
+        .collect()
 }
 
 async fn agree(app: &TestApp, token: &str) {
@@ -52,6 +56,7 @@ async fn session_describes_the_interview_from_its_config(pool: PgPool) {
     assert_eq!(body["candidate_name"], "测试候选人");
     assert_eq!(body["company_name"], Value::Null);
     assert_eq!(body["mode"], "scripted");
+    assert_eq!(body["language"], "zh");
     assert_eq!(body["expected_duration_sec"], 1200);
     assert_eq!(body["camera_required"], true);
     assert_eq!(
@@ -66,13 +71,50 @@ async fn session_describes_the_interview_from_its_config(pool: PgPool) {
     assert_eq!(body["consent"]["agreed"], false);
     assert_eq!(
         body["consent"]["items"].as_array().unwrap().len(),
-        consent_items().len()
+        consent_items(Language::Zh).len()
     );
 
     // 候选人的联系方式不该出现在给页面的内容里
     let text = body.to_string();
     assert!(!text.contains("candidate@example.com"));
     assert!(!text.contains("13800000001"));
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn english_interview_shows_and_records_the_consent_items_in_english(pool: PgPool) {
+    let app = app(pool).await;
+    let interview_id = seed_interview_with(&app.ctx, "ready", json!({ "language": "en" })).await;
+    let (_, token) = create_invite(&app, interview_id).await;
+
+    let body = session(&app, &token).await;
+    assert_eq!(body["language"], "en");
+    let shown: Vec<&str> = body["consent"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["title"].as_str().unwrap())
+        .collect();
+    let english: Vec<String> = consent_items(Language::En)
+        .into_iter()
+        .map(|item| item.title)
+        .collect();
+    assert_eq!(shown, english);
+
+    // 存下来的是候选人看到的那一份
+    agree(&app, &token).await;
+    let (recorded,): (Value,) =
+        sqlx::query_as("SELECT items FROM interview_consents WHERE interview_id = $1")
+            .bind(interview_id)
+            .fetch_one(&app.ctx.db)
+            .await
+            .unwrap();
+    let recorded: Vec<&str> = recorded
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(recorded, english);
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
@@ -164,7 +206,7 @@ async fn consent_needs_every_required_item_and_the_current_version(pool: PgPool)
     assert_eq!(version, CONSENT_VERSION);
     assert!(invite_id.is_some());
     let items = items.as_array().unwrap();
-    assert_eq!(items.len(), consent_items().len());
+    assert_eq!(items.len(), consent_items(Language::Zh).len());
     assert!(
         items
             .iter()

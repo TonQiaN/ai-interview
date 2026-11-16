@@ -133,3 +133,25 @@ pub async fn create_admin(
         Err(err) => Err(anyhow::anyhow!("{}", err.message())),
     }
 }
+
+/// 重设一个 HR 账号的密码，它已有的登录都失效。
+pub async fn reset_password(
+    config: PlatformConfig,
+    email: &str,
+    password: &str,
+) -> anyhow::Result<()> {
+    let pool = db::connect(&config.database_url)
+        .await
+        .context("连不上数据库")?;
+    db::migrate(&pool).await.context("数据库迁移失败")?;
+    let result =
+        interview_platform::accounts::reset_password_by_email(&pool, email, password).await;
+    pool.close().await;
+    match result {
+        Ok(()) => {
+            println!("已重设 {} 的密码，这个账号要重新登录", email.trim());
+            Ok(())
+        }
+        Err(err) => Err(anyhow::anyhow!("{}", err.message())),
+    }
+}

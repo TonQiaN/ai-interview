@@ -48,6 +48,18 @@ applyTheme(readTheme()); // 读上次的选择，没有就跟随系统
 pnpm --filter @ai-interview/ui dev   # http://localhost:5175
 ```
 
+## 组件自带的文字
+
+读屏文字、状态字、「已复制」这类组件自己带的文字都在 `src/text.tsx` 的 `UiText` 里，默认是中文。页面要用英文时在外面包一层：
+
+```tsx
+import { UiTextProvider, uiTextEn } from "@ai-interview/ui";
+
+<UiTextProvider value={uiTextEn}>{children}</UiTextProvider>;
+```
+
+组件里要新加自带的文字，加到 `UiText` 里（中英两份都写），用 `useUiText()` 取，不要直接写在组件里。使用方传了 `label` 这类 prop 的，以传的为准。
+
 ## 约束
 
 - 手机优先：触控目标不小于 44px，单列也要好用。

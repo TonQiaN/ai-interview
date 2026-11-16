@@ -8,11 +8,14 @@
 import { estimateBudget } from "../../lib/budget";
 import { replanReasons } from "../../lib/replan";
 import type {
+  Account,
   AdminUser,
   Candidate,
   CandidateDetail,
   CandidateInput,
   CandidateListItem,
+  ChangePasswordInput,
+  CreateAccountInput,
   CreatedInvite,
   CreateVoice,
   Decision,
@@ -30,6 +33,7 @@ import type {
   PositionDraft,
   PositionInput,
   PreviewRequest,
+  RaasCandidate,
   RaasCandidateImportItem,
   RaasPositionImportItem,
   ReportEnvelope,
@@ -37,6 +41,7 @@ import type {
   ResumeDetail,
   SystemStatus,
   TemplateInput,
+  UpdateAccountInput,
   UpdateVoice,
   Utterance,
   Voice,
@@ -175,8 +180,12 @@ function byNewest<T extends { created_at: string }>(a: T, b: T): number {
   return b.created_at.localeCompare(a.created_at);
 }
 
-function summary(i: Interview): InterviewSummary {
+/** 列表里的一行。结论和分数取自最新一份生成好的报告，和后端一样 */
+function summary(i: Interview, report: ReportVersion["content"]): InterviewSummary {
   return {
+    overall_score: report?.overall_score ?? null,
+    score_range: report?.score_range ?? null,
+    recommendation: report?.recommendation.decision ?? null,
     id: i.id,
     candidate_id: i.candidate.id,
     candidate_name: i.candidate.name,
@@ -491,6 +500,43 @@ export function createMockServer(options: MockOptions = {}) {
     role: "admin",
   };
 
+  /** 能登录后台的账号。第一个是现在登录的这个人 */
+  const accounts: Account[] = [
+    {
+      id: me.id,
+      email: me.email,
+      display_name: me.display_name,
+      role: "admin",
+      disabled: false,
+      created_at: iso(-90 * 24 * 3600_000),
+    },
+    {
+      id: "0193a000-0000-7000-8000-0000000000a2",
+      email: "recruiter@example.com",
+      display_name: "陈雨桐",
+      role: "recruiter",
+      disabled: false,
+      created_at: iso(-30 * 24 * 3600_000),
+    },
+    {
+      id: "0193a000-0000-7000-8000-0000000000a3",
+      email: "former@example.com",
+      display_name: "周启明",
+      role: "recruiter",
+      disabled: true,
+      created_at: iso(-200 * 24 * 3600_000),
+    },
+  ];
+  /** 演示数据里现在登录的人的密码。登录时填什么都行，改密码时要对得上 */
+  let myPassword = "demo";
+  const passwordIssue = (password: string | null | undefined): string | null => {
+    const length = password?.length ?? 0;
+    return length < 8 || length > 200 ? "密码要 8 到 200 位" : null;
+  };
+  const requireAdmin = () => {
+    if (me.role !== "admin") throw new HttpError(403, "forbidden", "只有管理员可以做这个操作");
+  };
+
   const routes: Route[] = [];
   const on = (method: string, path: string, handler: Handler, isPublic = false) => {
     const pattern = new RegExp(`^${path.replace(/:[a-z_]+/g, "([^/]+)")}$`);
@@ -507,6 +553,9 @@ export function createMockServer(options: MockOptions = {}) {
         throw new HttpError(422, "validation_failed", "请输入邮箱和密码");
       if (password === "wrong") throw new HttpError(401, "invalid_credentials", "邮箱或密码不对");
       me.email = email.trim();
+      const self = accounts[0];
+      if (self) self.email = me.email;
+      myPassword = password;
       loggedIn = true;
       try {
         sessionStorage.setItem(SESSION_KEY, "1");
@@ -532,6 +581,84 @@ export function createMockServer(options: MockOptions = {}) {
     true,
   );
   on("GET", "/auth/me", () => me);
+  on("PUT", "/auth/password", ({ body }) => {
+    const input = body as ChangePasswordInput;
+    const issue = passwordIssue(input.new_password);
+    if (issue) throw new HttpError(422, "validation_failed", issue, { new_password: issue });
+    if (input.current_password !== myPassword)
+      throw new HttpError(422, "validation_failed", "现在的密码不对", {
+        current_password: "现在的密码不对",
+      });
+    if (input.new_password === myPassword)
+      throw new HttpError(422, "validation_failed", "新密码不能和现在的一样", {
+        new_password: "新密码不能和现在的一样",
+      });
+    myPassword = input.new_password;
+    return null;
+  });
+
+  // ───────── HR 账号 ─────────
+  on("GET", "/accounts", ({ query }): Page<Account> => {
+    requireAdmin();
+    const list = accounts.filter((a) => matches(query.get("q"), a.email, a.display_name));
+    if (query.get("sort") === "email") list.sort((a, b) => a.email.localeCompare(b.email));
+    else list.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return paginate(list, query);
+  });
+  on("POST", "/accounts", ({ body }): Account => {
+    requireAdmin();
+    const input = body as CreateAccountInput;
+    const email = input.email?.trim() ?? "";
+    if (!/^[^@\s]+@[^@\s]+$/.test(email))
+      throw new HttpError(422, "validation_failed", "邮箱格式不对", { email: "邮箱格式不对" });
+    if (!input.display_name?.trim())
+      throw new HttpError(422, "validation_failed", "名字不能为空", { display_name: "不能为空" });
+    const issue = passwordIssue(input.password);
+    if (issue) throw new HttpError(422, "validation_failed", issue, { password: issue });
+    if (accounts.some((a) => a.email.toLowerCase() === email.toLowerCase()))
+      throw new HttpError(409, "conflict", "这个邮箱已经有账号了");
+    const account: Account = {
+      id: newId(),
+      email,
+      display_name: input.display_name.trim(),
+      role: input.role === "admin" ? "admin" : "recruiter",
+      disabled: false,
+      created_at: iso(0),
+    };
+    accounts.push(account);
+    return account;
+  });
+  on("PATCH", "/accounts/:id", ({ params, body }): Account => {
+    requireAdmin();
+    const account = accounts.find((a) => a.id === params[0]);
+    if (!account) throw notFound("这个账号");
+    const patch = body as UpdateAccountInput;
+    if (patch.password != null) {
+      const issue = passwordIssue(patch.password);
+      if (issue) throw new HttpError(422, "validation_failed", issue, { password: issue });
+    }
+    if (account.id === me.id) {
+      if (patch.disabled === true) throw new HttpError(409, "conflict", "不能停用自己的账号");
+      if (patch.role != null && patch.role !== "admin")
+        throw new HttpError(409, "conflict", "不能把自己改成普通账号");
+      if (patch.password != null)
+        throw new HttpError(409, "conflict", "改自己的密码请用「修改密码」，要先输入现在的密码");
+    }
+    const next: Account = {
+      ...account,
+      display_name: patch.display_name?.trim() || account.display_name,
+      role: patch.role ?? account.role,
+      disabled: patch.disabled ?? account.disabled,
+    };
+    const adminsLeft = accounts
+      .map((a) => (a.id === next.id ? next : a))
+      .filter((a) => a.role === "admin" && !a.disabled).length;
+    if (adminsLeft === 0)
+      throw new HttpError(409, "conflict", "这样改完就没有能登录的管理员了，至少留一个");
+    Object.assign(account, next);
+    if (account.id === me.id) me.display_name = account.display_name;
+    return account;
+  });
 
   on(
     "GET",
@@ -711,15 +838,49 @@ export function createMockServer(options: MockOptions = {}) {
     });
     return { items };
   });
+  on("GET", "/raas/positions/:ref", ({ params }) => {
+    raasReady();
+    const r = raasPositions.find((x) => x.external_ref === params[0]);
+    if (!r) throw notFound("RAAS 里的岗位");
+    return {
+      external_ref: r.external_ref,
+      job_requisition_ref: r.job_requisition_ref ?? null,
+      imported_position_id: importedPosition(r.external_ref)?.id ?? null,
+      status: r.status,
+      draft: { title: r.title ?? "没有名称" },
+    };
+  });
   on("GET", "/raas/candidates", ({ query }) => {
     raasReady();
+    const imported = (c: RaasCandidate) => ({
+      ...c,
+      imported_candidate_id: importedCandidate(c.external_ref)?.id ?? null,
+    });
+    // 给了需求编号就只列投了那个岗位的人，带着投递走到哪一步和匹配分
+    const requisition = query.get("job_requisition_ref");
+    if (requisition) {
+      const title = raasPositions.find((p) => p.job_requisition_ref === requisition)?.title;
+      const steps = [
+        ["client_screening", "screening_passed"],
+        ["job_matching", "pending"],
+        ["client_interview", "interview_scheduled"],
+      ] as const;
+      return paginate(
+        raasCandidates
+          .filter((c) => title && c.latest_application_job_title === title)
+          .map((c, index) => ({
+            ...imported(c),
+            application_stage: steps[index % steps.length]?.[0] ?? null,
+            application_status: steps[index % steps.length]?.[1] ?? null,
+            matching_score: 86 - index * 7,
+          })),
+        query,
+      );
+    }
     return paginate(
       raasCandidates
         .filter((c) => matches(query.get("q"), c.name, c.current_title, c.current_company))
-        .map((c) => ({
-          ...c,
-          imported_candidate_id: importedCandidate(c.external_ref)?.id ?? null,
-        })),
+        .map(imported),
       query,
     );
   });
@@ -1089,7 +1250,23 @@ export function createMockServer(options: MockOptions = {}) {
       .filter((i) => !query.get("position_id") || i.position.id === query.get("position_id"))
       .filter((i) => matches(query.get("q"), i.candidate.name, i.position.title))
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-      .map(summary);
+      .map((i) =>
+        summary(
+          i,
+          (db.reports.get(i.id) ?? []).find((v) => v.brief.status === "done" && v.content)
+            ?.content ?? null,
+        ),
+      );
+    // 按分数排：没有分数的排在最后，正序倒序都是
+    const sort = query.get("sort");
+    if (sort === "score" || sort === "-score") {
+      const direction = sort === "score" ? 1 : -1;
+      list.sort((a, b) => {
+        const [x, y] = [a.overall_score ?? null, b.overall_score ?? null];
+        if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+        return (x - y) * direction;
+      });
+    }
     return paginate(list, query);
   });
   on("POST", "/interviews", ({ body }) => {
@@ -1151,7 +1328,8 @@ export function createMockServer(options: MockOptions = {}) {
     const issues = configIssues(config);
     if (issues) throw new HttpError(422, "validation_failed", "面试设置不合要求", issues);
     const resumeId = patch.resume_id ?? i.resume_id ?? null;
-    const voiceId = patch.voice_id ?? i.voice_id ?? null;
+    // 没带 voice_id 是不改，带 null 是改回默认音色
+    const voiceId = "voice_id" in patch ? (patch.voice_id ?? null) : (i.voice_id ?? null);
     // 题目已经出好时，看这次改动让不让它作废（规则和后端一样，见 lib/replan.ts）
     const reasons = i.has_plan
       ? [
@@ -1187,6 +1365,14 @@ export function createMockServer(options: MockOptions = {}) {
     const i = find.interview(params[0]);
     if (i.status === "preparing" || i.status === "in_progress")
       throw conflict("面试正在准备或者进行中，等它结束再删");
+    db.interviews = db.interviews.filter((x) => x !== i);
+    return null;
+  });
+  on("POST", "/interviews/:id/purge", ({ params }) => {
+    requireAdmin();
+    const i = find.interview(params[0]);
+    if (i.status === "preparing" || i.status === "in_progress")
+      throw conflict("正在准备或者正在面试，先取消再删除");
     db.interviews = db.interviews.filter((x) => x !== i);
     return null;
   });
@@ -1341,11 +1527,29 @@ export function createMockServer(options: MockOptions = {}) {
     find.interview(params[0]);
     return { items: db.recordings.get(params[0] ?? "") ?? [] };
   });
+  // 画面检查的结果真后端不放在过程事件里，走单独的接口
+  const fromFrames = (kind: string) => kind === "face_count_changed" || kind === "phone_visible";
   on("GET", "/interviews/:id/events", ({ params, query }) => {
     find.interview(params[0]);
     const kind = query.get("kind");
-    const list = (db.events.get(params[0] ?? "") ?? []).filter((e) => !kind || e.kind === kind);
+    const list = (db.events.get(params[0] ?? "") ?? []).filter(
+      (e) => !fromFrames(e.kind) && (!kind || e.kind === kind),
+    );
     return paginate(list, query);
+  });
+  on("GET", "/interviews/:id/frame-events", ({ params }) => {
+    const interview = find.interview(params[0]);
+    const items = (db.events.get(params[0] ?? "") ?? [])
+      .filter((e) => fromFrames(e.kind) && typeof e.at_ms === "number")
+      .map((e) => ({
+        id: e.id,
+        kind: e.kind,
+        at_ms: e.at_ms ?? null,
+        duration_ms: 10_000,
+        payload: { people: Number(e.payload.count ?? 1), frames: 2, note: "旁边多了一个人" },
+        frame_at_ms: [e.at_ms ?? 0, (e.at_ms ?? 0) + 5000],
+      }));
+    return { checked: interview.report?.status === "done", items };
   });
 
   /** 接口客户端给的是 Request 对象，请求体要从它身上读出来 */

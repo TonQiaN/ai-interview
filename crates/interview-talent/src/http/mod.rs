@@ -34,7 +34,7 @@ pub(crate) fn talent_error(error: TalentError) -> ApiError {
     match error {
         TalentError::EmptyFile => unprocessable("empty_file", &error),
         TalentError::UnsupportedFile(_) => unprocessable("unsupported_file", &error),
-        TalentError::Render(_) | TalentError::Unreadable => {
+        TalentError::Docx(_) | TalentError::Render(_) | TalentError::Unreadable => {
             unprocessable("unreadable_file", &error)
         }
         TalentError::NotAResume(_) => unprocessable("not_a_resume", &error),

@@ -1513,6 +1513,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "futures-util",
+ "interview-engine",
  "interview-llm",
  "serde",
  "serde_json",
@@ -1615,6 +1616,7 @@ dependencies = [
  "interview-llm",
  "interview-platform",
  "interview-raas",
+ "quick-xml",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -1627,6 +1629,7 @@ dependencies = [
  "utoipa-axum",
  "uuid",
  "wiremock",
+ "zip",
 ]
 
 [[package]]
@@ -2173,6 +2176,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
