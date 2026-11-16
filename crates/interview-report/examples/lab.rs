@@ -16,6 +16,9 @@
 //! # 给样例加上「上行网速慢，画面的码率降了下来，画面检查在糊的画面上看错了一两帧」的过程事件
 //! cargo run -p interview-report --example lab -- reduced --out /tmp/reduced
 //! cargo run -p interview-report --example lab -- evaluate --samples /tmp/reduced
+//! # 给样例加上「面试页自己出错，候选人刷新后过了一分半钟才接着面」，看这段停顿会不会算到候选人头上
+//! cargo run -p interview-report --example lab -- crash --out /tmp/crash
+//! cargo run -p interview-report --example lab -- evaluate --samples /tmp/crash
 //! # 数一数已经存下来的报告里，给 HR 看的文字带了多少处事件和字段的英文名。不调用模型
 //! cargo run -p interview-report --example lab -- names --samples /tmp/reduced --reports /tmp/reduced-reports
 //! # 从一段录像里抽帧，让模型看画面里有几个人、有没有手机，打印整理出来的过程事件
@@ -128,6 +131,19 @@ enum Command {
         #[arg(long, default_value = "crates/interview-report/samples")]
         samples: PathBuf,
         /// 加了事件的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// 给样例加上「面试页自己出错，候选人刷新后接着面」：过程事件加上，出错之后的转写和事件整体往后挪，
+    /// 另存一份，用来检验这段停顿会不会算到候选人头上。不调用模型
+    Crash {
+        /// 只处理这几个场景（场景 id），不填就处理全部
+        only: Vec<String>,
+        #[arg(long, default_value = "crates/interview-report/scenarios")]
+        scenarios: PathBuf,
+        #[arg(long, default_value = "crates/interview-report/samples")]
+        samples: PathBuf,
+        /// 改过的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
         #[arg(long)]
         out: PathBuf,
     },
@@ -281,6 +297,15 @@ async fn main() -> Result<()> {
     {
         return reduced_all(scenarios, samples, out, only);
     }
+    if let Command::Crash {
+        only,
+        scenarios,
+        samples,
+        out,
+    } = &cli.command
+    {
+        return crash_all(scenarios, samples, out, only);
+    }
     if let Command::Names { samples, reports } = &cli.command {
         return names_all(samples, reports);
     }
@@ -290,6 +315,7 @@ async fn main() -> Result<()> {
         Command::Network { .. }
         | Command::Takeover { .. }
         | Command::Reduced { .. }
+        | Command::Crash { .. }
         | Command::Names { .. } => Ok(()),
         Command::Simulate {
             only,
@@ -936,6 +962,93 @@ fn add_takeover_events(record: &mut InterviewRecord) -> u64 {
     raw.push(("page_taken_over", Some(at + 400), json!({})));
     add_raw_events(record, "t", raw);
     at
+}
+
+// ---------- 面试页自己出错，刷新后接着面 ----------
+
+fn crash_all(scenarios: &Path, samples: &Path, out: &Path, only: &[String]) -> Result<()> {
+    let scenarios = load_scenarios(scenarios, only)?;
+    std::fs::create_dir_all(out)?;
+    for scenario in &scenarios {
+        let mut record: InterviewRecord =
+            read_json(&samples.join(format!("{}.json", scenario.id)))?;
+        let (crashed_at, resumed_at) = add_page_crash(&mut record);
+        let path = out.join(format!("{}.json", scenario.id));
+        std::fs::write(&path, serde_json::to_string_pretty(&record)? + "\n")?;
+        println!(
+            "{}：页面在 {} 出错，{} 接着面 → {}",
+            scenario.id,
+            clock(crashed_at),
+            clock(resumed_at),
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+/// 面试过半之后，面试官刚问完一个问题，面试页渲染出错：候选人看到「请刷新」，刷新、重新检查设备，
+/// 85 秒之后才接着面。面试的时间轴是照常往前走的，所以出错之后的转写和事件整体往后挪 85 秒，
+/// 面试也长了 85 秒；面试官的那个问题留在出错之前，这样从转写的时间上看，候选人像是隔了一分半钟才开口。
+/// 事件的写法和面试间上报的一样：出错的页面报 `page_error`，刷新后报 `page_opened` 和
+/// `interview_started`（`resumed: true`）。返回出错和接着面的时间。
+fn add_page_crash(record: &mut InterviewRecord) -> (u64, u64) {
+    const HELD_MS: u64 = 85_000;
+    let half = record.duration_ms / 2;
+    let interviewer = || {
+        record
+            .transcript
+            .iter()
+            .filter(|segment| segment.speaker == Speaker::Interviewer)
+    };
+    let crashed_at = interviewer()
+        .find(|segment| segment.start_ms >= half)
+        .or_else(|| interviewer().next_back())
+        .map_or(half, |segment| segment.end_ms);
+    let resumed_at = crashed_at + HELD_MS;
+
+    for segment in &mut record.transcript {
+        if segment.start_ms >= crashed_at {
+            segment.start_ms += HELD_MS;
+            segment.end_ms += HELD_MS;
+            for word in &mut segment.words {
+                word.s += HELD_MS;
+                word.e += HELD_MS;
+            }
+        }
+    }
+    for event in &mut record.events {
+        if let Some(at) = event.at_ms.as_mut().filter(|at| **at >= crashed_at) {
+            *at += HELD_MS;
+        }
+    }
+    record.duration_ms += HELD_MS;
+
+    let signals = json!({
+        "signals": {"visibility": true, "fullscreen": true, "device_change": true, "network": true, "clipboard": true},
+        "in_app_browser": null
+    });
+    let mut raw = Vec::new();
+    if !record
+        .events
+        .iter()
+        .any(|event| event.kind == "page_opened")
+    {
+        raw.push(("page_opened", None, signals.clone()));
+        raw.push(("interview_started", Some(0), json!({"resumed": false})));
+    }
+    raw.push((
+        "page_error",
+        Some(crashed_at),
+        json!({"stage": "interview", "name": "TypeError"}),
+    ));
+    raw.push(("page_opened", None, signals));
+    raw.push((
+        "interview_started",
+        Some(resumed_at),
+        json!({"resumed": true}),
+    ));
+    add_raw_events(record, "c", raw);
+    (crashed_at, resumed_at)
 }
 
 // ---------- 上行慢，画面的码率降了下来 ----------
