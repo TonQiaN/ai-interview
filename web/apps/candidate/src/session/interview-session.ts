@@ -561,6 +561,9 @@ export class InterviewSession {
     const { store, stream, graph } = this;
     const room = this.snapshot.room;
     if (!store || !stream || !graph || !room) return;
+    // 打开页面之后才关掉的别的标签页留下的段，趁这一段还没开始录先收尾。
+    // 开始录了就不能再收尾了（分不清哪一段是正在录的），得等到面试结束
+    await this.closeOrphans();
     const track: RecordingTrack = stream.getVideoTracks().length > 0 ? "camera" : "microphone";
     const recorder = new SegmentRecorder({
       sessionKey: this.sessionKey,

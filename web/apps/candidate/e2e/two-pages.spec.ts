@@ -182,3 +182,36 @@ test("同一个浏览器里开两个标签页：各管各的录像，先开的�
   await expectRecordingsReady(interview, 2);
   expect(takenOver(interview)).toBe(1);
 });
+
+test("同一个浏览器里先开的标签页关掉了：它留下的录像由后开的页面接着传完", async ({
+  page,
+  context,
+}) => {
+  const interview = await enterInterview(page, { silenceSec: 30 });
+  await expectQuestion(page, 1);
+  const first = () => roomState(interview).recordings[0];
+
+  const tab = await context.newPage();
+  await openElsewhere(tab, interview);
+  // 断网之后再录几秒：这几片只在本机的队列里
+  await context.setOffline(true);
+  await page.waitForTimeout(4000);
+  const received = first()?.chunks.length ?? 0;
+  await page.close();
+  await context.setOffline(false);
+
+  // 后开的页面一开始面试就把它收尾、传完，不用等到面试结束
+  await button(tab, "继续面试").click();
+  await expect(tab.getByText("录制中")).toBeVisible();
+  await expect.poll(() => first()?.status, { timeout: 30_000 }).toBe("ready");
+  expect(first()?.total_chunks ?? 0).toBeGreaterThan(received + 2);
+  expect(first()?.chunks.length).toBe(first()?.total_chunks);
+  expect(roomState(interview).status).toBe("in_progress");
+
+  await button(tab, "结束").click();
+  await button(tab, "结束面试").click();
+  await expect(tab.getByText("面试已结束")).toBeVisible({ timeout: 30_000 });
+  await expectRecordingsReady(interview, 2);
+  // 先开的页面是关掉的，不是被接走的
+  expect(takenOver(interview)).toBe(0);
+});
