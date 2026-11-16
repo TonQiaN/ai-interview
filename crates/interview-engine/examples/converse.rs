@@ -10,6 +10,12 @@
 //! - 思考强度：不写就用输入里的 `live_thinking`；`off`、`low`、`high`、`max` 会覆盖它。
 //!
 //! 读环境变量 `DEEPSEEK_API_KEY`，会产生少量费用。
+//!
+//! 设了 `AI_INTERVIEW_EVAL_HEARD_CMD` 时，候选人的话先读出来再识别回去，引擎拿到的是带识别错误的
+//! 文字（见 `scripts/asr_roundtrip.py`）。
+
+#[path = "support/heard.rs"]
+mod heard;
 
 use std::path::Path;
 use std::time::Instant;
@@ -59,6 +65,7 @@ async fn candidate_reply(
     model: &dyn ChatModel,
     input: &PlanInput,
     persona: &str,
+    style: &str,
     history: &[(String, String)],
     asked: &str,
 ) -> Result<(String, Usage)> {
@@ -67,7 +74,7 @@ async fn candidate_reply(
         Language::En => "这是一场英文面试，说英语",
     };
     let system = format!(
-        "你在扮演一位正在参加语音面试的候选人，用来测试面试系统。\n\n你的简历：\n{}\n\n你的人设：{}\n\n要求：{language}。只输出你口头回答的话，像真人说话一样，不要加括号、动作描写或解释。不要替面试官说话。",
+        "你在扮演一位正在参加语音面试的候选人，用来测试面试系统。\n\n你的简历：\n{}\n\n你的人设：{}\n\n要求：{language}。只输出你口头回答的话，像真人说话一样，不要加括号、动作描写或解释。不要替面试官说话。{style}",
         input.candidate.resume_text, persona
     );
     let mut messages = vec![Message::system(system)];
@@ -125,6 +132,7 @@ async fn main() -> Result<()> {
     }
     let config = &input.config;
     let model = DeepSeekClient::from_env()?;
+    let mut ears = heard::Ears::from_env()?;
 
     let plan: InterviewPlan = if Path::new(plan_path).exists() {
         serde_json::from_str(&std::fs::read_to_string(plan_path)?)?
@@ -157,18 +165,47 @@ async fn main() -> Result<()> {
     let mut saved_moved = Vec::new();
     let mut counts = [0u32; 4];
     let mut turns = 0u32;
+    let mut compare_usage = Usage::default();
+    let mut compared = 0u32;
+    let mut same_action = 0u32;
+    let mut compared_quality = 0u32;
+    let mut same_quality = 0u32;
 
     loop {
         let question = asked.join("\n");
-        let (answer, usage) = candidate_reply(&model, &input, persona, &history, &question).await?;
+        let (answer, usage) =
+            candidate_reply(&model, &input, persona, ears.style(), &history, &question).await?;
         candidate_usage += usage;
         println!("候选人 {answer}");
         let answer_ms = speak_ms(&answer);
         elapsed_ms += answer_ms;
-        history.push((question, answer.clone()));
+        // 候选人记得的是自己说的话，引擎拿到的是识别出来的
+        let mut heard = ears.hear(&answer)?;
+        if heard != answer {
+            println!("  识别成 {heard}");
+        }
+        if heard.is_empty() {
+            // 什么都没识别出来时真实面试里不会有这一轮，这里照原话走，免得卡住
+            heard.clone_from(&answer);
+        }
+        // 识别改过字的回答，原样的字也走一遍这一轮，看识别错误会不会让面试官换一种接法。
+        // 面试照识别出来的往下走
+        let clean = if heard == answer {
+            None
+        } else {
+            let turn = CandidateTurn {
+                text: answer.clone(),
+                elapsed_ms,
+                answer_ms,
+            };
+            let outcome = respond(&model, &plan, config, &state, &turn, &mut |_| {}).await?;
+            compare_usage += outcome.usage;
+            Some((outcome.action, outcome.note.map(|note| note.quality)))
+        };
+        history.push((question, answer));
 
         let turn = CandidateTurn {
-            text: answer,
+            text: heard,
             elapsed_ms,
             answer_ms,
         };
@@ -208,6 +245,25 @@ async fn main() -> Result<()> {
         let outcome = respond(&model, &plan, config, &state, &turn, &mut sink).await?;
         turns += 1;
         live_usage += outcome.usage;
+        if let Some((action, quality)) = clean {
+            compared += 1;
+            if action == outcome.action {
+                same_action += 1;
+            } else {
+                println!("  原样的字会是 {action:?}");
+            }
+            if let (Some(clean), Some(note)) = (quality, &outcome.note) {
+                compared_quality += 1;
+                if clean == note.quality {
+                    same_quality += 1;
+                } else {
+                    println!(
+                        "  原样的字判成 {clean:?}，识别出来的判成 {:?}",
+                        note.quality
+                    );
+                }
+            }
+        }
         decisions.push(outcome.timing.decision_ms);
         totals.push(outcome.timing.total_ms);
         if let Some(done_at) = done_at {
@@ -296,6 +352,12 @@ async fn main() -> Result<()> {
         Pricing::FLASH_OFF_PEAK.cost_cny(&live_usage),
         Pricing::FLASH_PEAK.cost_cny(&live_usage)
     );
+    if compared > 0 {
+        println!(
+            "同一段回答，原样的字和识别出来的字各走一遍，一共 {compared} 轮：动作一样 {same_action} 轮；两边都换题的 {compared_quality} 轮里质量判得一样 {same_quality} 轮（多花 {:.4} 元）",
+            Pricing::FLASH_OFF_PEAK.cost_cny(&compare_usage)
+        );
+    }
     println!(
         "扮演候选人的开销（不算在面试成本里）：空闲时段 {:.4} 元",
         Pricing::FLASH_OFF_PEAK.cost_cny(&candidate_usage)
