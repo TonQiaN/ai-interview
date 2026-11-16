@@ -550,6 +550,10 @@
     font-family: var(--oil-font-display);
     font-size: var(--oil-text-lg);
     font-weight: 700;
+    /* 它是 h2，但行高和字距跟正文走：标题里常常带着徽章和小字，按标题的行高排会挤 */
+    line-height: inherit;
+    letter-spacing: inherit;
+    text-wrap: inherit;
   }
   .oil-card__body {
     padding: var(--oil-space-5);
@@ -704,6 +708,11 @@
     position: relative;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+  }
+  .oil-table-wrap:focus-visible {
+    outline: 2px solid var(--oil-focus);
+    outline-offset: 2px;
+    border-radius: var(--oil-radius-sm);
   }
   .oil-table {
     width: 100%;

@@ -65,7 +65,8 @@ import { UiTextProvider, uiTextEn } from "@ai-interview/ui";
 - 手机优先：触控目标不小于 44px，单列也要好用。
 - 字体自托管，不走外网。标题用按字切片的 Noto Serif SC 和 Playfair Display（都是 SIL OFL 1.1），正文用系统字体。
 - 动效只动 `transform` 和 `opacity`，并且尊重「减少动态效果」的系统设置。
-- 文字对比度达到 WCAG AA，`src/tokens.test.ts` 会检查两套主题。
+- 文字对比度达到 WCAG AA，`src/tokens.test.ts` 会检查两套主题。在哪种底色上写了小字，就把那一对颜色加进去。
+- 页面的标题层级：页面顶上是一级标题，`CardHeader` 的标题是二级标题，卡片里面再分小节用三级。可交互的东西不要放在另一个可交互的东西里面（比如滑块里放按钮），读屏软件点不到。
 
 ## 重新生成插画
 

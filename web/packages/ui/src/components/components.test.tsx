@@ -3,6 +3,9 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   allConsented,
   Button,
+  Card,
+  CardBody,
+  CardHeader,
   ConsentList,
   Dialog,
   Field,
@@ -11,6 +14,7 @@ import {
   Segmented,
   Slider,
   Steps,
+  Table,
   Tabs,
   toneOf,
 } from "../index";
@@ -34,6 +38,47 @@ describe("Button", () => {
   it("默认是 type=button，放在表单里不会误提交", () => {
     render(<Button>取消</Button>);
     expect(screen.getByRole("button").getAttribute("type")).toBe("button");
+  });
+});
+
+describe("Card", () => {
+  it("卡片的标题是二级标题，读屏软件按标题跳得到", () => {
+    render(
+      <Card>
+        <CardHeader title="基本信息" actions={<Button>编辑</Button>} />
+        <CardBody>内容</CardBody>
+      </Card>,
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "基本信息" })).toBeTruthy();
+  });
+});
+
+describe("Table", () => {
+  const sample = (
+    <Table>
+      <tbody>
+        <tr>
+          <td>内容</td>
+        </tr>
+      </tbody>
+    </Table>
+  );
+  const widths = (scroll: number, client: number) => {
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(scroll);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(client);
+  };
+  afterEach(() => vi.restoreAllMocks());
+
+  it("表格比容器宽时，容器能用 Tab 停到，好用键盘横着滚", () => {
+    widths(900, 360);
+    const { container } = render(sample);
+    expect(container.querySelector(".oil-table-wrap")?.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("放得下时不多一个要 Tab 过去的地方", () => {
+    widths(360, 360);
+    const { container } = render(sample);
+    expect(container.querySelector(".oil-table-wrap")?.hasAttribute("tabindex")).toBe(false);
   });
 });
 

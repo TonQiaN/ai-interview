@@ -64,3 +64,4 @@ pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin
 - 链接到期以后后端不改面试的状态，还是 `invited`。列表上显示面试到哪一步用 `InterviewStatusBadge`（`src/components/common.tsx`），它拿列表项的 `invite_expires_at` 看，过期的标成「链接已过期」；要自己判断就用 `src/lib/format.ts` 的 `inviteExpired`。不要直接拿 `status` 去写「已发链接」。深入面试用 `StageBadge` 标出来，第一轮初筛不标。演示数据里的到期时间是假后端按链接现算的，和后端一样取没撤销的链接里最晚的那个。
 - 一批面试一起做的事都放在岗位页「这个岗位的面试」上面：准备失败的「一起重试」、草稿「一起准备」（`PrepareAll`）、准备好的「一起生成链接」、链接过期候选人还没面的「一起换新链接」（和生成链接是同一个 `BatchInvitesDialog`，带 `renew`）。做法一样：按状态各取一页（最多 100 场）来数，动手时用 `src/lib/schedule.ts` 的 `scheduleAll` 一场一场来，没成的不影响后面的，最后说明是谁、为什么，全部做完再刷新一次列表。
 - 诚信相关的内容写成「值得核对的迹象」，带上别的可能解释，不写成结论。
+- 页面的标题层级照 `packages/ui/README.md` 的约定走：页面顶上一级，卡片标题二级（`CardHeader` 自己就是），卡片里面再分小节用三级。改了页面结构以后在真实后端上用 axe-core 把每一页查一遍，浅色、深色、电脑和手机宽度都应该是 0 个问题（2026-11-16 查过）。

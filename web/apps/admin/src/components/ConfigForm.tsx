@@ -73,9 +73,9 @@ function Section({
   return (
     <Card className="adm-config__section">
       <div className="adm-config__intro">
-        <h3 className="oil-title-sm" style={{ margin: 0 }}>
+        <h2 className="oil-title-sm" style={{ margin: 0 }}>
           {title}
-        </h3>
+        </h2>
         <p>{description}</p>
       </div>
       <div className="adm-config__fields">{children}</div>

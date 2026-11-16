@@ -234,40 +234,42 @@ export function ReplayPlayer({
           </Select>
         </div>
 
-        <div
-          ref={trackRef}
-          className="adm-track"
-          role="slider"
-          tabIndex={0}
-          aria-label="播放进度"
-          aria-valuemin={0}
-          aria-valuemax={Math.round(total / 1000)}
-          aria-valuenow={Math.round(ms / 1000)}
-          aria-valuetext={`${clock(ms)}，共 ${clock(total)}`}
-          onKeyDown={onTrackKey}
-          onPointerDown={(e) => {
-            if ((e.target as HTMLElement).closest("button")) return;
-            e.currentTarget.setPointerCapture(e.pointerId);
-            seekFromPointer(e);
-          }}
-          onPointerMove={(e) => {
-            if (e.currentTarget.hasPointerCapture(e.pointerId)) seekFromPointer(e);
-          }}
-        >
-          <div className="adm-track__rail">
-            {turns.map((t) => (
-              <span
-                key={t.id}
-                className={`adm-track__seg${t.speaker === "interviewer" ? " adm-track__seg--interviewer" : ""}`}
-                style={{
-                  left: pct(t.start_ms),
-                  width: `calc(${pct(endOf(t))} - ${pct(t.start_ms)})`,
-                }}
-              />
-            ))}
+        {/* 标记放在进度条外面、叠在它上面：滑块里面的按钮读屏软件点不到 */}
+        <div className="adm-track-wrap">
+          <div
+            ref={trackRef}
+            className="adm-track"
+            role="slider"
+            tabIndex={0}
+            aria-label="播放进度"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(total / 1000)}
+            aria-valuenow={Math.round(ms / 1000)}
+            aria-valuetext={`${clock(ms)}，共 ${clock(total)}`}
+            onKeyDown={onTrackKey}
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              seekFromPointer(e);
+            }}
+            onPointerMove={(e) => {
+              if (e.currentTarget.hasPointerCapture(e.pointerId)) seekFromPointer(e);
+            }}
+          >
+            <div className="adm-track__rail">
+              {turns.map((t) => (
+                <span
+                  key={t.id}
+                  className={`adm-track__seg${t.speaker === "interviewer" ? " adm-track__seg--interviewer" : ""}`}
+                  style={{
+                    left: pct(t.start_ms),
+                    width: `calc(${pct(endOf(t))} - ${pct(t.start_ms)})`,
+                  }}
+                />
+              ))}
+            </div>
+            <div className="adm-track__played" style={{ width: pct(ms) }} />
+            <div className="adm-track__head" style={{ left: pct(ms) }} />
           </div>
-          <div className="adm-track__played" style={{ width: pct(ms) }} />
-          <div className="adm-track__head" style={{ left: pct(ms) }} />
           {marks.map((e) => (
             <button
               key={e.id}
