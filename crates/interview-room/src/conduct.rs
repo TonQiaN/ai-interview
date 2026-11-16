@@ -600,7 +600,7 @@ async fn advance_interview(
     }
     // 最多走三遍：判断完一段回答之后要重新看一次状态，才知道该给页面什么
     for _ in 0..3 {
-        match advance_once(&deps, interview_id, &request).await? {
+        match advance_once(&deps, &access, &request).await? {
             Advanced::Finished(step) => return Ok(Json(step)),
             Advanced::Step(step) => return Ok(Json(decorate(&deps, interview_id, &step).await?)),
             Advanced::Answered { ack: Some(ack) } => {
@@ -615,6 +615,9 @@ async fn advance_interview(
             }
             Advanced::Answered { ack: None } => {
                 if let Some(step) = settle_pending(&deps, interview_id).await? {
+                    // 判断回答等了几秒，这期间面试可能换到了另一个页面：下一句不再交给这个页面
+                    let mut conn = deps.ctx.db.acquire().await?;
+                    access.recheck_active_page(&mut conn).await?;
                     return Ok(Json(decorate(&deps, interview_id, &step).await?));
                 }
             }
@@ -667,14 +670,18 @@ async fn is_realtime(deps: &Deps, interview_id: Uuid) -> ApiResult<bool> {
 
 async fn advance_once(
     deps: &Deps,
-    interview_id: Uuid,
+    access: &RoomAccess,
     request: &AdvanceRequest,
 ) -> ApiResult<Advanced> {
+    let interview_id = access.interview_id;
     let mut tx = deps.ctx.db.begin().await?;
     let row = load(&mut tx, interview_id, true).await?;
     if row.is_finished() {
         return Ok(Advanced::Finished(row.finish_step()));
     }
+    // 这次上报可能已经等了一阵（等上一段回答判断完）。等的时候面试换到了另一个页面的话，
+    // 不再往下走，下一句留给接手的页面
+    access.recheck_active_page(&mut tx).await?;
     let state = match (row.status, stored_state(interview_id, &row)?) {
         (InterviewStatus::InProgress, Some(state)) => state,
         _ => return Err(ApiError::conflict("面试还没有开始")),
