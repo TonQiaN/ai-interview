@@ -16,9 +16,11 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { errorMessage, fieldErrors } from "../api/http";
 import {
+  useCandidate,
   useCandidates,
   useConfigDefaults,
   useCreateInterview,
+  usePosition,
   usePositions,
   useTemplates,
 } from "../api/queries";
@@ -147,6 +149,16 @@ function PickPosition({
         <div className="adm-toolbar">
           <SearchInput value={q} placeholder="搜岗位或部门" onChange={setQ} />
         </div>
+        {selected ? (
+          // 下面只列前 50 个在招的岗位，选的那个不一定在里面，在这里写出来
+          <ul className="adm-picked" aria-label="已选的岗位">
+            <li>
+              <Chip>{selected.title}</Chip>
+            </li>
+          </ul>
+        ) : (
+          <p className="oil-muted adm-picked">选一个在招的岗位。</p>
+        )}
         <QueryView query={positions}>
           {({ items }) =>
             items.length === 0 ? (
@@ -186,8 +198,6 @@ export function InterviewNewPage() {
   const defaults = useConfigDefaults();
   const templates = useTemplates();
   const create = useCreateInterview();
-  const presetCandidates = useCandidates({ page_size: 100 });
-  const presetPositions = usePositions({ page_size: 100 });
 
   const [step, setStep] = useState(0);
   const [candidates, setCandidates] = useState<CandidateListItem[]>([]);
@@ -209,20 +219,25 @@ export function InterviewNewPage() {
       (config !== null && baseConfig !== null && !sameForm(config, baseConfig)),
   );
 
-  // 从候选人页或岗位页点过来时，先替他选好
-  const candidateParam = params.get("candidate");
-  const positionParam = params.get("position");
-  const [presetDone, setPresetDone] = useState(false);
+  // 从候选人页或岗位页点过来时，先替他选好。按编号直接取，不在列表里找：
+  // 列表一次最多给 100 个，人多了以后排在后面的就找不到了
+  const presetCandidate = useCandidate(params.get("candidate") ?? undefined);
+  const presetPosition = usePosition(params.get("position") ?? undefined);
+  const [presetDone, setPresetDone] = useState({ candidate: false, position: false });
   useEffect(() => {
-    if (!candidateParam || presetDone || !presetCandidates.data) return;
-    const preset = presetCandidates.data.items.find((c) => c.id === candidateParam);
-    if (preset) setCandidates([preset]);
-    setPresetDone(true);
-  }, [candidateParam, presetDone, presetCandidates.data]);
+    const preset = presetCandidate.data;
+    if (!preset || presetDone.candidate) return;
+    // 归档的候选人后端不让再安排面试
+    if (!preset.archived_at) setCandidates([preset]);
+    setPresetDone((done) => ({ ...done, candidate: true }));
+  }, [presetCandidate.data, presetDone.candidate]);
   useEffect(() => {
-    if (positionParam && !position)
-      setPosition(presetPositions.data?.items.find((p) => p.id === positionParam) ?? null);
-  }, [positionParam, position, presetPositions.data]);
+    const preset = presetPosition.data;
+    if (!preset || presetDone.position) return;
+    // 归档的、不在招的岗位也一样
+    if (!preset.archived_at && preset.status === "open") setPosition(preset);
+    setPresetDone((done) => ({ ...done, position: true }));
+  }, [presetPosition.data, presetDone.position]);
 
   // 设置的初始值是系统默认，选了模板再换成模板的
   useEffect(() => {
