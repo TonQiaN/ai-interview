@@ -160,8 +160,15 @@ test("面试中页面渲染出错：不是一片空白，面试停住、摄像�
   expect(eventKinds(roomState(interview))).not.toContain("recording_gap");
 
   await page.unroute("**/api/v1/room/advance");
+  // 页面自己让候选人刷新的，浏览器不该再弹一句「要离开吗，更改可能不会保存」
+  const prompts: string[] = [];
+  page.on("dialog", (dialog) => {
+    prompts.push(dialog.type());
+    void dialog.accept();
+  });
   await button(page, "刷新页面").click();
   await expect(button(page, "检查设备，继续面试")).toBeVisible();
+  expect(prompts).toEqual([]);
   await passPreflight(page, { resuming: true });
   await button(page, "继续面试").click();
   await expectQuestion(page, 2);
