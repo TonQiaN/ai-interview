@@ -33,6 +33,8 @@ pub struct InterviewSummary {
     pub recommendation: Option<Decision>,
     pub started_at: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
+    /// 什么时候归档的。没归档时为空
+    pub archived_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -105,6 +107,8 @@ pub struct InterviewDetail {
     pub decided_at: Option<DateTime<Utc>>,
     /// 最新一份分析报告
     pub report: Option<ReportBrief>,
+    /// 什么时候归档的。没归档时为空
+    pub archived_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
