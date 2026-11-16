@@ -81,6 +81,7 @@ scripts/dev-db.sh start|stop|status|reset|psql     # 管理开发数据库（数
 tts/worker/run.sh start|stop|status|env            # 在 Mac 上起、停语音合成的 worker
 cargo run -p interview-server -- openapi           # 打印 OpenAPI 文档
 cargo run -p interview-server -- create-admin --email hr@example.com   # 新建 HR 账号，密码从标准输入读
+cargo run -p interview-server -- reset-password --email hr@example.com # 重设一个 HR 账号的密码（忘了密码时用）
 cargo run -p interview-cli -- tts engines          # 列出三个 TTS 引擎，* 是当前选中的
 ```
 

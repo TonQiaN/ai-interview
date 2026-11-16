@@ -64,7 +64,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 
 两种身份，互不相通：
 
-**HR**：`POST /api/v1/auth/login` 成功后服务器种一个 HttpOnly、SameSite=Lax 的 cookie（`ai_interview_session`），之后的请求自动带上。除了登录和下面的候选人接口，`/api/v1` 下的接口都要求已登录。handler 里用提取器 `interview_platform::auth::AdminUser` 拿当前账号。
+**HR**：`POST /api/v1/auth/login` 成功后服务器种一个 HttpOnly、SameSite=Lax 的 cookie（`ai_interview_session`），之后的请求自动带上。除了登录和下面的候选人接口，`/api/v1` 下的接口都要求已登录。handler 里用提取器 `interview_platform::auth::AdminUser` 拿当前账号。账号有两种角色：`admin`（管理员）能改全局设置和管理账号，`recruiter`（普通账号）其余的都能做；只有管理员能做的操作在 handler 开头调 `user.require_admin()?`。
 
 **候选人**：面试链接里的令牌就是全部身份，不用登录。
 
@@ -104,6 +104,8 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `GET /readyz` | 数据库连得上 |
 | `GET /api/openapi.json`、`GET /api/docs` | 接口文档 |
 | `POST /api/v1/auth/login`、`POST /api/v1/auth/logout`、`GET /api/v1/auth/me` ★ | HR 登录 |
+| `PUT /api/v1/auth/password` | 登录的人改自己的密码，要带现在的密码。改完以后这个账号在别处的登录都失效，当前这一处保留 |
+| `GET /api/v1/accounts`、`POST /api/v1/accounts`、`PATCH /api/v1/accounts/{id}` | HR 账号，只有管理员能用。列出、开账号、改名字和角色、停用和恢复（`disabled`）、重设密码（`password`）。停用或重设密码后那个账号已有的登录马上失效。不能停用自己、不能把自己改成普通账号，系统里始终至少有一个能登录的管理员（违反时 409） |
 | `GET /api/v1/settings/{key}`、`PUT /api/v1/settings/{key}` | 全局设置 |
 | `GET /api/v1/system/status` ★ | 各依赖是否就绪：数据库、DeepSeek、TTS worker、STT 模型 |
 
