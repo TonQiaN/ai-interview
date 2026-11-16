@@ -247,6 +247,14 @@
     gap: var(--oil-space-1);
     color: var(--oil-warning-ink);
   }
+  /* 字段说明里要提醒的一句，可能折成几行，图标跟着第一行走 */
+  .adm-warn-text {
+    color: var(--oil-warning-ink);
+  }
+  .adm-warn-text svg {
+    display: inline;
+    vertical-align: -2px;
+  }
 
   /* 表格里的人 */
   .adm-person {
