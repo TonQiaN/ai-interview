@@ -157,6 +157,19 @@
     <label>报告漏掉的重要内容（一行一条）
       <textarea id="missed"></textarea>
     </label>
+    <h3>候选人向公司提的问题</h3>
+    <p class="soft">报告里有一栏「候选人提的问题」。对着录像数一数候选人实际问了几个（问薪资、试用期、什么时候出结果这类；一句话里问了两件事算两个；让面试官把题目再说一遍不算）。没提问填 0，没数过就空着。</p>
+    <div class="row">
+      <label>候选人实际提了几个问题
+        <input type="number" id="questions-asked" min="0" max="50" step="1">
+      </label>
+      <label>其中几个报告没列出来
+        <input type="number" id="questions-missed" min="0" max="50" step="1">
+      </label>
+      <label>报告列的问题里，几条候选人没问过或者意思不对
+        <input type="number" id="questions-wrong" min="0" max="50" step="1">
+      </label>
+    </div>
     <div class="row">
       <label>这份报告对你做决定有多大帮助
         <select id="usefulness">
@@ -266,11 +279,15 @@ function collect(form) {
     evidence_wrong: number("evidence-wrong") || 0,
     wrong_findings: lines("wrong-findings"),
     missed: lines("missed"),
+    questions_asked: number("questions-asked"),
+    questions_missed: number("questions-missed") || 0,
+    questions_wrong: number("questions-wrong") || 0,
     usefulness: $("usefulness").value === "" ? null : Number($("usefulness").value),
     would_change_decision: yesNo("change"),
     note: $("review-note").value.trim(),
   };
   const reviewed = review.evidence_checked > 0 || review.wrong_findings.length > 0 || review.missed.length > 0
+    || review.questions_asked !== null || review.questions_wrong > 0
     || review.usefulness !== null || review.would_change_decision !== null || review.note !== "";
   return {
     form_version: form.form_version,
@@ -323,6 +340,9 @@ function fill(saved) {
   $("evidence-wrong").value = review.evidence_checked ? String(review.evidence_wrong || 0) : "";
   $("wrong-findings").value = (review.wrong_findings || []).join("\n");
   $("missed").value = (review.missed || []).join("\n");
+  $("questions-asked").value = review.questions_asked == null ? "" : String(review.questions_asked);
+  $("questions-missed").value = review.questions_missed ? String(review.questions_missed) : "";
+  $("questions-wrong").value = review.questions_wrong ? String(review.questions_wrong) : "";
   $("usefulness").value = review.usefulness == null ? "" : String(review.usefulness);
   setRadio("change", review.would_change_decision == null ? null : review.would_change_decision ? "yes" : "no");
   $("review-note").value = review.note || "";
@@ -338,6 +358,7 @@ function unfilled(result) {
   if (result.suspected_misconduct === null) missing.push("有没有作弊");
   if (!result.blind) missing.push("没勾「在看报告之前填的」");
   if (result.review && result.review.evidence_wrong > result.review.evidence_checked) missing.push("对不上的证据比抽查的还多");
+  if (result.review && result.review.questions_asked !== null && result.review.questions_missed > result.review.questions_asked) missing.push("报告漏掉的问题比候选人提的还多");
   return missing;
 }
 

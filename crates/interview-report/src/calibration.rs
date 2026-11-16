@@ -103,6 +103,16 @@ pub struct ReportReview {
     /// 报告漏掉的重要内容，一条一句。
     #[serde(default, deserialize_with = "null_as_default")]
     pub missed: Vec<String>,
+    /// 候选人在这场面试里向公司提了几个问题，以录像为准，一句话里问了两件事算两个。
+    /// 没提问填 0；没数过不填，这一场不算进「候选人提的问题」的统计。
+    #[serde(default)]
+    pub questions_asked: Option<u32>,
+    /// 其中几个报告没列出来。
+    #[serde(default)]
+    pub questions_missed: u32,
+    /// 报告列出来的问题里，几条候选人其实没问过，或者意思不对。
+    #[serde(default)]
+    pub questions_wrong: u32,
     /// 这份报告对做决定有多大帮助，1（没用）到 5（很有用）。
     #[serde(default)]
     pub usefulness: Option<u8>,
@@ -371,6 +381,13 @@ pub struct ReviewSummary {
     pub wrong_findings: u32,
     /// 一共指出报告漏了几处。
     pub missed: u32,
+    /// 候选人向公司提的问题里，报告列出来的。分母是评审对着录像数出来的问题数。
+    /// 报告里这一栏为空（那一步分析失败）的场次，提的问题全算漏掉。
+    #[serde(default)]
+    pub questions_listed: Rate,
+    /// 报告列出来的问题里，候选人确实问过、意思也对的。分母是报告列的条数。
+    #[serde(default)]
+    pub questions_correct: Rate,
     /// 有用程度的平均分，1 到 5。
     pub usefulness_mean: Option<f64>,
     /// 看完报告会改自己结论的。
@@ -826,6 +843,21 @@ pub fn calibrate(
         review.evidence_correct.hits += checked.evidence_checked - wrong;
         review.wrong_findings += to_u32(checked.wrong_findings.len());
         review.missed += to_u32(checked.missed.len());
+        if let Some(asked) = checked.questions_asked {
+            let listed = reports
+                .get(annotation.interview_id.as_str())
+                .and_then(|report| report.candidate_questions.as_ref());
+            // 报告没有这一栏时一条都没列出来，评审填的「漏了几个」不管是多少都按全漏算
+            let missed = match listed {
+                Some(_) => checked.questions_missed.min(asked),
+                None => asked,
+            };
+            review.questions_listed.total += asked;
+            review.questions_listed.hits += asked - missed;
+            let listed = to_u32(listed.map_or(0, Vec::len));
+            review.questions_correct.total += listed;
+            review.questions_correct.hits += listed - checked.questions_wrong.min(listed);
+        }
         if let Some(score) = checked.usefulness {
             usefulness.push(f64::from(score));
         }

@@ -347,6 +347,11 @@ fn print(c: &Calibration) {
         c.review.wrong_findings, c.review.missed
     );
     println!(
+        "候选人向公司提的问题，报告列出来 {}；报告列的问题里对的 {}",
+        rate(c.review.questions_listed),
+        rate(c.review.questions_correct)
+    );
+    println!(
         "有用程度平均 {}（满分 5）；看完会改自己结论的 {}",
         number(c.review.usefulness_mean),
         rate(c.review.would_change_decision)
