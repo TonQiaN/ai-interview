@@ -17,7 +17,7 @@ import {
   Textarea,
   useToast,
 } from "@ai-interview/ui";
-import { Archive, Ban, Link2, Pencil, RefreshCw, Send, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Ban, Link2, Pencil, RefreshCw, Send, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { errorMessage, fieldErrors } from "../api/http";
@@ -38,6 +38,7 @@ import {
   useRegenerateReport,
   useReport,
   useReportVersions,
+  useRestoreInterview,
   useRevokeInvite,
   useSavePlan,
   useTranscript,
@@ -1510,11 +1511,33 @@ function Verdict({ interview }: { interview: Interview }) {
 }
 
 /** 归档了的面试打开时，说清楚它现在是什么情况 */
-function ArchivedNote() {
+function ArchivedNote({ interview }: { interview: Interview }) {
   const me = useMe();
+  const toast = useToast();
+  const restore = useRestoreInterview();
   return (
-    <Banner tone="info" title="这场面试已经归档" className="adm-gap-below">
-      归档的面试不在列表里显示，发出去的链接已经失效，也不能再改设置、改题目或者生成链接。录像、逐字稿和报告都还在，这里照常能看；在面试列表勾上「带上已归档的」能找到它。
+    <Banner
+      tone="info"
+      title="这场面试已经归档"
+      className="adm-gap-below"
+      actions={
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<ArchiveRestore />}
+          loading={restore.isPending}
+          onClick={() =>
+            restore.mutate(interview.id, {
+              onSuccess: () => toast("已恢复"),
+              onError: (e) => toast(errorMessage(e)),
+            })
+          }
+        >
+          恢复
+        </Button>
+      }
+    >
+      归档的面试不在列表里显示，发出去的链接打不开，也不能再改设置、改题目或者生成链接。录像、逐字稿和报告都还在，这里照常能看；在面试列表勾上「带上已归档的」能找到它。归档错了，点「恢复」就回到列表里，没过期、没撤销的链接又能用。
       {me.data?.role === "admin"
         ? "要把录像和报告真的删掉，用概览里的「彻底删除」。"
         : "候选人要求删除录像时，请找管理员彻底删除。"}
@@ -1562,7 +1585,7 @@ export function InterviewDetailPage() {
               </span>
             }
           />
-          {archived(i) && <ArchivedNote />}
+          {archived(i) && <ArchivedNote interview={i} />}
           <Tabs
             aria-label="面试的各部分"
             value={tab}

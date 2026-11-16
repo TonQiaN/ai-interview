@@ -190,6 +190,21 @@ describe("面试详情", () => {
     expect(screen.queryByRole("button", { name: "归档" })).toBeNull();
   });
 
+  it("归档错了点「恢复」：说明没了，又能归档和生成链接，列表里也回来了", async () => {
+    const target = server.db.interviews.find((i) => i.status === "ready");
+    if (!target) throw new Error("演示数据里没有待发送的面试");
+    await server.fetch(`/api/v1/interviews/${target.id}`, { method: "DELETE" });
+    open(target.id);
+
+    fireEvent.click(await screen.findByRole("button", { name: "恢复" }));
+
+    expect(await screen.findByRole("button", { name: "归档" })).toBeTruthy();
+    expect(screen.queryByText("这场面试已经归档")).toBeNull();
+    expect(screen.queryByText("已归档")).toBeNull();
+    const listed = await call<{ items: { id: string }[] }>("GET", "/interviews?page_size=100");
+    expect(listed.items.some((i) => i.id === target.id)).toBe(true);
+  });
+
   it("没归档的面试不显示归档的说明", async () => {
     const target = server.db.interviews.find((i) => i.status === "ready");
     if (!target) throw new Error("演示数据里没有待发送的面试");

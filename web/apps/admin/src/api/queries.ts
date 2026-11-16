@@ -864,6 +864,18 @@ export function useDeleteInterview() {
   });
 }
 
+/** 把归档的面试恢复回来：回到列表里，没过期、没撤销的链接又能用 */
+export function useRestoreInterview() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => unwrap(api.POST("/api/v1/interviews/{id}/restore", at(id))),
+    onSuccess: (interview) => {
+      qc.setQueryData(["interview", interview.id], interview);
+      return qc.invalidateQueries({ queryKey: ["interviews"] });
+    },
+  });
+}
+
 /**
  * 彻底删除：录像、语音、题目、对话记录、报告都从服务器上删掉，不能恢复。只有管理员能用。
  * 和上面的归档不一样，归档只是不在列表里显示。
