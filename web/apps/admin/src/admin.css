@@ -1051,6 +1051,35 @@
     border: 1px solid var(--oil-line);
     border-radius: var(--oil-radius-md);
   }
+  .adm-picked {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--oil-space-2);
+    margin: 0 0 var(--oil-space-3);
+    padding: 0;
+    list-style: none;
+  }
+  .adm-picked button {
+    display: inline-flex;
+    align-items: center;
+    margin-left: var(--oil-space-1);
+    padding: 2px;
+    border: 0;
+    border-radius: var(--oil-radius-sm);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  .adm-picked button:hover {
+    background: var(--oil-sunken);
+  }
+  .adm-picked button:focus-visible {
+    outline: 2px solid var(--oil-focus);
+  }
+  .adm-failures {
+    margin: 0 0 var(--oil-space-2);
+    padding-left: var(--oil-space-5);
+  }
   .adm-pick {
     display: flex;
     align-items: center;
