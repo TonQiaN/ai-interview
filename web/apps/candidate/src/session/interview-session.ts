@@ -32,6 +32,7 @@ import { CaptureError, requestCapture, stopStream } from "../lib/media/capture";
 import type { MediaErrorKind } from "../lib/media/errors";
 import type { OutputHalt, OutputWatch } from "../lib/media/output-watch";
 import { ScreenWakeLock } from "../lib/media/wake-lock";
+import { type FittedBitrate, fitRecordingBitrate } from "../lib/recording/bitrate";
 import { recorderFactory } from "../lib/recording/create-recorder";
 import { SegmentRecorder } from "../lib/recording/segment-recorder";
 import { Timeline } from "../lib/timeline";
@@ -121,6 +122,9 @@ export interface SessionSnapshot {
 /** 面试换到另一个页面里继续了，这个页面停了下来。 */
 export const TAKEN_OVER = "taken_over";
 
+/** 点「开始面试」时网速还在量，最多等它这么久（毫秒）。 */
+const NETWORK_CHECK_WAIT_MS = 2_000;
+
 const INITIAL_DEVICE: DeviceState = {
   permission: "idle",
   error: null,
@@ -176,6 +180,8 @@ export class InterviewSession {
   private recorder: SegmentRecorder | null = null;
   private runner: InterviewRunner<AudioBuffer> | null = null;
   private wakeLock: ScreenWakeLock | null = null;
+  /** 正在量的那一次上行网速；量完了也留着。 */
+  private networkCheck: Promise<void> = Promise.resolve();
   private outputWatch: OutputWatch | null = null;
   /** 声音是什么时候被系统停掉的（performance.now()）；没停是 null。 */
   private outputHaltedAt: number | null = null;
@@ -373,12 +379,34 @@ export class InterviewSession {
     const api = this.api;
     if (!api || this.snapshot.network.status === "testing") return;
     this.patch({ network: { status: "testing", uplinkKbps: null } });
-    try {
-      const uplinkKbps = await measureUplinkKbps({ send: (bytes) => api.probeUplink(bytes) });
-      this.patch({ network: { status: "measured", uplinkKbps } });
-    } catch {
-      this.patch({ network: { status: "failed", uplinkKbps: null } });
-    }
+    const measuring = (async () => {
+      try {
+        const uplinkKbps = await measureUplinkKbps({ send: (bytes) => api.probeUplink(bytes) });
+        this.patch({ network: { status: "measured", uplinkKbps } });
+      } catch {
+        this.patch({ network: { status: "failed", uplinkKbps: null } });
+      }
+    })();
+    this.networkCheck = measuring;
+    await measuring;
+  }
+
+  /**
+   * 录像按多大的码率录。上行装不下服务端给的码率时把画面的码率降下来，
+   * 不然候选人的声音到不了服务端，面试官只能按半截回答来判断。
+   */
+  private recordingBitrate(): FittedBitrate {
+    const { room, network } = this.snapshot;
+    return fitRecordingBitrate(
+      {
+        videoBitsPerSecond:
+          (this.stream?.getVideoTracks().length ?? 0) > 0
+            ? (room?.recording.video_bits_per_second ?? 0)
+            : 0,
+        audioBitsPerSecond: room?.recording.audio_bits_per_second ?? 0,
+      },
+      network.uplinkKbps,
+    );
   }
 
   private pageTargets(): PageTargets {
@@ -480,11 +508,22 @@ export class InterviewSession {
 
     await this.action(async () => {
       await graph.resume();
+      // 网速还在量（候选人点得快，或者刷新后回来）：等它一下再定录像的码率，最多等两秒
+      await Promise.race([
+        this.networkCheck,
+        new Promise((resolve) => setTimeout(resolve, NETWORK_CHECK_WAIT_MS)),
+      ]);
       const first = await api.start();
       this.timeline = new Timeline(
         first.action === "say" ? first.progress.elapsed_ms : (room.elapsed_ms ?? 0),
       );
-      this.collector?.record("interview_started", { resumed: room.stage === "in_progress" });
+      const bitrate = this.recordingBitrate();
+      this.collector?.record("interview_started", {
+        resumed: room.stage === "in_progress",
+        // 画面按多大的码率录。上行慢的时候会比配置的低，报告能知道画面为什么糊
+        video_kbps: Math.round(bitrate.videoBitsPerSecond / 1000),
+        video_reduced: bitrate.reduced,
+      });
 
       await this.startRecording();
       void this.keepScreenOn();
@@ -573,10 +612,7 @@ export class InterviewSession {
       sessionKey: this.sessionKey,
       track,
       store,
-      createRecorder: recorderFactory(stream, graph.mixedStream, {
-        videoBitsPerSecond: room.recording.video_bits_per_second,
-        audioBitsPerSecond: room.recording.audio_bits_per_second,
-      }),
+      createRecorder: recorderFactory(stream, graph.mixedStream, this.recordingBitrate()),
       timesliceMs: room.recording.timeslice_ms,
       timelineNow: () => this.timeline?.now() ?? 0,
       onStored: () => this.uploader?.notify(),

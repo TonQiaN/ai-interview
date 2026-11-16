@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { CameraPreview } from "../components/CameraPreview";
 import { MicMeter } from "../components/MicMeter";
 import type { RoomSession } from "../lib/api/room-types";
-import { judgeUplink } from "../lib/flow/uplink";
+import { type FittedBitrate, fitRecordingBitrate } from "../lib/recording/bitrate";
 import type { DeviceState, NetworkState } from "../session/interview-session";
 import { type Texts, useText } from "../text";
 
@@ -65,11 +65,15 @@ export function DevicePage(props: DevicePageProps) {
   const canContinue = allPassed || (granted && speakerDone && micSlow);
 
   // 没有摄像头时只录声音，对网速的要求低得多。还没授权时不知道有没有摄像头，先按录像算
-  const recordingBits =
-    room.recording.audio_bits_per_second +
-    (granted && !device.hasVideo ? 0 : room.recording.video_bits_per_second);
-  const networkSlow =
-    network.uplinkKbps !== null && judgeUplink(network.uplinkKbps, recordingBits) === "slow";
+  const fitted = fitRecordingBitrate(
+    {
+      videoBitsPerSecond: granted && !device.hasVideo ? 0 : room.recording.video_bits_per_second,
+      audioBitsPerSecond: room.recording.audio_bits_per_second,
+    },
+    network.uplinkKbps,
+  );
+  // 上行装不下配置的码率：画面降一些还装得下，或者降到最低也装不下，都提醒一句
+  const networkSlow = fitted.reduced || !fitted.fits;
 
   const pending: DeviceCheckState =
     device.permission === "requesting"
@@ -196,7 +200,7 @@ export function DevicePage(props: DevicePageProps) {
         }
         icon={<Wifi />}
         title={text.network.title}
-        description={networkText(text.network, network, networkSlow, room.mode === "realtime")}
+        description={networkText(text.network, network, fitted, room.mode === "realtime")}
       >
         {(network.status === "failed" || networkSlow) && (
           <div className="oil-row oil-row--wrap">
@@ -214,7 +218,7 @@ export function DevicePage(props: DevicePageProps) {
 function networkText(
   text: Texts["device"]["network"],
   network: NetworkState,
-  slow: boolean,
+  fitted: FittedBitrate,
   realtime: boolean,
 ): string {
   switch (network.status) {
@@ -224,7 +228,8 @@ function networkText(
     case "failed":
       return text.failed;
     case "measured":
-      if (!slow) return text.ok;
+      // 画面降一些就装得下：面试不受影响，只是录像糊一点
+      if (fitted.fits) return fitted.reduced ? text.slowReduced : text.ok;
       return realtime ? text.slowRealtime : text.slow;
   }
 }

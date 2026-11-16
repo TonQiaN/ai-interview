@@ -116,6 +116,8 @@ export const en: Texts = {
         "The upload speed could not be measured. The connection may be unstable. You can continue, but please check your network first.",
       ok: "Upload speed is good enough.",
       slow: "Upload speed is on the slow side. You can take the interview, but it takes longer to finish uploading the recording afterwards. Consider another network: move closer to the router, or use mobile data.",
+      slowReduced:
+        "Upload speed is on the slow side, so the video will be recorded at a lower quality to keep the interview running smoothly. For a clearer picture, consider another network: move closer to the router, or use mobile data.",
       slowRealtime:
         "Upload speed is on the slow side. The interviewer may respond more slowly, and it takes longer to finish uploading the recording afterwards. Consider another network: move closer to the router, or use mobile data.",
     },
