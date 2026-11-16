@@ -28,19 +28,28 @@ interface ImportItem {
   message?: string | null;
 }
 
-interface RaasImportDialogProps<T, R extends ImportItem> {
+interface RaasImportDialogProps<T, R extends ImportItem, F extends object> {
   open: boolean;
   onClose: () => void;
   title: string;
   /** 量词加名词，比如「个岗位」「位候选人」 */
   unit: string;
-  searchPlaceholder: string;
+  /** 不传就没有搜索框（比如列的是投了某个岗位的人，本来就不多） */
+  searchPlaceholder?: string;
+  /** 一条都没有时说的话 */
+  empty?: ReactNode;
+  /** 列表上面要先说的话，比如列的是哪个岗位的投递 */
+  intro?: ReactNode;
+  /** 现在列不出来的原因。给了就显示它，不显示列表 */
+  blocked?: ReactNode;
   /** 连不上 RAAS 时建议怎么办 */
   fallback: string;
   list: (
-    query: { q: string; page: number; page_size: number },
+    query: { q: string; page: number; page_size: number } & Partial<F>,
     enabled: boolean,
   ) => UseQueryResult<Page<T>>;
+  /** 每次查都带上的条件，比如只看投了某个岗位的人 */
+  filter?: F;
   row: (item: T) => RaasRow;
   run: {
     isPending: boolean;
@@ -56,19 +65,23 @@ interface RaasImportDialogProps<T, R extends ImportItem> {
 }
 
 /** 从 RAAS 挑几个导进来。岗位和候选人共用。 */
-export function RaasImportDialog<T, R extends ImportItem>({
+export function RaasImportDialog<T, R extends ImportItem, F extends object = object>({
   open,
   onClose,
   title,
   unit,
   searchPlaceholder,
+  empty = "没有找到。",
+  intro,
+  blocked,
   fallback,
   list: useList,
+  filter,
   row,
   run,
   itemName,
   doneMessage,
-}: RaasImportDialogProps<T, R>) {
+}: RaasImportDialogProps<T, R, F>) {
   const toast = useToast();
   const status = useRaasStatus();
   const [q, setQ] = useState("");
@@ -76,7 +89,14 @@ export function RaasImportDialog<T, R extends ImportItem>({
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [failures, setFailures] = useState<R[]>([]);
   const available = status.data?.configured === true && status.data.reachable;
-  const list = useList({ q, page, page_size: 8 }, open && available);
+  const list = useList(
+    { q, page, page_size: 8, ...filter } as {
+      q: string;
+      page: number;
+      page_size: number;
+    } & Partial<F>,
+    open && available && !blocked,
+  );
   const tooMany = picked.size > RAAS_IMPORT_MAX;
 
   function toggle(ref: string) {
@@ -153,19 +173,23 @@ export function RaasImportDialog<T, R extends ImportItem>({
         <p className="oil-muted adm-note">
           只从 RAAS 读取，不会改动 RAAS 里的任何数据。导入之后是一份独立的副本，可以在这里再改。
         </p>
-        <SearchInput
-          value={q}
-          placeholder={searchPlaceholder}
-          onChange={(value) => {
-            setQ(value);
-            setPage(1);
-          }}
-        />
-        {available && (
+        {intro}
+        {searchPlaceholder && (
+          <SearchInput
+            value={q}
+            placeholder={searchPlaceholder}
+            onChange={(value) => {
+              setQ(value);
+              setPage(1);
+            }}
+          />
+        )}
+        {available && blocked}
+        {available && !blocked && (
           <QueryView query={list}>
             {(data) =>
               data.items.length === 0 ? (
-                <p className="oil-muted">没有找到。</p>
+                <p className="oil-muted">{empty}</p>
               ) : (
                 <>
                   <ul className="adm-list">
