@@ -108,6 +108,7 @@ function SessionView({
   if (stage === "finishing") {
     return (
       <FinishingPage
+        reason={snapshot.finishReason}
         upload={snapshot.upload}
         error={snapshot.actionError}
         onRetry={() => void session.retryUpload()}
@@ -115,7 +116,14 @@ function SessionView({
     );
   }
   if (stage === "done")
-    return <DonePage reason={snapshot.finishReason} problem={snapshot.problem} />;
+    return (
+      <DonePage
+        reason={snapshot.finishReason}
+        problem={snapshot.problem}
+        // 重新载入就是一次普通的续面：检查设备，点「继续面试」，面试回到这个页面
+        onResumeHere={() => window.location.reload()}
+      />
+    );
   if (stage === "loading" || !room) return <Loading />;
 
   switch (stage) {
