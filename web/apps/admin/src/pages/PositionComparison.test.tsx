@@ -125,6 +125,37 @@ describe("对比候选人", () => {
     }
   }, 15_000);
 
+  it("对比可以打印：抬头写着岗位，选人的那一块不印，深色主题先换成浅色", async () => {
+    const { position, done } = positionWithReports();
+    await call("POST", `/positions/${position.id}/comparison`, {
+      interview_ids: done.map((i) => i.id),
+    });
+    await waitFor(async () => {
+      const now = await call<PositionComparison>("GET", `/positions/${position.id}/comparison`);
+      expect(now.result).toBeTruthy();
+    });
+    const print = vi.fn();
+    vi.stubGlobal("print", print);
+    open(`/positions/${position.id}/comparison`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "打印 / 存成 PDF" }));
+    expect(print).toHaveBeenCalledTimes(1);
+    // 纸上没有页面上方的导航，抬头要写明是哪个岗位
+    const heading = screen.getByText(new RegExp(`^${position.title}：候选人对比`));
+    expect(heading.classList.contains("adm-print-only")).toBe(true);
+    // 选人的那一块和「看这份报告」是给页面上用的
+    expect(screen.getByRole("group", { name: "要比的面试" }).closest(".adm-no-print")).toBeTruthy();
+    for (const link of screen.getAllByRole("link", { name: "看这份报告" }))
+      expect(link.classList.contains("adm-no-print")).toBe(true);
+
+    document.documentElement.dataset.theme = "dark";
+    window.dispatchEvent(new Event("beforeprint"));
+    expect(document.documentElement.dataset.theme).toBe("light");
+    window.dispatchEvent(new Event("afterprint"));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    delete document.documentElement.dataset.theme;
+  });
+
   it("少于两场时不能点对比；后端不让比时把原因显示出来", async () => {
     const { position, done } = positionWithReports();
     open(`/positions/${position.id}/comparison`);
