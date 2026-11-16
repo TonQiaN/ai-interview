@@ -2,6 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 import {
   button,
   enterInterview,
+  eventKinds,
   expectRecordingsReady,
   passPreflight,
   roomState,
@@ -174,4 +175,75 @@ test("实时对话里候选人插话，中途还刷新了页面：面试官停�
     expect.objectContaining({ payload: expect.objectContaining({ resumed: false }) }),
     expect.objectContaining({ payload: expect.objectContaining({ resumed: true }) }),
   ]);
+});
+
+test("实时对话里网络断了几秒、接口出了几次错：面试官晚一点接话，一句不多一句不少，面试照常走完", async ({
+  page,
+  context,
+}) => {
+  const verdicts = watchPauseChecks(page);
+  await politeCandidate(page);
+  // 头两次问「说完没有」都出错；报第二题的回答时头两次服务不可用，像后端正在重启
+  let failedChecks = 0;
+  await page.route("**/api/v1/room/pause-check", async (route) => {
+    if (failedChecks >= 2) return route.continue();
+    failedChecks += 1;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "internal", message: "服务出错了" } }),
+    });
+  });
+  let failedAdvances = 0;
+  await page.route("**/api/v1/room/advance", async (route) => {
+    const body = route.request().postDataJSON() as { utterance_key?: string } | null;
+    if (body?.utterance_key !== "q2" || failedAdvances >= 2) return route.continue();
+    failedAdvances += 1;
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "服务暂时不可用" } }),
+    });
+  });
+
+  const interview = await enterInterview(page, { realtime: true });
+  // 面试官在第一题上追问的时候断网，候选人回答追问的那一段正好报不上去
+  await expect.poll(() => spokenKeys(roomState(interview)), { timeout: 30_000 }).toContain("q1.p1");
+  await context.setOffline(true);
+  await expect(page.getByText("网络不稳定")).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(6000);
+  await context.setOffline(false);
+
+  await expect(page.getByText("面试完成，谢谢你")).toBeVisible({ timeout: 110_000 });
+  const state = await expectRecordingsReady(interview, 1);
+  await test.info().attach("面试经过", { body: timeline(state), contentType: "text/plain" });
+  expect(state.end_reason).toBe("completed");
+  expect(failedChecks).toBe(2);
+  expect(failedAdvances).toBe(2);
+  // 问不到「说完没有」时页面按静音时长自己判断，没有卡住
+  expect(verdicts.filter((verdict) => verdict === "failed")).toHaveLength(2);
+
+  // 重试没有让哪一句多说一遍，也没有漏掉哪一句
+  expect(spokenInOrder(spokenKeys(state))).toEqual([
+    "opening",
+    "q1",
+    "q1.p1",
+    "q2",
+    "q2.p1",
+    "q3",
+    "q3.p1",
+    "candidate_questions",
+    "closing",
+  ]);
+  const answers = state.turns.filter((turn) => turn.speaker === "candidate");
+  expect(answers.map((turn) => turn.utterance_key)).toEqual([
+    "q1",
+    "q1.p1",
+    "q2",
+    "q2.p1",
+    "q3",
+    "q3.p1",
+    "candidate_questions",
+  ]);
+  expect(eventKinds(state)).toEqual(expect.arrayContaining(["network_offline", "network_online"]));
 });

@@ -1,8 +1,15 @@
 import { Button, buttonClass, Card, CardBody, CardHeader, Hero, Stat } from "@ai-interview/ui";
 import { ArrowRight, Check, Plus } from "lucide-react";
 import { Link, useNavigate } from "react-router";
-import { useCandidates, useInterviews, useMe, usePositions, useSystemStatus } from "../api/queries";
-import type { InterviewSummary } from "../api/types";
+import {
+  useCandidates,
+  useInterviewCounts,
+  useInterviews,
+  useMe,
+  usePositions,
+  useSystemStatus,
+} from "../api/queries";
+import type { InterviewCounts, InterviewSummary } from "../api/types";
 import { Person, QueryView } from "../components/common";
 import { PageTitle } from "../components/PageHeader";
 import { hasVerdict, InterviewTags, ReportVerdict } from "../components/ReportVerdict";
@@ -19,6 +26,19 @@ function todoOf(i: InterviewSummary): string | null {
   if (ended && i.report_status === "failed") return "报告生成失败，去重新生成";
   if (ended && i.report_status === "done" && i.decision === "pending") return "报告好了，等你决定";
   return null;
+}
+
+/** 一共有几场在等 HR 处理，和上面 `todoOf` 是同一套条件 */
+function todoCount(counts: InterviewCounts): number {
+  const { by_status: status } = counts;
+  return (
+    status.prepare_failed +
+    status.draft +
+    status.ready +
+    counts.invite_expired +
+    counts.report_failed +
+    counts.awaiting_decision
+  );
 }
 
 function greeting(now = new Date()): string {
@@ -98,7 +118,9 @@ function FirstSteps() {
 export function OverviewPage() {
   const navigate = useNavigate();
   const me = useMe();
+  // 列表只取得到最近的 100 场，用来列出「等你处理」和「最近的面试」；上面的数字另外问后端要
   const interviews = useInterviews({ page_size: 100 });
+  const counts = useInterviewCounts().data;
   const system = useSystemStatus();
 
   return (
@@ -124,10 +146,22 @@ export function OverviewPage() {
       <QueryView query={interviews}>
         {({ items }) => {
           const todos = items.filter((i) => todoOf(i));
-          const live = items.filter((i) => i.status === "in_progress").length;
-          const waiting = items.filter((i) => i.status === "invited" && !inviteExpired(i)).length;
-          const done = items.filter((i) => i.status === "completed");
-          const advanced = items.filter((i) => i.decision === "advance").length;
+          // 数字还没取到时，先用列表里数出来的顶一下
+          const n = counts
+            ? {
+                todo: todoCount(counts),
+                live: counts.by_status.in_progress,
+                waiting: counts.by_status.invited - counts.invite_expired,
+                done: counts.by_status.completed,
+                advanced: counts.by_decision.advance,
+              }
+            : {
+                todo: todos.length,
+                live: items.filter((i) => i.status === "in_progress").length,
+                waiting: items.filter((i) => i.status === "invited" && !inviteExpired(i)).length,
+                done: items.filter((i) => i.status === "completed").length,
+                advanced: items.filter((i) => i.decision === "advance").length,
+              };
           return (
             <>
               {items.length === 0 && (
@@ -136,11 +170,11 @@ export function OverviewPage() {
                 </div>
               )}
               <div className="adm-stats adm-section">
-                <Stat label="等你处理" value={todos.length} unit="场" />
-                <Stat label="正在面试" value={live} unit="场" />
-                <Stat label="已发链接，等候选人" value={waiting} unit="场" />
-                <Stat label="已完成" value={done.length} unit="场" />
-                <Stat label="决定进入下一轮" value={advanced} unit="人" />
+                <Stat label="等你处理" value={n.todo} unit="场" />
+                <Stat label="正在面试" value={n.live} unit="场" />
+                <Stat label="已发链接，等候选人" value={n.waiting} unit="场" />
+                <Stat label="已完成" value={n.done} unit="场" />
+                <Stat label="决定进入下一轮" value={n.advanced} unit="人" />
               </div>
 
               <div className="adm-split adm-section">
@@ -148,9 +182,11 @@ export function OverviewPage() {
                   <CardHeader title="等你处理" />
                   <CardBody>
                     {todos.length === 0 ? (
-                      <p className="oil-muted" style={{ margin: 0 }}>
-                        没有要处理的事。
-                      </p>
+                      n.todo === 0 && (
+                        <p className="oil-muted" style={{ margin: 0 }}>
+                          没有要处理的事。
+                        </p>
+                      )
                     ) : (
                       <ul className="adm-list">
                         {todos.map((i) => (
@@ -176,6 +212,12 @@ export function OverviewPage() {
                           </li>
                         ))}
                       </ul>
+                    )}
+                    {n.todo > todos.length && (
+                      <p className="oil-muted adm-note">
+                        还有 {n.todo - todos.length} 场不在最近的 100
+                        场面试里，没有列在这里。到「面试」里按状态筛出来，或者到那个岗位的页面上一起处理。
+                      </p>
                     )}
                   </CardBody>
                 </Card>

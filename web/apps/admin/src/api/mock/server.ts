@@ -22,6 +22,7 @@ import type {
   DuplicateHint,
   Interview,
   InterviewConfig,
+  InterviewCounts,
   InterviewInput,
   InterviewPatch,
   InterviewPlan,
@@ -1432,6 +1433,45 @@ export function createMockServer(options: MockOptions = {}) {
     };
     db.interviews.push(i);
     return i;
+  });
+  on("GET", "/interviews/counts", ({ query }): InterviewCounts => {
+    const list = db.interviews
+      .filter((i) => !i.archived_at)
+      .filter((i) => !query.get("candidate_id") || i.candidate.id === query.get("candidate_id"))
+      .filter((i) => !query.get("position_id") || i.position.id === query.get("position_id"));
+    const count = (keep: (i: Interview) => boolean) => list.filter(keep).length;
+    const status = (value: InterviewStatus) => count((i) => i.status === value);
+    const decision = (value: Interview["decision"]) => count((i) => i.decision === value);
+    const over = (i: Interview) => i.status === "completed" || i.status === "abandoned";
+    return {
+      total: list.length,
+      by_status: {
+        draft: status("draft"),
+        preparing: status("preparing"),
+        prepare_failed: status("prepare_failed"),
+        ready: status("ready"),
+        invited: status("invited"),
+        in_progress: status("in_progress"),
+        completed: status("completed"),
+        abandoned: status("abandoned"),
+        expired: status("expired"),
+        cancelled: status("cancelled"),
+      },
+      by_decision: {
+        pending: decision("pending"),
+        advance: decision("advance"),
+        hold: decision("hold"),
+        reject: decision("reject"),
+      },
+      awaiting_decision: count(
+        (i) => over(i) && i.report?.status === "done" && i.decision === "pending",
+      ),
+      report_failed: count((i) => over(i) && i.report?.status === "failed"),
+      invite_expired: count((i) => {
+        const expiresAt = inviteExpiresAt(i.id);
+        return i.status === "invited" && expiresAt !== null && expiresAt <= iso(0);
+      }),
+    };
   });
   on("GET", "/interviews/:id", ({ params }) => {
     const i = find.interview(params[0]);
