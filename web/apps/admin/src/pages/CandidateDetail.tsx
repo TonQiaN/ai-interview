@@ -595,6 +595,11 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
           </>
         }
       />
+      {candidate.archived_at && (
+        <Banner tone="info" title="这位候选人已经归档" className="adm-gap-below">
+          归档的候选人不在列表里显示，资料和简历还留在服务器上。在候选人列表勾上「带上已归档的」能找到。
+        </Banner>
+      )}
       {candidate.possible_duplicates.length > 0 && (
         <Banner tone="warning" title="可能和这些候选人是同一个人" className="adm-gap-below">
           <DuplicateList items={candidate.possible_duplicates} />
@@ -790,14 +795,16 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
           </Card>
 
           <div className="oil-row">
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Archive aria-hidden="true" />}
-              onClick={() => setDeleting(true)}
-            >
-              归档
-            </Button>
+            {!candidate.archived_at && (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Archive aria-hidden="true" />}
+                onClick={() => setDeleting(true)}
+              >
+                归档
+              </Button>
+            )}
             {isAdmin && (
               <Button
                 variant="ghost"

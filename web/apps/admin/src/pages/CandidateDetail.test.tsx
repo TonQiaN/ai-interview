@@ -133,6 +133,16 @@ describe("候选人详情", () => {
     expect(requests).not.toContain(`POST /candidates/${candidate.id}/purge`);
   });
 
+  it("已经归档的候选人，页面上说明已归档，不再给归档按钮，管理员还能彻底删除", async () => {
+    const candidate = busyCandidate();
+    candidate.archived_at = new Date().toISOString();
+    open(candidate.id);
+
+    expect(await screen.findByText("这位候选人已经归档")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "归档" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "彻底删除" })).toBeTruthy();
+  });
+
   it("普通账号只有归档，没有彻底删除；归档的说明讲清楚资料还在", async () => {
     const candidate = busyCandidate();
     open(candidate.id, {
