@@ -115,6 +115,7 @@ function SessionView({ session }: { session: InterviewSession }) {
           runner={snapshot.runner}
           upload={snapshot.upload}
           interrupted={snapshot.interrupted}
+          audioHalted={snapshot.audioHalted}
           busy={snapshot.busy}
           actionError={snapshot.actionError}
           cameraStream={session.cameraStream}
@@ -126,6 +127,7 @@ function SessionView({ session }: { session: InterviewSession }) {
           onReplay={session.replayQuestion}
           onReady={session.readyToAnswer}
           onReconnect={() => void session.reconnectDevices()}
+          onResumeAudio={() => void session.resumeAudio()}
           onLeave={() => void session.leave()}
         />
       );

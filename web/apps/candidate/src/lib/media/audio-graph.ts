@@ -10,6 +10,7 @@
  * 麦克风本身不接扬声器，候选人听不到自己的回声。
  */
 import levelProcessorUrl from "./level-processor.js?url";
+import { type OutputHalt, OutputWatch } from "./output-watch";
 
 export interface LevelFrame {
   /** 这一帧的均方根音量，0 到 1。 */
@@ -78,6 +79,16 @@ export class AudioGraph {
    */
   async resume(): Promise<void> {
     if (this.context.state !== "running") await this.context.resume();
+  }
+
+  /**
+   * 盯着音频有没有被系统停掉（来电话、切到别的应用），停了和恢复了各通知一次。
+   * 返回的对象可以试着恢复（revive），不用了要 stop。
+   */
+  watchOutput(onChange: (halt: OutputHalt | null) => void): OutputWatch {
+    const watch = new OutputWatch({ context: this.context, onChange });
+    watch.start();
+    return watch;
   }
 
   /**
