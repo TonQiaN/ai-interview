@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { en, zh } from "../text";
-import { endingFor as endingIn } from "./FinishPages";
+import { endingFor as endingIn, waitText } from "./FinishPages";
 
 const endingFor = (reason: string | null, problem: Parameters<typeof endingIn>[1]) =>
   endingIn(reason, problem, zh.done);
@@ -45,5 +45,29 @@ describe("结束页对候选人怎么说", () => {
   it("英文面试看到的是英文", () => {
     expect(endingIn("completed", null, en.done).title).toBe("Interview complete. Thank you");
     expect(endingIn("connection_lost", null, en.done).description).toContain("recruiter");
+  });
+});
+
+describe("保存录像还要等多久", () => {
+  it("不到一分钟的不报具体秒数", () => {
+    expect(waitText(1, zh.finishing)).toBe("不到一分钟");
+    expect(waitText(59, zh.finishing)).toBe("不到一分钟");
+  });
+
+  it("超过一分钟的按分钟往上取整，宁可说长一点", () => {
+    expect(waitText(60, zh.finishing)).toBe("大约还要 1 分钟");
+    expect(waitText(61, zh.finishing)).toBe("大约还要 2 分钟");
+    expect(waitText(234, zh.finishing)).toBe("大约还要 4 分钟");
+  });
+
+  it("超过一小时的写小时和分钟", () => {
+    expect(waitText(3600, zh.finishing)).toBe("大约还要 1 小时");
+    expect(waitText(3900, zh.finishing)).toBe("大约还要 1 小时 5 分钟");
+  });
+
+  it("英文面试看到的是英文", () => {
+    expect(waitText(30, en.finishing)).toBe("less than a minute");
+    expect(waitText(234, en.finishing)).toBe("about 4 min");
+    expect(waitText(3900, en.finishing)).toBe("about 1 h 5 min");
   });
 });

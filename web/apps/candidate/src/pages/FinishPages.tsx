@@ -1,5 +1,6 @@
 import { Banner, Button, Progress, Spinner, Stage, StatusPage } from "@ai-interview/ui";
-import type { UploadStatus } from "../lib/upload/uploader";
+import { useEffect, useState } from "react";
+import { type UploadStatus, uploadEtaSeconds } from "../lib/upload/uploader";
 import { type ProblemKind, TAKEN_OVER } from "../session/interview-session";
 import { type Texts, useText } from "../text";
 
@@ -19,8 +20,17 @@ export function FinishingPage({ reason, upload, error, onRetry }: FinishingPageP
   const waiting = upload?.state === "offline" || upload?.state === "retrying";
   const t = useText();
   const text = t.finishing;
+  const eta = upload ? uploadEtaSeconds(upload) : null;
+  // 估出来要等一分钟以上，就不再说「一般不到一分钟」。说过慢了就一直这么说，
+  // 不在快传完的时候又换回去
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (eta !== null && eta >= SLOW_SAVE_SECONDS) setSlow(true);
+  }, [eta]);
   const heading = reason === TAKEN_OVER ? text.movedTitle : text.title;
-  const description = reason === TAKEN_OVER ? text.movedDescription : text.description;
+  const description =
+    reason === TAKEN_OVER ? text.movedDescription : slow ? text.slowDescription : text.description;
+  const size = formatBytes(pending);
 
   return (
     <Stage>
@@ -47,7 +57,11 @@ export function FinishingPage({ reason, upload, error, onRetry }: FinishingPageP
           ) : (
             <div className="oil-row" style={{ justifyContent: "center" }}>
               <Spinner label={text.saving} />
-              <span className="oil-muted">{text.remaining(formatBytes(pending))}</span>
+              <span className="oil-muted">
+                {eta === null
+                  ? text.remaining(size)
+                  : text.remainingWithWait(size, waitText(eta, text))}
+              </span>
             </div>
           )}
         </>
@@ -116,6 +130,20 @@ export function DonePage({ reason, problem, onResumeHere }: DonePageProps) {
       />
     </Stage>
   );
+}
+
+/** 估出来保存还要这么多秒以上，就告诉候选人网络慢、要等一会儿。 */
+const SLOW_SAVE_SECONDS = 60;
+
+/**
+ * 还要等多久，说给候选人听。估的本来就不准，不报秒数；按分钟往上取整，宁可说长一点，
+ * 不让候选人等过了说的时间还没好。
+ */
+export function waitText(seconds: number, text: Texts["finishing"]): string {
+  if (seconds < 60) return text.waitUnderMinute;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return text.waitMinutes(minutes);
+  return text.waitHours(Math.floor(minutes / 60), minutes % 60);
 }
 
 function formatBytes(bytes: number): string {

@@ -7,6 +7,7 @@ import {
   UploadError,
   Uploader,
   type UploadStatus,
+  uploadEtaSeconds,
 } from "./uploader";
 
 const SESSION = "session-a";
@@ -334,6 +335,69 @@ describe("Uploader", () => {
     expect(pending).toEqual([5, 4, 3, 2, 1]);
     expect(uploader.getStatus().pendingBytes).toBe(0);
     expect(api.seqs("seg-1")).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("记下现在传得多快：传上去的字节除以花的时间，还没传过的时候不知道", async () => {
+    let clock = 0;
+    const { store, api, uploader } = setup({ now: () => clock });
+    await store.putSegment(segment("seg-1", 1000, 3));
+    for (const seq of [0, 1, 2]) await addChunk(store, "seg-1", seq);
+    expect(uploader.getStatus().bytesPerSecond).toBeNull();
+
+    // 每一片传两秒
+    api.beforeCall = (call) => {
+      if (call.startsWith("put:")) clock += 2000;
+    };
+    uploader.start();
+    await uploader.drain();
+    expect(uploader.getStatus().bytesPerSecond).toBeCloseTo("chunk-0".length / 2);
+  });
+
+  it("传得多快只看最近几片：网络中途变了，很快跟上", async () => {
+    let clock = 0;
+    const { store, api, uploader } = setup({ now: () => clock });
+    await store.putSegment(segment("seg-1", 1000, 8));
+    for (let seq = 0; seq < 8; seq += 1) await addChunk(store, "seg-1", seq);
+
+    // 头两片各传了十秒，后面六片一秒一片
+    let puts = 0;
+    api.beforeCall = (call) => {
+      if (!call.startsWith("put:")) return;
+      puts += 1;
+      clock += puts <= 2 ? 10_000 : 1000;
+    };
+    uploader.start();
+    await uploader.drain();
+    expect(uploader.getStatus().bytesPerSecond).toBeCloseTo("chunk-0".length);
+  });
+
+  it("传得多快不算失败的那几次", async () => {
+    let clock = 0;
+    const { store, api, uploader } = setup({ now: () => clock });
+    await store.putSegment(segment("seg-1", 1000, 1));
+    await addChunk(store, "seg-1", 0);
+
+    let failed = false;
+    api.beforeCall = (call) => {
+      if (!call.startsWith("put:")) return;
+      if (!failed) {
+        failed = true;
+        clock += 15_000;
+        throw new UploadError("超时", true);
+      }
+      clock += 1000;
+    };
+    uploader.start();
+    await uploader.drain();
+    expect(uploader.getStatus().bytesPerSecond).toBeCloseTo("chunk-0".length);
+  });
+
+  it("按现在的速度估还要传多久；不知道速度就估不出来", () => {
+    expect(uploadEtaSeconds({ pendingBytes: 3_000_000, bytesPerSecond: 15_000 })).toBe(200);
+    expect(uploadEtaSeconds({ pendingBytes: 100, bytesPerSecond: 15_000 })).toBe(1);
+    expect(uploadEtaSeconds({ pendingBytes: 0, bytesPerSecond: 15_000 })).toBe(0);
+    expect(uploadEtaSeconds({ pendingBytes: 3_000_000, bytesPerSecond: null })).toBeNull();
+    expect(uploadEtaSeconds({ pendingBytes: 3_000_000, bytesPerSecond: 0 })).toBeNull();
   });
 
   it("断网的时候录下的分片也算进还没传完的里面", async () => {

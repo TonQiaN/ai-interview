@@ -13,6 +13,8 @@ import {
  * 面试照常往下走；页面上说的「还剩多少没传」要和本机真的留着的对得上，不能传着传着又跳回去。
  */
 
+/** 限速限到多少：录像码率的七分之一左右，半分钟的面试攒下的录像要传两三分钟。 */
+const SLOW_KBPS = 48;
 const SLOW_HINT = "网络较慢，部分录像还在上传。面试可以正常进行。";
 
 /** 本机这场面试还留着多少录像：几片、多少字节，还有没有正在录的段。 */
@@ -50,15 +52,23 @@ const localBacklog = (page: Page, sessionKey: string) =>
     [LOCAL_DB, sessionKey] as const,
   );
 
-/** 结束页上写的「还剩 1.4 MB」是多少字节；这时候没显示就是 null。 */
-async function shownRemaining(page: Page): Promise<number | null> {
+/**
+ * 结束页上写的「还剩 1.4 MB，大约还要 3 分钟」：还剩多少字节、大约还要几分钟。
+ * 这时候没显示就是 null；没写时间、或者写的是「不到一分钟」，分钟数是 null。
+ */
+async function shownRemaining(
+  page: Page,
+): Promise<{ bytes: number; minutes: number | null } | null> {
   const text = await page
     .getByText(/^还剩 /)
     .textContent({ timeout: 1000 })
     .catch(() => null);
-  const match = text?.match(/^还剩 ([\d.]+) (KB|MB)$/);
+  const match = text?.match(/^还剩 ([\d.]+) (KB|MB)(?:，大约还要 (\d+) 分钟|，不到一分钟)?$/);
   if (!match) return null;
-  return Number(match[1]) * (match[2] === "MB" ? 1024 * 1024 : 1024);
+  return {
+    bytes: Number(match[1]) * (match[2] === "MB" ? 1024 * 1024 : 1024),
+    minutes: match[3] === undefined ? null : Number(match[3]),
+  };
 }
 
 /** 页面现在拦着屏幕熄灭的有几个（申请了还没松开的屏幕常亮）。 */
@@ -70,7 +80,7 @@ const screenLocksHeld = (page: Page) =>
       ).length,
   );
 
-test("上传比录像慢：面试照常往下走，结束页上「还剩多少」和本机真的留着的对得上，只减不增", async ({
+test("上传比录像慢：面试照常往下走，结束页上「还剩多少」和本机真的留着的对得上，只减不增，还说了大约要等几分钟", async ({
   page,
 }) => {
   // 没有界面的浏览器不给屏幕常亮，换一个假的：记下页面申请的每一个，后面看它什么时候松开
@@ -103,8 +113,8 @@ test("上传比录像慢：面试照常往下走，结束页上「还剩多少�
       downloadThroughput: -1,
       uploadThroughput: kbps > 0 ? (kbps * 1000) / 8 : -1,
     });
-  // 录像大约每秒 40 KB，这里每秒只传得出去 10 KB
-  await uplink(80);
+  // 录像大约每秒 40 KB，这里每秒只传得出去 6 KB
+  await uplink(SLOW_KBPS);
 
   // 本机攒了几片之后提醒一句，面试不停
   await expect(page.getByText(SLOW_HINT)).toBeVisible({ timeout: 30_000 });
@@ -125,27 +135,39 @@ test("上传比录像慢：面试照常往下走，结束页上「还剩多少�
 
   // 结束页上的数和本机真的留着的差不了多少（以前只算了手上这一轮开始时的那几片，不到一半）
   const settled: number[] = [];
+  const waits: number[] = [];
   for (let second = 0; second < 8; second += 1) {
     const local = await localBacklog(page, sessionKey);
     const remaining = await shownRemaining(page);
     if (remaining !== null) {
-      expect(remaining).toBeGreaterThan(local.bytes * 0.8);
-      expect(remaining).toBeLessThan(local.bytes * 1.2 + 100 * 1024);
+      expect(remaining.bytes).toBeGreaterThan(local.bytes * 0.8);
+      expect(remaining.bytes).toBeLessThan(local.bytes * 1.2 + 100 * 1024);
       // 最后一片落到本机之后不会再有新的：从这时候起这个数只减不增
-      if (!local.recording) settled.push(remaining);
+      if (!local.recording) settled.push(remaining.bytes);
+      // 说的时间和「剩下的除以限的速度」差不了太多
+      if (remaining.minutes !== null) {
+        const expected = local.bytes / (SLOW_KBPS * 125) / 60;
+        expect(remaining.minutes).toBeGreaterThan(expected * 0.7);
+        expect(remaining.minutes).toBeLessThan(expected * 2 + 1);
+        waits.push(remaining.minutes);
+      }
     }
     // 录像还没传完：手机这时候自己锁屏的话上传就停了，所以屏幕常亮要留到传完
     expect(await screenLocksHeld(page)).toBe(1);
     await page.waitForTimeout(1000);
   }
   expect(settled.length).toBeGreaterThan(3);
+  // 要等好几分钟：写了大约多久，上面那句也不再说「一般不到一分钟」
+  expect(waits.length).toBeGreaterThan(3);
+  await expect(page.getByText(/你的网络上传比较慢/)).toBeVisible();
+  await expect(page.getByText(/一般不到一分钟/)).toBeHidden();
 
   // 网络好了：剩下的很快传完，这期间的数也只减不增
   await uplink(0);
   const done = page.getByText("面试已结束");
   while (!(await done.isVisible())) {
     const remaining = await shownRemaining(page);
-    if (remaining !== null) settled.push(remaining);
+    if (remaining !== null) settled.push(remaining.bytes);
     await done.waitFor({ timeout: 500 }).catch(() => undefined);
   }
   for (let index = 1; index < settled.length; index += 1) {

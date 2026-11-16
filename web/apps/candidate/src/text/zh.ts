@@ -284,7 +284,14 @@ export const zh = {
     offlineTitle: "网络断开了",
     offlineBody: "恢复后会自动继续，请保持页面打开。",
     saving: "保存中",
+    slowDescription:
+      "你的网络上传比较慢，录像还要一些时间才能保存完。请保持这个页面打开，完成后会有提示。",
     remaining: (size: string): string => `还剩 ${size}`,
+    remainingWithWait: (size: string, wait: string): string => `还剩 ${size}，${wait}`,
+    waitUnderMinute: "不到一分钟",
+    waitMinutes: (minutes: number): string => `大约还要 ${minutes} 分钟`,
+    waitHours: (hours: number, minutes: number): string =>
+      minutes > 0 ? `大约还要 ${hours} 小时 ${minutes} 分钟` : `大约还要 ${hours} 小时`,
     movedTitle: "面试已经在另一个页面里继续了",
     movedDescription: "这个页面已经停止录制，正在保存它录下的部分。请先不要关闭这个页面。",
   },

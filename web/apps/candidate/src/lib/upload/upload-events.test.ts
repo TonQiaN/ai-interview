@@ -27,6 +27,7 @@ function status(patch: Partial<UploadStatus>): UploadStatus {
     uploadedBytes: 0,
     consecutiveFailures: 0,
     lastError: null,
+    bytesPerSecond: null,
     ...patch,
   };
 }
