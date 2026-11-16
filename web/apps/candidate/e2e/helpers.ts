@@ -97,6 +97,11 @@ export function seedInterview({
 export const roomState = (interview: SeededInterview): RoomState =>
   demo("state", interview.interview_id);
 
+/** 把这场面试的链接都撤销掉，像 HR 在后台撤销了链接。 */
+export const revokeInvites = (interview: SeededInterview): void => {
+  demo<{ revoked: number }>("revoke", interview.interview_id);
+};
+
 /** 面试官依次说了哪几句。 */
 export const spokenKeys = (state: RoomState): (string | null)[] =>
   state.turns.filter((turn) => turn.speaker === "interviewer").map((turn) => turn.utterance_key);

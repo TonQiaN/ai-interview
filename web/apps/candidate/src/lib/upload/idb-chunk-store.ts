@@ -73,8 +73,26 @@ export class IndexedDbChunkStore implements ChunkStore {
     return rows.sort((a, b) => a.startMs - b.startMs);
   }
 
+  async listAllSegments(): Promise<SegmentMeta[]> {
+    const transaction = this.db.transaction(SEGMENTS, "readonly");
+    return (await requestToPromise(transaction.objectStore(SEGMENTS).getAll())) as SegmentMeta[];
+  }
+
   async deleteSegment(sessionKey: string, segmentId: string): Promise<void> {
     const transaction = this.db.transaction(SEGMENTS, "readwrite");
+    transaction.objectStore(SEGMENTS).delete([sessionKey, segmentId]);
+    await transactionDone(transaction);
+  }
+
+  async discardSegment(sessionKey: string, segmentId: string): Promise<void> {
+    // 一个事务里删完：不会出现段的登记没了、分片还留着找不到的情况
+    const transaction = this.db.transaction([SEGMENTS, CHUNKS, CHUNK_INDEX], "readwrite");
+    const chunks = IDBKeyRange.bound(
+      [sessionKey, segmentId, 0],
+      [sessionKey, segmentId, Number.MAX_SAFE_INTEGER],
+    );
+    transaction.objectStore(CHUNKS).delete(chunks);
+    transaction.objectStore(CHUNK_INDEX).delete(chunks);
     transaction.objectStore(SEGMENTS).delete([sessionKey, segmentId]);
     await transactionDone(transaction);
   }

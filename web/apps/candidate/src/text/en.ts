@@ -261,7 +261,7 @@ export const en: Texts = {
     aborted: {
       title: "Interview stopped",
       description:
-        "This interview link is no longer valid, so the interview could not continue. What was recorded has been saved. If you have questions, please contact the recruiter.",
+        "This interview link is no longer valid, so the interview could not continue. If you have questions, please contact the recruiter.",
     },
     left: { title: "Interview ended", description: `${SAVED} You can close this page now.` },
     noResponse: {
