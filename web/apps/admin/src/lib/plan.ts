@@ -11,6 +11,8 @@ export interface QuestionDraft {
   competency: string;
   category: QuestionCategory;
   expectedAnswerSec: number;
+  /** 答得好会提到什么，一行一条，可以不填。判断回答和写报告的模型会对照 */
+  strongSignals: string;
 }
 
 /** 给新题起一个这份计划里没用过的名字。出题时用的是 q1、q2……，接着往后排 */
@@ -40,7 +42,7 @@ export function addQuestion(plan: InterviewPlan, draft: QuestionDraft): Intervie
     required: true,
     reserve: false,
     expected_answer_sec: draft.expectedAnswerSec,
-    scoring: { strong_signals: [], weak_signals: [], red_flags: [] },
+    scoring: { strong_signals: lines(draft.strongSignals), weak_signals: [], red_flags: [] },
     follow_ups: [],
   };
   const firstReserve = plan.questions.findIndex((q) => q.reserve);
@@ -49,6 +51,14 @@ export function addQuestion(plan: InterviewPlan, draft: QuestionDraft): Intervie
     ...plan,
     questions: [...plan.questions.slice(0, at), question, ...plan.questions.slice(at)],
   };
+}
+
+/** 一行一条，空行和每行前后的空白、列表符号去掉 */
+function lines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/^\s*(?:[-*•·]|\d+[.、)])\s*/, "").trim())
+    .filter((line) => line !== "");
 }
 
 /** 预计回答多久可以选的几档，不超过设置里的单题最长时间；一档都不剩时就用那个上限 */

@@ -669,6 +669,9 @@ describe("面试详情", () => {
         target: { value: "确认出差安排" },
       });
       expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+      fireEvent.change(within(dialog).getByLabelText(/^答得好会提到什么/), {
+        target: { value: "能接受\n说得出顾虑是什么" },
+      });
       fireEvent.click(saveButton);
 
       await waitFor(() =>
@@ -681,6 +684,11 @@ describe("面试详情", () => {
         intent: "确认出差安排",
         origin: "must_ask",
         required: true,
+        scoring: {
+          strong_signals: ["能接受", "说得出顾虑是什么"],
+          weak_signals: [],
+          red_flags: [],
+        },
       });
       expect(before).not.toContain(saved.at(-1)?.key);
       expect(await screen.findByText(new RegExp(`共 ${before.length + 1} 道主问题`))).toBeTruthy();

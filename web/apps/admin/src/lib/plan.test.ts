@@ -16,6 +16,7 @@ const draft: QuestionDraft = {
   competency: "沟通表达",
   category: "screening",
   expectedAnswerSec: 60,
+  strongSignals: "",
 };
 
 /** 把题目的 key 换成出题时真实的样子：q1、q2…… */
@@ -73,7 +74,7 @@ describe("加一道自己的题", () => {
     expect(next.questions.at(-1)?.text).toBe("你能接受每个月出差一周吗？");
   });
 
-  it("标成必问题，前后的空白去掉，没有追问和评分提示", () => {
+  it("标成必问题，前后的空白去掉，没有追问", () => {
     const added = addQuestion(numbered(plan()), draft).questions.at(-1);
     expect(added).toMatchObject({
       text: "你能接受每个月出差一周吗？",
@@ -85,6 +86,20 @@ describe("加一道自己的题", () => {
       reserve: false,
       expected_answer_sec: 60,
       follow_ups: [],
+    });
+  });
+
+  it("答得好会提到什么：一行一条，空行和列表符号去掉；不填就是空的", () => {
+    const source = numbered(plan());
+    expect(addQuestion(source, draft).questions.at(-1)?.scoring?.strong_signals).toEqual([]);
+    const added = addQuestion(source, {
+      ...draft,
+      strongSignals: "  能接受，说得出怎么安排家里的事 \n\n- 主动问出差去哪\n2. 有过驻场经历\n",
+    }).questions.at(-1);
+    expect(added?.scoring).toEqual({
+      strong_signals: ["能接受，说得出怎么安排家里的事", "主动问出差去哪", "有过驻场经历"],
+      weak_signals: [],
+      red_flags: [],
     });
   });
 

@@ -37,6 +37,7 @@ export function AddQuestionDialog({
     competency: competencies[0] ?? FALLBACK_COMPETENCY,
     category: "professional",
     expectedAnswerSec: choices.includes(120) ? 120 : (choices.at(-1) ?? maxAnswerSec),
+    strongSignals: "",
   });
   const [draft, setDraft] = useState(blank);
   const set = (patch: Partial<QuestionDraft>) => setDraft((old) => ({ ...old, ...patch }));
@@ -55,7 +56,7 @@ export function AddQuestionDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      unsaved={draft.text.trim() !== "" || draft.intent.trim() !== ""}
+      unsaved={[draft.text, draft.intent, draft.strongSignals].some((value) => value.trim() !== "")}
       title="加一道题"
       footer={
         <>
@@ -105,6 +106,20 @@ export function AddQuestionDialog({
               aria-describedby={describedBy}
               value={draft.intent}
               onChange={(e) => set({ intent: e.target.value })}
+            />
+          )}
+        </Field>
+        <Field
+          label="答得好会提到什么（可以不填）"
+          hint="一行一条。面试官判断回答、报告打分时会对照着看，不会念给候选人。"
+        >
+          {({ id, describedBy }) => (
+            <Textarea
+              id={id}
+              aria-describedby={describedBy}
+              rows={3}
+              value={draft.strongSignals}
+              onChange={(e) => set({ strongSignals: e.target.value })}
             />
           )}
         </Field>
