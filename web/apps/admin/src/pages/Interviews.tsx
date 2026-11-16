@@ -6,11 +6,12 @@ import type { InterviewStatus } from "../api/types";
 import {
   DecisionBadge,
   Empty,
+  InterviewStatusBadge,
   Pager,
   Person,
   QueryView,
   SearchInput,
-  StatusBadge,
+  StageBadge,
 } from "../components/common";
 import { ExportInterviewsButton } from "../components/ExportInterviews";
 import { PageHeader } from "../components/PageHeader";
@@ -132,7 +133,8 @@ export function InterviewsPage() {
                       <td>{i.position_title}</td>
                       <td>
                         <span className="adm-item__tags">
-                          <StatusBadge status={i.status} />
+                          <InterviewStatusBadge interview={i} />
+                          <StageBadge stage={i.stage} />
                           {i.archived_at && <Badge plain>已归档</Badge>}
                         </span>
                       </td>

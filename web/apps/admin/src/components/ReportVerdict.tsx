@@ -1,7 +1,7 @@
 import { Badge } from "@ai-interview/ui";
 import type { InterviewSummary } from "../api/types";
 import { reportStatusLabel, scoreRangeText } from "../lib/format";
-import { DecisionBadge, RecommendationBadge, StatusBadge } from "./common";
+import { DecisionBadge, InterviewStatusBadge, RecommendationBadge, StageBadge } from "./common";
 
 type Props = {
   interview: Pick<
@@ -60,7 +60,8 @@ export function InterviewTags({ interview }: { interview: InterviewSummary }) {
     <span className="adm-item__tags">
       {hasVerdict(interview) && <ReportVerdict interview={interview} />}
       <DecisionBadge value={interview.decision} />
-      {!hasVerdict(interview) && <StatusBadge status={interview.status} />}
+      {!hasVerdict(interview) && <InterviewStatusBadge interview={interview} />}
+      <StageBadge stage={interview.stage} />
       {interview.archived_at && <Badge plain>已归档</Badge>}
     </span>
   );

@@ -79,3 +79,28 @@ describe("总览：刚装好、什么都还没有的时候", () => {
     expect(screen.queryByRole("list", { name: "三步安排第一场面试" })).toBeNull();
   });
 });
+
+describe("总览：链接过期了的面试", () => {
+  it("算在「等你处理」里，告诉 HR 去换一个新链接；不算在「等候选人」里", async () => {
+    const expired = server.db.interviews.find(
+      (i) =>
+        i.status === "invited" &&
+        (server.db.invites.get(i.id) ?? []).every((invite) => invite.status === "expired"),
+    );
+    if (!expired) throw new Error("演示数据里没有链接过期的面试");
+    const waiting = server.db.interviews.filter(
+      (i) => i.status === "invited" && i !== expired,
+    ).length;
+    open();
+
+    const todo = (await screen.findByText("链接过期了，候选人还没面试，去换一个新链接")).closest(
+      "li",
+    );
+    if (!todo) throw new Error("没找到那一条");
+    expect(within(todo).getByText(expired.candidate.name)).toBeTruthy();
+
+    const stat = screen.getByText("已发链接，等候选人").parentElement;
+    if (!stat) throw new Error("没找到那个数字");
+    expect(stat.textContent).toContain(String(waiting));
+  });
+});

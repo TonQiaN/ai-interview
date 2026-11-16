@@ -47,6 +47,7 @@ describe("interviewsSheet", () => {
     expect(head).toEqual([
       "候选人",
       "岗位",
+      "轮次",
       "状态",
       "报告的建议",
       "综合分",
@@ -57,16 +58,17 @@ describe("interviewsSheet", () => {
       "用时（分钟）",
       "链接",
     ]);
-    expect(row?.slice(0, 6)).toEqual([
+    expect(row?.slice(0, 7)).toEqual([
       "周明远",
       "后端工程师",
+      "第一轮初筛",
       "已完成",
       "建议推进",
       "78",
       "进入下一轮",
     ]);
-    expect(row?.[9]).toBe("21.5");
-    expect(row?.[10]).toBe("https://hr.example.com/admin/interviews/i1");
+    expect(row?.[10]).toBe("21.5");
+    expect(row?.[11]).toBe("https://hr.example.com/admin/interviews/i1");
   });
 
   it("还没面的那几格是空的，不写横线；归档的在状态后面注明", () => {
@@ -84,7 +86,27 @@ describe("interviewsSheet", () => {
       ],
       link,
     );
-    expect(row?.slice(2, 6)).toEqual(["已发链接（已归档）", "", "", "还没定"]);
-    expect(row?.slice(7, 10)).toEqual(["", "", ""]);
+    expect(row?.slice(3, 7)).toEqual(["已发链接（已归档）", "", "", "还没定"]);
+    expect(row?.slice(8, 11)).toEqual(["", "", ""]);
+  });
+
+  it("深入面试在「轮次」那一列写出来", () => {
+    const [, row] = interviewsSheet([interview({ stage: "in_depth" })], link);
+    expect(row?.[2]).toBe("深入面试");
+  });
+
+  it("发了链接、链接已经过期的，状态后面注明，不然会以为还在等候选人", () => {
+    const waiting = interview({ status: "invited", started_at: null, ended_at: null });
+    const [, expired, valid, never] = interviewsSheet(
+      [
+        { ...waiting, invite_expires_at: "2020-01-01T00:00:00Z" },
+        { ...waiting, invite_expires_at: "2999-01-01T00:00:00Z" },
+        { ...waiting, invite_expires_at: null },
+      ],
+      link,
+    );
+    expect(expired?.[3]).toBe("已发链接（链接已过期）");
+    expect(valid?.[3]).toBe("已发链接");
+    expect(never?.[3]).toBe("已发链接");
   });
 });
