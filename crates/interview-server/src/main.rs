@@ -31,6 +31,11 @@ enum Command {
         #[arg(long, default_value = "admin")]
         role: String,
     },
+    /// 重设一个 HR 账号的密码（忘了密码时用）。新密码从标准输入读一行
+    ResetPassword {
+        #[arg(long)]
+        email: String,
+    },
 }
 
 #[tokio::main]
@@ -49,14 +54,23 @@ async fn main() -> anyhow::Result<()> {
         Command::Migrate => interview_server::serve::migrate(config).await,
         Command::Openapi => unreachable!("上面已经处理了"),
         Command::CreateAdmin { email, name, role } => {
-            eprintln!("输入密码（至少 8 位），回车结束：");
-            let mut password = String::new();
-            tokio::io::BufReader::new(tokio::io::stdin())
-                .read_line(&mut password)
-                .await
-                .context("读密码失败")?;
-            let password = password.trim_end_matches(['\r', '\n']);
-            interview_server::serve::create_admin(config, &email, &name, password, &role).await
+            let password = read_password("输入密码（至少 8 位），回车结束：").await?;
+            interview_server::serve::create_admin(config, &email, &name, &password, &role).await
+        }
+        Command::ResetPassword { email } => {
+            let password = read_password("输入新密码（至少 8 位），回车结束：").await?;
+            interview_server::serve::reset_password(config, &email, &password).await
         }
     }
+}
+
+/// 从标准输入读一行当密码。密码不走命令行参数，不会留在 shell 的历史里。
+async fn read_password(prompt: &str) -> anyhow::Result<String> {
+    eprintln!("{prompt}");
+    let mut password = String::new();
+    tokio::io::BufReader::new(tokio::io::stdin())
+        .read_line(&mut password)
+        .await
+        .context("读密码失败")?;
+    Ok(password.trim_end_matches(['\r', '\n']).to_owned())
 }
