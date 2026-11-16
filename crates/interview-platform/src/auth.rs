@@ -80,7 +80,7 @@ pub async fn hash_password_async(password: String) -> anyhow::Result<String> {
     tokio::task::spawn_blocking(move || hash_password(&password)).await?
 }
 
-async fn verify_password_async(password: String, password_hash: String) -> bool {
+pub(crate) async fn verify_password_async(password: String, password_hash: String) -> bool {
     tokio::task::spawn_blocking(move || verify_password(&password, &password_hash))
         .await
         .unwrap_or(false)
@@ -448,6 +448,50 @@ fn cookie_header(value: &str, max_age_sec: u64, secure: bool) -> HeaderValue {
     HeaderValue::from_str(&cookie).unwrap_or_else(|_| HeaderValue::from_static(""))
 }
 
+/// 密码的长度上限。再长也不会更安全，只会让算哈希的请求变慢。
+const MAX_PASSWORD_CHARS: usize = 200;
+
+/// 新密码能不能用。`field` 是请求里这个字段的名字，出错时指给前端。
+pub(crate) fn check_password(field: &str, password: &str) -> ApiResult<()> {
+    let chars = password.chars().count();
+    if chars < 8 {
+        return Err(ApiError::invalid_field(field, "密码至少 8 位"));
+    }
+    if chars > MAX_PASSWORD_CHARS {
+        return Err(ApiError::invalid_field(
+            field,
+            format!("密码最长 {MAX_PASSWORD_CHARS} 位"),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn check_role(role: &str) -> ApiResult<()> {
+    if matches!(role, "admin" | "recruiter") {
+        Ok(())
+    } else {
+        Err(ApiError::invalid_field(
+            "role",
+            "角色只能是 admin 或 recruiter",
+        ))
+    }
+}
+
+/// 这个邮箱最近输错密码的次数是不是到上限了。登录和改密码共用一份计数。
+pub(crate) fn too_many_failures(email: &str) -> bool {
+    failed_logins().too_many(&email.to_lowercase(), Instant::now())
+}
+
+/// 记一次输错密码。
+pub(crate) fn record_failure(email: &str) {
+    failed_logins().record(&email.to_lowercase(), Instant::now());
+}
+
+/// 清掉这个邮箱输错密码的计数（密码对了，或者管理员给重设了密码）。
+pub(crate) fn clear_failures(email: &str) {
+    failed_logins().clear(&email.to_lowercase());
+}
+
 /// 新建一个 HR 账号。邮箱已存在返回 409。
 pub async fn create_admin_user(
     db: &PgPool,
@@ -460,15 +504,8 @@ pub async fn create_admin_user(
     if !email.contains('@') {
         return Err(ApiError::invalid_field("email", "邮箱格式不对"));
     }
-    if password.chars().count() < 8 {
-        return Err(ApiError::invalid_field("password", "密码至少 8 位"));
-    }
-    if !matches!(role, "admin" | "recruiter") {
-        return Err(ApiError::invalid_field(
-            "role",
-            "角色只能是 admin 或 recruiter",
-        ));
-    }
+    check_password("password", password)?;
+    check_role(role)?;
     let password_hash = hash_password_async(password.to_owned()).await?;
     let inserted: Option<AdminUser> = sqlx::query_as(
         "INSERT INTO admin_users (id, email, display_name, password_hash, role)

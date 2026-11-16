@@ -16,8 +16,9 @@ import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api/http";
 import { useDeletePosition, useInterviews, usePosition, useSavePosition } from "../api/queries";
 import type { Position, PositionExtra } from "../api/types";
-import { Confirm, DecisionBadge, Person, QueryView, StatusBadge } from "../components/common";
+import { Confirm, Person, QueryView } from "../components/common";
 import { RaasApplicantsDialog } from "../components/RaasApplicantsDialog";
+import { hasVerdict, InterviewTags } from "../components/ReportVerdict";
 import { fullTime, positionStatusLabel, positionStatusTone, relativeTime } from "../lib/format";
 import { PositionFields, type PositionForm } from "./Positions";
 
@@ -143,7 +144,8 @@ function ExtraCard({ extra }: { extra: PositionExtra }) {
 function Detail({ position }: { position: Position }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const interviews = useInterviews({ position_id: position.id, page_size: 50 });
+  // 一个岗位下的人是要拿来比的：综合分高的在前，还没有报告的排在后面
+  const interviews = useInterviews({ position_id: position.id, page_size: 50, sort: "-score" });
   const remove = useDeletePosition();
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -260,21 +262,25 @@ function Detail({ position }: { position: Position }) {
                       还没有人面过这个岗位。
                     </p>
                   ) : (
-                    <ul className="adm-list">
-                      {items.map((i) => (
-                        <li key={i.id} className="adm-item">
-                          <div className="adm-item__main">
-                            <Person
-                              name={i.candidate_name}
-                              sub={relativeTime(i.updated_at)}
-                              to={`/interviews/${i.id}`}
-                            />
-                          </div>
-                          <DecisionBadge value={i.decision} />
-                          <StatusBadge status={i.status} />
-                        </li>
-                      ))}
-                    </ul>
+                    <>
+                      {items.some(hasVerdict) && (
+                        <p className="oil-muted adm-note">综合分高的在前，还没有报告的排在后面。</p>
+                      )}
+                      <ul className="adm-list">
+                        {items.map((i) => (
+                          <li key={i.id} className="adm-item adm-item--wrap">
+                            <div className="adm-item__main">
+                              <Person
+                                name={i.candidate_name}
+                                sub={relativeTime(i.updated_at)}
+                                to={`/interviews/${i.id}`}
+                              />
+                            </div>
+                            <InterviewTags interview={i} />
+                          </li>
+                        ))}
+                      </ul>
+                    </>
                   )
                 }
               </QueryView>
