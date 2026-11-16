@@ -84,8 +84,12 @@ pub struct Question {
 }
 
 /// 说话人。
+///
+/// 接口文档里叫 `ReportSpeaker`：对话记录里的说话人（`interview_core::Speaker`，没有第三个人）也叫
+/// `Speaker`，文档里类型按名字放，重名的只会留下一个。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = ReportSpeaker)]
 pub enum Speaker {
     Interviewer,
     Candidate,
