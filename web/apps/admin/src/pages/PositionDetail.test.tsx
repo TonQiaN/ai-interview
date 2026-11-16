@@ -76,7 +76,8 @@ describe("岗位详情", () => {
     expect(dialog.getByText(/岗位的内容还留着，没有删掉/)).toBeTruthy();
 
     fireEvent.click(dialog.getByRole("button", { name: "归档" }));
-    expect(await screen.findByText(/岗位列表/)).toBeTruthy();
+    // 归档页面上的说明里也有「岗位列表」四个字，所以认列表页上才有的那个链接
+    expect(await screen.findByRole("link", { name: "回到这个岗位" })).toBeTruthy();
     expect(screen.getByText("已归档")).toBeTruthy();
     expect(server.db.positions.find((p) => p.id === position.id)?.archived_at).toBeTruthy();
   });
