@@ -12,6 +12,7 @@ import type {
   Invite,
   Page,
   Position,
+  PositionComparison,
   PositionDraft,
   RaasCandidateImportItem,
   RaasPosition,
@@ -685,6 +686,77 @@ describe("彻底删除面试", () => {
     expect((await call(server, "POST", `/interviews/${id}/purge`)).status).toBe(204);
     expect((await call(server, "GET", `/interviews/${id}`)).status).toBe(404);
     expect((await call(server, "POST", `/interviews/${id}/purge`)).status).toBe(404);
+  });
+});
+
+describe("候选人对比", () => {
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it("没比过是 404；选的面试要够两场、都有报告；生成好以后带着姓名和对比", async () => {
+    const server = createMockServer({ latencyMs: 0, jobMs: 20 });
+    await login(server);
+    const withReport = (id: string) =>
+      Boolean(server.db.reports.get(id)?.some((v) => v.brief.status === "done" && v.content));
+    const position = server.db.positions.find(
+      (p) =>
+        server.db.interviews.filter((i) => i.position.id === p.id && withReport(i.id)).length >= 2,
+    );
+    if (!position) throw new Error("演示数据里没有哪个岗位有两份报告");
+    const mine = server.db.interviews.filter((i) => i.position.id === position.id);
+    const ready = mine.filter((i) => withReport(i.id)).map((i) => i.id);
+    const path = `/positions/${position.id}/comparison`;
+    type Failure = { error: { code: string; details: Record<string, string> } };
+
+    const none = await call<Failure>(server, "GET", path);
+    expect(none.status).toBe(404);
+    expect(none.data.error.code).toBe("comparison_not_found");
+
+    const one = await call<Failure>(server, "POST", path, { interview_ids: ready.slice(0, 1) });
+    expect(one.status).toBe(422);
+    expect(one.data.error.details.interview_ids).toBeTruthy();
+    const other = server.db.interviews.find((i) => i.position.id !== position.id);
+    const foreign = await call<Failure>(server, "POST", path, {
+      interview_ids: [ready[0], other?.id],
+    });
+    expect(foreign.status).toBe(422);
+
+    const started = await call<PositionComparison>(server, "POST", path, { interview_ids: ready });
+    expect(started.data.status).toBe("running");
+    expect(started.data.result ?? null).toBeNull();
+    // 同一批再点一次不会重新排；换一批要等这一批好了
+    const again = await call<PositionComparison>(server, "POST", path, {
+      interview_ids: [...ready].reverse(),
+    });
+    expect(again.data.requested_at).toBe(started.data.requested_at);
+    if (ready.length > 2) {
+      const changed = await call<Failure>(server, "POST", path, {
+        interview_ids: ready.slice(0, 2),
+      });
+      expect(changed.status).toBe(409);
+      expect(changed.data.error.code).toBe("comparison_in_progress");
+    }
+
+    await wait(80);
+    const done = await call<PositionComparison>(server, "GET", path);
+    expect(done.data.status).toBe("done");
+    const result = done.data.result;
+    if (!result) throw new Error("对比没有生成出来");
+    expect(result.people.map((p) => p.interview_id)).toEqual(ready);
+    expect(result.comparison.candidates.map((c) => c.interview_id).sort()).toEqual(
+      [...ready].sort(),
+    );
+    // 建议档次高的在前
+    const tiers = ["strong_advance", "advance", "borderline", "not_advance"];
+    const order = result.comparison.candidates.map((c) => tiers.indexOf(c.decision));
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // 对照表每行一人一格
+    for (const row of result.comparison.requirements) expect(row.cells).toHaveLength(ready.length);
+
+    // 彻底删除其中一场，这份对比也跟着没了
+    const victim = server.db.interviews.find((i) => i.id === ready[0]);
+    if (victim) victim.status = "completed";
+    expect((await call(server, "POST", `/interviews/${ready[0]}/purge`)).status).toBe(204);
+    expect((await call(server, "GET", path)).status).toBe(404);
   });
 });
 

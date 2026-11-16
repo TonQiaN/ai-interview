@@ -151,6 +151,42 @@ export function usePosition(id: string | undefined) {
   });
 }
 
+/**
+ * 一个岗位最近一次的候选人对比。从来没比过是 null。
+ * 正在生成的时候两秒取一次，一般不到一分钟就好。
+ */
+export function useComparison(positionId: string | undefined) {
+  return useQuery({
+    queryKey: ["comparison", positionId],
+    queryFn: async () => {
+      try {
+        return await unwrap(api.GET("/api/v1/positions/{id}/comparison", at(positionId)));
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404 && e.code === "comparison_not_found")
+          return null;
+        throw e;
+      }
+    },
+    enabled: Boolean(positionId),
+    refetchInterval: (q) => (reportBusy(q.state.data?.status) ? 2000 : false),
+  });
+}
+
+/** 发起一次对比：给出要比的几场面试，后台生成，结果用 useComparison 等 */
+export function useStartComparison(positionId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (interviewIds: string[]) =>
+      unwrap(
+        api.POST("/api/v1/positions/{id}/comparison", {
+          ...at(positionId),
+          body: { interview_ids: interviewIds },
+        }),
+      ),
+    onSuccess: (data) => qc.setQueryData(["comparison", positionId], data),
+  });
+}
+
 export function useSavePosition(id?: string) {
   const qc = useQueryClient();
   return useMutation({

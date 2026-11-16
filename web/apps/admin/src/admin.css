@@ -1286,6 +1286,103 @@
   /* ───────── 打印 ─────────
      打印或者在打印对话框里存成 PDF 时，只留内容：导航、页签、按钮都不印。
      纸是白的，底色和阴影去掉；评分条和徽标的颜色要照样印出来。 */
+  /* 同一个岗位几位候选人的对比 */
+  .adm-compare {
+    --oil-gap: var(--oil-space-5);
+  }
+  .adm-compare__gap {
+    margin-bottom: var(--oil-space-3);
+  }
+  .adm-compare__picks {
+    border: 1px solid var(--oil-line);
+    border-radius: var(--oil-radius);
+    overflow: hidden;
+  }
+  .adm-compare__tick {
+    width: 18px;
+    flex: none;
+    display: inline-flex;
+  }
+  .adm-compare__summary {
+    margin: 0 0 var(--oil-space-4);
+    font-size: var(--oil-text-lg);
+    line-height: 1.7;
+  }
+  .adm-compare__summary:last-child {
+    margin-bottom: 0;
+  }
+  .adm-compare__caveats {
+    margin: 0;
+    padding-left: var(--oil-space-5);
+  }
+  .adm-compare__tier + .adm-compare__tier {
+    margin-top: var(--oil-space-5);
+    padding-top: var(--oil-space-5);
+    border-top: 1px solid var(--oil-line);
+  }
+  .adm-compare__tier > h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--oil-space-2);
+    margin: 0 0 var(--oil-space-3);
+    font-size: inherit;
+  }
+  .adm-compare__people {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--oil-space-3);
+  }
+  .adm-compare__person {
+    display: flex;
+    flex-direction: column;
+    gap: var(--oil-space-3);
+    padding: var(--oil-space-4);
+    border: 1px solid var(--oil-line);
+    border-radius: var(--oil-radius);
+    background: var(--oil-sunken);
+  }
+  .adm-compare__head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--oil-space-3);
+  }
+  .adm-compare__sides {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: var(--oil-space-4);
+  }
+  .adm-compare__sides h4 {
+    margin: 0 0 var(--oil-space-1);
+    font-size: var(--oil-text-sm);
+    color: var(--oil-ink-3);
+  }
+  .adm-compare__sides ul {
+    margin: 0;
+    padding-left: var(--oil-space-5);
+  }
+  .adm-compare__table th[scope="row"] {
+    min-width: 200px;
+    font-weight: 500;
+    text-align: left;
+  }
+  .adm-compare__table th[scope="col"],
+  .adm-compare__table td {
+    white-space: nowrap;
+  }
+  .adm-compare__question {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--oil-space-4);
+  }
+  .adm-compare__question > div > span {
+    font-weight: 600;
+  }
+
   .adm-print-only {
     display: none;
   }

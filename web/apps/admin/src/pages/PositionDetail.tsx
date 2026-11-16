@@ -2,6 +2,7 @@ import {
   Badge,
   Banner,
   Button,
+  buttonClass,
   Card,
   CardBody,
   CardHeader,
@@ -10,7 +11,7 @@ import {
   PageHeader,
   useToast,
 } from "@ai-interview/ui";
-import { Download, Pencil, Plus, Trash2 } from "lucide-react";
+import { Download, Pencil, Plus, Scale, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api/http";
@@ -242,16 +243,28 @@ function Detail({ position }: { position: Position }) {
             <CardHeader
               title="这个岗位的面试"
               actions={
-                fromRaas && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon={<Download aria-hidden="true" />}
-                    onClick={() => setImporting(true)}
-                  >
-                    导入 RAAS 的投递
-                  </Button>
-                )
+                <>
+                  {/* 有两场以上出了报告才比得起来 */}
+                  {(interviews.data?.items.filter(hasVerdict).length ?? 0) >= 2 && (
+                    <Link
+                      to={`/positions/${position.id}/comparison`}
+                      className={buttonClass({ variant: "secondary", size: "sm" })}
+                    >
+                      <Scale aria-hidden="true" />
+                      对比候选人
+                    </Link>
+                  )}
+                  {fromRaas && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<Download aria-hidden="true" />}
+                      onClick={() => setImporting(true)}
+                    >
+                      导入 RAAS 的投递
+                    </Button>
+                  )}
+                </>
               }
             />
             <CardBody>
