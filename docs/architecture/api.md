@@ -156,9 +156,11 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 
 | 方法和路径 | 做什么 |
 | --- | --- |
-| `GET /api/v1/positions`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 岗位 |
+| `GET /api/v1/positions`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 岗位。`DELETE` 是归档 |
+| `POST /api/v1/positions/{id}/restore` | 把归档的岗位恢复回来，返回岗位。没归档的再调一次也算成功 |
 | `POST /api/v1/positions/draft` | 粘贴一段岗位描述，让大模型整理成岗位草稿（不保存，给新建岗位的表单预填） |
-| `GET /api/v1/candidates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 候选人 |
+| `GET /api/v1/candidates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 候选人。`DELETE` 是归档 |
+| `POST /api/v1/candidates/{id}/restore` | 把归档的候选人恢复回来，返回候选人详情，简历和画像都还在。没归档的再调一次也算成功 |
 | `GET /api/v1/candidates/{id}/resumes`、`POST /api/v1/candidates/{id}/resumes` | 简历列表、上传。能收 PDF、Word（.docx）、图片（PNG、JPG、WebP）和纯文本，最大 20 MB；老格式的 Word（.doc）不收，返回 422 `unsupported_file`；Word 文档坏了或者里面没有文字，返回 422 `unreadable_file` |
 | `GET /api/v1/resumes/{id}`、`GET /api/v1/resumes/{id}/file`、`POST /api/v1/resumes/{id}/parse`、`DELETE /api/v1/resumes/{id}` | 简历详情、原件、重新解析、删除（连原件一起删）。`parse_status` 是 `failed` 时原因在 `parse_error`；是 `done` 但 `parse_warning` 有值时，要把这句话显示给 HR（比如 PDF 页数太多，只读了前 8 页） |
 | `POST /api/v1/candidates/import` | 直接传一份简历，自动建候选人 |
@@ -300,12 +302,13 @@ HR 侧：
 1. 开始录之前 `PUT /room/recordings/{track}/{segment}` 登记这一段。`{track}` 是 `camera`（摄像头加麦克风）、`microphone`（只有声音）或 `screen`；`{segment}` 是浏览器生成的 UUID。请求体 `{ "content_type": "video/webm;codecs=vp8,opus", "start_ms": 1200 }`，`start_ms` 是这一段从面试时间轴的哪一毫秒开始。只接受 WebM 和 MP4。
 2. 每切出一片 `PUT …/chunks/{seq}`，`seq` 从 0 开始，请求体就是这一片的字节，最大 16 MB。`X-Chunk-Sha256` 带内容的 SHA-256（十六进制），服务端校验，对不上返回 422（`checksum_mismatch`）。同一个序号重复上传没有副作用。
 3. 断网或刷新之后，`GET …/chunks` 拿到已收到的序号，只补传缺的。没传完的分片页面存在 IndexedDB 里。
-4. 停止录制后 `POST …/complete`，带 `{ "total_chunks": 38 }`。缺片时返回 409（`chunks_missing`），`details.missing` 是缺的序号（最多列 100 个），补传后再调。一片都没录到就传 0，这一段记成失败。重复调用没有副作用。
+4. 停止录制后 `POST …/complete`，带 `{ "total_chunks": 38 }`。缺片时返回 409（`chunks_missing`），`details.missing` 是缺的序号（最多列 100 个），补传后再调。缺的那几片页面手里也没有了（本机没存下来），就带上 `"accept_missing": true` 再调一次，服务端不再等，把从第 0 片起连得上的部分合并出来，`error` 里写明这一段不完整。一片都没录到就传 0，这一段记成失败。重复调用没有副作用。
 5. 服务端在后台把分片合并成一个文件（任务 `recording.assemble`），再用 ffmpeg 原样重新封装一遍补上时长（`MediaRecorder` 录出来的文件头里没有总时长，播放器拖不了进度条）。没装 ffmpeg 或处理失败时保留合并出来的文件，`error` 里有一句说明。
 
 - 刷新页面、设备断开重连之后开新的一段（新的 UUID），不接着旧的录。服务端给每条轨道的段从 0 开始排序号，HR 侧按 `start_ms` 把几段接起来看。
-- 面试开始之后才能登记和上传。面试结束后 24 小时内链接还能用来补传。
-- 还没登记的段返回 404（`segment_not_found`）；已经在合并的段不再收新分片（409）。
+- 面试开始之后才能登记和上传。面试结束后 24 小时内链接还能用来补传。过了以后（或者链接被撤销、面试被取消或删除）服务端返回 401 或 410，页面把还留在 IndexedDB 里的分片删掉，不把候选人的录像留在设备上。
+- 还没登记的段返回 404（`segment_not_found`）；已经在合并的段不再收新分片（409，`segment_closed`）。
+- 候选人没传完就不回来了（关了页面、本机的分片丢了）：面试结束后，这场面试的录像连着 30 分钟（`AI_INTERVIEW_ROOM_UPLOAD_IDLE_MINUTES`）没有新的分片传来，后台任务 `room.recording_salvage` 就不再等，把每一段从第 0 片起连得上的分片合并出来，`error` 里写明这一段不完整（缺结尾，或者中间缺了一部分）；第 0 片都没有的记成失败。过了补传的期限、面试被取消时也这样收尾。之后这一段不再收新分片（409，`segment_closed`），页面收到后把本机留着的这一段删掉。
 - 一场面试最多 200 段、4 GB。
 
 ### 实时对话（同一套 HTTP 协议）

@@ -30,6 +30,7 @@ import type {
   InterviewTemplate,
   Page,
   Position,
+  PositionComparison,
   PositionDraft,
   PositionInput,
   PreviewRequest,
@@ -46,6 +47,7 @@ import type {
   Utterance,
   Voice,
 } from "../types";
+import { type ComparedInput, sampleComparison } from "./comparison";
 import { planUtterances, samplePlan, sampleReport } from "./samples";
 import {
   buildSeed,
@@ -254,6 +256,9 @@ export function createMockServer(options: MockOptions = {}) {
   } catch {
     // 没有存储就每次刷新重新登录
   }
+
+  /** 每个岗位最近一次的候选人对比，按岗位 id 存 */
+  const comparisons = new Map<string, PositionComparison>();
 
   const later = (ms: number, fn: () => void) => {
     setTimeout(fn, ms);
@@ -745,6 +750,68 @@ export function createMockServer(options: MockOptions = {}) {
     };
   });
   on("GET", "/positions/:id", ({ params }) => find.position(params[0]));
+  // ───────── 同一个岗位几位候选人的对比 ─────────
+
+  on("GET", "/positions/:id/comparison", ({ params }) => {
+    const position = find.position(params[0]);
+    const comparison = comparisons.get(position.id);
+    if (!comparison) throw new HttpError(404, "comparison_not_found", "这个岗位还没有对比过候选人");
+    return comparison;
+  });
+  on("POST", "/positions/:id/comparison", ({ params, body }) => {
+    const position = find.position(params[0]);
+    const ids = (body as { interview_ids?: unknown })?.interview_ids;
+    const refuse = (reason: string) =>
+      new HttpError(422, "validation_failed", reason, { interview_ids: reason });
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string"))
+      throw refuse("要给出几场面试的 ID");
+    const wanted = ids as string[];
+    if (wanted.length < 2) throw refuse("至少选 2 场面试才能对比");
+    if (wanted.length > 20) throw refuse("一次最多对比 20 场");
+    if (new Set(wanted).size !== wanted.length) throw refuse("同一场面试选了两次");
+    const inputs: ComparedInput[] = wanted.map((id) => {
+      const interview = db.interviews.find((i) => i.id === id);
+      if (!interview || interview.position.id !== position.id)
+        throw refuse("选的面试里有不属于这个岗位的");
+      const report = db.reports.get(id)?.find((v) => v.brief.status === "done" && v.content);
+      if (!report?.content)
+        throw refuse(`${interview.candidate.name}的面试还没有生成好的报告，先生成报告再对比`);
+      return {
+        interview_id: id,
+        candidate_id: interview.candidate.id,
+        name: interview.candidate.name,
+        report: report.content,
+      };
+    });
+    const current = comparisons.get(position.id);
+    if (current && (current.status === "pending" || current.status === "running")) {
+      const same =
+        current.interview_ids.length === wanted.length &&
+        wanted.every((id) => current.interview_ids.includes(id));
+      if (same) return current;
+      throw new HttpError(409, "comparison_in_progress", "上一次对比还在生成，等它好了再换一批");
+    }
+    const next: PositionComparison = {
+      status: "running",
+      error: null,
+      requested_at: iso(0),
+      interview_ids: wanted,
+      result: current?.result ?? null,
+    };
+    comparisons.set(position.id, next);
+    later(jobMs, () => {
+      // 生成期间其中一场被彻底删除了，这次就不算数
+      if (comparisons.get(position.id) !== next) return;
+      next.status = "done";
+      next.result = {
+        generated_at: iso(0),
+        people: inputs.map(({ report: _, ...person }) => person),
+        comparison: sampleComparison(inputs, Date.now()),
+      };
+    });
+    return next;
+  });
+
   on("PATCH", "/positions/:id", ({ params, body }) => {
     const p = Object.assign(find.position(params[0]), body as Partial<PositionInput>, {
       updated_at: iso(0),
@@ -968,7 +1035,7 @@ export function createMockServer(options: MockOptions = {}) {
       db.candidates
         .filter(
           (c) =>
-            live(c) &&
+            (live(c) || query.get("include_archived") === "true") &&
             matches(query.get("q"), c.name, c.phone, c.email, c.current_title, c.current_company),
         )
         .sort(byNewest)
@@ -1018,6 +1085,20 @@ export function createMockServer(options: MockOptions = {}) {
   });
   on("DELETE", "/candidates/:id", ({ params }) => {
     find.candidate(params[0]).archived_at = iso(0);
+    return null;
+  });
+  on("POST", "/candidates/:id/purge", ({ params }) => {
+    requireAdmin();
+    const c = find.candidate(params[0]);
+    const left = db.interviews.filter((i) => i.candidate.id === c.id).length;
+    if (left > 0)
+      throw new HttpError(
+        409,
+        "candidate_has_interviews",
+        `这位候选人名下还有 ${left} 场面试，先把面试彻底删除`,
+      );
+    db.candidates = db.candidates.filter((x) => x !== c);
+    db.resumes = db.resumes.filter((r) => r.candidate_id !== c.id);
     return null;
   });
   on("GET", "/candidates/:id/resumes", ({ params, query }) => {
@@ -1374,6 +1455,9 @@ export function createMockServer(options: MockOptions = {}) {
     if (i.status === "preparing" || i.status === "in_progress")
       throw conflict("正在准备或者正在面试，先取消再删除");
     db.interviews = db.interviews.filter((x) => x !== i);
+    // 比过这场面试的那份对比也一起删掉
+    if (comparisons.get(i.position.id)?.interview_ids.includes(i.id))
+      comparisons.delete(i.position.id);
     return null;
   });
   on("POST", "/interviews/:id/prepare", ({ params, body }) => {

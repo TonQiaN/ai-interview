@@ -35,6 +35,7 @@ pub(super) fn router() -> OpenApiRouter<Deps> {
         .routes(routes!(list_candidates, create_candidate))
         .routes(routes!(get_candidate, update_candidate, archive_candidate))
         .routes(routes!(regenerate_profile))
+        .routes(routes!(restore_candidate))
         .routes(routes!(purge_candidate))
         .merge(uploads)
 }
@@ -393,6 +394,31 @@ async fn archive_candidate(
     } else {
         Err(ApiError::not_found("候选人"))
     }
+}
+
+/// 恢复归档的候选人
+///
+/// 归档错了用这个恢复：重新出现在列表里，可以再修改、再安排面试，简历和画像都还在。
+/// 没归档的再调一次也算成功。
+#[utoipa::path(
+    post,
+    path = "/api/v1/candidates/{id}/restore",
+    tag = "candidates",
+    params(("id" = Uuid, Path, description = "候选人 id")),
+    responses(
+        (status = 200, description = "恢复后的候选人", body = CandidateDetail),
+        (status = 404, description = "候选人不存在", body = ErrorBody),
+    )
+)]
+async fn restore_candidate(
+    State(deps): State<Deps>,
+    _user: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<CandidateDetail>> {
+    let candidate = candidates::restore(&deps.ctx.db, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("候选人"))?;
+    Ok(Json(detail(&deps, candidate).await?))
 }
 
 /// 彻底删除候选人

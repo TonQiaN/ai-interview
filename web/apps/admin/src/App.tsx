@@ -10,6 +10,7 @@ import { InterviewsPage } from "./pages/Interviews";
 import { LoginPage } from "./pages/Login";
 import { NotFoundPage } from "./pages/NotFound";
 import { OverviewPage } from "./pages/Overview";
+import { PositionComparisonPage } from "./pages/PositionComparison";
 import { PositionDetailPage } from "./pages/PositionDetail";
 import { PositionsPage } from "./pages/Positions";
 import { SettingsPage } from "./pages/Settings";
@@ -30,6 +31,7 @@ export function App() {
         <Route path="candidates/:id" element={<CandidateDetailPage />} />
         <Route path="positions" element={<PositionsPage />} />
         <Route path="positions/:id" element={<PositionDetailPage />} />
+        <Route path="positions/:id/comparison" element={<PositionComparisonPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="templates/new" element={<TemplateEditPage />} />
         <Route path="templates/:id" element={<TemplateEditPage />} />

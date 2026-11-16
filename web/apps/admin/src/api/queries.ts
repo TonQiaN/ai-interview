@@ -14,6 +14,7 @@ import type {
   InterviewInput,
   InterviewPatch,
   InterviewPlan,
+  InterviewSummary,
   LoginInput,
   PositionInput,
   PreviewRequest,
@@ -151,6 +152,42 @@ export function usePosition(id: string | undefined) {
   });
 }
 
+/**
+ * 一个岗位最近一次的候选人对比。从来没比过是 null。
+ * 正在生成的时候两秒取一次，一般不到一分钟就好。
+ */
+export function useComparison(positionId: string | undefined) {
+  return useQuery({
+    queryKey: ["comparison", positionId],
+    queryFn: async () => {
+      try {
+        return await unwrap(api.GET("/api/v1/positions/{id}/comparison", at(positionId)));
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404 && e.code === "comparison_not_found")
+          return null;
+        throw e;
+      }
+    },
+    enabled: Boolean(positionId),
+    refetchInterval: (q) => (reportBusy(q.state.data?.status) ? 2000 : false),
+  });
+}
+
+/** 发起一次对比：给出要比的几场面试，后台生成，结果用 useComparison 等 */
+export function useStartComparison(positionId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (interviewIds: string[]) =>
+      unwrap(
+        api.POST("/api/v1/positions/{id}/comparison", {
+          ...at(positionId),
+          body: { interview_ids: interviewIds },
+        }),
+      ),
+    onSuccess: (data) => qc.setQueryData(["comparison", positionId], data),
+  });
+}
+
 export function useSavePosition(id?: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -276,7 +313,64 @@ export function useDeleteCandidate() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/candidates/{id}", at(id))),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["candidates"] }),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ["candidates"] });
+      // 详情也要重新取，不然马上再打开时还是归档前的样子
+      qc.invalidateQueries({ queryKey: ["candidate", id] });
+    },
+  });
+}
+
+/** 一位候选人名下的全部面试，归档的也算。彻底删除候选人之前要先把它们删掉 */
+async function interviewsOfCandidate(candidateId: string): Promise<InterviewSummary[]> {
+  const all: InterviewSummary[] = [];
+  for (let page = 1; ; page += 1) {
+    const got = await unwrap(
+      api.GET("/api/v1/interviews", {
+        params: {
+          query: { candidate_id: candidateId, include_archived: true, page_size: 100, page },
+        },
+      }),
+    );
+    all.push(...got.items);
+    if (got.items.length === 0 || all.length >= got.total) return all;
+  }
+}
+
+export function useAllInterviewsOfCandidate(candidateId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["interviews", "all-of-candidate", candidateId],
+    queryFn: () => interviewsOfCandidate(candidateId),
+    enabled,
+  });
+}
+
+/**
+ * 彻底删除一位候选人。名下还有面试时接口会拒绝，所以先把面试一场场彻底删除，再删人。
+ * 中间有一场删不掉就停下来：已经删掉的不会回来，候选人还在，过一会儿可以再来一次。
+ */
+export function usePurgeCandidate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      let done = 0;
+      for (const i of await interviewsOfCandidate(id)) {
+        try {
+          await unwrap(api.POST("/api/v1/interviews/{id}/purge", at(i.id)));
+          done += 1;
+        } catch (e) {
+          const before = done > 0 ? `前面 ${done} 场已经删了，` : "";
+          throw new Error(
+            `「${i.position_title}」那场面试没删掉：${errorMessage(e)}。${before}候选人还在，处理好以后再点一次。`,
+          );
+        }
+      }
+      await unwrap(api.POST("/api/v1/candidates/{id}/purge", at(id)));
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["interviews"] });
+      qc.invalidateQueries({ queryKey: ["candidates"] });
+    },
   });
 }
 

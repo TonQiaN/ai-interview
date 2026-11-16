@@ -226,6 +226,7 @@ HR 在岗位下选几位面完的候选人点「对比」
 | `interview.synthesize` | ① | 重新合成一场面试里改过的话术 |
 | `recording.assemble` | ⑤ | 把分片合并成完整录像 |
 | `room.watchdog` | ⑤ | 面试开始后定时看候选人还在不在，太久没动静就结束面试（`abandoned`，原因 `connection_lost`） |
+| `room.recording_salvage` | ⑤ | 候选人没传完的录像：面试结束后隔一阵没有新的分片，就把已经收到的部分合并出来 |
 | `interview.finalize` | ① | 面试结束后的转写 |
 | `report.generate` | ① | 生成分析报告 |
 | `position.compare` | ① | 拿几场面试的报告做同一个岗位候选人的横向对比 |

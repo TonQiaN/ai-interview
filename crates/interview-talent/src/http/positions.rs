@@ -27,6 +27,7 @@ pub(super) fn router() -> OpenApiRouter<Deps> {
         .routes(routes!(list_positions, create_position))
         .routes(routes!(draft_position))
         .routes(routes!(get_position, update_position, archive_position))
+        .routes(routes!(restore_position))
 }
 
 /// 新建岗位的请求。结构和 [`PositionDraft`] 一样，整理出的草稿确认后可以原样提交。
@@ -278,4 +279,28 @@ async fn archive_position(
     } else {
         Err(ApiError::not_found("岗位"))
     }
+}
+
+/// 恢复归档的岗位
+///
+/// 归档错了用这个恢复：重新出现在列表里，可以再修改、再安排面试。没归档的再调一次也算成功。
+#[utoipa::path(
+    post,
+    path = "/api/v1/positions/{id}/restore",
+    tag = "positions",
+    params(("id" = Uuid, Path, description = "岗位 id")),
+    responses(
+        (status = 200, description = "恢复后的岗位", body = Position),
+        (status = 404, description = "岗位不存在", body = ErrorBody),
+    )
+)]
+async fn restore_position(
+    State(deps): State<Deps>,
+    _user: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Position>> {
+    positions::restore(&deps.ctx.db, id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("岗位"))
 }
