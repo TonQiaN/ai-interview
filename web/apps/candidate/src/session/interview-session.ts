@@ -4,7 +4,13 @@
  * 页面只做两件事：订阅这里的快照来画界面，把按钮点击转成这里的方法调用。
  * 摄像头、音频、录制、上传、过程事件这些资源都由它创建和释放。
  */
-import { HttpRoomApi, type RoomApi, RoomApiError } from "../lib/api/room-api";
+import {
+  ACTIVE_ELSEWHERE,
+  HttpRoomApi,
+  type RoomApi,
+  RoomApiError,
+  type RoomApiHooks,
+} from "../lib/api/room-api";
 import type { NextStep, RoomSession } from "../lib/api/room-types";
 import {
   bindPageEvents,
@@ -106,9 +112,12 @@ export interface SessionSnapshot {
   audioHalted: boolean;
   /** 录像分片只能放在内存里（没有 IndexedDB），刷新会丢。 */
   volatileStorage: boolean;
-  /** 面试是怎么结束的。 */
+  /** 面试是怎么结束的。`taken_over` 是面试没有结束，只是换到另一个页面里继续了。 */
   finishReason: string | null;
 }
+
+/** 面试换到另一个页面里继续了，这个页面停了下来。 */
+export const TAKEN_OVER = "taken_over";
 
 const INITIAL_DEVICE: DeviceState = {
   permission: "idle",
@@ -122,12 +131,12 @@ export interface InterviewSessionOptions {
   /** location.hash。 */
   hash: string;
   /** 测试时可以换掉接口实现。 */
-  createApi?: (token: string) => RoomApi;
+  createApi?: (token: string, hooks: RoomApiHooks) => RoomApi;
 }
 
 export class InterviewSession {
   private readonly hash: string;
-  private readonly createApi: (token: string) => RoomApi;
+  private readonly createApi: (token: string, hooks: RoomApiHooks) => RoomApi;
   private readonly listeners = new Set<() => void>();
   private readonly levelListeners = new Set<(level: number) => void>();
   private readonly vad = new EnergyVad();
@@ -174,7 +183,7 @@ export class InterviewSession {
 
   constructor(options: InterviewSessionOptions) {
     this.hash = options.hash;
-    this.createApi = options.createApi ?? ((token) => new HttpRoomApi({ token }));
+    this.createApi = options.createApi ?? ((token, hooks) => new HttpRoomApi({ token, ...hooks }));
   }
 
   getSnapshot = (): SessionSnapshot => this.snapshot;
@@ -211,7 +220,7 @@ export class InterviewSession {
     if (!capability.ok) return this.fail("unsupported");
 
     if (!this.api) {
-      this.api = this.createApi(token);
+      this.api = this.createApi(token, { onActiveElsewhere: this.handleActiveElsewhere });
       // 本地队列按面试区分。用令牌的摘要做键，令牌本身不落盘
       this.sessionKey = (
         await sha256Hex(new TextEncoder().encode(token).buffer as ArrayBuffer)
@@ -513,6 +522,16 @@ export class InterviewSession {
     }
   }
 
+  /**
+   * 服务端说面试正在另一个页面里进行（同一条链接又在别处打开，并且在那边点了继续）。
+   * 这个页面正在面试的话就停下来：不再播、不再录，把已经录下的传完。面试本身没有结束。
+   */
+  private handleActiveElsewhere = (): void => {
+    if (this.snapshot.stage !== "interview") return;
+    this.runner?.stop();
+    void this.finish(TAKEN_OVER, false);
+  };
+
   /** 面试中不让屏幕自己熄灭。要在按钮点击里调用；申请不到不影响面试。 */
   private async keepScreenOn(): Promise<void> {
     this.wakeLock ??= new ScreenWakeLock(
@@ -699,7 +718,9 @@ export class InterviewSession {
       interrupted: false,
       audioHalted: false,
     });
-    this.collector?.record("interview_finished", { reason });
+    // 换到别的页面继续的不算结束，另记一种事件：报告里能看出来中途换过页面
+    if (reason === TAKEN_OVER) this.collector?.record("page_taken_over");
+    else this.collector?.record("interview_finished", { reason });
     this.outputWatch?.stop();
     this.outputWatch = null;
     this.outputHaltedAt = null;
@@ -727,6 +748,11 @@ export class InterviewSession {
         await this.api?.finish("candidate_left");
         return;
       } catch (error) {
+        // 这个页面已经不是在面试的那个了，结束不了面试：面试还在另一个页面里继续
+        if (error instanceof RoomApiError && error.code === ACTIVE_ELSEWHERE) {
+          this.collector?.record("page_taken_over");
+          this.patch({ finishReason: TAKEN_OVER });
+        }
         if (error instanceof RoomApiError && !error.retryable) return;
         await new Promise((resolve) =>
           setTimeout(resolve, retryDelayMs(failures, 1_000, 10_000, Math.random())),

@@ -14,6 +14,8 @@ export interface DialogProps {
   wide?: boolean;
   /** 点遮罩不关闭（用在必须明确选择的确认框上） */
   modalOnly?: boolean;
+  /** 必须在弹窗里的按钮中选一个才能离开：没有关闭按钮，按 Esc、点遮罩都不关 */
+  persistent?: boolean;
   className?: string;
 }
 
@@ -26,6 +28,7 @@ export function Dialog({
   footer,
   wide,
   modalOnly,
+  persistent,
   className,
 }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -47,25 +50,27 @@ export function Dialog({
       aria-labelledby={titleId}
       onCancel={(e) => {
         e.preventDefault();
-        onClose();
+        if (!persistent) onClose();
       }}
       onClick={(e) => {
         // 点在 dialog 自身上就是点在遮罩上：内容区都在子元素里
-        if (!modalOnly && e.target === ref.current) onClose();
+        if (!modalOnly && !persistent && e.target === ref.current) onClose();
       }}
     >
       <div className="oil-dialog__head">
         <div className="oil-dialog__title" id={titleId}>
           {title}
         </div>
-        <button
-          type="button"
-          className={buttonClass({ variant: "ghost", size: "sm", iconOnly: true })}
-          aria-label={text.close}
-          onClick={onClose}
-        >
-          <X aria-hidden="true" />
-        </button>
+        {!persistent && (
+          <button
+            type="button"
+            className={buttonClass({ variant: "ghost", size: "sm", iconOnly: true })}
+            aria-label={text.close}
+            onClick={onClose}
+          >
+            <X aria-hidden="true" />
+          </button>
+        )}
       </div>
       <div className="oil-dialog__body">{children}</div>
       {footer && <div className="oil-dialog__foot">{footer}</div>}

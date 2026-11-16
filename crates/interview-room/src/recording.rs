@@ -353,18 +353,42 @@ async fn put_chunk(
     let segment_no = u32::try_from(segment.segment).unwrap_or_default();
     let key = blob_key::recording_chunk(access.interview_id, track.as_str(), segment_no, seq);
     deps.ctx.blobs.put(&key, body.clone()).await?;
-    sqlx::query(
-        "INSERT INTO interview_recording_chunks (recording_id, seq, blob_key, size_bytes, sha256)
-         VALUES ($1, $2, $3, $4, $5)",
-    )
-    .bind(segment.id)
-    .bind(seq_i32)
-    .bind(&key)
-    .bind(size)
-    .bind(&digest)
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
+    let registered = async {
+        sqlx::query(
+            "INSERT INTO interview_recording_chunks (recording_id, seq, blob_key, size_bytes, sha256)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(segment.id)
+        .bind(seq_i32)
+        .bind(&key)
+        .bind(size)
+        .bind(&digest)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await
+    }
+    .await;
+    if let Err(error) = registered {
+        // 文件已经写下去了，库里却没登记上。留着它的话没有人知道它存在，把它收回来
+        if let Err(cleanup) = deps.ctx.blobs.delete(&key).await {
+            tracing::warn!(
+                interview_id = %access.interview_id,
+                recording_id = %segment.id,
+                seq,
+                error = %cleanup,
+                "分片没登记上，写下的文件也没删掉"
+            );
+        }
+        // 这一段在写文件的时候被删了（HR 正好在彻底删除这场面试）：和找不到这一段一样回答
+        let gone = error
+            .as_database_error()
+            .is_some_and(|db| db.is_foreign_key_violation());
+        return Err(if gone {
+            ApiError::not_found("这一段录制").with_code("segment_not_found")
+        } else {
+            error.into()
+        });
+    }
     // 面试还在进行时，顺手把这一块交给现场转写。结束之后传上来的是收尾的分片，不用再转
     if let Some(live) = &deps.live
         && access.status == InterviewStatus::InProgress

@@ -10,7 +10,6 @@ import {
   Field,
   Input,
   KeyValue,
-  PageHeader,
   Progress,
   Segmented,
   Select,
@@ -65,6 +64,7 @@ import {
   RecommendationBadge,
   StatusBadge,
 } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { ReplayPlayer } from "../components/ReplayPlayer";
 import { ReportView } from "../components/ReportView";
 import { useVoiceName, VoicePicker } from "../components/VoicePicker";

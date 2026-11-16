@@ -29,6 +29,15 @@ describe("结束页对候选人怎么说", () => {
     expect(endingFor("aborted", "revoked").title).toBe("面试已中止");
   });
 
+  it("面试换到另一个页面里继续了：说清楚面试没有结束，这个页面可以关", () => {
+    const moved = endingFor("taken_over", null);
+    expect(moved.title).toBe("面试已经在另一个页面里继续了");
+    expect(moved.title).not.toContain("结束");
+    expect(endingIn("taken_over", null, en.done).title).toBe(
+      "The interview continues in another page",
+    );
+  });
+
   it("不知道原因时只说结束了，不说「完成」", () => {
     expect(endingFor(null, null).title).toBe("面试已结束");
   });

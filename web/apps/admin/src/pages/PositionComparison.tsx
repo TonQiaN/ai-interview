@@ -6,7 +6,6 @@ import {
   Card,
   CardBody,
   CardHeader,
-  PageHeader,
   Table,
   useToast,
 } from "@ai-interview/ui";
@@ -23,6 +22,7 @@ import type {
   PositionComparison,
 } from "../api/types";
 import { Empty, Loading, QueryView, RecommendationBadge } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { hasVerdict, ReportVerdict } from "../components/ReportVerdict";
 import { displayNames, groupByTier, namesInText, sameSelection } from "../lib/comparison";
 import {
@@ -509,6 +509,7 @@ export function PositionComparisonPage() {
               </>
             }
             title="对比候选人"
+            tabTitle={`对比候选人 · ${p.title}`}
             description="把这个岗位面完的几位放在一起看，决定先约谁做人工面试。"
           />
           <Body position={p} />

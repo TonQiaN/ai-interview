@@ -203,6 +203,25 @@
   .adm-item--wrap {
     flex-wrap: wrap;
   }
+  /* 总览上「三步安排第一场面试」每一步前面的序号，做完的换成对勾 */
+  .adm-step__dot {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--oil-line);
+    color: var(--oil-ink-2);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .adm-step__dot[data-done] {
+    border-color: transparent;
+    background: var(--oil-success-soft);
+    color: var(--oil-success-ink);
+  }
   .adm-item__tags {
     display: flex;
     flex-wrap: wrap;
@@ -239,6 +258,17 @@
   .adm-person__sub {
     color: var(--oil-ink-3);
     font-size: var(--oil-text-sm);
+  }
+  /* 手机上列表的列多，每列只剩一两个字宽，名字和地点会被竖着拆开。
+     列表里中文不在字中间断行，表格放宽一些，放不下就横向滚动。
+     对比页的表格里是成段的话，照常换行 */
+  @media (max-width: 640px) {
+    .oil-table:not(.adm-compare__table) {
+      min-width: 720px;
+    }
+    .oil-table:not(.adm-compare__table) td {
+      word-break: keep-all;
+    }
   }
 
   /* 登录页 */
