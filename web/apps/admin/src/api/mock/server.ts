@@ -194,6 +194,7 @@ function summary(i: Interview, report: ReportVersion["content"]): InterviewSumma
     position_id: i.position.id,
     position_title: i.position.title,
     status: i.status,
+    stage: i.config.stage ?? "screening",
     decision: i.decision,
     report_status: i.report?.status ?? null,
     started_at: i.started_at ?? null,

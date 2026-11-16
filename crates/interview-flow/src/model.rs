@@ -5,7 +5,7 @@ use interview_core::{
     InterviewDecision, InterviewStatus, ReportStatus, Speaker, SynthStatus, UtteranceKind,
     UtteranceSource,
 };
-use interview_engine::{ConfigLimits, InterviewConfig, TimeBudget};
+use interview_engine::{ConfigLimits, InterviewConfig, InterviewStage, TimeBudget};
 use interview_report::report::{Decision, ScoreRange};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -21,6 +21,12 @@ pub struct InterviewSummary {
     pub candidate_name: String,
     pub position_id: Uuid,
     pub position_title: String,
+    /// 初筛还是深入面试。同一位候选人在同一个岗位下可以先后有两场
+    #[sqlx(json)]
+    pub stage: InterviewStage,
+    /// 面试链接什么时候到期：没撤销的链接里最晚的那个到期时间，已经过了就是链接过期了。
+    /// 没发过链接、或者链接都撤销了时为空
+    pub invite_expires_at: Option<DateTime<Utc>>,
     /// 最新一份分析报告的状态。还没有报告时为空
     pub report_status: Option<ReportStatus>,
     /// 报告的综合得分，0 到 100。取最新一份生成好的报告；还没有生成好的报告、或者报告里没有总分时为空
@@ -107,6 +113,9 @@ pub struct InterviewDetail {
     pub decided_at: Option<DateTime<Utc>>,
     /// 最新一份分析报告
     pub report: Option<ReportBrief>,
+    /// 面试链接什么时候到期：没撤销的链接里最晚的那个到期时间，已经过了就是链接过期了。
+    /// 没发过链接、或者链接都撤销了时为空。每条链接的情况用 `GET /interviews/{id}/invites` 取
+    pub invite_expires_at: Option<DateTime<Utc>>,
     /// 什么时候归档的。没归档时为空
     pub archived_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
