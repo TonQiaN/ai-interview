@@ -6,7 +6,6 @@ import {
   CardBody,
   Field,
   Input,
-  PageHeader,
   Textarea,
   useToast,
 } from "@ai-interview/ui";
@@ -17,6 +16,7 @@ import { useConfigDefaults, useSaveTemplate, useTemplate } from "../api/queries"
 import type { InterviewConfig } from "../api/types";
 import { ConfigForm, cleanConfig } from "../components/ConfigForm";
 import { LoadError, Loading } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 
 interface Draft {
   name: string;

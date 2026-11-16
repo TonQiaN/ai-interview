@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { UploadError } from "../upload/uploader";
-import { classifyHttpError, HttpRoomApi, RoomApiError } from "./room-api";
+import { ACTIVE_ELSEWHERE, classifyHttpError, HttpRoomApi, RoomApiError } from "./room-api";
 
 const token = "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG0";
 
@@ -16,11 +16,15 @@ interface Call {
   request: Request;
 }
 
-function setup(respond: (call: Call) => Response | Promise<Response>) {
+function setup(
+  respond: (call: Call) => Response | Promise<Response>,
+  hooks: { onActiveElsewhere?: () => void } = {},
+) {
   const calls: Call[] = [];
   const api = new HttpRoomApi({
     token,
     baseUrl: origin,
+    ...hooks,
     fetch: async (request) => {
       const url = new URL(request.url);
       const call = {
@@ -230,6 +234,67 @@ describe("候选人侧接口客户端", () => {
       .putChunk(segment, 0, new ArrayBuffer(1), "x")
       .catch((caught: unknown) => caught);
     expect(fatal).toMatchObject({ retryable: false, status: 410 });
+  });
+
+  it("每个请求都带着这个页面的标识，换一个页面就换一个", async () => {
+    const { api, calls } = setup((call) => {
+      if (call.path.endsWith("/session")) return json({ stage: "in_progress" });
+      if (call.path.endsWith("/audio")) return new Response(new ArrayBuffer(2));
+      return new Response(null, { status: 204 });
+    });
+    await api.getSession();
+    await api.putChunk({ track: "camera", segmentId: "s1" }, 0, new ArrayBuffer(1), "x");
+    await api.fetchAudio("/api/v1/room/utterances/q1/audio");
+    const ids = calls.map((call) => call.headers.get("X-Room-Page"));
+    expect(ids).toHaveLength(3);
+    expect(ids[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(new Set(ids).size).toBe(1);
+    // 标识和令牌一样不进地址；上传分片时别的请求头还在
+    for (const call of calls) expect(call.request.url).not.toContain(ids[0]);
+    expect(calls[1]?.headers.get("Authorization")).toBe(`Bearer ${token}`);
+    expect(calls[1]?.headers.get("X-Chunk-Sha256")).toBe("x");
+
+    const other = setup(() => json({ stage: "in_progress" }));
+    await other.api.getSession();
+    expect(other.calls[0]?.headers.get("X-Room-Page")).not.toBe(ids[0]);
+  });
+
+  it("服务端说面试正在另一个页面里进行时报一声，请求成功还是失败都报", async () => {
+    let told = 0;
+    const elsewhere = { "X-Room-Active-Elsewhere": "1" };
+    const { api } = setup(
+      (call) => {
+        if (call.path.endsWith("/session")) return json({ stage: "in_progress" });
+        if (call.path.endsWith("/advance")) {
+          return new Response(JSON.stringify(errorBody("active_elsewhere", "在别处进行")), {
+            status: 409,
+            headers: { "Content-Type": "application/json", ...elsewhere },
+          });
+        }
+        return new Response(null, { status: 204, headers: elsewhere });
+      },
+      { onActiveElsewhere: () => (told += 1) },
+    );
+
+    await api.getSession();
+    expect(told).toBe(0);
+    // 录像照样收下了
+    await api.putChunk({ track: "camera", segmentId: "s1" }, 0, new ArrayBuffer(1), "x");
+    expect(told).toBe(1);
+    const refused = await api
+      .advance({
+        seq: 2,
+        utterance_key: "q1",
+        playback_start_ms: 0,
+        playback_end_ms: 2_000,
+        answer_start_ms: null,
+        answer_end_ms: null,
+        end_reason: null,
+        replays: 0,
+      })
+      .catch((caught: unknown) => caught);
+    expect(refused).toMatchObject({ kind: "conflict", status: 409, code: ACTIVE_ELSEWHERE });
+    expect(told).toBe(2);
   });
 
   it("错误归类规则", () => {

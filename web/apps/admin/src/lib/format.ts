@@ -387,6 +387,7 @@ export const eventLabel: Record<string, string> = {
   upload_stalled: "录像传不上去",
   upload_recovered: "录像又传上去了",
   upload_finished: "录像传完了",
+  page_taken_over: "面试换到另一个页面继续了，这个页面停了下来",
 };
 
 /** 录像为什么传不上去 */
@@ -421,6 +422,8 @@ export function eventSeverity(kind: string): EventSeverity {
       "interview_abandoned",
       // 录像传不上去是设备和网络的事，不是候选人的行为，只作提示
       "upload_stalled",
+      // 换设备、换标签页本身是正常的事；但换页面前后是不是同一个人，要 HR 自己看一眼录像
+      "page_taken_over",
     ].includes(kind)
   )
     return "notice";
@@ -621,6 +624,8 @@ export function eventName(event: EventLike): string {
   // 实际一个字节都没传。写成「录像传完了 共 0 B」会让人以为录像是完整的
   if (event.kind === "upload_finished" && event.payload?.uploaded_bytes === 0)
     return "这一次打开页面没有再传录像";
+  // 刷新页面、换到另一个页面以后接着面，页面也报一条「开始」，带着 resumed
+  if (event.kind === "interview_started" && event.payload?.resumed === true) return "回来接着面试";
   return eventLabel[event.kind] ?? event.kind;
 }
 

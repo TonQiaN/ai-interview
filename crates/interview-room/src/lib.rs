@@ -189,6 +189,7 @@ pub fn router(deps: Deps) -> OpenApiRouter {
         .merge(conduct::router())
         .merge(events::router())
         .merge(recording::router())
+        .layer(axum::middleware::from_fn(access::mark_active_elsewhere))
         .with_state(deps)
 }
 

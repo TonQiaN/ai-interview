@@ -12,7 +12,6 @@ import {
   Field,
   Input,
   KeyValue,
-  PageHeader,
   useToast,
 } from "@ai-interview/ui";
 import {
@@ -53,6 +52,7 @@ import type {
   Resume,
 } from "../api/types";
 import { Confirm, QueryView, StatusBadge } from "../components/common";
+import { PageHeader } from "../components/PageHeader";
 import { InterviewTags } from "../components/ReportVerdict";
 import {
   fileSize,

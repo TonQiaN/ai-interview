@@ -289,6 +289,7 @@ HR 侧：
 - 候选人答完之后，`advance` 马上返回一句过渡语，回答放到后台判断。页面报告过渡语播完时判断还没好，这次请求会等到判断完再返回；判断最多等 20 秒，等不到就按顺序问下一题。极少数情况下返回 503（`answer_pending`），页面过一会儿原样重试。
 - `advance` 是幂等的：同一个 `seq` 重复提交返回同样的下一步（断网重试用）；`seq` 不是当前这一句也不是上一句时返回 409（`seq_conflict`）。面试已经结束时返回 `finish`。
 - 断点续面：`GET /room/session` 的 `resume` 是当前该播的那一句；页面重新检查设备后调 `start`，从这一句继续。录像从新的一段开始录。续面时这一步里的 `progress.elapsed_ms` 是服务端现在的时间（面试开始到此刻过了多久），页面拿它当时间轴的起点，新的一段录像才不会和刷新前的那段叠在一起。
+- 同一条链接同时开在两个页面里（手机和电脑各开一个、同一个浏览器开了两个标签页）：只有一个页面在面试。页面每次载入给自己起一个 UUID，随面试间的每个请求放在请求头 `X-Room-Page` 里。调 `start` 的那个页面（开始或者续面）就是在面试的页面，后调的接走前一个的。面试进行中，别的页面调 `advance`、`pause-check`、`finish` 返回 409（`active_elsewhere`），它的每一个响应（不管成功失败）都带响应头 `X-Room-Active-Elsewhere: 1`。正在面试的页面看到这个响应头就停下面试和录制，报一条 `page_taken_over`，把录下的传完，告诉候选人面试已经在另一个页面里继续了；还没开始面试的页面（在看欢迎页、做设备检测）不用理它。录像分片、过程事件、会话信息和面试官语音不受影响，被接走的页面录下的那一段照样收。候选人想回到原来的页面，在那里重新载入、检查设备、点继续面试，就又接回来。不带 `X-Room-Page`（或者值不是 UUID）的请求不参与这件事：不会接走面试，也不会被拒绝。面试结束之后不再拒绝、不再提醒。
 - `GET /room/session` 的 `language` 是面试配置里的面试语言（`zh` 或 `en`）。面试页的文字按它显示，`consent.items` 也是这种语言的；候选人同意时存下来的标题就是他看到的那一份。两种语言的同意事项项目和顺序一样，共用一个 `consent.version`。
 - 面试结束之后 `GET /room/session` 的 `stage` 是 `finished`，`end_reason` 是结束的原因（取值和 `finish` 的 `reason` 一样），页面据此决定结束页说「面试完成」还是「面试已结束」。还没结束时 `end_reason` 是 null。
 - 面试结束（不管哪种原因）时，服务端在同一个事务里排一个 `interview.finalize` 任务，转写和出报告从那里开始。
@@ -365,6 +366,7 @@ HR 侧：
 - `screen_wake_lock` 在开始面试时报一次：`supported`（浏览器有没有屏幕常亮的能力）和 `held`（有没有申请到）。没申请到时手机可能中途自动锁屏，录像会断。
 - `upload_stalled` 是录像传不动了：`cause`（`retrying` 请求失败在重试、`offline` 浏览器报告断网、`failed` 重试也没用）和当时还没传的分片数 `pending_chunks`。又传动了报 `upload_recovered`：`stalled_ms`（停了多久）、`failures`（中间连续失败了几次）、`pending_chunks`。一次停顿不管重试多少次只报这一对。
 - `upload_finished` 是面试结束后录像全部传完：`uploaded_bytes`（这次打开页面以来传了多少字节）和 `wait_ms`（面试结束后候选人等了多久；刷新后回来补传的是 null）。
+- `page_taken_over` 是面试换到另一个页面里继续了（见上面「同一条链接同时开在两个页面里」），由停下来的那个页面报，没有别的内容。这之后到下一条 `interview_started` 之间的录像在另一段里，不是候选人离开了。刷新页面续面不报这一条。
 - `kind` 只能用小写字母、数字和下划线；`payload` 是一个 JSON 对象，序列化后不超过 4096 字节；一次最多报 200 条。格式不对的单条事件会被丢掉，不影响同一批里的其他事件。
 
-`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`upload_stalled`、`upload_recovered`、`upload_finished`、`device_check`、`device_report`、`screen_wake_lock`、`page_opened`、`interview_started`、`interview_finished`、`question_replayed`、`answer_continued`、`events_dropped`、`interview_abandoned`（服务端记的：候选人离开后一直没回来，面试被结束）、`face_count_changed`、`phone_visible`、`frames_checked`（这三种由 ⑦ 面试后从录像抽帧产出，浏览器不报，含义见 `crates/interview-report/README.md` 的「录像画面检查」）。
+`kind` 的初始清单（⑤ 和 ⑦ 一起维护）：`visibility_hidden`、`visibility_visible`、`window_blur`、`window_focus`、`fullscreen_exit`、`paste`、`copy`、`device_changed`、`network_offline`、`network_online`、`ws_reconnected`、`recording_gap`、`device_recovered`、`recording_error`、`upload_stalled`、`upload_recovered`、`upload_finished`、`device_check`、`device_report`、`screen_wake_lock`、`page_opened`、`interview_started`、`interview_finished`、`page_taken_over`、`question_replayed`、`answer_continued`、`events_dropped`、`interview_abandoned`（服务端记的：候选人离开后一直没回来，面试被结束）、`face_count_changed`、`phone_visible`、`frames_checked`（这三种由 ⑦ 面试后从录像抽帧产出，浏览器不报，含义见 `crates/interview-report/README.md` 的「录像画面检查」）。
