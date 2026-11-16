@@ -4,6 +4,9 @@
  * 请求都通过 @ai-interview/api-client 发出去，路径、请求体和响应的类型来自后端的 OpenAPI 文档。
  * 令牌只放在 Authorization 请求头里，不进 URL。所有方法失败时抛 RoomApiError，
  * 调用方根据 kind 决定是重试、提示候选人，还是直接显示「链接失效」。
+ *
+ * 每个请求还带着这个页面给自己起的标识（X-Room-Page）。同一条链接同时开在两个页面里时，
+ * 服务端靠它认出哪个页面在面试；面试正在另一个页面里进行的话，响应里会带 X-Room-Active-Elsewhere。
  */
 import { type ApiClient, ApiError, createRoomClient } from "@ai-interview/api-client";
 import type { SegmentRef, UploadApi } from "../upload/uploader";
@@ -70,8 +73,24 @@ export interface RoomApi extends UploadApi {
   finish(reason: FinishKind): Promise<void>;
 }
 
-export interface HttpRoomApiOptions {
+/** 推进面试被拒绝时的错误码：面试正在另一个页面里进行。 */
+export const ACTIVE_ELSEWHERE = "active_elsewhere";
+
+const PAGE_HEADER = "X-Room-Page";
+const ACTIVE_ELSEWHERE_HEADER = "X-Room-Active-Elsewhere";
+
+export interface RoomApiHooks {
+  /**
+   * 服务端说面试正在另一个页面里进行。只要还是这样，每个响应都会报一次；
+   * 这个页面本来就没在面试的话（刚打开、还在检测设备）不用理会。
+   */
+  onActiveElsewhere?: () => void;
+}
+
+export interface HttpRoomApiOptions extends RoomApiHooks {
   token: string;
+  /** 这个页面的标识，每次打开页面换一个。默认随机生成。 */
+  pageId?: string;
   /** 后端的地址，默认是页面所在的站点。 */
   baseUrl?: string;
   fetch?: (request: Request) => Promise<Response>;
@@ -108,6 +127,8 @@ interface Outcome<T> {
 export class HttpRoomApi implements RoomApi {
   private readonly client: ApiClient;
   private readonly token: string;
+  private readonly pageId: string;
+  private readonly onActiveElsewhere: (() => void) | undefined;
   private readonly baseUrl: string;
   private readonly fetchImpl: (request: Request) => Promise<Response>;
   private readonly timeoutMs: number;
@@ -117,6 +138,8 @@ export class HttpRoomApi implements RoomApi {
 
   constructor(options: HttpRoomApiOptions) {
     this.token = options.token;
+    this.pageId = options.pageId ?? crypto.randomUUID();
+    this.onActiveElsewhere = options.onActiveElsewhere;
     this.baseUrl = options.baseUrl ?? "";
     this.fetchImpl = options.fetch ?? ((request) => fetch(request));
     this.timeoutMs = options.timeoutMs ?? 15_000;
@@ -126,6 +149,7 @@ export class HttpRoomApi implements RoomApi {
     this.client = createRoomClient(options.token, {
       baseUrl: this.baseUrl,
       fetch: this.fetchImpl,
+      headers: { [PAGE_HEADER]: this.pageId },
       // 不带 cookie：候选人的身份只有令牌，和 HR 后台的登录互不相干
       credentials: "omit",
       cache: "no-store",
@@ -186,7 +210,7 @@ export class HttpRoomApi implements RoomApi {
     // 语音的地址是服务端在「下一步」里给的（站内路径），照着取就行，不自己拼；取的时候同样带令牌
     return this.json(async (signal) => {
       const request = new Request(`${this.baseUrl}${audioUrl}`, {
-        headers: { Authorization: `Bearer ${this.token}` },
+        headers: { Authorization: `Bearer ${this.token}`, [PAGE_HEADER]: this.pageId },
         credentials: "omit",
         signal,
       });
@@ -313,6 +337,8 @@ export class HttpRoomApi implements RoomApi {
     }
 
     const { response } = outcome;
+    // 成功和失败的响应都可能带着这个提醒：被接走的页面多半是在传录像时知道的
+    if (response.headers.get(ACTIVE_ELSEWHERE_HEADER) === "1") this.onActiveElsewhere?.();
     if (response.ok) return outcome.data;
 
     // 不是约定的错误结构（例如反向代理返回的错误页）时，ApiError 会给一句通用的提示
