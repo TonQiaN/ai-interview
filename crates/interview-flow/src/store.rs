@@ -32,13 +32,14 @@ pub(crate) struct InterviewRow {
     pub decision: InterviewDecision,
     pub decision_note: Option<String>,
     pub decided_at: Option<DateTime<Utc>>,
+    pub archived_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 const INTERVIEW_COLUMNS: &str = "id, candidate_id, position_id, resume_id, template_id, voice_id, \
      status, config, plan, prepare_error, started_at, ended_at, end_reason, decision, \
-     decision_note, decided_at, created_at, updated_at";
+     decision_note, decided_at, archived_at, created_at, updated_at";
 
 impl InterviewRow {
     /// 配置。库里的 JSON 缺字段时用默认值补上。
@@ -138,7 +139,7 @@ pub(crate) async fn list_interviews(
          {LIST_SCORE} AS overall_score, \
          NULLIF(rep.content->'score_range', 'null'::jsonb) AS score_range, \
          NULLIF(rep.content->'recommendation'->'decision', 'null'::jsonb) AS recommendation, \
-         i.started_at, i.ended_at, i.created_at, i.updated_at{LIST_FROM}{LIST_LATEST_REPORT} WHERE true"
+         i.started_at, i.ended_at, i.archived_at, i.created_at, i.updated_at{LIST_FROM}{LIST_LATEST_REPORT} WHERE true"
     ));
     push_filters(&mut list, filter, query);
     // 没有分数的排在最后，正序倒序都是
@@ -210,6 +211,7 @@ pub(crate) async fn detail(
         decision_note: row.decision_note,
         decided_at: row.decided_at,
         report,
+        archived_at: row.archived_at,
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
