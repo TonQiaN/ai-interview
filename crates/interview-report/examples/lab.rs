@@ -19,6 +19,10 @@
 //! # 给样例加上「面试页自己出错，候选人刷新后过了一分半钟才接着面」，看这段停顿会不会算到候选人头上
 //! cargo run -p interview-report --example lab -- crash --out /tmp/crash
 //! cargo run -p interview-report --example lab -- evaluate --samples /tmp/crash
+//! # 给样例加上「最后请候选人提问」的环节（每份样例一种情况），分析之后对照该列出哪几个问题
+//! cargo run -p interview-report --example lab -- asks --out /tmp/asks
+//! cargo run -p interview-report --example lab -- evaluate --samples /tmp/asks --out /tmp/asks-reports
+//! cargo run -p interview-report --example lab -- asks --reports /tmp/asks-reports
 //! # 数一数已经存下来的报告里，给 HR 看的文字带了多少处事件和字段的英文名。不调用模型
 //! cargo run -p interview-report --example lab -- names --samples /tmp/reduced --reports /tmp/reduced-reports
 //! # 从一段录像里抽帧，让模型看画面里有几个人、有没有手机，打印整理出来的过程事件
@@ -47,7 +51,8 @@ use interview_report::record::{
     Speaker,
 };
 use interview_report::report::{
-    Credibility, Decision, InterviewReport, ReviewFlagCode, RiskLevel, SignalKind, Usage,
+    CandidateQuestionReply, Credibility, Decision, InterviewReport, ReviewFlagCode, RiskLevel,
+    SignalKind, Usage,
 };
 use interview_report::{AnalyzeOptions, analyze, compare, program_names_in_prose};
 use serde::Deserialize;
@@ -159,6 +164,22 @@ enum Command {
         /// 加了事件的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
         #[arg(long)]
         out: PathBuf,
+    },
+    /// 给样例加上「最后请候选人提问」的环节，每份样例一种情况（问了两件事、没有问题、面试官当场答了、
+    /// 中途只是确认题目……），另存一份；或者对照分析出来的报告，看候选人提的问题列得对不对。不调用模型
+    Asks {
+        /// 只处理这几个场景（场景 id），不填就处理全部
+        only: Vec<String>,
+        #[arg(long, default_value = "crates/interview-report/scenarios")]
+        scenarios: PathBuf,
+        #[arg(long, default_value = "crates/interview-report/samples")]
+        samples: PathBuf,
+        /// 改过的记录存到这个目录，文件名和样例相同，可以交给 evaluate --samples
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// 分析这些记录得到的报告所在的目录：对照每份报告里候选人提的问题
+        #[arg(long)]
+        reports: Option<PathBuf>,
     },
     /// 数一数存下来的报告里，给 HR 看的文字带了多少处事件和字段的英文名。不调用模型
     Names {
@@ -306,6 +327,16 @@ async fn main() -> Result<()> {
     {
         return crash_all(scenarios, samples, out, only);
     }
+    if let Command::Asks {
+        only,
+        scenarios,
+        samples,
+        out,
+        reports,
+    } = &cli.command
+    {
+        return asks_all(scenarios, samples, out.as_deref(), reports.as_deref(), only);
+    }
     if let Command::Names { samples, reports } = &cli.command {
         return names_all(samples, reports);
     }
@@ -316,6 +347,7 @@ async fn main() -> Result<()> {
         | Command::Takeover { .. }
         | Command::Reduced { .. }
         | Command::Crash { .. }
+        | Command::Asks { .. }
         | Command::Names { .. } => Ok(()),
         Command::Simulate {
             only,
@@ -1049,6 +1081,399 @@ fn add_page_crash(record: &mut InterviewRecord) -> (u64, u64) {
     ));
     add_raw_events(record, "c", raw);
     (crashed_at, resumed_at)
+}
+
+// ---------- 最后请候选人提问 ----------
+
+/// 提问环节里的一句话。
+struct Line {
+    speaker: Speaker,
+    text: &'static str,
+}
+
+const fn interviewer(text: &'static str) -> Line {
+    Line {
+        speaker: Speaker::Interviewer,
+        text,
+    }
+}
+
+const fn candidate(text: &'static str) -> Line {
+    Line {
+        speaker: Speaker::Candidate,
+        text,
+    }
+}
+
+/// 报告里该列出的一个问题：`words` 里任何一个词出现在整理出来的问题里就算列到了。
+struct Asked {
+    words: &'static [&'static str],
+    handling: CandidateQuestionReply,
+}
+
+/// 一种提问的情况。
+struct AskCase {
+    what: &'static str,
+    /// 面试过半之后，面试官问完一道题、候选人开口之前插进去的话（候选人确认题目问的是什么）。
+    midway: &'static [Line],
+    /// 最后一道题答完之后、结束语之前的话。
+    closing: &'static [Line],
+    expected: &'static [Asked],
+    /// 报告里最多可以列几条：一句话问了两件事，拆成两条和并成一条都说得过去。
+    at_most: usize,
+}
+
+const INVITE: &str = "我这边的问题问完了。你有什么想了解的吗？我会记下来，转给负责招聘的同事。";
+const NOTED: &str = "好的，记下了，会转给负责招聘的同事，由他们来答复你。";
+
+/// 八种情况，按场景 id 的字母序一份样例一种；样例多出来的从头再轮。
+const ASK_CASES: [AskCase; 8] = [
+    AskCase {
+        what: "一口气问了两件事，面试官说会转达",
+        midway: &[],
+        closing: &[
+            interviewer(INVITE),
+            candidate(
+                "嗯，有两个。一个是这个岗位大概什么时候能入职？然后就是团队现在大概多少人，是怎么分工的？",
+            ),
+            interviewer(
+                "好的，这两个问题我都记下了，会转给负责招聘的同事，由他们来答复你。还有别的吗？",
+            ),
+            candidate("没有了，谢谢。"),
+        ],
+        expected: &[
+            Asked {
+                words: &["入职"],
+                handling: CandidateQuestionReply::Noted,
+            },
+            Asked {
+                words: &["团队", "分工"],
+                handling: CandidateQuestionReply::Noted,
+            },
+        ],
+        at_most: 3,
+    },
+    AskCase {
+        what: "候选人说没有问题",
+        midway: &[],
+        closing: &[
+            interviewer(INVITE),
+            candidate("暂时没有什么想问的，该了解的招聘信息上都写了。谢谢。"),
+        ],
+        expected: &[],
+        at_most: 0,
+    },
+    AskCase {
+        what: "面试官当场答了一个（薪资），另一个说会转达",
+        midway: &[],
+        closing: &[
+            interviewer(INVITE),
+            candidate("我想问一下，这个岗位的薪资范围大概是多少？"),
+            interviewer(
+                "这个岗位的薪资范围是每月两万到三万，具体会根据面试结果来定。还有别的想问的吗？",
+            ),
+            candidate("还想问下试用期是多久？"),
+            interviewer(NOTED),
+        ],
+        expected: &[
+            Asked {
+                words: &["薪资", "薪酬", "工资"],
+                handling: CandidateQuestionReply::Answered,
+            },
+            Asked {
+                words: &["试用期"],
+                handling: CandidateQuestionReply::Noted,
+            },
+        ],
+        at_most: 2,
+    },
+    AskCase {
+        what: "中途只是确认题目问的是什么（不算），最后问了什么时候有结果",
+        midway: &[
+            candidate("不好意思，我确认一下，您是想听我上一份工作里的例子，还是哪一段的都可以？"),
+            interviewer("哪一段的都可以，挑你最熟悉的讲。"),
+        ],
+        closing: &[
+            interviewer(INVITE),
+            candidate("就一个，这次面试大概多久能有结果？"),
+            interviewer(NOTED),
+        ],
+        expected: &[Asked {
+            words: &["结果"],
+            handling: CandidateQuestionReply::Noted,
+        }],
+        at_most: 1,
+    },
+    AskCase {
+        what: "问自己表现怎么样（面试官说之后反馈），另一个问题面试官没有回应",
+        midway: &[],
+        closing: &[
+            interviewer(INVITE),
+            candidate(
+                "我就想问问，我今天答得怎么样？有什么需要改进的地方吗？还有，这个岗位需要经常出差吗？",
+            ),
+            interviewer(
+                "面试的评价我这边没办法现在告诉你，后面会由负责招聘的同事统一反馈。今天就到这里。",
+            ),
+        ],
+        expected: &[
+            Asked {
+                words: &["表现", "答得", "改进"],
+                handling: CandidateQuestionReply::Noted,
+            },
+            Asked {
+                words: &["出差"],
+                handling: CandidateQuestionReply::Unaddressed,
+            },
+        ],
+        at_most: 3,
+    },
+    AskCase {
+        what: "说得不利索，问了加班和双休",
+        midway: &[],
+        closing: &[
+            interviewer(INVITE),
+            candidate(
+                "呃，那个，想问下就是说，咱们这个岗位是不是要经常加班啊，然后一周是双休吗还是大小周。",
+            ),
+            interviewer(NOTED),
+        ],
+        expected: &[
+            Asked {
+                words: &["加班"],
+                handling: CandidateQuestionReply::Noted,
+            },
+            Asked {
+                words: &["双休", "大小周"],
+                handling: CandidateQuestionReply::Noted,
+            },
+        ],
+        at_most: 2,
+    },
+    AskCase {
+        what: "没等面试官请就先问了一个，请他提问时说没有别的了",
+        midway: &[],
+        closing: &[
+            candidate("对了，我能先问一下吗，这个岗位是必须在北京办公，还是可以远程？"),
+            interviewer("这个问题我记下了，稍后转给负责招聘的同事。"),
+            interviewer(INVITE),
+            candidate("没有别的了，就刚才那一个。"),
+        ],
+        expected: &[Asked {
+            words: &["远程", "北京"],
+            handling: CandidateQuestionReply::Noted,
+        }],
+        at_most: 1,
+    },
+    AskCase {
+        what: "没有提问环节（样例原样）",
+        midway: &[],
+        closing: &[],
+        expected: &[],
+        at_most: 0,
+    },
+];
+
+fn asks_all(
+    scenarios: &Path,
+    samples: &Path,
+    out: Option<&Path>,
+    reports: Option<&Path>,
+    only: &[String],
+) -> Result<()> {
+    if out.is_none() && reports.is_none() {
+        bail!("--out（造样例）和 --reports（对照报告）至少给一个");
+    }
+    // 哪份样例用哪种情况，按全部场景排，只处理其中几个时也不变
+    let all = load_scenarios(scenarios, &[])?;
+    let chosen: Vec<(&Scenario, &AskCase)> = all
+        .iter()
+        .enumerate()
+        .map(|(index, scenario)| (scenario, &ASK_CASES[index % ASK_CASES.len()]))
+        .filter(|(scenario, _)| only.is_empty() || only.contains(&scenario.id))
+        .collect();
+
+    if let Some(out) = out {
+        std::fs::create_dir_all(out)?;
+        for (scenario, case) in &chosen {
+            let mut record: InterviewRecord =
+                read_json(&samples.join(format!("{}.json", scenario.id)))?;
+            add_candidate_questions(&mut record, case);
+            let path = out.join(format!("{}.json", scenario.id));
+            std::fs::write(&path, serde_json::to_string_pretty(&record)? + "\n")?;
+            println!("{}：{} → {}", scenario.id, case.what, path.display());
+        }
+    }
+    let Some(reports) = reports else {
+        return Ok(());
+    };
+
+    let (mut passed, mut total) = (0, 0);
+    for (scenario, case) in &chosen {
+        let report: InterviewReport = read_json(&reports.join(format!("{}.json", scenario.id)))?;
+        println!("\n{}：{}", scenario.id, case.what);
+        let Some(listed) = &report.candidate_questions else {
+            println!("  ✗ 这一步分析失败了，报告里没有这一栏");
+            total += 1;
+            continue;
+        };
+        for question in listed {
+            println!(
+                "  · {}（{}{}）",
+                question.question,
+                handling_label(question.handling),
+                question
+                    .reply
+                    .as_deref()
+                    .map(|reply| format!("：{reply}"))
+                    .unwrap_or_default()
+            );
+            for evidence in &question.evidence {
+                println!(
+                    "      {} {}：{}",
+                    evidence.start_ms.map(clock).unwrap_or_default(),
+                    evidence.speaker.map_or("", Speaker::label),
+                    evidence.quote
+                );
+            }
+        }
+        let mut checks: Vec<(String, bool)> = case
+            .expected
+            .iter()
+            .map(|asked| {
+                let found = listed
+                    .iter()
+                    .find(|q| asked.words.iter().any(|word| q.question.contains(word)));
+                (
+                    format!(
+                        "列出了「{}」，面试官{}",
+                        asked.words.join("／"),
+                        handling_label(asked.handling)
+                    ),
+                    found.is_some_and(|q| q.handling == asked.handling),
+                )
+            })
+            .collect();
+        checks.push((
+            format!("一共不超过 {} 条（实际 {} 条）", case.at_most, listed.len()),
+            listed.len() <= case.at_most,
+        ));
+        for (what, ok) in &checks {
+            println!("  {} {what}", if *ok { "✓" } else { "✗" });
+            total += 1;
+            passed += usize::from(*ok);
+        }
+    }
+    println!("\n候选人提的问题：{passed}/{total} 条预期符合。");
+    Ok(())
+}
+
+fn handling_label(handling: CandidateQuestionReply) -> &'static str {
+    match handling {
+        CandidateQuestionReply::Answered => "当场答了",
+        CandidateQuestionReply::Noted => "说会转达",
+        CandidateQuestionReply::Unaddressed => "没有回应",
+    }
+}
+
+/// 把一种提问的情况加进记录：`midway` 插在面试过半之后面试官问完的那道题后面，`closing` 插在最后一道题
+/// 答完之后、结束语之前，后面的转写和事件整体往后挪。片段的题目归属照面试引擎的写法：请候选人提问是
+/// `candidate_questions`，面试官后面的回应是 `candidate_questions.r序号`，候选人的话跟着它回应的那一句。
+fn add_candidate_questions(record: &mut InterviewRecord, case: &AskCase) {
+    if !case.midway.is_empty() {
+        let half = record.duration_ms / 2;
+        let asked = record.transcript.iter().position(|segment| {
+            segment.speaker == Speaker::Interviewer
+                && segment.start_ms >= half
+                && segment.question_id.is_some()
+        });
+        if let Some(index) = asked {
+            let key = record.transcript[index].question_id.clone();
+            let keys = vec![key; case.midway.len()];
+            insert_lines(record, index + 1, "m", case.midway, &keys);
+        }
+    }
+    if case.closing.is_empty() {
+        return;
+    }
+    // 最后一句属于某道题的话后面
+    let index = record
+        .transcript
+        .iter()
+        .rposition(|segment| segment.question_id.is_some())
+        .map_or(record.transcript.len(), |index| index + 1);
+    let mut keys = Vec::with_capacity(case.closing.len());
+    let mut key: Option<String> = None;
+    let mut replies = 0;
+    for line in case.closing {
+        if line.speaker == Speaker::Interviewer {
+            key = Some(if line.text == INVITE {
+                "candidate_questions".to_owned()
+            } else {
+                replies += 1;
+                format!("candidate_questions.r{replies}")
+            });
+        }
+        // 候选人没等面试官请就先开口的，算在最后一道题上
+        keys.push(key.clone().or_else(|| {
+            index
+                .checked_sub(1)
+                .and_then(|last| record.transcript[last].question_id.clone())
+        }));
+    }
+    insert_lines(record, index, "a", case.closing, &keys);
+}
+
+/// 在第 `index` 个片段前面插进几句话，后面的转写和事件往后挪。
+fn insert_lines(
+    record: &mut InterviewRecord,
+    index: usize,
+    id_prefix: &str,
+    lines: &[Line],
+    keys: &[Option<String>],
+) {
+    const GAP_MS: u64 = 900;
+    let from = index
+        .checked_sub(1)
+        .map_or(0, |last| record.transcript[last].end_ms);
+    let mut at = from;
+    let mut inserted = Vec::with_capacity(lines.len());
+    for (number, (line, key)) in lines.iter().zip(keys).enumerate() {
+        let per_char = if line.speaker == Speaker::Candidate {
+            230
+        } else {
+            200
+        };
+        let length = u64::try_from(line.text.chars().count()).unwrap_or(0) * per_char;
+        let start_ms = at + GAP_MS;
+        at = start_ms + length;
+        inserted.push(Segment {
+            id: format!("{id_prefix}{}", number + 1),
+            speaker: line.speaker,
+            start_ms,
+            end_ms: at,
+            text: line.text.to_owned(),
+            question_id: key.clone(),
+            confidence: None,
+            words: Vec::new(),
+        });
+    }
+    let shift = at - from;
+    for segment in record.transcript.iter_mut().skip(index) {
+        segment.start_ms += shift;
+        segment.end_ms += shift;
+        for word in &mut segment.words {
+            word.s += shift;
+            word.e += shift;
+        }
+    }
+    for event in &mut record.events {
+        if let Some(event_at) = event.at_ms.as_mut().filter(|event_at| **event_at > from) {
+            *event_at += shift;
+        }
+    }
+    record.duration_ms += shift;
+    record.transcript.splice(index..index, inserted);
 }
 
 // ---------- 上行慢，画面的码率降了下来 ----------

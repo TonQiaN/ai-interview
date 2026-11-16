@@ -2,7 +2,7 @@
 //!
 //! 步骤：
 //! 1. 转写按题分段（面试引擎标了归属就直接用，没标由模型来分），算计时数据。
-//! 2. 逐题评价、岗位匹配、简历核验、诚信迹象、沟通表现，这几步互不依赖，同时进行。
+//! 2. 逐题评价、岗位匹配、简历核验、诚信迹象、沟通表现、候选人提的问题，这几步互不依赖，同时进行。
 //! 3. 程序核对每一条证据，回填时间戳，丢掉对不上的。
 //! 4. 模型看着前面的结果给出综合建议和下一轮的追问方向。
 //! 5. 程序算总分、按固定条件给出需要人工复核的提示。
@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use futures_util::future::{join_all, join5};
+use futures_util::future::{join, join_all, join5};
 use interview_llm::{ChatModel, ChatRequest, Message, Thinking, chat_json_checked};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -22,13 +22,14 @@ use tokio::sync::Semaphore;
 use crate::evidence::{EvidenceIndex, HasEvidence};
 use crate::prompts::{self, PROMPT_VERSION, SYSTEM};
 use crate::prose;
-use crate::record::InterviewRecord;
+use crate::record::{InterviewRecord, Speaker};
 use crate::report::{
-    ClaimVerdict, CommunicationAssessment, CompetencyRating, Credibility, Decision, Evidence,
-    EvidenceSource, EvidenceStats, Finding, FocusCheck, Importance, IntegrityAssessment,
-    InterviewReport, Level, NextRound, QuestionJudgement, QuestionReview, Recommendation,
-    ReportMeta, RequirementMatch, RequirementVerdict, ResumeVerification, ReviewFlag,
-    ReviewFlagCode, RiskLevel, SCHEMA_VERSION, ScoreRange, StageFailure, Usage, null_as_default,
+    CandidateQuestion, ClaimVerdict, CommunicationAssessment, CompetencyRating, Credibility,
+    Decision, Evidence, EvidenceSource, EvidenceStats, Finding, FocusCheck, Importance,
+    IntegrityAssessment, InterviewReport, Level, NextRound, QuestionJudgement, QuestionReview,
+    Recommendation, ReportMeta, RequirementMatch, RequirementVerdict, ResumeVerification,
+    ReviewFlag, ReviewFlagCode, RiskLevel, SCHEMA_VERSION, ScoreRange, StageFailure, Usage,
+    null_as_default,
 };
 use crate::transcript::{
     Assignment, QuestionGroup, clock, group_by_question, held_intervals, lookup_by_alias,
@@ -117,7 +118,26 @@ pub async fn analyze(
             Some(judge_question(runner, &stage, context, &task, options.question_judgements).await)
         }
     }));
-    let (question_judgements, requirement_match, resume_verification, integrity, communication) =
+    let candidate_spoke = record
+        .transcript
+        .iter()
+        .any(|segment| segment.speaker == Speaker::Candidate);
+    let asked = async {
+        if !candidate_spoke {
+            return Ok(AskedQuestions::default()); // 候选人一句话都没说，不用问模型
+        }
+        runner
+            .run::<AskedQuestions>(
+                STAGE_CANDIDATE_QUESTIONS,
+                &context,
+                prompts::CANDIDATE_QUESTIONS_TASK,
+            )
+            .await
+    };
+    let (
+        (question_judgements, requirement_match, resume_verification, integrity, communication),
+        asked,
+    ) = join(
         join5(
             question_judgements,
             runner.run::<RequirementMatch>("requirements", &context, prompts::REQUIREMENT_TASK),
@@ -128,8 +148,10 @@ pub async fn analyze(
                 &context,
                 prompts::COMMUNICATION_TASK,
             ),
-        )
-        .await;
+        ),
+        asked,
+    )
+    .await;
 
     let held = held_intervals(&record.events);
     let mut questions = Vec::with_capacity(groups.len());
@@ -181,6 +203,14 @@ pub async fn analyze(
         &mut stats,
         &mut failed_stages,
     );
+    let candidate_questions = settle(
+        STAGE_CANDIDATE_QUESTIONS,
+        asked,
+        &index,
+        &mut stats,
+        &mut failed_stages,
+    )
+    .map(|asked| said_by_candidate(asked.questions));
 
     // 综合建议要看着前面核对过的结果来写
     let findings = Findings {
@@ -243,6 +273,7 @@ pub async fn analyze(
         resume_verification,
         integrity,
         communication,
+        candidate_questions,
         next_round: synthesis.next_round,
         timing,
         review_flags,
@@ -319,6 +350,7 @@ fn failed_stage_names(failed_stages: &[StageFailure]) -> Vec<String> {
             "resume" => "简历核实",
             "integrity" => "诚信观察",
             "communication" => "表达和状态",
+            STAGE_CANDIDATE_QUESTIONS => "候选人提的问题",
             stage if stage.starts_with("question:") => {
                 questions += 1;
                 continue;
@@ -331,6 +363,39 @@ fn failed_stage_names(failed_stages: &[StageFailure]) -> Vec<String> {
         names.push(format!("{questions} 道题的评分"));
     }
     names
+}
+
+/// 「候选人提的问题」这一步在 `meta.failed_stages` 里的名字。
+const STAGE_CANDIDATE_QUESTIONS: &str = "candidate_questions";
+
+/// 「候选人提的问题」这一步模型的输出。
+#[derive(Debug, Default, Deserialize)]
+struct AskedQuestions {
+    #[serde(default, deserialize_with = "null_as_default")]
+    questions: Vec<CandidateQuestion>,
+}
+
+/// 只留下有候选人原话作证的问题，候选人的原话排在证据的最前面。
+///
+/// 证据已经核对过：引文在转写里找得到，说话人是程序按片段填的。一个问题的证据里没有一句是候选人说的，
+/// 就没法确认候选人问过，宁可不转达，也不把模型编的问题交给 HR 去答复。
+fn said_by_candidate(questions: Vec<CandidateQuestion>) -> Vec<CandidateQuestion> {
+    let by_candidate = |evidence: &Evidence| evidence.speaker == Some(Speaker::Candidate);
+    questions
+        .into_iter()
+        .filter(|question| question.evidence.iter().any(by_candidate))
+        .map(|mut question| {
+            // 稳定排序：候选人的话在前，其余的先后不变
+            question
+                .evidence
+                .sort_by_key(|evidence| !by_candidate(evidence));
+            question.reply = question
+                .reply
+                .map(|reply| reply.trim().to_owned())
+                .filter(|reply| !reply.is_empty());
+            question
+        })
+        .collect()
 }
 
 /// 一步的结果落定：成功就核对证据，失败就记下来。
@@ -754,6 +819,31 @@ impl Checked for Synthesis {
     }
 }
 impl Checked for Alignment {}
+impl Checked for AskedQuestions {
+    fn check(&self) -> Result<(), String> {
+        // 没有原话的问题核对不了，后面会被丢掉；先让模型补上
+        let missing: Vec<String> = self
+            .questions
+            .iter()
+            .enumerate()
+            .filter(|(_, question)| !question.evidence.iter().any(is_transcript_quote))
+            .map(|(index, _)| (index + 1).to_string())
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "questions 里第 {} 条没有引用候选人的原话。每个问题都要在 evidence 里用 \
+             {{\"source\":\"transcript\",\"segment_id\":\"片段 id\",\"quote\":\"候选人提这个问题的原话\"}} 引用；\
+             转写里找不到原话的问题不要列",
+            missing.join("、")
+        ))
+    }
+}
+
+fn is_transcript_quote(evidence: &Evidence) -> bool {
+    evidence.source == EvidenceSource::Transcript && evidence.segment_id.is_some()
+}
 
 fn visit_findings(findings: &mut [Finding], visit: &mut dyn FnMut(&mut Vec<Evidence>)) {
     for finding in findings {
@@ -793,6 +883,13 @@ impl HasEvidence for CommunicationAssessment {
         self.aspects
             .iter_mut()
             .for_each(|aspect| visit(&mut aspect.evidence));
+    }
+}
+impl HasEvidence for AskedQuestions {
+    fn each_evidence_list(&mut self, visit: &mut dyn FnMut(&mut Vec<Evidence>)) {
+        self.questions
+            .iter_mut()
+            .for_each(|question| visit(&mut question.evidence));
     }
 }
 impl HasEvidence for Synthesis {

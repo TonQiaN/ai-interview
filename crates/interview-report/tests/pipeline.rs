@@ -13,9 +13,10 @@ use interview_report::record::{
     Speaker,
 };
 use interview_report::report::{
-    Decision, EvidenceSource, QuoteMatch, ReviewFlagCode, RiskLevel, SignalKind,
+    CandidateQuestionReply, Decision, EvidenceSource, QuoteMatch, ReviewFlagCode, RiskLevel,
+    SignalKind,
 };
-use interview_report::{AnalyzeError, AnalyzeOptions, SCHEMA_VERSION, analyze};
+use interview_report::{AnalyzeError, AnalyzeOptions, InterviewReport, SCHEMA_VERSION, analyze};
 
 /// 按任务回放回答的假模型。并发的几步谁先调用不确定，所以按提示词里的任务标题来分发，不按顺序。
 #[derive(Default)]
@@ -63,6 +64,9 @@ impl RoutedModel {
     }
 }
 
+/// 「候选人提的问题」这一步的回答：候选人没提问。
+const NO_QUESTIONS: &str = r#"{"questions": []}"#;
+
 /// 从提示词里认出这是哪一步。重试时后面会追加消息，所以只看第一条用户消息。
 fn stage_of(request: &ChatRequest) -> String {
     let prompt = request
@@ -80,6 +84,7 @@ fn stage_of(request: &ChatRequest) -> String {
         ("# 任务：核验简历内容", "resume"),
         ("# 任务：找出作弊和诚信方面的迹象", "integrity"),
         ("# 任务：评价沟通表达", "communication"),
+        ("# 任务：整理候选人向公司提的问题", "candidate_questions"),
         ("# 任务：给出综合建议", "synthesis"),
     ];
     stages
@@ -97,6 +102,8 @@ impl ChatModel for RoutedModel {
             match replies.get_mut(&stage) {
                 Some(queue) if queue.len() > 1 => queue.pop_front(),
                 Some(queue) => queue.front().cloned(),
+                // 多数测试不关心候选人提的问题，没准备回答就当候选人没提问
+                None if stage == "candidate_questions" => Some(Ok(NO_QUESTIONS.to_owned())),
                 None => None,
             }
         };
@@ -392,10 +399,13 @@ async fn full_report_is_assembled_and_evidence_is_checked() {
     assert_eq!(report.next_round.questions.len(), 1);
     assert!(report.review_flags.is_empty());
 
-    // 七次调用，用量累加
-    assert_eq!(report.meta.usage.calls, 7);
-    assert_eq!(report.meta.usage.prompt_tokens, 700);
-    assert_eq!(report.meta.usage.cache_hit_tokens, 560);
+    // 候选人没提问：这一栏是空的，不是没有
+    assert_eq!(report.candidate_questions, Some(Vec::new()));
+
+    // 八次调用，用量累加
+    assert_eq!(report.meta.usage.calls, 8);
+    assert_eq!(report.meta.usage.prompt_tokens, 800);
+    assert_eq!(report.meta.usage.cache_hit_tokens, 640);
     assert_eq!(report.meta.model, "fake-model");
     assert_eq!(report.meta.thinking, "high");
     assert_eq!(report.meta.system_fingerprints, ["fp_test"]);
@@ -408,7 +418,7 @@ async fn every_step_shares_the_same_prompt_prefix() {
     analyze(&sample_record(), &model, &once()).await.unwrap();
 
     let requests = model.requests();
-    assert_eq!(requests.len(), 7);
+    assert_eq!(requests.len(), 8);
     let prompts: Vec<String> = requests
         .iter()
         .map(|(_, request)| request.messages[1].content.as_text())
@@ -500,7 +510,7 @@ async fn out_of_range_rating_is_sent_back_to_the_model() {
 
     assert_eq!(report.questions[1].judgement.as_ref().unwrap().rating, 2.0);
     assert_eq!(model.calls("question:q2"), 2);
-    assert_eq!(report.meta.usage.calls, 8);
+    assert_eq!(report.meta.usage.calls, 9);
     // 第二次请求里带着上一次的输出和不合要求的原因
     let requests = model.requests();
     let retry = requests
@@ -660,7 +670,7 @@ async fn untagged_transcript_is_split_by_the_model() {
     assert_eq!(report.questions[1].segment_ids, ["s6", "s7"]);
     // 不存在的题目和片段被忽略
     assert!(!report.questions[2].asked);
-    assert_eq!(report.meta.usage.calls, 8);
+    assert_eq!(report.meta.usage.calls, 9);
 }
 
 #[tokio::test]
@@ -711,6 +721,152 @@ async fn risky_findings_raise_review_flags() {
     assert_eq!(integrity.signals[0].kind, SignalKind::Other);
 }
 
+/// 在结束语前面加上请候选人提问的环节：候选人问了两件事，面试官说会转达。
+fn record_with_candidate_questions() -> InterviewRecord {
+    use Speaker::{Candidate as C, Interviewer as I};
+    let mut record = sample_record();
+    let closing = record.transcript.pop().unwrap();
+    record.transcript.extend([
+        segment(
+            "s8",
+            I,
+            152,
+            156,
+            "我的问题问完了，你有什么想问的吗？",
+            "candidate_questions",
+        ),
+        segment(
+            "s9",
+            C,
+            158,
+            170,
+            "想问一下这个岗位大概什么时候能入职？另外团队现在有多少人？",
+            "candidate_questions",
+        ),
+        segment(
+            "s10",
+            I,
+            171,
+            180,
+            "团队现在是八个人。入职时间我记下了，会转给负责招聘的同事。",
+            "candidate_questions.r1",
+        ),
+        Segment {
+            id: "s11".to_owned(),
+            start_ms: 181_000,
+            end_ms: 185_000,
+            ..closing
+        },
+    ]);
+    record.duration_ms = 185_000;
+    record
+}
+
+const ASKED: &str = r#"{
+  "questions": [
+    {"question": "这个岗位大概什么时候能入职？", "handling": "noted", "reply": " 记下了，会转给负责招聘的同事。 ",
+     "evidence": [{"source": "transcript", "segment_id": "s9", "quote": "这个岗位大概什么时候能入职"}]},
+    {"question": "团队现在有多少人？", "handling": "answered", "reply": "团队现在是八个人。",
+     "evidence": [{"source": "transcript", "segment_id": "s10", "quote": "团队现在是八个人"},
+                  {"source": "transcript", "segment_id": "s9", "quote": "团队现在有多少人"}]},
+    {"question": "试用期多长？", "handling": "unaddressed", "reply": null,
+     "evidence": [{"source": "transcript", "segment_id": "s9", "quote": "试用期是多长时间"}]},
+    {"question": "面试官问候选人有什么想问的", "handling": "unaddressed", "reply": "",
+     "evidence": [{"source": "transcript", "segment_id": "s8", "quote": "你有什么想问的吗"}]}
+  ]
+}"#;
+
+#[tokio::test]
+async fn candidate_questions_are_listed_with_what_the_interviewer_said() {
+    let model = full_model().on("candidate_questions", ASKED);
+    let report = analyze(&record_with_candidate_questions(), &model, &once())
+        .await
+        .unwrap();
+
+    // 四条里只有两条有候选人的原话：原话在转写里找不到的、只引了面试官的话的，都不转达
+    let asked = report.candidate_questions.as_ref().unwrap();
+    let questions: Vec<&str> = asked.iter().map(|q| q.question.as_str()).collect();
+    assert_eq!(
+        questions,
+        ["这个岗位大概什么时候能入职？", "团队现在有多少人？"]
+    );
+
+    assert_eq!(asked[0].handling, CandidateQuestionReply::Noted);
+    assert_eq!(
+        asked[0].reply.as_deref(),
+        Some("记下了，会转给负责招聘的同事。")
+    );
+    assert_eq!(asked[0].evidence[0].start_ms, Some(158_000));
+
+    // 面试官当场答了的：候选人的原话排在前面，后面是面试官的回答，HR 能点回录像核对
+    assert_eq!(asked[1].handling, CandidateQuestionReply::Answered);
+    let speakers: Vec<Option<Speaker>> = asked[1].evidence.iter().map(|e| e.speaker).collect();
+    assert_eq!(
+        speakers,
+        [Some(Speaker::Candidate), Some(Speaker::Interviewer)]
+    );
+
+    // 这一栏只是转达，不影响分数和复核提示
+    assert_eq!(report.overall_score, Some(67));
+    assert!(report.review_flags.is_empty());
+    assert!(report.meta.failed_stages.is_empty());
+}
+
+#[tokio::test]
+async fn a_question_without_a_quote_is_sent_back_to_the_model() {
+    let unquoted = r#"{"questions": [{"question": "什么时候能入职？", "handling": "noted",
+        "reply": "会转达。", "evidence": []}]}"#;
+    let model = full_model()
+        .on("candidate_questions", unquoted)
+        .on("candidate_questions", ASKED);
+    let report = analyze(&record_with_candidate_questions(), &model, &once())
+        .await
+        .unwrap();
+
+    assert_eq!(model.calls("candidate_questions"), 2);
+    assert_eq!(report.candidate_questions.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn failing_to_list_candidate_questions_leaves_the_section_unknown() {
+    let model = full_model().fail("candidate_questions");
+    let report = analyze(&record_with_candidate_questions(), &model, &once())
+        .await
+        .unwrap();
+
+    // 没列出来和候选人没提问是两回事：这里是空，不是空数组
+    assert_eq!(report.candidate_questions, None);
+    let flag = report
+        .review_flags
+        .iter()
+        .find(|f| f.code == ReviewFlagCode::IncompleteAnalysis)
+        .expect("有步骤失败时要提示报告不完整");
+    assert!(flag.message.contains("候选人提的问题"), "{}", flag.message);
+}
+
+#[tokio::test]
+async fn candidate_questions_are_not_asked_about_when_the_candidate_never_spoke() {
+    let mut record = sample_record();
+    record
+        .transcript
+        .retain(|segment| segment.speaker != Speaker::Candidate);
+    let model = full_model();
+    let report = analyze(&record, &model, &once()).await.unwrap();
+
+    assert_eq!(model.calls("candidate_questions"), 0);
+    assert_eq!(report.candidate_questions, Some(Vec::new()));
+}
+
+#[test]
+fn reports_written_before_candidate_questions_still_load() {
+    let report: InterviewReport =
+        serde_json::from_str(include_str!("../samples/reports/backend-strong.json")).unwrap();
+    let mut value = serde_json::to_value(&report).unwrap();
+    value.as_object_mut().unwrap().remove("candidate_questions");
+    let old: InterviewReport = serde_json::from_value(value).unwrap();
+    assert_eq!(old.candidate_questions, None);
+}
+
 #[tokio::test]
 async fn empty_record_has_nothing_to_analyze() {
     let mut record = sample_record();
@@ -735,7 +891,7 @@ async fn interview_without_planned_questions_still_gets_a_report() {
     assert!(report.questions.is_empty());
     assert_eq!(report.overall_score, None);
     assert_eq!(model.calls("alignment"), 0);
-    assert_eq!(report.meta.usage.calls, 5);
+    assert_eq!(report.meta.usage.calls, 6);
 }
 
 #[test]

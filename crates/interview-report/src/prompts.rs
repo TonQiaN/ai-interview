@@ -7,7 +7,7 @@ use crate::record::Segment;
 use crate::transcript::{QuestionGroup, segment_alias};
 
 /// 提示词版本。
-pub const PROMPT_VERSION: u32 = 11;
+pub const PROMPT_VERSION: u32 = 12;
 
 /// 所有步骤共用的系统提示。
 pub(crate) const SYSTEM: &str = r#"你是一位资深的招聘评估专家，正在帮企业的 HR 分析一场 AI 面试的记录。
@@ -242,6 +242,42 @@ pub(crate) const COMMUNICATION_TASK: &str = r#"# 任务：评价沟通表达和�
   "reliability_note": "一句话说明这部分结论有多可靠、局限在哪"
 }
 aspects 要四个方面各一条。"#;
+
+/// 候选人向公司提的问题。
+pub(crate) const CANDIDATE_QUESTIONS_TASK: &str = r#"# 任务：整理候选人向公司提的问题
+面试快结束时，面试官一般会请候选人提问，并告诉候选人问题会转给负责招聘的同事；候选人也可能在面试中途问。请把候选人想让公司回答的问题逐个列出来，HR 要照着这份清单答复候选人。这一步只是转达，不评价候选人问得好不好。
+
+算的：关于岗位、工作内容、团队、汇报关系、薪资福利、工作时间和地点、入职时间、后面的流程、什么时候有结果、公司和业务情况的问题；候选人问自己这场面试表现怎么样、有什么建议，也算。
+
+不算的：
+- 没听清或没听懂题目，请面试官重复、解释题目，或者确认题目问的是什么（「能再说一遍吗」「您是指我上一份工作的项目吗」）
+- 回答里的自问自答、反问和口头语（「为什么这么做呢？因为……」「怎么说呢」「对吧」）
+- 面试页怎么操作的问题（「听得到吗」「我现在可以开始说了吗」）
+- 候选人说没有问题、暂时想不到
+
+一句话里问了几件事的拆成几条，同一件事问了两遍的只列一条，按提出的先后排。转写来自语音识别，按最合理的意思把问题整理成一句通顺的话写进 question，不要加候选人没问的内容，也不要把候选人的陈述改写成问题。
+
+每个问题看面试官当场是怎么回应的，填 handling：
+- answered：面试官当场给了具体的回答，说了实际的内容，而不只是说会转达
+- noted：面试官说记下了、会转达、之后有人答复，没有当场回答
+- unaddressed：面试官没有回应这个问题，例如只回应了别的问题，或者直接结束了面试
+reply 用一句话写面试官当场说了什么。answered 的要把面试官说的具体内容写出来：面试官是 AI，HR 要核对它有没有说错、有没有替公司许诺。unaddressed 的填 null。
+
+evidence：第一条是候选人提这个问题的原话；answered 的再加一条面试官回答的原话。
+
+候选人没有提任何问题就输出 {"questions": []}，不要凑。
+
+输出 JSON：
+{
+  "questions": [
+    {
+      "question": "候选人问的是什么",
+      "handling": "answered" | "noted" | "unaddressed",
+      "reply": "面试官当场说了什么" 或 null,
+      "evidence": [证据]
+    }
+  ]
+}"#;
 
 /// 综合各步的结果给出建议。`findings` 是前面各步结果的 JSON。
 pub(crate) fn synthesis_task(findings: &str) -> String {
