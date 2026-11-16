@@ -1572,6 +1572,9 @@ export function createMockServer(options: MockOptions = {}) {
     if (plan.questions.every((q) => q.reserve)) details.questions = "至少要有一道主问题";
     plan.questions.forEach((q, index) => {
       if (!q.text.trim()) details[`questions[${index}].text`] = "不能为空";
+      if (q.reserve && q.required) details[`questions[${index}].required`] = "备用题不能标成必须问";
+      if (!q.reserve && plan.questions.slice(0, index).some((earlier) => earlier.reserve))
+        details[`questions[${index}].reserve`] = "备用题要排在所有主问题后面";
       (q.follow_ups ?? []).forEach((f, n) => {
         if (!f.text.trim()) details[`questions[${index}].follow_ups[${n}].text`] = "不能为空";
       });
