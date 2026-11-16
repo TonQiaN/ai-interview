@@ -91,7 +91,7 @@ start_one() {
   port="$(port_of "$name")"
   log="$state/$name.log"
   if pid="$(pid_of "$name")"; then
-    echo "$name 已经在跑（进程 $pid，端口 $port）"
+    echo "$name 已经在跑（进程 ${pid}，端口 ${port}）"
     return 0
   fi
   if health_of "$name" >/dev/null; then
@@ -109,7 +109,7 @@ start_one() {
     dir="$(vendor_of "$name")"
     python="$dir/.venv/bin/python"
     if [ ! -x "$python" ]; then
-      echo "没找到 $python。" >&2
+      echo "没找到 ${python}。" >&2
       echo "真引擎只能在 Apple Silicon 的 Mac 上跑，环境怎么装见 tts/README.md。" >&2
       echo "vendor/ 和 models/ 不在这个仓库下时，用 AI_INTERVIEW_TTS_HOME 指过去。" >&2
       return 1
@@ -117,7 +117,7 @@ start_one() {
     args+=(--models "$home/models" --preload)
   fi
 
-  echo "启动 $name（$(engines_of "$name")，端口 $port）……"
+  echo "启动 ${name}（$(engines_of "$name")，端口 ${port}）……"
   # 先进目录再放到后台：这样记下来的进程号就是 worker 自己的，不是外面那层 shell 的
   (
     cd "$dir"
@@ -128,13 +128,13 @@ start_one() {
   # 加了 --preload：模型加载完才开始监听，所以能连上就是可以用了
   until health_of "$name" >/dev/null; do
     if ! pid_of "$name" >/dev/null; then
-      echo "$name 没起来，日志最后几行（$log）：" >&2
+      echo "$name 没起来，日志最后几行（${log}）：" >&2
       tail -n 15 "$log" >&2
       rm -f "$state/$name.pid"
       return 1
     fi
     if [ $((SECONDS - began)) -ge "$load_timeout" ]; then
-      echo "$name 等了 $load_timeout 秒还没准备好，日志在 $log。进程还留着，可以用 stop 停掉。" >&2
+      echo "$name 等了 $load_timeout 秒还没准备好，日志在 ${log}。进程还留着，可以用 stop 停掉。" >&2
       return 1
     fi
     sleep 0.2
@@ -165,13 +165,13 @@ stop_one() {
 status_one() {
   local name="$1" pid health
   if ! pid="$(pid_of "$name")"; then
-    echo "$name：没在跑"
+    echo "${name}：没在跑"
     return 0
   fi
   if health="$(health_of "$name")"; then
-    echo "$name：在跑（进程 $pid，端口 $(port_of "$name")）$health"
+    echo "${name}：在跑（进程 ${pid}，端口 $(port_of "$name")）$health"
   else
-    echo "$name：进程 $pid 在，但连不上（可能还在加载模型，或者令牌不对）"
+    echo "${name}：进程 $pid 在，但连不上（可能还在加载模型，或者令牌不对）"
   fi
 }
 
