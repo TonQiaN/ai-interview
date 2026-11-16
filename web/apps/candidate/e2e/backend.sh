@@ -30,6 +30,9 @@ else
   # 这样能看到浏览器录出来的分片确实解得出声音、文字确实记进了对话
   export AI_INTERVIEW_STT_BACKEND=fake
   export AI_INTERVIEW_ROOM_FAKE_TRANSCRIPT=true
+  # 配成实时对话的面试用一个固定回答的替身接话（每道题追问一句同样的话），这样页面上实时对话的那部分
+  # 也能在真浏览器里对着真后端走。配成逐题的面试不受影响
+  export AI_INTERVIEW_ROOM_FAKE_LIVE_MODEL=true
 fi
 export AI_INTERVIEW_LOG="${AI_INTERVIEW_LOG:-warn}"
 exec target/debug/interview-server serve
