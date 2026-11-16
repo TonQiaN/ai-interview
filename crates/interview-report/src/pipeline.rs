@@ -302,6 +302,31 @@ fn count(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
+/// 失败的步骤叫什么，写给 HR 看。`meta.failed_stages` 里记的是内部的名字（`requirements`、
+/// `question:q3`），这里换成报告里对应那一部分的叫法，逐题评分的几步合成一项。
+fn failed_stage_names(failed_stages: &[StageFailure]) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut questions = 0;
+    for failure in failed_stages {
+        let name = match failure.stage.as_str() {
+            "requirements" => "岗位要求对照",
+            "resume" => "简历核实",
+            "integrity" => "诚信观察",
+            "communication" => "表达和状态",
+            stage if stage.starts_with("question:") => {
+                questions += 1;
+                continue;
+            }
+            other => other,
+        };
+        names.push(name.to_owned());
+    }
+    if questions > 0 {
+        names.push(format!("{questions} 道题的评分"));
+    }
+    names
+}
+
 /// 一步的结果落定：成功就核对证据，失败就记下来。
 fn settle<T: HasEvidence>(
     stage: &str,
@@ -490,13 +515,12 @@ fn review_flags(
         );
     }
     if !failed_stages.is_empty() {
-        let stages: Vec<&str> = failed_stages.iter().map(|f| f.stage.as_str()).collect();
         flag(
             ReviewFlagCode::IncompleteAnalysis,
             format!(
                 "有 {} 个分析步骤失败（{}），报告不完整，可以重新生成。",
-                stages.len(),
-                stages.join("、")
+                failed_stages.len(),
+                failed_stage_names(failed_stages).join("、")
             ),
         );
     }

@@ -23,6 +23,7 @@ utoipa.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 clap.workspace = true
+interview-engine.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
