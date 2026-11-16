@@ -1129,6 +1129,38 @@ async fn the_list_and_the_detail_say_when_an_interview_was_archived(pool: PgPool
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn an_archived_interview_can_be_restored(pool: PgPool) {
+    let h = Harness::new(pool, None, FakeBackend::new()).await;
+    let id = h.create(json!({})).await;
+    let restore = format!("/api/v1/interviews/{id}/restore");
+
+    let response = TestRequest::delete(format!("/api/v1/interviews/{id}"))
+        .send(&h.app)
+        .await;
+    assert_eq!(response.status, StatusCode::NO_CONTENT);
+    assert_eq!(h.get("/api/v1/interviews").await.json()["total"], 0);
+
+    let response = h.post(&restore, json!({})).await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let restored = response.json();
+    assert_eq!(restored["id"], id.as_str());
+    assert!(restored["archived_at"].is_null());
+    assert_eq!(restored["status"], "draft", "状态和归档前一样");
+    assert_eq!(h.get("/api/v1/interviews").await.json()["total"], 1);
+
+    let again = h.post(&restore, json!({})).await;
+    assert_eq!(again.status, StatusCode::OK, "没归档的再恢复一次也算成功");
+
+    let missing = h
+        .post(
+            &format!("/api/v1/interviews/{}/restore", uuid::Uuid::now_v7()),
+            json!({}),
+        )
+        .await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn waits_for_the_resume_to_be_parsed(pool: PgPool) {
     let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;
     sqlx::query("UPDATE resumes SET parse_status = 'running' WHERE candidate_id = $1")

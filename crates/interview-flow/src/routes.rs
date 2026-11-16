@@ -26,6 +26,7 @@ pub(crate) fn router() -> OpenApiRouter<Deps> {
     OpenApiRouter::new()
         .routes(routes!(list_interviews, create_interview))
         .routes(routes!(get_interview, update_interview, archive_interview))
+        .routes(routes!(restore_interview))
         .routes(routes!(prepare_interview))
         .routes(routes!(cancel_interview))
         .routes(routes!(purge_interview))
@@ -354,6 +355,32 @@ async fn archive_interview(
         .execute(&deps.ctx.db)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// 恢复归档的面试
+///
+/// 归档错了用这个恢复：重新出现在列表里，原来的状态、题目、录像和报告都还在。归档时候选人的面试链接
+/// 打不开，恢复以后链接没过期、没撤销的话又能用。没归档的再调一次也算成功。
+#[utoipa::path(
+    post,
+    path = "/api/v1/interviews/{id}/restore",
+    tag = "interviews",
+    params(("id" = Uuid, Path, description = "面试 ID")),
+    responses(
+        (status = 200, description = "恢复后的面试", body = InterviewDetail),
+        (status = 404, description = "没有这场面试", body = ErrorBody),
+    )
+)]
+async fn restore_interview(
+    State(deps): State<Deps>,
+    _user: AdminUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<InterviewDetail>> {
+    sqlx::query("UPDATE interviews SET archived_at = NULL WHERE id = $1")
+        .bind(id)
+        .execute(&deps.ctx.db)
+        .await?;
+    Ok(Json(detail(&deps, id).await?))
 }
 
 /// 开始准备

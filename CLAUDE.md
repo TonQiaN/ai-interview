@@ -32,6 +32,7 @@ pnpm -C web check                      # 前端全量检查：lint 和格式（�
 pnpm -C web gen:api                    # 由后端的 OpenAPI 文档生成 TypeScript 类型（typecheck 和 build 会自己先跑）
 pnpm -C web --filter <包名> test       # 只测一个包，比如 @ai-interview/api-client
 pnpm -C web/apps/candidate e2e         # 候选人面试页的浏览器测试：真的 Chromium 对着真的后端走完整场面试，自己起后端，两三分钟。CI 里是 candidate-e2e
+E2E_SOAK_MINUTES=15 pnpm -C web/apps/candidate e2e soak   # 一场十几分钟的面试，看内存、录像积压和录像时长。CI 不跑，要 ffprobe
 pnpm -C web format                     # 用 Biome 格式化并整理 import
 ```
 

@@ -115,6 +115,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | --- | --- |
 | `GET /api/v1/interviews`、`POST /api/v1/interviews` ★ | 列表（可按候选人、岗位、状态筛；每一行带报告的结论和综合分；`include_archived=true` 带上已归档的，归档的那几行 `archived_at` 有时间）、新建 |
 | `GET /api/v1/interviews/{id}`、`PATCH /api/v1/interviews/{id}`、`DELETE /api/v1/interviews/{id}` ★ | 详情（带候选人和岗位摘要、最新报告状态；归档了的 `archived_at` 有时间）、改配置、归档 |
+| `POST /api/v1/interviews/{id}/restore` | 把归档的面试恢复回来，返回详情。状态、题目、录像、报告都和归档前一样；候选人的面试链接归档时打不开，恢复以后没过期、没撤销的又能用。没归档的再调一次也算成功 |
 | `POST /api/v1/interviews/{id}/prepare` ★ | 出题加预合成语音 |
 | `POST /api/v1/interviews/{id}/cancel` | 取消 |
 | `POST /api/v1/interviews/{id}/purge` | 彻底删除，只有管理员能用，删了不能恢复：这场面试的录像、语音、画面检查的帧，和题目、对话记录、过程事件、面试链接、报告一起删掉，比过它的候选人对比也删，候选人和岗位不动。成功返回 204。正在准备、正在面试，或者后台正在处理它（转写、写报告）时返回 409，先取消或者等一会儿。只想在列表里藏起来用归档 |

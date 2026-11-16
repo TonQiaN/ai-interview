@@ -1266,6 +1266,14 @@ export function createMockServer(options: MockOptions = {}) {
         );
       if (v.not_ready_reason) throw voiceNotReady(v.not_ready_reason);
       engine = v.engine;
+      // 和真后端一样：逐字稿只认音色上存着的那份，临时换到要逐字稿的引擎时没有就合成不了
+      const used = engines.find((e) => e.id === (input.engine ?? v.engine));
+      if (
+        v.kind === "cloned" &&
+        used?.requires_reference_transcript &&
+        !v.reference_transcript?.trim()
+      )
+        throw new HttpError(422, "validation_failed", `${used.id} 克隆时必须给参考录音的逐字稿`);
     }
     // 演示数据没有接语音合成，和真后端没连 Mac 时一样，回一段测试音
     const ms = Math.min(6_000, 600 + [...text].length * 90);
@@ -1458,6 +1466,9 @@ export function createMockServer(options: MockOptions = {}) {
     i.archived_at ??= iso(0);
     return null;
   });
+  on("POST", "/interviews/:id/restore", ({ params }) =>
+    Object.assign(find.interview(params[0]), { archived_at: null }),
+  );
   on("POST", "/interviews/:id/purge", ({ params }) => {
     requireAdmin();
     const i = find.interview(params[0]);
