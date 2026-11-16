@@ -10,7 +10,28 @@ Rust 那边对应的是 `crates/interview-tts` 的 `WorkerBackend`。
 
 ## 启动
 
-IndexTTS 和 Breeze 的依赖不能装进同一个环境（见 [../README.md](../README.md) 的「已知的坑」），所以起两个进程，各占一个端口：
+IndexTTS 和 Breeze 的依赖不能装进同一个环境（见 [../README.md](../README.md) 的「已知的坑」），所以是两个进程，各占一个端口：IndexTTS 2 和 2.5 在 7801，BreezeTTS2 在 7802。默认的引擎是 IndexTTS 2，只用它的话起前一个就够了。
+
+用 `run.sh` 起，它把进程放到后台，等模型加载完才返回：
+
+```bash
+tts/worker/run.sh start          # 起 IndexTTS 的 worker；start breeze 起 BreezeTTS2 的，start all 两个都起
+tts/worker/run.sh status         # 哪些在跑、此刻忙不忙、有几条在排队
+tts/worker/run.sh stop           # 都停掉；stop index、stop breeze 只停一个
+eval "$(tts/worker/run.sh env)"  # 给后端设好 AI_INTERVIEW_TTS_BACKEND 和 AI_INTERVIEW_TTS_WORKER_URLS
+```
+
+日志和进程号在 `.runtime/tts-worker/` 下（`index.log`、`breeze.log`），起不来时脚本会把日志最后几行打出来。可以用环境变量改的：
+
+| 变量 | 含义 |
+| --- | --- |
+| `AI_INTERVIEW_TTS_HOME` | `vendor/` 和 `models/` 所在的目录，默认是脚本所在的这个仓库。在别的工作区（git worktree）里跑时，指到放着模型的那个仓库，日志和参考录音也放在它的 `.runtime/tts-worker/` 下 |
+| `AI_INTERVIEW_TTS_INDEX_PORT`、`AI_INTERVIEW_TTS_BREEZE_PORT` | 端口，默认 7801 和 7802 |
+| `AI_INTERVIEW_TTS_WORKER_HOST` | 监听地址，默认 `127.0.0.1`。后端不在这台 Mac 上时改成 `0.0.0.0`，并且必须设令牌 |
+| `AI_INTERVIEW_TTS_WORKER_TOKEN` | 令牌，worker 和后端要一致 |
+| `AI_INTERVIEW_TTS_WORKER_FAKE=1` | 不加载模型，用系统的 `python3` 起假引擎。没有 Mac 时测流程用 |
+
+脚本做的事就是下面两条命令，要自己起（比如前台看日志、调内存上限）也可以：
 
 ```bash
 REPO=~/Desktop/ai-interview    # 仓库在 Mac 上的位置，vendor/ 和 models/ 都在它下面
@@ -56,13 +77,14 @@ IndexTTS 2 和 2.5 在同一个进程里，内存里一次只留一个版本，�
   "worker": "ai-interview-tts",
   "protocol": 1,
   "busy": false,
+  "waiting": 0,
   "engines": [
     {"engine": "index2", "ready": true, "loaded": true, "detail": "IndexTTS-2-mlx-8bit"}
   ]
 }
 ```
 
-`ready` 是权重在不在，`loaded` 是模型现在是不是已经在内存里，`busy` 是此刻是不是正在合成。
+`ready` 是权重在不在，`loaded` 是模型现在是不是已经在内存里，`busy` 是此刻是不是正在合成，`waiting` 是有几条请求在排队。
 
 ### `HEAD /v1/references/{sha256}` 和 `PUT /v1/references/{sha256}`
 
@@ -81,9 +103,12 @@ IndexTTS 2 和 2.5 在同一个进程里，内存里一次只留一个版本，�
   "style": {"emotion": "calm", "emotion_strength": 0.65, "instruction": "<导演指令，只有 Breeze 用>"},
   "seed": 42,
   "diffusion_steps": 16,
+  "priority": "background",
   "stream": false
 }
 ```
+
+- `priority` 可以不给。`background` 是后台合成，没有人正等着听（面试前预先合成题目）；不给或者 `interactive` 是有人等着（实时对话里现场要说的话、试听）。只影响排队的先后，见下面「排队」。后端成批合成（`Synthesizer::synthesize_batch`）时带 `background`，别的不带。加这个字段之前的 worker 会直接忽略它，所有请求按到的先后排。
 
 - `diffusion_steps` 可以不给。它是 IndexTTS 声学生成走几步，4 到 50 的整数，不给是 25；BreezeTTS2 忽略它。后端只在实时对话现场合成时带这个字段（设了 `AI_INTERVIEW_TTS_LIVE_DIFFUSION_STEPS` 才带），预先合成的题目不带。加这个字段之前的 worker 会直接忽略它，所以后端和 worker 要一起更新。
 - `voice` 也可以是 `{"kind": "design", "description": "温和的女声"}`，只有 BreezeTTS2 支持。
@@ -96,7 +121,7 @@ IndexTTS 2 和 2.5 在同一个进程里，内存里一次只留一个版本，�
 - 采样率跟着引擎走：IndexTTS 两个版本是 22.05 kHz，BreezeTTS2 是 24 kHz。调用方不能写死，要读 WAV 头或 `X-Sample-Rate`。
 - `stream` 为 `true`：`application/octet-stream`，分块传输的 PCM16 小端单声道裸数据，采样率在响应头 `X-Sample-Rate` 里。引擎生成一块发一块，后端可以边收边播。合成中途出错时 worker 直接断开连接（响应头已经发出去，没法再回错误），后端要把没收完的流当作失败。
 
-模型一次只跑一条请求，同时来的请求排队。
+**排队。** 模型一次只跑一条请求，同时来的请求排队。有人等着的排在后台合成的前面，同一类按到的先后。正在合成的那一条不打断，所以有人等着的请求最多等一条的时间。后端的任务执行器默认同时跑 4 个任务，几场面试一起准备时会有几条预先合成的请求同时在排；这时候来一句现场要说的话，等正在合成的那一条做完就轮到它，不用等前面排着的预先合成。
 
 流式合成到一半调用方断开连接（比如实时对话里候选人打断了面试官），worker 停止生成这一条，不算出错。BreezeTTS2 约 0.4 秒就停；IndexTTS 一段生成到一半停不下来，要等当前这段算完（实测 3 到 7 秒），这期间下一条请求在排队。
 
@@ -504,6 +529,18 @@ cargo test -p interview-server --features sherpa --test live -- --ignored --noca
 - 16 步那场有一轮模型说了三段，第三段在第二段播完前 1.85 秒就备好了。
 - 机器听写：接话的 11 段全对。问句里对不上的，同音字三处（识别挑字），英文词 Rust 和 PostgreSQL 读不准，「拆」两场各有一次没听对（一次 25 步，一次 16 步）。没有发现 16 步比 25 步读得更差。读不准的词记在 issue #180。
 - 录音在 Mac 的 `data/worker-live-e2e/run9/`（25 步）和 `run10/`（16 步）。
+
+## 几场面试同时用一个 worker
+
+模型一次只能合成一段，几场面试同时进行、或者有人正在做面试前的准备时，现场要说的话要排队。`crates/interview-tts/tests/worker_load.rs` 量这件事：几场「面试」各自隔一会儿要一句现场的话（十几个字的追问），同时几路不停地预先合成题目（四十个字上下），打印每句现场的话比没人抢时多等了多久、预先合成每分钟做了几道。
+
+```bash
+tts/worker/run.sh start && eval "$(tts/worker/run.sh env)"
+export AI_INTERVIEW_TTS_LIVE_REFERENCE=参考录音.wav
+cargo test -p interview-tts --test worker_load -- --ignored --nocapture
+```
+
+默认跑六种情况（`几场面试+几路预先合成`：`1+0,2+0,4+0,1+4,2+4,4+4`），每种 90 秒，一场面试里上一句合成完隔 15 秒要下一句。真实面试里候选人一段回答二三十秒起，15 秒比真实的密，量出来的等待偏多不偏少。能改的环境变量写在测试文件开头。合成出来的音频不落盘，打印的只有时间。
 
 ## 日志
 

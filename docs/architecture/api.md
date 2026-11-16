@@ -123,6 +123,8 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `GET /api/v1/interviews/{id}/reports` | 报告的所有版本和各自的状态 |
 | `POST /api/v1/interviews/{id}/report/regenerate` | 重新生成报告 |
 | `PUT /api/v1/interviews/{id}/decision` | HR 的结论 |
+| `GET /api/v1/interviews/{id}/frame-events` | 录像画面检查的结果：画面里人数不对、看得到手机的时间段 |
+| `GET /api/v1/interviews/{id}/frames/{at_ms}` | 画面检查时存下来的那一帧（JPEG），可以直接当 `<img>` 的地址 |
 | `GET /api/v1/interview-templates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` | 配置模板 |
 | `GET /api/v1/interview-config/defaults` | 默认配置和各选项的取值范围，给配置表单用 |
 
@@ -140,6 +142,8 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 - `POST .../report/regenerate` 只有面试结束后（`completed`、`abandoned`）才能点，否则 409，`code` 是 `interview_not_finished`。返回 202 和面试详情。每次重新生成加一个版本，旧版本留着；上一版还在生成时不会再加，直接返回当前状态。
 - 候选人一句都没答、或者没配大模型时，报告直接是 `failed`，`error` 里写了原因，不会一直转圈。
 - `PUT .../decision` 请求体 `{"decision": "advance" | "hold" | "reject" | "pending", "note": "…"}`，`note` 可以不传，最长 2000 字。返回面试详情。改回 `pending` 会清掉决定人和时间。
+- `GET .../frame-events` 返回 `{checked, items}`。出报告之前会从摄像头录像里抽帧让模型看，结果在这里；没有录像、还没出报告或者检查没做成时 `checked` 是 false、`items` 是空的。每条是 `{id, kind, at_ms, duration_ms, payload, frame_at_ms}`，按 `at_ms` 从早到晚排，时间和录像、过程事件（`GET .../events`）是同一条时间轴，两边按 `at_ms` 就能排在一起。`id` 就是报告证据里的 `event_id`（比如 `frame-phone-95000`）。`kind` 是 `face_count_changed`、`phone_visible`、`frames_checked`；`payload` 里有 `people`、`frames`、`note`、`unclear`（`frames_checked` 是 `frames`、`interval_ms`、`flagged`、`unreadable`）。只在一帧里看到的 `duration_ms` 是 null。`frame_at_ms` 是这一段里存了图的帧，只有不正常的帧存图，`frames_checked` 这一条不带。
+- `GET .../frames/{at_ms}` 的 `at_ms` 用 `frame_at_ms` 里的值。这一刻没存图返回 404。画面是候选人的个人信息，要登录才能取。
 
 ### ② 岗位和候选人（interview-talent、interview-raas）
 
@@ -345,6 +349,7 @@ HR 侧：
 - `page_opened` 带 `signals`：这个浏览器里哪几类事件采得到（`visibility`、`fullscreen`、`device_change`、`network`、`clipboard`），以及 `in_app_browser`（微信等内置浏览器的名字，可能不触发失焦事件）。报告据此区分「没发生」和「采不到」。
 - `device_check` 带 `result`（`passed` 或 `failed`）；失败时带 `error`（`permission_denied`、`device_not_found` 等）。
 - `device_report` 是 `POST /room/device-check` 记下的：`camera`、`microphone`、`speaker`（`ok`、`failed`、`skipped`）、`uplink_kbps`（页面测出来的上行网速，千比特每秒；没测出来是 null）、`recording_mime`、`user_agent`。
+- `recording_gap` 是面试中录像缺了一段，带 `device` 和 `cause`：`device` 是 `audio` 或 `video` 时是麦克风或摄像头断了（`cause` 为 `ended` 设备没了、`muted` 被系统静音，比如来电话）；`device` 是 `audio_output` 时是页面的声音被系统整个停掉了（`cause` 为 `suspended`、`interrupted`，或者 `stalled` 状态正常但声音不走），这一段面试官的话播不出来，录像里也没有声音。恢复了报 `device_recovered`；声音被停掉的那一种带 `device: "audio_output"` 和 `duration_ms`（停了多久）。这两种情况面试都会停下来等，不会把这段时间算成候选人没说话。
 - `screen_wake_lock` 在开始面试时报一次：`supported`（浏览器有没有屏幕常亮的能力）和 `held`（有没有申请到）。没申请到时手机可能中途自动锁屏，录像会断。
 - `upload_stalled` 是录像传不动了：`cause`（`retrying` 请求失败在重试、`offline` 浏览器报告断网、`failed` 重试也没用）和当时还没传的分片数 `pending_chunks`。又传动了报 `upload_recovered`：`stalled_ms`（停了多久）、`failures`（中间连续失败了几次）、`pending_chunks`。一次停顿不管重试多少次只报这一对。
 - `upload_finished` 是面试结束后录像全部传完：`uploaded_bytes`（这次打开页面以来传了多少字节）和 `wait_ms`（面试结束后候选人等了多久；刷新后回来补传的是 null）。

@@ -6,12 +6,16 @@
 from __future__ import annotations
 
 import math
+import time
 
 SAMPLE_RATE = 24_000
 CHUNK = SAMPLE_RATE // 5
 # 文本里带这两个标记时故意出错，用来测后端怎么处理 worker 的失败
 FAIL_MARKER = "[fail]"
 FAIL_MIDWAY_MARKER = "[fail-midway]"
+# 文本里带这个标记时先等一会儿再出声，用来测请求排队的先后
+SLOW_MARKER = "[slow]"
+SLOW_SECS = 1.0
 
 
 class FakeEngine:
@@ -29,6 +33,8 @@ class FakeEngine:
     def synthesize(self, *, text: str, **_ignored):
         if FAIL_MARKER in text:
             raise RuntimeError("假引擎按要求失败")
+        if SLOW_MARKER in text:
+            time.sleep(SLOW_SECS)
         count = sum(1 for char in text if not char.isspace())
         total = max(count * SAMPLE_RATE // 5, SAMPLE_RATE * 3 // 10)
         step = 2 * math.pi * 220.0 / SAMPLE_RATE

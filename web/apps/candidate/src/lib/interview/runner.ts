@@ -228,6 +228,9 @@ export class InterviewRunner<B> {
   private playback: Playback | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
   private aborted = false;
+  /** 面试被按住了（设备断了、声音被系统停了）：不开始播下一句，听回答的计时也停着。 */
+  private held = false;
+  private readonly releaseWaiters = new Set<() => void>();
   /** 等状态机走到某个阶段的人。 */
   private turnWaiter: { until: (state: TurnState) => boolean; resolve: () => void } | null = null;
   private readonly abortWaiters = new Set<() => void>();
@@ -288,6 +291,7 @@ export class InterviewRunner<B> {
     this.stopTicking();
     this.turnWaiter?.resolve();
     for (const wake of this.abortWaiters) wake();
+    for (const wake of this.releaseWaiters) wake();
   }
 
   // ── 候选人的操作 ──
@@ -313,14 +317,20 @@ export class InterviewRunner<B> {
     this.dispatch({ type: "user_ready", at: this.now() });
   }
 
-  /** 麦克风或摄像头被打断：暂停计时。 */
+  /**
+   * 麦克风、摄像头被打断，或者声音被系统停了：按住面试。正在听回答的，计时停下；
+   * 面试官正在说或者还没开口的，等这一句说完、轮到候选人回答时计时也不走，下一句先不播。
+   */
   pause(): void {
+    this.held = true;
     this.dispatch({ type: "pause", at: this.now() });
   }
 
   resume(): void {
+    this.held = false;
     this.vad.reset();
     this.dispatch({ type: "resume", at: this.now() });
+    for (const wake of this.releaseWaiters) wake();
   }
 
   /** 麦克风的音量帧。AudioGraph 的 onLevel 直接接到这里。 */
@@ -361,6 +371,7 @@ export class InterviewRunner<B> {
     this.turn = startTurn(this.now());
 
     for (;;) {
+      await this.whileHeld();
       if (buffer) {
         playbackStart ??= this.now();
         this.setPhase("asking");
@@ -403,6 +414,8 @@ export class InterviewRunner<B> {
 
       // 面试官的声音刚停，之前的音量状态不能带进来。插话的不清：候选人正说着
       if (this.cutPlayedMs === null) this.vad.reset();
+      // 面试官说话的时候被按住的：状态机那会儿不在听，没记下来，这里补上
+      if (this.held) this.dispatch({ type: "pause", at: this.now() });
       this.setPhase("listening");
       this.startTicking();
       await this.waitForTurn((state) => state.phase === "ended" || state.phase === "asking");
@@ -622,6 +635,20 @@ export class InterviewRunner<B> {
       const timer = setTimeout(wake, ms);
       this.abortWaiters.add(wake);
     });
+  }
+
+  /** 面试被按住的时候在这里等，放开了再往下走。 */
+  private async whileHeld(): Promise<void> {
+    while (this.held && !this.aborted) {
+      await new Promise<void>((resolve) => {
+        const wake = () => {
+          this.releaseWaiters.delete(wake);
+          resolve();
+        };
+        this.releaseWaiters.add(wake);
+      });
+    }
+    this.checkAborted();
   }
 
   private checkAborted(): void {

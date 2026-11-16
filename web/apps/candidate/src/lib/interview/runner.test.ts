@@ -447,6 +447,48 @@ describe("逐题面试编排", () => {
     expect(api.requests).toHaveLength(1);
   });
 
+  it("面试官说话时被打断，轮到候选人回答时计时不走", async () => {
+    const { api, runner } = setup([finish]);
+    void runner.run(say("q1"));
+    await quiet(runner, 1_000);
+    expect(runner.getSnapshot().phase).toBe("asking");
+
+    runner.pause(); // 题目还没播完，麦克风断了
+    await quiet(runner, 1_000);
+    expect(runner.getSnapshot()).toMatchObject({ phase: "listening", paused: true });
+    await feed(runner, 2_000, true);
+    await feed(runner, 30_000, false); // 没恢复之前，说了什么、静了多久都不算
+    expect(api.requests).toHaveLength(0);
+
+    runner.resume();
+    expect(runner.getSnapshot().paused).toBe(false);
+    await feed(runner, 2_000, true);
+    await feed(runner, 4_900, false);
+    expect(api.requests).toHaveLength(0);
+    await feed(runner, 600, false);
+    expect(api.requests).toHaveLength(1);
+  });
+
+  it("被打断期间不开始播下一句，恢复后接着播", async () => {
+    const { api, audio, runner } = setup([say("q1"), finish]);
+    void runner.run(say("opening", { expectsAnswer: false }));
+    await quiet(runner, 1_000);
+
+    runner.pause();
+    await quiet(runner, 20_000);
+    // 开场白播完了也报上去了，但第一题先不问
+    expect(api.requests).toHaveLength(1);
+    expect(audio.played).toHaveLength(1);
+    expect(runner.getSnapshot().utterance?.key).toBe("q1");
+
+    runner.resume();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(audio.played).toHaveLength(2);
+    expect(runner.getSnapshot().phase).toBe("asking");
+    await quiet(runner, 2_000);
+    expect(runner.getSnapshot()).toMatchObject({ phase: "listening", paused: false });
+  });
+
   it("stop 之后不再播放也不再上报", async () => {
     const { api, runner } = setup([finish]);
     const result = runner.run(say("q1"));

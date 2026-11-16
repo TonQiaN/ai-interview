@@ -275,6 +275,34 @@ pub struct ReportList {
     pub items: Vec<ReportBrief>,
 }
 
+/// 录像画面检查得到的一条事件：画面里的人数不对，或者看得到手机。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct FrameEvent {
+    /// 报告里证据的 `event_id` 指的就是它，比如 `frame-phone-95000`
+    pub id: String,
+    /// `face_count_changed`、`phone_visible`，或者 `frames_checked`（整段录像检查过了，带抽了多少帧）
+    pub kind: String,
+    /// 从哪一刻开始，面试时间轴上的毫秒，和录像同一条时间轴
+    pub at_ms: Option<u64>,
+    /// 持续了多久。只在一帧里看到的没有
+    pub duration_ms: Option<u64>,
+    /// 看到了什么：`people`（几个人，看不清是 null）、`frames`（连续几帧）、`note`（模型的一句说明）、
+    /// `unclear`（看不清）。`frames_checked` 带的是 `frames`、`interval_ms`、`flagged`、`unreadable`
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
+    pub payload: serde_json::Value,
+    /// 这一段里存了图的帧，面试时间轴上的毫秒。图用 `GET /api/v1/interviews/{id}/frames/{at_ms}` 取
+    pub frame_at_ms: Vec<u64>,
+}
+
+/// 这场面试的录像画面检查结果。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct FrameEventList {
+    /// 检查过没有。没有录像、还没出报告、或者检查没做成时是 false，这时 `items` 是空的
+    pub checked: bool,
+    /// 按开始的时间从早到晚排
+    pub items: Vec<FrameEvent>,
+}
+
 /// HR 的结论。
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct DecisionRequest {

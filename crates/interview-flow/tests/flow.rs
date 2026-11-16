@@ -1201,6 +1201,8 @@ async fn endpoints_require_login(pool: PgPool) {
         format!("/api/v1/interviews/{id}/transcript"),
         format!("/api/v1/interviews/{id}/report"),
         format!("/api/v1/interviews/{id}/reports"),
+        format!("/api/v1/interviews/{id}/frame-events"),
+        format!("/api/v1/interviews/{id}/frames/95000"),
     ] {
         let response = TestRequest::get(&uri).send(&router).await;
         assert_eq!(response.status, StatusCode::UNAUTHORIZED, "{uri}");
