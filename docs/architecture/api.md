@@ -117,6 +117,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `GET /api/v1/interviews/{id}`、`PATCH /api/v1/interviews/{id}`、`DELETE /api/v1/interviews/{id}` ★ | 详情（带候选人和岗位摘要、最新报告状态）、改配置、归档 |
 | `POST /api/v1/interviews/{id}/prepare` ★ | 出题加预合成语音 |
 | `POST /api/v1/interviews/{id}/cancel` | 取消 |
+| `POST /api/v1/interviews/{id}/purge` | 彻底删除，只有管理员能用，删了不能恢复：这场面试的录像、语音、画面检查的帧，和题目、对话记录、过程事件、面试链接、报告一起删掉，候选人和岗位不动。成功返回 204。正在准备、正在面试，或者后台正在处理它（转写、写报告）时返回 409，先取消或者等一会儿。只想在列表里藏起来用归档 |
 | `GET /api/v1/interviews/{id}/plan`、`PUT /api/v1/interviews/{id}/plan` | 看题、改题 |
 | `GET /api/v1/interviews/{id}/utterances` | 面试官的每句话和合成状态 |
 | `GET /api/v1/interviews/{id}/utterances/{key}/audio` | 试听 |

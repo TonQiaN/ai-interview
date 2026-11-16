@@ -28,6 +28,7 @@ use uuid::Uuid;
 
 use super::{Harness, config, error_code, planner};
 
+mod purge;
 mod recordings;
 
 /// 写报告的假模型。报告的几步是并发的，谁先调用不确定，所以按提示词里的任务标题分发。
