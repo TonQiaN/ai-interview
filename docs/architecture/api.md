@@ -148,7 +148,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 | `GET /api/v1/positions`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 岗位 |
 | `POST /api/v1/positions/draft` | 粘贴一段岗位描述，让大模型整理成岗位草稿（不保存，给新建岗位的表单预填） |
 | `GET /api/v1/candidates`、`POST`、`GET /{id}`、`PATCH /{id}`、`DELETE /{id}` ★ | 候选人 |
-| `GET /api/v1/candidates/{id}/resumes`、`POST /api/v1/candidates/{id}/resumes` | 简历列表、上传 |
+| `GET /api/v1/candidates/{id}/resumes`、`POST /api/v1/candidates/{id}/resumes` | 简历列表、上传。能收 PDF、Word（.docx）、图片（PNG、JPG、WebP）和纯文本，最大 20 MB；老格式的 Word（.doc）不收，返回 422 `unsupported_file`；Word 文档坏了或者里面没有文字，返回 422 `unreadable_file` |
 | `GET /api/v1/resumes/{id}`、`GET /api/v1/resumes/{id}/file`、`POST /api/v1/resumes/{id}/parse`、`DELETE /api/v1/resumes/{id}` | 简历详情、原件、重新解析、删除（连原件一起删）。`parse_status` 是 `failed` 时原因在 `parse_error`；是 `done` 但 `parse_warning` 有值时，要把这句话显示给 HR（比如 PDF 页数太多，只读了前 8 页） |
 | `POST /api/v1/candidates/import` | 直接传一份简历，自动建候选人 |
 | `POST /api/v1/candidates/{id}/profile/regenerate` | 重新生成画像 |
@@ -161,7 +161,7 @@ GET /api/v1/candidates?page=1&page_size=20&q=关键词&sort=-created_at
 - 列表和详情是实时去 RAAS 查的，`{ref}` 是 RAAS 里的编号（列表里的 `external_ref`）。已经导入过的带 `imported_position_id` 或 `imported_candidate_id`。候选人的列表和详情不带手机和邮箱，导入以后在我们这边看。
 - 导入是同步的，请求体 `{"refs": [...], "refresh": false}`，一次最多 20 条。每条各自成功或失败，返回 `items[]`，看 `outcome`：`created`、`already_imported`、`refreshed`、`restored`（原来归档了，这次恢复）、`failed`（原因在 `message`）。
 - 已经导入过的默认不动。`refresh` 为真时：岗位用 RAAS 的最新内容覆盖（用工形式 RAAS 里没有，留着我们这边填的）；候选人的基本信息只补空的，RAAS 里有新简历就导进来设成主简历。
-- 候选人的简历优先取 RAAS 里的原始文件，没有或者读不了（比如 Word）就用 RAAS 的解析结果拼一份文字版，都交给 `resume.parse` 任务。`items[].resume` 是 `queued`、`unchanged`、`none`（RAAS 里没有简历）或 `failed`（取简历时 RAAS 出错，人已经建好，稍后带 `refresh` 再导）。
+- 候选人的简历优先取 RAAS 里的原始文件，没有或者读不了（比如老格式的 Word .doc）就用 RAAS 的解析结果拼一份文字版，都交给 `resume.parse` 任务。`items[].resume` 是 `queued`、`unchanged`、`none`（RAAS 里没有简历）或 `failed`（取简历时 RAAS 出错，人已经建好，稍后带 `refresh` 再导）。
 - RAAS 没配置或登录不上是 503（`raas_unavailable`），RAAS 暂时访问不了是 502（`raas_error`）。
 
 ### ④ 语音（interview-tts、interview-stt）
