@@ -320,3 +320,18 @@ describe("录像上传和屏幕常亮的事件", () => {
     expect(eventWhen(lone, [lone])).toBe("开始前");
   });
 });
+
+describe("面试换到另一个页面继续", () => {
+  const text = (kind: string, payload: Record<string, unknown>) => eventText({ kind, payload });
+
+  it("原来的页面停下来那一条有中文说法，提示 HR 看一眼", () => {
+    expect(text("page_taken_over", {})).toBe("面试换到另一个页面继续了，这个页面停了下来");
+    expect(eventSeverity("page_taken_over")).toBe("notice");
+  });
+
+  it("中断以后接着面的那一条不再写成「面试开始」", () => {
+    expect(text("interview_started", { resumed: true })).toBe("回来接着面试");
+    expect(text("interview_started", { resumed: false })).toBe("面试开始");
+    expect(text("interview_started", {})).toBe("面试开始");
+  });
+});
