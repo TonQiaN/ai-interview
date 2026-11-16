@@ -707,8 +707,8 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
                 <div className="oil-stack">
                   <p className="oil-muted" style={{ margin: 0 }}>
                     {primary
-                      ? "还没有画像。可以让大模型按简历归纳一份，面试官出题时会用到。"
-                      : "还没有画像。上传一份简历，大模型会读出经历、技能和值得核实的地方，面试官出题时也会用到。"}
+                      ? "还没有画像。可以让大模型按简历归纳一份，方便你先了解这位候选人。没有画像不影响出题，面试官看的是简历。"
+                      : "还没有画像。上传一份简历，大模型会读出经历、技能和值得核实的地方，面试官也会按这份简历出题。"}
                   </p>
                   {!archived && (
                     <div>

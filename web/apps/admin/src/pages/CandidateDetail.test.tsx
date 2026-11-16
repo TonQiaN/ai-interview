@@ -215,4 +215,21 @@ describe("候选人详情", () => {
     const rows = link.map((a) => a.closest("li")).filter((li) => li !== null);
     expect(rows.some((li) => within(li).queryByText("已归档"))).toBe(true);
   });
+
+  it("还没有画像时不说出题会用到画像：出题看的是简历", async () => {
+    const created = (await (
+      await server.fetch("/api/v1/candidates", {
+        method: "POST",
+        body: JSON.stringify({ name: "合成候选人甲" }),
+      })
+    ).json()) as { id: string };
+    open(created.id);
+
+    expect(
+      await screen.findByText(
+        "还没有画像。上传一份简历，大模型会读出经历、技能和值得核实的地方，面试官也会按这份简历出题。",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/出题时(也)?会用到/)).toBeNull();
+  });
 });

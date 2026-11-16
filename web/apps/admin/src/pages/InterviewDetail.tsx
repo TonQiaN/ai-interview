@@ -155,7 +155,7 @@ function NextStep({ interview, goTo }: { interview: Interview; goTo: (tab: Tab) 
           <span>
             {synthesizing
               ? `题目出好了，已合成 ${synth.done} / ${synth.total} 句语音。`
-              : "正在按简历和岗位要求出题。"}
+              : "正在出题。"}
             可以先去做别的，好了会停在「待发送」。
           </span>
           <Progress value={synthesizing ? synth.done / synth.total : 0.05} label="准备进度" />
