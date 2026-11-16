@@ -28,6 +28,7 @@ use utoipa_axum::router::OpenApiRouter;
 use uuid::Uuid;
 
 pub mod access;
+mod compress;
 pub mod conduct;
 pub mod config;
 pub mod consent;

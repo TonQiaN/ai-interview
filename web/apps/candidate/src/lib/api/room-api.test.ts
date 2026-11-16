@@ -112,6 +112,18 @@ describe("候选人侧接口客户端", () => {
     expect(calls[0]?.request.credentials).toBe("omit");
   });
 
+  it("取语音时说明接受压缩过的格式；要没压缩的就只说 WAV", async () => {
+    const { api, calls } = setup(() => new Response(new Uint8Array([1, 2, 3])));
+    await api.fetchAudio("/api/v1/room/utterances/q1/audio", "compressed");
+    await api.fetchAudio("/api/v1/room/utterances/q1/audio", "wav");
+    await api.fetchAudio("/api/v1/room/utterances/q1/audio");
+    expect(calls.map((call) => call.headers.get("Accept"))).toEqual([
+      "audio/mpeg, audio/wav;q=0.9",
+      "audio/wav",
+      "audio/wav",
+    ]);
+  });
+
   it("没有事件时不发请求；页面要关时带 keepalive", async () => {
     const { api, calls } = setup(() => new Response(null, { status: 204 }));
     await api.postEvents([]);

@@ -48,6 +48,9 @@ pub struct RoomConfig {
     pub ffmpeg: String,
     /// ffprobe 的路径或命令名，读录像时长用
     pub ffprobe: String,
+    /// 面试官的语音压成 MP3 下发时用的码率（kbps）。0 是不压缩，原样发 WAV。
+    /// 页面要整段取下来才能播，压缩后体积是原来的五分之一左右，候选人网络慢的时候少等几秒
+    pub audio_kbps: u32,
     /// 面试进行中，页面多少分钟没有任何动静（不上报、不传录像）就算候选人离开了
     pub abandon_after_minutes: u32,
     /// 判断一段回答最多等多少秒。超过了就不等模型，按顺序问下一题
@@ -98,6 +101,16 @@ impl RoomConfig {
             });
         let ffmpeg = env_opt("AI_INTERVIEW_FFMPEG").unwrap_or(default.ffmpeg.clone());
         let ffprobe = env_opt("AI_INTERVIEW_FFPROBE").unwrap_or(default.ffprobe.clone());
+        let audio_kbps = env_parse("AI_INTERVIEW_ROOM_AUDIO_KBPS", default.audio_kbps)
+            .ok()
+            .filter(|kbps| *kbps == 0 || (32..=160).contains(kbps))
+            .unwrap_or_else(|| {
+                tracing::warn!(
+                    "AI_INTERVIEW_ROOM_AUDIO_KBPS 要么是 0（不压缩），要么在 32 到 160 之间，这次用默认值 {}",
+                    default.audio_kbps
+                );
+                default.audio_kbps
+            });
         let abandon_after_minutes = env_parse(
             "AI_INTERVIEW_ROOM_ABANDON_MINUTES",
             default.abandon_after_minutes,
@@ -223,6 +236,7 @@ impl RoomConfig {
             camera_required,
             ffmpeg,
             ffprobe,
+            audio_kbps,
             abandon_after_minutes,
             upload_idle_minutes,
             transcribe_with_fake,
@@ -251,6 +265,7 @@ impl Default for RoomConfig {
             recording: RecordingSettings::default(),
             ffmpeg: "ffmpeg".to_owned(),
             ffprobe: "ffprobe".to_owned(),
+            audio_kbps: 64,
             abandon_after_minutes: 15,
             settle_timeout_sec: 20,
             transcribe_with_fake: false,
