@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setFetch } from "../api/http";
 import { createMockServer } from "../api/mock/server";
 import type { AdminUser, Interview, Page } from "../api/types";
+import { DEFAULT_ASK_WHEN } from "../lib/plan";
 import { InterviewDetailPage } from "./InterviewDetail";
 
 type Server = ReturnType<typeof createMockServer>;
@@ -821,6 +822,29 @@ describe("面试详情", () => {
       expect(
         await screen.findByText("什么时候问：只说了团队做了什么，没说自己做了什么"),
       ).toBeTruthy();
+    });
+
+    it("加追问时没写什么情况下问：存下来的是「每次都问」那一句，窗口里说了不填会怎样", async () => {
+      const { target, plan } = readyWithPlan();
+      const first = plan.questions[0];
+      if (!first) throw new Error("演示数据里没有题");
+      first.follow_ups = [];
+      await openQuestions(target.id);
+
+      fireEvent.click(screen.getByRole("button", { name: "给第 1 题加一句追问" }));
+      const dialog = await screen.findByRole("dialog", { name: "给第 1 题加一句追问" });
+      expect(within(dialog).getByText(/不填的话，只要候选人回答了这道题/)).toBeTruthy();
+      fireEvent.change(within(dialog).getByLabelText("面试官会这样追问"), {
+        target: { value: "如果要经常夜里处理线上问题，你能接受吗？" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "加进去并合成语音" }));
+
+      await waitFor(() =>
+        expect(server.db.plans.get(target.id)?.questions[0]?.follow_ups?.[0]?.ask_when).toBe(
+          DEFAULT_ASK_WHEN,
+        ),
+      );
+      expect(DEFAULT_ASK_WHEN).toMatch(/^每次都问/);
     });
 
     it("追问到了每题的上限，或者设置里关了追问，就没有「加一句追问」", async () => {

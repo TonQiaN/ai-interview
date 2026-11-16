@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { errorMessage } from "../api/http";
 import { useSavePlan } from "../api/queries";
 import type { InterviewPlan } from "../api/types";
-import { addFollowUp, DEFAULT_ASK_WHEN, type FollowUpDraft } from "../lib/plan";
+import { addFollowUp, type FollowUpDraft } from "../lib/plan";
 
 const BLANK: FollowUpDraft = { text: "", askWhen: "" };
 
@@ -94,7 +94,7 @@ export function AddFollowUpDialog({
         </Field>
         <Field
           label="什么情况下问（可以不填）"
-          hint={`写一句就行，比如「只说了团队做了什么，没说自己做了什么」。不会念给候选人。不填就是「${DEFAULT_ASK_WHEN}」。`}
+          hint="写一句就行，比如「只说了团队做了什么，没说自己做了什么」。不会念给候选人。不填的话，只要候选人回答了这道题、又没有讲过这一句要问的内容，就会问。"
         >
           {({ id, describedBy }) => (
             <Input
