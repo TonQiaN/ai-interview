@@ -23,6 +23,7 @@ mod config;
 mod engine;
 mod fake;
 pub mod http;
+mod pronounce;
 mod request;
 mod segment;
 mod synthesizer;
