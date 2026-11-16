@@ -14,6 +14,7 @@ import type {
   InterviewInput,
   InterviewPatch,
   InterviewPlan,
+  InterviewSummary,
   LoginInput,
   PositionInput,
   PreviewRequest,
@@ -313,6 +314,59 @@ export function useDeleteCandidate() {
   return useMutation({
     mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/candidates/{id}", at(id))),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["candidates"] }),
+  });
+}
+
+/** 一位候选人名下的全部面试，归档的也算。彻底删除候选人之前要先把它们删掉 */
+async function interviewsOfCandidate(candidateId: string): Promise<InterviewSummary[]> {
+  const all: InterviewSummary[] = [];
+  for (let page = 1; ; page += 1) {
+    const got = await unwrap(
+      api.GET("/api/v1/interviews", {
+        params: {
+          query: { candidate_id: candidateId, include_archived: true, page_size: 100, page },
+        },
+      }),
+    );
+    all.push(...got.items);
+    if (got.items.length === 0 || all.length >= got.total) return all;
+  }
+}
+
+export function useAllInterviewsOfCandidate(candidateId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["interviews", "all-of-candidate", candidateId],
+    queryFn: () => interviewsOfCandidate(candidateId),
+    enabled,
+  });
+}
+
+/**
+ * 彻底删除一位候选人。名下还有面试时接口会拒绝，所以先把面试一场场彻底删除，再删人。
+ * 中间有一场删不掉就停下来：已经删掉的不会回来，候选人还在，过一会儿可以再来一次。
+ */
+export function usePurgeCandidate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      let done = 0;
+      for (const i of await interviewsOfCandidate(id)) {
+        try {
+          await unwrap(api.POST("/api/v1/interviews/{id}/purge", at(i.id)));
+          done += 1;
+        } catch (e) {
+          const before = done > 0 ? `前面 ${done} 场已经删了，` : "";
+          throw new Error(
+            `「${i.position_title}」那场面试没删掉：${errorMessage(e)}。${before}候选人还在，处理好以后再点一次。`,
+          );
+        }
+      }
+      await unwrap(api.POST("/api/v1/candidates/{id}/purge", at(id)));
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["interviews"] });
+      qc.invalidateQueries({ queryKey: ["candidates"] });
+    },
   });
 }
 

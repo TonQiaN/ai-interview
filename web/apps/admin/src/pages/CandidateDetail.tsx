@@ -9,20 +9,25 @@ import {
   Chip,
   Dialog,
   Dropzone,
+  Field,
+  Input,
   KeyValue,
   PageHeader,
   useToast,
 } from "@ai-interview/ui";
-import { FileText, Pencil, Plus, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { Archive, FileText, Pencil, Plus, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage, isMock } from "../api/http";
 import {
   profilePending,
+  useAllInterviewsOfCandidate,
   useCandidate,
   useDeleteCandidate,
   useDeleteResume,
   useInterviews,
+  useMe,
+  usePurgeCandidate,
   useRegenerateProfile,
   useReparseResume,
   useResume,
@@ -37,10 +42,11 @@ import type {
   ParsedResume,
   Resume,
 } from "../api/types";
-import { Confirm, QueryView } from "../components/common";
+import { Confirm, QueryView, StatusBadge } from "../components/common";
 import { InterviewTags } from "../components/ReportVerdict";
 import {
   fileSize,
+  fullTime,
   parseStatusLabel,
   parseStatusTone,
   relativeTime,
@@ -395,7 +401,7 @@ function ResumeRow({ resume, candidateId }: { resume: Resume; candidateId: strin
         onConfirm={() =>
           remove.mutate(resume.id, {
             onSuccess: () => {
-              toast("已删除");
+              toast("已归档");
               setDeleting(false);
             },
             onError: (e) => {
@@ -413,6 +419,125 @@ function ResumeRow({ resume, candidateId }: { resume: Resume; candidateId: strin
   );
 }
 
+/** 彻底删除：个人信息和简历真的从服务器上删掉。名下的面试要先删，所以在这里列出来一起删 */
+function PurgeDialog({
+  candidate,
+  open,
+  onClose,
+}: {
+  candidate: CandidateDetail;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const purge = usePurgeCandidate();
+  const interviews = useAllInterviewsOfCandidate(candidate.id, open);
+  const [typed, setTyped] = useState("");
+  const name = candidate.name.trim();
+  const matched = typed.trim() === name;
+  const list = interviews.data ?? [];
+  const blocked = list.some((i) => i.status === "preparing" || i.status === "in_progress");
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 每次打开都要重新输一遍
+  useEffect(() => {
+    if (!open) return;
+    setTyped("");
+    purge.reset();
+  }, [open]);
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={`彻底删除${candidate.name}？`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} autoFocus>
+            先不
+          </Button>
+          <Button
+            variant="danger"
+            type="submit"
+            form="purge-candidate"
+            loading={purge.isPending}
+            disabled={!matched || !interviews.isSuccess}
+          >
+            彻底删除
+          </Button>
+        </>
+      }
+    >
+      <form
+        id="purge-candidate"
+        className="oil-stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!matched || !interviews.isSuccess) return;
+          purge.mutate(candidate.id, {
+            onSuccess: () => {
+              toast(`${candidate.name}的资料已经彻底删除`);
+              navigate("/candidates", { replace: true });
+            },
+          });
+        }}
+      >
+        {purge.error && <Banner tone="danger">{errorMessage(purge.error)}</Banner>}
+        <p className="adm-flat">
+          {`${candidate.name}的姓名、手机、邮箱、画像、备注，和每一份简历（原件、全文、解析结果）会从服务器上删掉，`}
+          <strong>删了不能恢复</strong>。
+        </p>
+        {interviews.isPending && <p className="oil-muted adm-flat">正在查名下有没有面试…</p>}
+        {interviews.error && <Banner tone="danger">{errorMessage(interviews.error)}</Banner>}
+        {list.length > 0 && (
+          <div>
+            <p className="adm-flat">
+              名下的 {list.length}{" "}
+              场面试会先一起彻底删除，录像、对话记录和报告都在里面，归档了的也算：
+            </p>
+            <ul className="adm-list adm-purge__list">
+              {list.map((i) => (
+                <li key={i.id} className="adm-item adm-item--wrap">
+                  <div className="adm-item__main">
+                    {i.position_title}
+                    <div className="adm-item__sub">
+                      {fullTime(i.ended_at ?? i.started_at ?? i.created_at)}
+                    </div>
+                  </div>
+                  <StatusBadge status={i.status} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {blocked && (
+          <Banner tone="warning">
+            有面试正在准备或者正在进行，删到那一场会停下来。先去把它取消，或者等它结束。
+          </Banner>
+        )}
+        {candidate.source === "raas" && (
+          <p className="adm-flat">
+            这位候选人是从 RAAS 导入的。这里删掉以后，再从 RAAS 导入一次还会重新出现。
+          </p>
+        )}
+        <p className="oil-muted adm-flat">
+          候选人要求删除个人信息时用。只是不想让这个人出现在列表里，用「归档」就行。
+        </p>
+        <Field label={`输入候选人的名字「${name}」来确认`}>
+          {({ id }) => (
+            <Input
+              id={id}
+              autoComplete="off"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+            />
+          )}
+        </Field>
+      </form>
+    </Dialog>
+  );
+}
+
 function Detail({ candidate }: { candidate: CandidateDetail }) {
   const navigate = useNavigate();
   const toast = useToast();
@@ -425,6 +550,8 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
   const [editing, setEditing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [purging, setPurging] = useState(false);
+  const isAdmin = useMe().data?.role === "admin";
 
   const primary = candidate.primary_resume;
   const reading = primary?.parse_status === "pending" || primary?.parse_status === "running";
@@ -662,15 +789,25 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
             </CardBody>
           </Card>
 
-          <div>
+          <div className="oil-row">
             <Button
               variant="ghost"
               size="sm"
-              icon={<Trash2 aria-hidden="true" />}
+              icon={<Archive aria-hidden="true" />}
               onClick={() => setDeleting(true)}
             >
-              删除候选人
+              归档
             </Button>
+            {isAdmin && (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Trash2 aria-hidden="true" />}
+                onClick={() => setPurging(true)}
+              >
+                彻底删除
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -697,11 +834,11 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
           }}
         />
       </Dialog>
+      <PurgeDialog candidate={candidate} open={purging} onClose={() => setPurging(false)} />
       <Confirm
         open={deleting}
-        title={`删除${candidate.name}？`}
-        confirmLabel="删除"
-        danger
+        title={`归档${candidate.name}？`}
+        confirmLabel="归档"
         loading={remove.isPending}
         onClose={() => setDeleting(false)}
         onConfirm={() =>
@@ -717,7 +854,10 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
           })
         }
       >
-        删掉之后列表里不再显示这位候选人，已经安排的面试不受影响。
+        归档以后列表里不再显示这位候选人，已经安排的面试不受影响。资料和简历还留在服务器上，没有删掉。
+        {isAdmin
+          ? "要把它们真的删掉，用旁边的「彻底删除」。"
+          : "候选人要求删除个人信息时，请找管理员彻底删除。"}
       </Confirm>
     </>
   );

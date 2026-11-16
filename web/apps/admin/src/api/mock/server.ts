@@ -1087,6 +1087,20 @@ export function createMockServer(options: MockOptions = {}) {
     find.candidate(params[0]).archived_at = iso(0);
     return null;
   });
+  on("POST", "/candidates/:id/purge", ({ params }) => {
+    requireAdmin();
+    const c = find.candidate(params[0]);
+    const left = db.interviews.filter((i) => i.candidate.id === c.id).length;
+    if (left > 0)
+      throw new HttpError(
+        409,
+        "candidate_has_interviews",
+        `这位候选人名下还有 ${left} 场面试，先把面试彻底删除`,
+      );
+    db.candidates = db.candidates.filter((x) => x !== c);
+    db.resumes = db.resumes.filter((r) => r.candidate_id !== c.id);
+    return null;
+  });
   on("GET", "/candidates/:id/resumes", ({ params, query }) => {
     find.candidate(params[0]);
     return paginate(db.resumes.filter((r) => r.candidate_id === params[0]).sort(byNewest), query);
