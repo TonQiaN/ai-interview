@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use common::{TestApp, agree, create_invite, error_code, interview_status, prepared, run_tasks};
+use interview_audio::{Audio, Ffmpeg, encode_wav};
 use interview_llm::testing::ScriptedModel;
 use interview_platform::testing::{self, TestRequest, TestResponse};
 use interview_room::{AnswerTranscriber, AnswerTranscript, Deps, RoomConfig};
@@ -882,4 +883,103 @@ async fn the_watchdog_closes_an_interview_nobody_came_back_to(pool: PgPool) {
         end_reason(&finished, other).await.as_deref(),
         Some("candidate_left")
     );
+}
+
+/// 机器上的 ffmpeg 能不能压 MP3。没装或者不带这个编码器时，压缩的测试跳过。
+fn has_mp3_encoder() -> bool {
+    std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-encoders"])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains("libmp3lame"))
+        .unwrap_or(false)
+}
+
+const ACCEPT_COMPRESSED: &str = "audio/mpeg, audio/wav;q=0.9";
+
+/// 页面说了自己接受压缩的格式：面试官的语音压成 MP3 再下发，时长不变，体积小得多。
+/// 没说的（别的调用方）照旧拿到原样的 WAV。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn audio_is_compressed_when_the_page_accepts_it(pool: PgPool) {
+    if !has_mp3_encoder() {
+        eprintln!("没有带 MP3 编码器的 ffmpeg，跳过");
+        return;
+    }
+    let app = common::app(pool).await;
+    let interview_id = common::seed_interview(&app.ctx, "ready").await;
+    common::seed_script(&app.ctx, interview_id, &common::sample_plan(), &[]).await;
+    // 开场白换成一段真的声音：六秒，采样率和 IndexTTS 输出的一样
+    let tone = Audio::tone(22_050, 220.0, 6_000, 0.4).unwrap();
+    let wav = encode_wav(&tone);
+    app.ctx
+        .blobs
+        .put(
+            &interview_core::blob_key::utterance_audio(interview_id, "opening"),
+            wav.clone().into(),
+        )
+        .await
+        .unwrap();
+    let (_, token) = create_invite(&app, interview_id).await;
+    agree(&app, &token).await;
+    start(&app, &token).await;
+
+    let compressed = TestRequest::get("/api/v1/room/utterances/opening/audio")
+        .bearer(&token)
+        .header("accept", ACCEPT_COMPRESSED)
+        .send(&app.public)
+        .await;
+    assert_eq!(compressed.status, 200);
+    assert_eq!(compressed.content_type(), Some("audio/mpeg"));
+    assert_eq!(compressed.header("vary"), Some("Accept"));
+    assert!(
+        compressed.body.len() * 4 < wav.len(),
+        "压缩后 {} 字节，原来 {} 字节",
+        compressed.body.len(),
+        wav.len()
+    );
+    // 解出来还是六秒：开头结尾没有多出一截空白（直接写管道的 MP3 会多 50 毫秒）
+    let decoded = Ffmpeg::from_env().decode(&compressed.body).await.unwrap();
+    let off_by = decoded.duration_ms().abs_diff(6_000);
+    assert!(off_by <= 30, "解出来 {} 毫秒", decoded.duration_ms());
+
+    let plain = TestRequest::get("/api/v1/room/utterances/opening/audio")
+        .bearer(&token)
+        .send(&app.public)
+        .await;
+    assert_eq!(plain.status, 200);
+    assert_eq!(plain.content_type(), Some("audio/wav"));
+    assert_eq!(plain.body.as_ref(), wav.as_slice());
+}
+
+/// 压不了的时候照旧发原样的语音，面试不受影响：存的不是 WAV、没装 ffmpeg、配置里关掉了压缩。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn audio_is_served_as_stored_when_it_cannot_be_compressed(pool: PgPool) {
+    let configs = [
+        // 存的内容 ffmpeg 读不了（测试里的假语音是一行字）
+        RoomConfig::default(),
+        RoomConfig {
+            ffmpeg: "ffmpeg-not-installed".to_owned(),
+            ..RoomConfig::default()
+        },
+        RoomConfig {
+            audio_kbps: 0,
+            ..RoomConfig::default()
+        },
+    ];
+    for config in configs {
+        let app = common::app_with(pool.clone(), config).await;
+        let interview_id = common::seed_interview(&app.ctx, "ready").await;
+        common::seed_script(&app.ctx, interview_id, &common::sample_plan(), &[]).await;
+        let (_, token) = create_invite(&app, interview_id).await;
+        agree(&app, &token).await;
+        start(&app, &token).await;
+
+        let audio = TestRequest::get("/api/v1/room/utterances/opening/audio")
+            .bearer(&token)
+            .header("accept", ACCEPT_COMPRESSED)
+            .send(&app.public)
+            .await;
+        assert_eq!(audio.status, 200);
+        assert_eq!(audio.content_type(), Some("audio/wav"));
+        assert_eq!(audio.text(), "假语音：opening");
+    }
 }
