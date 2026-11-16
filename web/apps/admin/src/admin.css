@@ -207,6 +207,22 @@
   .adm-item--wrap {
     flex-wrap: wrap;
   }
+  /* 调题目先后的窗口：一行一道题，题目最多两行 */
+  .adm-arrange {
+    align-items: flex-start;
+  }
+  .adm-arrange__text {
+    margin: 0 0 var(--oil-space-2);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  .adm-arrange__moves {
+    flex: none;
+    display: flex;
+    gap: var(--oil-space-1);
+  }
   /* 「使用说明」页：成段的说明文字，一行不要太长 */
   .adm-help p,
   .adm-help dd,

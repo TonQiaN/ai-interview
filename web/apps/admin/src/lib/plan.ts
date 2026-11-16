@@ -1,4 +1,5 @@
-// 题目出好以后 HR 自己加一道题：不调模型，直接放进计划里，后端只给新的这一句合成语音。
+// 题目出好以后 HR 自己调：加一道题、调先后、改哪些题时间紧也要问。都不调模型，
+// 改完整份计划存回去，后端只给文字变了的和新增的句子合成语音。
 import type { InterviewPlan, PlannedQuestion, QuestionCategory } from "../api/types";
 
 /** 页面上填的那几样 */
@@ -59,6 +60,51 @@ function lines(text: string): string[] {
     .split("\n")
     .map((line) => line.replace(/^\s*(?:[-*•·]|\d+[.、)])\s*/, "").trim())
     .filter((line) => line !== "");
+}
+
+/**
+ * 主问题往前（-1）或往后（1）挪一位以后排在第几个；挪不了就是 undefined。
+ * 只在主问题之间挪：备用题要排在所有主问题后面（后端会检查），不参与。
+ */
+function moveTarget(plan: InterviewPlan, key: string, direction: -1 | 1): number | undefined {
+  const from = plan.questions.findIndex((q) => q.key === key);
+  const to = from + direction;
+  const moving = plan.questions[from];
+  const other = plan.questions[to];
+  if (!moving || !other || moving.reserve || other.reserve) return undefined;
+  return to;
+}
+
+/** 这道主问题还能不能往这个方向挪 */
+export function canMoveQuestion(plan: InterviewPlan, key: string, direction: -1 | 1): boolean {
+  return moveTarget(plan, key, direction) !== undefined;
+}
+
+/**
+ * 把一道主问题往前或往后挪一位，和旁边那道换个位置。挪不了时原样返回。
+ * 面试官要说的话没有变，后端不会重新合成语音。时间不够时没标必问的题会被跳过，
+ * 越靠后越容易轮不上，所以先后是有用的。
+ */
+export function moveQuestion(plan: InterviewPlan, key: string, direction: -1 | 1): InterviewPlan {
+  const to = moveTarget(plan, key, direction);
+  if (to === undefined) return plan;
+  const from = to - direction;
+  const questions = [...plan.questions];
+  const [moving] = questions.splice(from, 1);
+  if (!moving) return plan;
+  questions.splice(to, 0, moving);
+  return { ...plan, questions };
+}
+
+/**
+ * 把一道主问题标成「时间紧也要问」或者「时间紧可以跳过」。
+ * 备用题不能标成必问（后端会拒绝），原样返回。
+ */
+export function setRequired(plan: InterviewPlan, key: string, required: boolean): InterviewPlan {
+  return {
+    ...plan,
+    questions: plan.questions.map((q) => (q.key === key && !q.reserve ? { ...q, required } : q)),
+  };
 }
 
 /** 预计回答多久可以选的几档，不超过设置里的单题最长时间；一档都不剩时就用那个上限 */
