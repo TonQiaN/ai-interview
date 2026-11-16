@@ -12,7 +12,7 @@ import {
   useToast,
 } from "@ai-interview/ui";
 import { Check, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { errorMessage, fieldErrors } from "../api/http";
 import {
@@ -23,6 +23,7 @@ import {
   useInterview,
   usePosition,
   usePositions,
+  useReport,
   useTemplates,
 } from "../api/queries";
 import type { CandidateListItem, InterviewConfig, Position } from "../api/types";
@@ -33,6 +34,7 @@ import { PageHeader } from "../components/PageHeader";
 import { VoicePicker } from "../components/VoicePicker";
 import { sameForm } from "../lib/form";
 import { fullTime } from "../lib/format";
+import { nextRoundConfig } from "../lib/nextRound";
 import { scheduleAll } from "../lib/schedule";
 
 /**
@@ -209,6 +211,8 @@ function PickPosition({
 
 /** 「从哪份设置开始」里代表「上一场面试的设置」的那一项，不会和模板的编号撞上 */
 const SOURCE = "__source";
+/** 同上，代表「按上一场的报告面下一轮」 */
+const NEXT = "__next";
 
 export function InterviewNewPage() {
   const navigate = useNavigate();
@@ -242,8 +246,25 @@ export function InterviewNewPage() {
 
   // 从一场面试点「再安排一场」过来：人、岗位、设置和声音都沿用那一场的
   const source = useInterview(params.get("from") ?? undefined).data;
-  const [usingSource, setUsingSource] = useState(false);
+  // 现在的设置是不是从那一场来的：source 是原样沿用，next 是按那一场的报告改成下一轮
+  const [usingSource, setUsingSource] = useState<"source" | "next" | null>(null);
   const [sourceDone, setSourceDone] = useState(false);
+  // 那一场出了报告的话，可以按报告的建议安排下一轮
+  const hasReport = source?.report?.status === "done";
+  const sourceReport = useReport(source?.id ?? "", hasReport);
+  const wantNext = params.get("round") === "next";
+  const nextConfig = useMemo(
+    () =>
+      source && sourceReport.data && defaults.data
+        ? nextRoundConfig(
+            source.config,
+            sourceReport.data.content,
+            defaults.data.limits,
+            fullTime(source.created_at),
+          )
+        : null,
+    [source, sourceReport.data, defaults.data],
+  );
 
   // 从候选人页或岗位页点过来时，先替他选好。按编号直接取，不在列表里找：
   // 列表一次最多给 100 个，人多了以后排在后面的就找不到了
@@ -272,24 +293,36 @@ export function InterviewNewPage() {
     setBaseConfig(defaults.data.config);
   }, [config, defaults.data]);
 
-  function applySource() {
-    if (!source) return;
-    setUsingSource(true);
+  // 题目数量定死了的时候，报告建议的问题放不下的有几个
+  const leftOut =
+    nextConfig && sourceReport.data
+      ? new Set(sourceReport.data.content.next_round.questions.map((q) => q.question.trim())).size -
+        nextConfig.must_ask_questions.length
+      : 0;
+  function applySource(kind: "source" | "next") {
+    const base = kind === "next" ? nextConfig : source?.config;
+    if (!base) return;
+    setUsingSource(kind);
     setTemplateId(null);
-    setConfig(structuredClone(source.config));
-    setBaseConfig(source.config);
+    setConfig(structuredClone(base));
+    setBaseConfig(base);
   }
-  // 那一场面试取到的时候套一次，之后的改动归用户
+  // 那一场面试取到的时候套一次，之后的改动归用户。要按报告面下一轮时等报告取到再套；
+  // 报告取不到（没生成、请求失败）就原样沿用那一场的
   useEffect(() => {
     if (!source || sourceDone) return;
-    setUsingSource(true);
+    const waiting = wantNext && hasReport && (sourceReport.isPending || !defaults.data);
+    if (waiting) return;
+    const next = wantNext ? nextConfig : null;
+    const base = next ?? source.config;
+    setUsingSource(next ? "next" : "source");
     setTemplateId(null);
-    setConfig(structuredClone(source.config));
-    setBaseConfig(source.config);
+    setConfig(structuredClone(base));
+    setBaseConfig(base);
     setVoiceId(source.voice_id ?? null);
     setBaseVoiceId(source.voice_id ?? null);
     setSourceDone(true);
-  }, [source, sourceDone]);
+  }, [source, sourceDone, wantNext, hasReport, sourceReport.isPending, defaults.data, nextConfig]);
   // 人和岗位都替他选好了，就直接到设置那一步；有一个没选上（归档了、岗位不招了）就留在第一步
   const [skipped, setSkipped] = useState(false);
   useEffect(() => {
@@ -300,7 +333,7 @@ export function InterviewNewPage() {
 
   function applyTemplate(id: string) {
     const template = templates.data?.items.find((t) => t.id === id);
-    setUsingSource(false);
+    setUsingSource(null);
     setTemplateId(template?.id ?? null);
     const base = template?.config ?? defaults.data?.config;
     if (!base) return;
@@ -420,21 +453,31 @@ export function InterviewNewPage() {
               <Field
                 label="从哪份设置开始"
                 hint={
-                  usingSource && source
-                    ? `沿用了 ${fullTime(source.created_at)} 安排的那一场的设置和声音。下面的内容可以再改，只对这一场生效。`
-                    : "选一个模板，下面的内容可以再改，只对这一场生效。"
+                  usingSource === "next" && source
+                    ? `按 ${fullTime(source.created_at)} 安排的那一场的报告改成了深入面试：报告建议的方向放进了「重点考察」，建议的问题放进了「必须问的题」，那一场的结论记在「之前已经了解到的情况」里。${leftOut > 0 && source.config.question_count != null ? `题目数量是 ${source.config.question_count} 道，报告建议的问题只放进了前面几个，还有 ${leftOut} 个没放。` : ""}都可以再改，只对这一场生效。`
+                    : usingSource && source
+                      ? `沿用了 ${fullTime(source.created_at)} 安排的那一场的设置和声音。下面的内容可以再改，只对这一场生效。`
+                      : "选一个模板，下面的内容可以再改，只对这一场生效。"
                 }
               >
                 {({ id, describedBy }) => (
                   <Select
                     id={id}
                     aria-describedby={describedBy}
-                    value={usingSource ? SOURCE : (templateId ?? "")}
-                    onChange={(e) =>
-                      e.target.value === SOURCE ? applySource() : applyTemplate(e.target.value)
+                    value={
+                      usingSource === "next" ? NEXT : usingSource ? SOURCE : (templateId ?? "")
                     }
+                    onChange={(e) => {
+                      const picked = e.target.value;
+                      if (picked === SOURCE) applySource("source");
+                      else if (picked === NEXT) applySource("next");
+                      else applyTemplate(picked);
+                    }}
                   >
                     {source && <option value={SOURCE}>上一场面试的设置</option>}
+                    {source && nextConfig && (
+                      <option value={NEXT}>上一场的设置，按报告的建议面下一轮</option>
+                    )}
                     <option value="">系统默认</option>
                     {templates.data?.items.map((t) => (
                       <option key={t.id} value={t.id}>
