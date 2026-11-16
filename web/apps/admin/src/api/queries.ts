@@ -740,10 +740,13 @@ export function useInterviews(query: InterviewQuery = {}, enabled = true) {
  * 面试的各种数字：各个状态、各个决定各有几场，等 HR 处理的几种各有几场。不含已归档的。
  * 总览和侧栏上的数字用它，不要翻列表自己数：列表一页最多 100 场，面试多了会数少。
  */
-export function useInterviewCounts(enabled = true) {
+export function useInterviewCounts(
+  query: { position_id?: string; candidate_id?: string } = {},
+  enabled = true,
+) {
   return useQuery({
-    queryKey: ["interviews", "counts"],
-    queryFn: () => unwrap(api.GET("/api/v1/interviews/counts")),
+    queryKey: ["interviews", "counts", query],
+    queryFn: () => unwrap(api.GET("/api/v1/interviews/counts", { params: { query } })),
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: 30_000,

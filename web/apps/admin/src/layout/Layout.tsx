@@ -78,7 +78,7 @@ export function Layout() {
   const navigate = useNavigate();
   const logout = useLogout();
   // 侧栏上的数字：面完了、报告已经出来、还没做决定的
-  const undecided = useInterviewCounts(Boolean(me.data)).data?.awaiting_decision ?? 0;
+  const undecided = useInterviewCounts({}, Boolean(me.data)).data?.awaiting_decision ?? 0;
 
   if (me.isPending) {
     return (
