@@ -14,6 +14,7 @@
 
 ```bash
 scripts/dev.sh                         # 一键启动：开发数据库、迁移、后端（127.0.0.1:8080）
+scripts/serve.sh                       # 正式使用的一键启动：真语音识别，Mac 上顺带起语音合成的 worker。--check 只检查环境。见 docs/deploy.md
 scripts/dev-db.sh start                # 只起开发数据库。要数据库的测试靠它（DATABASE_URL=$(scripts/dev-db.sh url)）
 scripts/check.sh                       # 全量检查，和 CI 一样：卫生检查、fmt、clippy、测试。会自己起开发数据库
 cargo fmt --all                        # 格式化
