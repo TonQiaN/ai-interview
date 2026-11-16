@@ -530,6 +530,18 @@ cargo test -p interview-server --features sherpa --test live -- --ignored --noca
 - 机器听写：接话的 11 段全对。问句里对不上的，同音字三处（识别挑字），英文词 Rust 和 PostgreSQL 读不准，「拆」两场各有一次没听对（一次 25 步，一次 16 步）。没有发现 16 步比 25 步读得更差。读不准的词记在 issue #180。
 - 录音在 Mac 的 `data/worker-live-e2e/run9/`（25 步）和 `run10/`（16 步）。
 
+## 几场面试同时用一个 worker
+
+模型一次只能合成一段，几场面试同时进行、或者有人正在做面试前的准备时，现场要说的话要排队。`crates/interview-tts/tests/worker_load.rs` 量这件事：几场「面试」各自隔一会儿要一句现场的话（十几个字的追问），同时几路不停地预先合成题目（四十个字上下），打印每句现场的话比没人抢时多等了多久、预先合成每分钟做了几道。
+
+```bash
+tts/worker/run.sh start && eval "$(tts/worker/run.sh env)"
+export AI_INTERVIEW_TTS_LIVE_REFERENCE=参考录音.wav
+cargo test -p interview-tts --test worker_load -- --ignored --nocapture
+```
+
+默认跑六种情况（`几场面试+几路预先合成`：`1+0,2+0,4+0,1+4,2+4,4+4`），每种 90 秒，一场面试里上一句合成完隔 15 秒要下一句。真实面试里候选人一段回答二三十秒起，15 秒比真实的密，量出来的等待偏多不偏少。能改的环境变量写在测试文件开头。合成出来的音频不落盘，打印的只有时间。
+
 ## 日志
 
 合成的文本可能带候选人的信息，参考录音是真人的声音。worker 的日志只记字数、哈希的前 12 位、耗时和实时率，不记文本和逐字稿。
