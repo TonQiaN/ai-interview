@@ -188,4 +188,19 @@ describe("候选人详情", () => {
     expect(await screen.findByText("这位候选人已经归档")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "归档" })).toBeNull();
   });
+
+  it("归档的候选人点「恢复」就回来，又能改、能归档了", async () => {
+    const candidate = busyCandidate();
+    candidate.archived_at = new Date().toISOString();
+    open(candidate.id);
+
+    fireEvent.click(await screen.findByRole("button", { name: "恢复" }));
+
+    expect(await screen.findByText("已恢复")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "改信息" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "归档" })).toBeTruthy();
+    expect(screen.queryByText("这位候选人已经归档")).toBeNull();
+    expect(requests).toContain(`POST /candidates/${candidate.id}/restore`);
+    expect(server.db.candidates.find((c) => c.id === candidate.id)?.archived_at).toBeNull();
+  });
 });

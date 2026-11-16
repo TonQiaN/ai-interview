@@ -98,4 +98,18 @@ describe("岗位详情", () => {
     for (const name of ["归档", "改岗位", "安排面试"])
       expect(screen.queryByRole("button", { name })).toBeNull();
   });
+
+  it("归档的岗位点「恢复」就回来，又能改、能归档了", async () => {
+    const position = firstPosition();
+    position.archived_at = new Date().toISOString();
+    open(position.id);
+
+    fireEvent.click(await screen.findByRole("button", { name: "恢复" }));
+
+    expect(await screen.findByText("已恢复")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "改岗位" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "归档" })).toBeTruthy();
+    expect(screen.queryByText("这个岗位已经归档")).toBeNull();
+    expect(server.db.positions.find((p) => p.id === position.id)?.archived_at).toBeNull();
+  });
 });
