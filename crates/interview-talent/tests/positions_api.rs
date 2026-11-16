@@ -388,6 +388,49 @@ async fn draft_reports_what_went_wrong(pool: PgPool) {
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn restores_an_archived_position(pool: PgPool) {
+    let app = app(pool).await;
+    let created = create(
+        &app,
+        json!({"title": "后端工程师", "department": "基础架构"}),
+    )
+    .await;
+    let id = created["id"].as_str().expect("有 id");
+    let uri = format!("/api/v1/positions/{id}");
+    let restore = format!("{uri}/restore");
+    TestRequest::delete(&uri).send(&app.router).await;
+
+    let restored = TestRequest::post(&restore).send(&app.router).await;
+    assert_eq!(restored.status, StatusCode::OK, "{}", restored.text());
+    let restored = restored.json();
+    assert_eq!(restored["id"], id);
+    assert_eq!(restored["archived_at"], Value::Null);
+    assert_eq!(restored["department"], "基础架构");
+
+    // 回到列表里，又可以改了
+    let list = TestRequest::get("/api/v1/positions")
+        .send(&app.router)
+        .await;
+    assert_eq!(list.json()["total"], 1);
+    let patched = TestRequest::patch(&uri)
+        .json(&json!({"title": "资深后端工程师"}))
+        .send(&app.router)
+        .await;
+    assert_eq!(patched.status, StatusCode::OK, "{}", patched.text());
+
+    // 没归档的再恢复一次也算成功，内容不变
+    let again = TestRequest::post(&restore).send(&app.router).await;
+    assert_eq!(again.status, StatusCode::OK);
+    assert_eq!(again.json()["title"], "资深后端工程师");
+
+    let missing =
+        TestRequest::post("/api/v1/positions/0190a0b0-0000-7000-8000-000000000000/restore")
+            .send(&app.router)
+            .await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn openapi_lists_the_position_endpoints(pool: PgPool) {
     let ctx = interview_platform::testing::test_context(pool);
     let (_router, api) =
@@ -397,6 +440,7 @@ async fn openapi_lists_the_position_endpoints(pool: PgPool) {
     assert!(paths.contains_key("/api/v1/positions"));
     assert!(paths.contains_key("/api/v1/positions/draft"));
     assert!(paths.contains_key("/api/v1/positions/{id}"));
+    assert!(paths.contains_key("/api/v1/positions/{id}/restore"));
     let schemas = doc["components"]["schemas"]
         .as_object()
         .expect("有 schemas");
