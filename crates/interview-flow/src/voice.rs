@@ -20,6 +20,8 @@ pub struct ResolvedVoice {
     pub settings: VoiceSettings,
     /// 这场面试说什么语言
     pub language: Language,
+    /// 是不是兜底音色：面试没指定音色，系统里也没有默认音色
+    pub fallback: bool,
 }
 
 impl ResolvedVoice {
@@ -32,6 +34,7 @@ impl ResolvedVoice {
             },
             settings: VoiceSettings::default(),
             language: tts_language(language),
+            fallback: true,
         }
     }
 
@@ -122,5 +125,6 @@ pub async fn resolve(
         voice,
         settings,
         language: tts_language(language),
+        fallback: false,
     })
 }
