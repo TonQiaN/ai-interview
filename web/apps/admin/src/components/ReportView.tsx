@@ -30,9 +30,12 @@ import type {
   IntegritySignal,
   InterviewReport,
   QuestionReview,
+  ReportCandidateQuestion,
   RequirementCheck,
 } from "../api/types";
 import {
+  askReplyLabel,
+  askReplyTone,
   aspectLabel,
   basisLabel,
   claimVerdictLabel,
@@ -355,6 +358,32 @@ function Signal({ item, onSeek }: { item: IntegritySignal; onSeek: Seek }) {
   );
 }
 
+/** 候选人向公司提的一个问题：问了什么、面试官当场怎么回应的、原话在哪 */
+function Ask({ item, onSeek }: { item: ReportCandidateQuestion; onSeek: Seek }) {
+  return (
+    <div className="adm-dim">
+      <div className="adm-dim__head">
+        <strong>{item.question}</strong>
+        <Badge tone={askReplyTone[item.handling]} plain>
+          {askReplyLabel[item.handling]}
+        </Badge>
+      </div>
+      {item.reply && (
+        <p>
+          <strong>面试官当时说：</strong>
+          {item.reply}
+        </p>
+      )}
+      {item.handling === "answered" && (
+        <p className="adm-alt">
+          面试官是 AI，这是它当场的回答，不是公司的正式答复。说得不对的地方，请你再和候选人确认。
+        </p>
+      )}
+      <Quotes items={item.evidence} onSeek={onSeek} />
+    </div>
+  );
+}
+
 function Aspect({ item, onSeek }: { item: AspectRating; onSeek: Seek }) {
   return (
     <div className="adm-dim">
@@ -487,6 +516,9 @@ export function ReportView({
   const rec = report.recommendation;
   const failed = report.meta.failed_stages;
   const failedStage = (stage: string) => failed.some((f) => f.stage === stage);
+  const asksToFollowUp = (report.candidate_questions ?? []).filter(
+    (q) => q.handling !== "answered",
+  ).length;
   // 有步骤失败时上面已经用中文说了缺哪几块，报告里那条「分析不完整」带的是英文步骤名，不再重复
   const flags = report.review_flags.filter(
     (flag) => !(flag.code === "incomplete_analysis" && failed.length > 0),
@@ -721,6 +753,34 @@ export function ReportView({
             </Section>
           ) : (
             failedStage("communication") && <Missing title="表达和状态" />
+          )}
+
+          {report.candidate_questions ? (
+            <Section
+              title="候选人向公司提的问题"
+              nav="候选人的提问"
+              aside={
+                asksToFollowUp > 0 && <Badge tone="warning">{asksToFollowUp} 个等你回复</Badge>
+              }
+              intro={
+                report.candidate_questions.length > 0
+                  ? "回访候选人时用得上。这一栏只是转达，不影响评分和建议。"
+                  : undefined
+              }
+            >
+              {report.candidate_questions.length === 0 ? (
+                <p className="oil-muted adm-flat">候选人没有提问。</p>
+              ) : (
+                report.candidate_questions.map((item) => (
+                  <Ask key={item.question} item={item} onSeek={onSeek} />
+                ))
+              )}
+            </Section>
+          ) : (
+            // 没有这一栏不等于没提问：可能是这一步没成功，也可能是加这一栏之前生成的旧报告
+            failedStage("candidate_questions") && (
+              <Missing title="候选人向公司提的问题" nav="候选人的提问" />
+            )
           )}
 
           <Section
