@@ -773,7 +773,7 @@ fn network_all(
     Ok(())
 }
 
-/// 加上一场网络差的面试里面试间会报的事件：上行网速慢、没拿到屏幕常亮、录像三次传不动
+/// 加上一场网络差的面试里面试间会报的事件：上行网速慢、没拿到屏幕常亮、浏览器播不了压缩过的语音、录像三次传不动
 /// （一次请求失败、一次断网、一次重试到放弃）。事件的写法和面试间上报的一样，
 /// 经过 [`ProctorEvent::from_raw`] 整理。`unrecovered` 为真时最后一次停顿发生在面试快结束时，
 /// 没有恢复，录像也没有传完。返回加了几条事件。
@@ -807,6 +807,8 @@ fn add_network_events(record: &mut InterviewRecord, unrecovered: bool) -> usize 
             Some(0),
             json!({"supported": false, "held": false}),
         ),
+        // 这个浏览器播不了压缩过的面试官语音，页面改取了没压缩的
+        ("audio_format_fallback", Some(900), json!({"from": "mp3"})),
         (
             "upload_stalled",
             Some(first),

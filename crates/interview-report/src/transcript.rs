@@ -222,9 +222,13 @@ pub(crate) const EVENT_LEGEND: &str = "\n# 过程事件\n由候选人的面试�
      某类信号采集不到时，没有记录不等于没有发生。\n\
      frames_checked、face_count_changed、phone_visible 这三种不是网页采集的，\
      是面试结束后从摄像头录像里每隔几秒抽一帧、由模型看图得到的。\n\
-     device_report、screen_wake_lock、upload_stalled、upload_finished 说的是候选人的设备和网络，\
-     和候选人做了什么无关。device_report 是面试前的设备检测，uplink_kbps 是测出来的上行网速（千比特每秒）。\
+     device_report、screen_wake_lock、audio_format_fallback、upload_stalled、upload_finished \
+     说的是候选人的设备和网络，和候选人做了什么无关。\
+     device_report 是面试前的设备检测，uplink_kbps 是测出来的上行网速（千比特每秒）。\
      screen_wake_lock 的 held 为 false 表示没拿到屏幕常亮，手机中途可能自动锁屏，录像会断。\
+     audio_format_fallback 是候选人的浏览器播不了压缩过的面试官语音（from 是播不了的那种格式），\
+     页面自动改取了没压缩的，一场面试最多记一次：面试官的话照常播出来了，候选人听到的内容一样，\
+     只是每句话取得慢一些。\
      upload_stalled 是录像传不动了：cause 是原因（retrying 请求失败在重试，offline 断网，failed 重试也没用），\
      持续时间是过了多久又传动的，failures 是中间连续失败了几次；持续时间写「-」的是到最后都没有恢复。\
      upload_finished 是面试结束后录像全部传完了。\
