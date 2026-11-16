@@ -325,6 +325,85 @@ describe("候选人侧接口客户端", () => {
     expect(told).toBe(1);
   });
 
+  it("页面接手面试之前发出去的请求晚到了：它带的提醒是接手之前的事，不报", async () => {
+    let told = 0;
+    const elsewhere = { "X-Room-Active-Elsewhere": "1" };
+    // 测网速的请求：服务端早就答了，响应在路上耽搁着
+    let deliver: (response: Response) => void = () => {};
+    let probeSent: () => void = () => {};
+    const sent = new Promise<void>((resolve) => {
+      probeSent = resolve;
+    });
+    const { api } = setup(
+      (call) => {
+        if (call.path.endsWith("/uplink-probe")) {
+          inFlight.add(call.request);
+          probeSent();
+          return new Promise<Response>((resolve) => {
+            deliver = (response) => {
+              inFlight.delete(call.request);
+              resolve(response);
+            };
+          });
+        }
+        if (call.path.endsWith("/start")) return json({ action: "finish", reason: "completed" });
+        return new Response(null, { status: 204, headers: elsewhere });
+      },
+      { onActiveElsewhere: () => (told += 1) },
+    );
+
+    const probe = api.probeUplink(new ArrayBuffer(8));
+    await sent;
+    // 这个页面接手了面试
+    await api.start();
+    // 之前那个请求的响应这才到，带着接手之前的提醒
+    deliver(new Response(null, { status: 204, headers: elsewhere }));
+    await probe;
+    expect(told).toBe(0);
+
+    // 接手之后发的请求还带着提醒：面试又被别的页面接走了
+    await api.putChunk({ track: "camera", segmentId: "s1" }, 0, new ArrayBuffer(1), "x");
+    expect(told).toBe(1);
+    expect(inFlight.size).toBe(0);
+  });
+
+  it("页面接手面试之前发出去的请求晚到了，还被拒绝了：照样不报", async () => {
+    let told = 0;
+    let deliver: (response: Response) => void = () => {};
+    let probeSent: () => void = () => {};
+    const sent = new Promise<void>((resolve) => {
+      probeSent = resolve;
+    });
+    const { api } = setup(
+      (call) => {
+        if (call.path.endsWith("/start")) return json({ action: "finish", reason: "completed" });
+        inFlight.add(call.request);
+        probeSent();
+        return new Promise<Response>((resolve) => {
+          deliver = (response) => {
+            inFlight.delete(call.request);
+            resolve(response);
+          };
+        });
+      },
+      { onActiveElsewhere: () => (told += 1) },
+    );
+
+    const finishing = api.finish("candidate_left").catch((caught: unknown) => caught);
+    await sent;
+    await api.start();
+    // 提醒用的响应头没到（被中间的代理去掉了），只有拒绝的原因
+    deliver(
+      new Response(JSON.stringify(errorBody("active_elsewhere", "在别处进行")), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(await finishing).toMatchObject({ status: 409, code: ACTIVE_ELSEWHERE });
+    expect(told).toBe(0);
+    expect(inFlight.size).toBe(0);
+  });
+
   it("错误归类规则", () => {
     expect(classifyHttpError(401, "invite_invalid")).toBe("invalid_link");
     expect(classifyHttpError(410, "invite_expired")).toBe("expired");

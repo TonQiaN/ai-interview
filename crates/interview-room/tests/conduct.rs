@@ -669,6 +669,62 @@ async fn a_weak_answer_gets_the_prepared_follow_up(pool: PgPool) {
     assert_eq!(usage, [("interview.turn".to_owned(), Some(interview_id))]);
 }
 
+/// 过渡语播完、回答还在判断的时候，候选人在另一个页面点了「继续面试」：原来的页面等着的那次
+/// 上报拿不到下一句（不然两个页面会一起问下一句），下一句留给接手的页面，回答只记一次。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_page_left_behind_while_an_answer_is_judged_does_not_get_the_next_sentence(pool: PgPool) {
+    let model = Arc::new(ScriptedModel::new().reply(WEAK_ANSWER));
+    let transcriber = FakeTranscriber::new(Some("我们团队做了很多事情。"), false);
+    let app = app_with_model(pool, model, transcriber.clone(), RoomConfig::default()).await;
+    let (interview_id, token) = prepared(&app, json!({})).await;
+    let (old, new) = (interview_core::new_id(), interview_core::new_id());
+    let send = |page: Uuid, path: &'static str, body: Value| {
+        let (router, token) = (app.public.clone(), token.clone());
+        async move {
+            TestRequest::post(format!("/api/v1/room/{path}"))
+                .bearer(&token)
+                .header("X-Room-Page", &page.to_string())
+                .json(&body)
+                .send(&router)
+                .await
+        }
+    };
+
+    let opening = send(old, "start", json!({})).await.json();
+    let question = send(old, "advance", played(&opening, 100)).await.json();
+    let ack = send(old, "advance", answered(&question, 200, "silence"))
+        .await
+        .json();
+    assert_eq!(key(&ack), "ack.1");
+
+    // 原来的页面报了过渡语播完，回答还在判断，它在等
+    let waiting = tokio::spawn(send(old, "advance", played(&ack, 300)));
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert!(!waiting.is_finished(), "判断没完就不该给出下一句");
+
+    // 另一个页面接着面：从正在播的过渡语接上
+    let resumed = send(new, "start", json!({})).await;
+    assert_eq!(resumed.status, 200, "{}", resumed.text());
+    let resumed = resumed.json();
+    assert_eq!(key(&resumed), "ack.1");
+
+    transcriber.gate.add_permits(8);
+    let late = waiting.await.unwrap();
+    assert_eq!(late.status, 409, "{}", late.text());
+    assert_eq!(error_code(&late.json()), "active_elsewhere");
+    assert_eq!(late.header("x-room-active-elsewhere"), Some("1"));
+
+    let follow_up = send(new, "advance", played(&resumed, 400)).await;
+    assert_eq!(follow_up.status, 200, "{}", follow_up.text());
+    assert_eq!(key(&follow_up.json()), "q1.f1");
+    let answers = turns(&app, interview_id)
+        .await
+        .into_iter()
+        .filter(|turn| turn.1 == "candidate")
+        .count();
+    assert_eq!(answers, 1);
+}
+
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn a_stuck_transcriber_does_not_stall_the_interview(pool: PgPool) {
     let model = Arc::new(ScriptedModel::new());

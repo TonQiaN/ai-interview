@@ -66,13 +66,33 @@ async function politeCandidate(page: Page): Promise<void> {
       streams.push(stream);
       return stream;
     };
-    setInterval(() => {
-      // 面试官头像下面的小标签：「正在提问」「正在听」「思考中」。不在面试页上（设备检测）时没有它
+    // 点了「开始面试」「继续面试」之后，头像下面的标签写着「正在听」才出声
+    let begun = false;
+    const listenIfPolite = () => {
+      // 面试官头像下面的小标签：「正在提问」「正在听」「思考中」。设备检测的页面上没有它，那时候照常出声
       const presence = document.querySelector(".oil-presence__label");
-      const mayTalk = !presence || presence.textContent === "正在听";
+      const mayTalk = presence ? presence.textContent === "正在听" : !begun;
       for (const stream of streams) {
         for (const track of stream.getAudioTracks()) track.enabled = mayTalk;
       }
+    };
+    // 从点下去到面试页画出来有一小段时间，页面上还没有那个标签，面试官却可能已经要开口了。
+    // 这时候麦克风里有声音，开场白会被当成候选人插话，一个字没说就停下（机器慢的时候碰上过）。
+    // 所以一点下去就先静音，不等标签出来
+    document.addEventListener(
+      "click",
+      (event) => {
+        const clicked = event.target instanceof Element ? event.target.closest("button") : null;
+        const name = clicked?.textContent?.trim();
+        if (name === "开始面试" || name === "继续面试") {
+          begun = true;
+          listenIfPolite();
+        }
+      },
+      true,
+    );
+    setInterval(() => {
+      listenIfPolite();
       const caption = document.querySelector(".app-scene__caption")?.textContent;
       if (caption && scope.__captions.at(-1) !== caption) scope.__captions.push(caption);
     }, 30);

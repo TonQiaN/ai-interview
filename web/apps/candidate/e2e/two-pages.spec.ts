@@ -111,6 +111,65 @@ test("换到另一个页面之后可以再回来：点一下，重新检查设�
   await context.close();
 });
 
+test("回来检查设备时发的请求，响应等面试接回来之后才到：它带的提醒是回来之前的事，面试留在这个页面", async ({
+  page,
+  browser,
+}) => {
+  const interview = await enterInterview(page, { silenceSec: 30 });
+  await expectQuestion(page, 1);
+
+  const context = await browser.newContext();
+  const other = await context.newPage();
+  await openElsewhere(other, interview);
+  await button(other, "继续面试").click();
+  await expect(other.getByText("录制中")).toBeVisible();
+  await expect(button(page, "回到这个页面继续面试")).toBeVisible({ timeout: 30_000 });
+
+  // 回来检查设备时测网速的请求：服务端当时就答了（面试还在那边，响应带着提醒），响应在路上耽搁着
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const reminders: (string | undefined)[] = [];
+  let delivered = 0;
+  await page.route("**/api/v1/room/uplink-probe", async (route) => {
+    const response = await route.fetch();
+    reminders.push(response.headers()["x-room-active-elsewhere"]);
+    await held;
+    await route.fulfill({ response });
+    delivered += 1;
+  });
+
+  await button(page, "回到这个页面继续面试").click();
+  await passPreflight(page, { resuming: true });
+  await button(page, "继续面试").click();
+  // 网速没测出来不拦着：等两秒面试照常接回来
+  await expect(page.getByText("录制中")).toBeVisible();
+  await expectQuestion(page, 1);
+
+  // 耽搁的响应这才到
+  expect(reminders[0]).toBe("1");
+  release();
+  await expect.poll(() => delivered).toBeGreaterThan(0);
+  await page.waitForTimeout(1500);
+  await expect(movedNotice(page)).toHaveCount(0);
+  await expect(page.getByText("录制中")).toBeVisible();
+  // 停下来的是那边
+  await expect(movedNotice(other)).toBeVisible();
+  await expect(button(other, "回到这个页面继续面试")).toBeVisible({ timeout: 30_000 });
+
+  await button(page, "我答完了，下一题").click();
+  await expectQuestion(page, 2);
+  await button(page, "结束").click();
+  await button(page, "结束面试").click();
+  await expect(page.getByText("面试已结束")).toBeVisible({ timeout: 30_000 });
+
+  await expectRecordingsReady(interview, 3);
+  expect(takenOver(interview)).toBe(2);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await context.close();
+});
+
 test("留在后面的页面点「结束面试」结束不了面试：它被告知面试在另一个页面里", async ({
   page,
   browser,
