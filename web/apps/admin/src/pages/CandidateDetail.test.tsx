@@ -203,4 +203,16 @@ describe("候选人详情", () => {
     expect(requests).toContain(`POST /candidates/${candidate.id}/restore`);
     expect(server.db.candidates.find((c) => c.id === candidate.id)?.archived_at).toBeNull();
   });
+
+  it("归档了的面试也列在这位候选人名下，标着已归档", async () => {
+    const candidate = busyCandidate();
+    const interview = server.db.interviews.find((i) => i.candidate.id === candidate.id);
+    if (!interview) throw new Error("这位候选人没有面试");
+    interview.archived_at = new Date().toISOString();
+    open(candidate.id);
+
+    const link = await screen.findAllByRole("link", { name: interview.position.title });
+    const rows = link.map((a) => a.closest("li")).filter((li) => li !== null);
+    expect(rows.some((li) => within(li).queryByText("已归档"))).toBe(true);
+  });
 });

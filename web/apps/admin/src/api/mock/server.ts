@@ -198,6 +198,7 @@ function summary(i: Interview, report: ReportVersion["content"]): InterviewSumma
     report_status: i.report?.status ?? null,
     started_at: i.started_at ?? null,
     ended_at: i.ended_at ?? null,
+    archived_at: i.archived_at ?? null,
     created_at: i.created_at,
     updated_at: i.updated_at,
   };
@@ -1332,6 +1333,7 @@ export function createMockServer(options: MockOptions = {}) {
   on("GET", "/interviews", ({ query }) => {
     const status = query.get("status");
     const list = db.interviews
+      .filter((i) => !i.archived_at || query.get("include_archived") === "true")
       .filter((i) => !status || i.status === status)
       .filter((i) => !query.get("candidate_id") || i.candidate.id === query.get("candidate_id"))
       .filter((i) => !query.get("position_id") || i.position.id === query.get("position_id"))
@@ -1451,8 +1453,9 @@ export function createMockServer(options: MockOptions = {}) {
   on("DELETE", "/interviews/:id", ({ params }) => {
     const i = find.interview(params[0]);
     if (i.status === "preparing" || i.status === "in_progress")
-      throw conflict("面试正在准备或者进行中，等它结束再删");
-    db.interviews = db.interviews.filter((x) => x !== i);
+      throw conflict("正在准备或者正在面试，先取消再归档");
+    // 归档只是从列表里藏起来，面试本身和录像、报告都还在
+    i.archived_at ??= iso(0);
     return null;
   });
   on("POST", "/interviews/:id/purge", ({ params }) => {
@@ -1570,6 +1573,7 @@ export function createMockServer(options: MockOptions = {}) {
   });
   on("POST", "/interviews/:id/invites", ({ params, body }): CreatedInvite => {
     const i = find.interview(params[0]);
+    if (i.archived_at) throw conflict("面试已经归档，不能再生成链接");
     if (i.status !== "ready" && i.status !== "invited")
       throw conflict("题目和语音准备好之后才能生成链接");
     const input = (body ?? {}) as { expires_in_hours?: number | null; keep_existing?: boolean };

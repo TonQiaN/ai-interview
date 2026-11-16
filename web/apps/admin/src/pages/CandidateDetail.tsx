@@ -554,7 +554,12 @@ function Detail({ candidate }: { candidate: CandidateDetail }) {
   const navigate = useNavigate();
   const toast = useToast();
   const resumes = useResumes(candidate.id);
-  const interviews = useInterviews({ candidate_id: candidate.id, page_size: 50 });
+  // 这个人面过的都列出来，归档的也算（标着「已归档」），不然看着像没面过
+  const interviews = useInterviews({
+    candidate_id: candidate.id,
+    page_size: 50,
+    include_archived: true,
+  });
   const upload = useUploadResume(candidate.id);
   const reparse = useReparseResume(candidate.id);
   const regenerate = useRegenerateProfile(candidate.id);

@@ -855,7 +855,12 @@ export function useDeleteInterview() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/interviews/{id}", at(id))),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["interviews"] }),
+    // 这一场自己的详情也要重新取：归档以后还能从列表里再打开，不能还是归档前的样子
+    onSuccess: (_done, id) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["interviews"] }),
+        qc.invalidateQueries({ queryKey: ["interview", id] }),
+      ]),
   });
 }
 

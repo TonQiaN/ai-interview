@@ -61,6 +61,7 @@ export function InterviewTags({ interview }: { interview: InterviewSummary }) {
       {hasVerdict(interview) && <ReportVerdict interview={interview} />}
       <DecisionBadge value={interview.decision} />
       {!hasVerdict(interview) && <StatusBadge status={interview.status} />}
+      {interview.archived_at && <Badge plain>已归档</Badge>}
     </span>
   );
 }

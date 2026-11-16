@@ -1,7 +1,7 @@
 import { ToastProvider } from "@ai-interview/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { Link, MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setFetch } from "../api/http";
 import { createMockServer } from "../api/mock/server";
@@ -38,8 +38,8 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 /** me 不传就是演示数据里登录的管理员；传了就当成那个人在看 */
-function open(id: string, me?: AdminUser) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function open(id: string, me?: AdminUser, staleTime = 0) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime } } });
   if (me) client.setQueryData(["me"], me);
   render(
     <QueryClientProvider client={client}>
@@ -47,7 +47,14 @@ function open(id: string, me?: AdminUser) {
         <MemoryRouter initialEntries={[`/interviews/${id}`]}>
           <Routes>
             <Route path="/interviews/:id" element={<InterviewDetailPage />} />
-            <Route path="/interviews" element={<p>面试列表</p>} />
+            <Route
+              path="/interviews"
+              element={
+                <p>
+                  面试列表 <Link to={`/interviews/${id}`}>回到刚才那一场</Link>
+                </p>
+              }
+            />
           </Routes>
         </MemoryRouter>
       </ToastProvider>
@@ -150,5 +157,45 @@ describe("面试详情", () => {
     const dialog = within(await screen.findByRole("dialog", { name: "归档这场面试？" }));
     expect(dialog.getByText(/还留在服务器上，没有删掉/)).toBeTruthy();
     expect(dialog.getByText(/请找管理员彻底删除/)).toBeTruthy();
+  });
+
+  it("归档了的面试：说明它已归档，不能再归档、改设置、生成链接；管理员还能彻底删除", async () => {
+    const target = server.db.interviews.find((i) => i.status === "ready");
+    if (!target) throw new Error("演示数据里没有待发送的面试");
+    await server.fetch(`/api/v1/interviews/${target.id}`, { method: "DELETE" });
+    open(target.id);
+
+    expect(await screen.findByText("这场面试已经归档")).toBeTruthy();
+    expect(screen.getByText("已归档")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "彻底删除" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "归档" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "改设置" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "取消这场面试" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "生成面试链接" })).toBeNull();
+  });
+
+  it("在页面上归档以后马上再打开这一场，看到的是归档以后的样子", async () => {
+    const target = server.db.interviews.find((i) => i.status === "ready");
+    if (!target) throw new Error("演示数据里没有待发送的面试");
+    // 和正式用的时候一样，刚取过的数据十秒内不重新取
+    open(target.id, undefined, 10_000);
+
+    fireEvent.click(await screen.findByRole("button", { name: "归档" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "归档" }),
+    );
+    fireEvent.click(await screen.findByRole("link", { name: "回到刚才那一场" }));
+
+    expect(await screen.findByText("这场面试已经归档")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "归档" })).toBeNull();
+  });
+
+  it("没归档的面试不显示归档的说明", async () => {
+    const target = server.db.interviews.find((i) => i.status === "ready");
+    if (!target) throw new Error("演示数据里没有待发送的面试");
+    open(target.id);
+
+    expect(await screen.findByRole("button", { name: "归档" })).toBeTruthy();
+    expect(screen.queryByText("这场面试已经归档")).toBeNull();
   });
 });
