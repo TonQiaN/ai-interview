@@ -1035,7 +1035,7 @@ export function createMockServer(options: MockOptions = {}) {
       db.candidates
         .filter(
           (c) =>
-            live(c) &&
+            (live(c) || query.get("include_archived") === "true") &&
             matches(query.get("q"), c.name, c.phone, c.email, c.current_title, c.current_company),
         )
         .sort(byNewest)
