@@ -4,11 +4,15 @@ import {
   answerTo,
   button,
   enterInterview,
+  eventKinds,
   expectQuestion,
+  expectRecordingsReady,
+  liveTracks,
   open,
   passPreflight,
   roomState,
   seedInterview,
+  watchStreams,
 } from "./helpers";
 
 /**
@@ -120,9 +124,10 @@ test("页面一打开就出错（面试还没建起来）：显示「请刷新�
   await expect(button(page, "刷新页面")).toBeVisible();
 });
 
-test("面试中页面渲染出错：不是一片空白，面试停住，记一条过程事件，刷新后从中断的那一题继续", async ({
+test("面试中页面渲染出错：不是一片空白，面试停住、摄像头和麦克风关掉，记一条过程事件，刷新后从中断的那一题继续", async ({
   page,
 }) => {
+  await watchStreams(page);
   const interview = await enterInterview(page);
   await expectQuestion(page, 1);
 
@@ -150,10 +155,20 @@ test("面试中页面渲染出错：不是一片空白，面试停住，记一�
   expect(advances).toBe(1);
   expect(answerTo(roomState(interview), "q2")).toBeUndefined();
 
+  // 候选人面前只剩「请刷新」：不再录了，摄像头的指示灯不该还亮着。这是页面自己关的，不算设备出了问题
+  expect(await liveTracks(page)).toBe(0);
+  expect(eventKinds(roomState(interview))).not.toContain("recording_gap");
+
   await page.unroute("**/api/v1/room/advance");
   await button(page, "刷新页面").click();
   await expect(button(page, "检查设备，继续面试")).toBeVisible();
   await passPreflight(page, { resuming: true });
   await button(page, "继续面试").click();
   await expectQuestion(page, 2);
+
+  // 出错之前录下的那一段收好了、传完了，和刷新之后的那一段都完整
+  await button(page, "结束").click();
+  await button(page, "结束面试").click();
+  await expect(page.getByText("面试已结束")).toBeVisible({ timeout: 30_000 });
+  await expectRecordingsReady(interview, 2);
 });

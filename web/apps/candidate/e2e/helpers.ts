@@ -242,3 +242,25 @@ export function timeline(state: RoomState): string {
   });
   return lines.join("\n");
 }
+
+/** 记下页面申请到的每一路摄像头和麦克风。 */
+export const watchStreams = (page: Page) =>
+  page.addInitScript(() => {
+    const scope = window as unknown as { __streams: MediaStream[] };
+    scope.__streams = [];
+    const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async (constraints) => {
+      const stream = await original(constraints);
+      scope.__streams.push(stream);
+      return stream;
+    };
+  });
+
+/** 页面申请过的摄像头和麦克风里，还开着的有几路。 */
+export const liveTracks = (page: Page): Promise<number> =>
+  page.evaluate(() => {
+    const scope = window as unknown as { __streams: MediaStream[] };
+    return scope.__streams
+      .flatMap((stream) => stream.getTracks())
+      .filter((track) => track.readyState === "live").length;
+  });

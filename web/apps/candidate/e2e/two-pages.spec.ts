@@ -5,11 +5,13 @@ import {
   eventKinds,
   expectQuestion,
   expectRecordingsReady,
+  liveTracks,
   open,
   passPreflight,
   roomState,
   type SeededInterview,
   seedInterview,
+  watchStreams,
 } from "./helpers";
 
 /**
@@ -34,6 +36,7 @@ test("在另一个页面继续面试：面试换到那边，原来的页面停�
   page,
   browser,
 }) => {
+  await watchStreams(page);
   // 静音 30 秒才算答完：题目不会自己往下走
   const interview = await enterInterview(page, { silenceSec: 30 });
   await expectQuestion(page, 1);
@@ -56,6 +59,8 @@ test("在另一个页面继续面试：面试换到那边，原来的页面停�
   await expect(button(page, "回到这个页面继续面试")).toBeVisible({ timeout: 30_000 });
   expect(roomState(interview).status).toBe("in_progress");
   expect(takenOver(interview)).toBe(1);
+  // 这边不录了，摄像头和麦克风也关了
+  expect(await liveTracks(page)).toBe(0);
 
   // 面试在那边接着往下走
   await button(other, "我答完了，下一题").click();

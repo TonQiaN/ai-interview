@@ -425,6 +425,8 @@ export class InterviewSession {
     this.patch({ device: { ...INITIAL_DEVICE, permission: "requesting" }, actionError: null });
     try {
       const stream = await this.capture(room);
+      // 不是第一次申请的话，把上一次拿到的关掉：留着没人管，面试结束后摄像头的指示灯还亮着
+      stopStream(this.stream);
       this.stream = stream;
       if (this.graph) {
         this.graph.replaceMic(stream);
@@ -762,7 +764,12 @@ export class InterviewSession {
       this.patch({ interrupted: true });
     } else if (this.snapshot.stage === "device" || this.snapshot.stage === "ready") {
       if (cause !== "ended") return;
-      // 检测阶段设备没了：回到检测页重新来
+      // 检测阶段设备没了：回到检测页重新来。还开着的那一路（比如麦克风没了、摄像头还在）先关掉，
+      // 候选人点「重新检测」时再一起申请
+      for (const off of this.trackCleanups) off();
+      this.trackCleanups = [];
+      stopStream(this.stream);
+      this.stream = null;
       this.patch({
         stage: "device",
         device: { ...INITIAL_DEVICE, permission: "failed", error: "device_not_found" },
@@ -784,11 +791,23 @@ export class InterviewSession {
     // 换到别的页面继续的不算结束，另记一种事件：报告里能看出来中途换过页面
     if (reason === TAKEN_OVER) this.collector?.record("page_taken_over");
     else this.collector?.record("interview_finished", { reason });
-    this.outputWatch?.stop();
-    this.outputWatch = null;
     this.outputHaltedAt = null;
     this.holds.clear();
 
+    await this.stopCapture();
+
+    if (notifyServer) await this.notifyFinished();
+    await this.drainUploads();
+  }
+
+  /**
+   * 停止录制，关掉摄像头和麦克风。页面用不着它们了就要关：
+   * 指示灯还亮着，候选人会以为还在被录。
+   */
+  private async stopCapture(): Promise<void> {
+    // 先不再盯着声音：下面关掉声音是页面自己关的，不是被系统停掉
+    this.outputWatch?.stop();
+    this.outputWatch = null;
     const recorder = this.recorder;
     this.recorder = null;
     await recorder?.stop().catch(() => {});
@@ -798,9 +817,6 @@ export class InterviewSession {
     this.stream = null;
     await this.graph?.close().catch(() => {});
     this.graph = null;
-
-    if (notifyServer) await this.notifyFinished();
-    await this.drainUploads();
   }
 
   /** 告诉服务端面试结束了。断网时一直重试到成功，或者链接已经失效。 */
@@ -901,7 +917,7 @@ export class InterviewSession {
 
   /**
    * 页面渲染时出错，候选人面前已经换成了「请刷新」那一页（见 CrashBoundary）。
-   * 面试按住，免得在候选人看不见的地方接着问、接着算作答时间；刷新之后按续面接上。
+   * 面试按住，免得在候选人看不见的地方接着问、接着算作答时间；录像停下，刷新之后按续面接上。
    * 只记出错时在哪一步、错误是哪一类，不记错误的内容。
    */
   pageCrashed = (error: unknown): void => {
@@ -911,6 +927,8 @@ export class InterviewSession {
     });
     void this.collector?.flush();
     this.hold("page");
+    // 候选人面前只剩「请刷新」，没有什么要录的了：已经录下的收好传上去，摄像头和麦克风关掉
+    void this.stopCapture();
   };
 
   /** 页面卸载。 */
@@ -983,6 +1001,9 @@ export class InterviewSession {
 
   private fail(problem: ProblemKind): void {
     this.patch({ stage: "problem", problem });
+    // 设备检查之后才出的问题（链接被撤销、面试被取消）：摄像头和麦克风已经开着，这里关掉。
+    // 点「重试」会从头走，到设备检查那一步重新申请
+    void this.stopCapture();
     if (isDeadLink(problem)) void this.discardLocalRecordings();
   }
 
