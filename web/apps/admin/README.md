@@ -38,6 +38,6 @@ pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin
 - 接口返回的每个枚举值都要在 `src/lib/format.ts` 里有中文文案。`src/api/mock/samples.test.ts` 会拿报告线的样例检查，样例里出现没有文案的值测试就失败。
 - 报告里的判断下面跟着原话，点一下跳到回看的那个时间。新加的报告内容也照这个做，简历里的原文没有时间，不做成可点的。
 - 报告可以打印或存成 PDF（`src/lib/print.ts` 和 `admin.css` 末尾的打印样式）：打印前把收起来的内容展开、换成浅色主题。报告里新加了要点开才看得到的内容，要么用 `<details>`，要么读 `PrintingContext`，不然印不出来。
-- 面试概览里的「归档」和「彻底删除」是两回事：归档（`DELETE /interviews/{id}`）只是不在列表里显示，数据还在；彻底删除（`POST /interviews/{id}/purge`）把录像、题目、对话和报告真的删掉，只有管理员看得到，要输候选人的名字才能点。文案别把两个说混。候选人详情页也一样：归档是 `DELETE /candidates/{id}`，彻底删除（`usePurgeCandidate`）先把他名下的面试一场场彻底删除（归档的也算），再调 `POST /candidates/{id}/purge`，中间哪一场删不掉就停下来。
+- 面试概览里的「归档」和「彻底删除」是两回事：归档（`DELETE /interviews/{id}`）只是不在列表里显示，数据还在；彻底删除（`POST /interviews/{id}/purge`）把录像、题目、对话和报告真的删掉，只有管理员看得到，要输候选人的名字才能点。文案别把两个说混。候选人详情页也一样：归档是 `DELETE /candidates/{id}`，彻底删除（`usePurgeCandidate`）先把他名下的面试一场场彻底删除（归档的也算），再调 `POST /candidates/{id}/purge`，中间哪一场删不掉就停下来。岗位只有归档（`DELETE /positions/{id}`），没有彻底删除。归档的候选人和岗位后端不让再改、不让再安排面试，详情页上这些按钮要跟着收起来；列表上勾「带上已归档的」（地址栏 `?archived=1`）才看得到它们。
 - 候选人对比（`/positions/:id/comparison`，`pages/PositionComparison.tsx`）：对比的正文里候选人是代号 A、B、C，页面用 `src/lib/comparison.ts` 的 `namesInText` 换成姓名。按建议的档次分组，组里不显示名次；`close_to` 标成「分不出先后」；诚信迹象只说「要人工复核」；`caveats` 直接摆出来。这几条是报告线实测后提的要求（issue #238），改展示时别丢。
 - 诚信相关的内容写成「值得核对的迹象」，带上别的可能解释，不写成结论。

@@ -715,7 +715,7 @@ export function createMockServer(options: MockOptions = {}) {
     const list = db.positions
       .filter(
         (p) =>
-          live(p) &&
+          (live(p) || query.get("include_archived") === "true") &&
           (!status || p.status === status) &&
           matches(query.get("q"), p.title, p.department, p.location, p.extra.client_name),
       )
