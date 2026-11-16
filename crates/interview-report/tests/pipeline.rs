@@ -812,6 +812,70 @@ async fn candidate_questions_are_listed_with_what_the_interviewer_said() {
     assert!(report.meta.failed_stages.is_empty());
 }
 
+/// 除了诚信评估，其余各步都照常回答。
+fn full_model_with_integrity(replies: &[&str]) -> RoutedModel {
+    let mut model = RoutedModel::new()
+        .on("question:q1", Q1)
+        .on("question:q2", Q2)
+        .on("requirements", REQUIREMENTS)
+        .on("resume", RESUME)
+        .on("communication", COMMUNICATION)
+        .on("synthesis", SYNTHESIS);
+    for reply in replies {
+        model = model.on("integrity", reply);
+    }
+    model
+}
+
+#[tokio::test]
+async fn a_risk_level_without_signals_is_sent_back_to_the_model() {
+    // 真模型出过这种结果：风险写了高，迹象一条没列，HR 没有东西可核实
+    let unsupported = r#"{"risk_level": "high", "summary": "多处回答像照着念。", "signals": []}"#;
+    let model = full_model_with_integrity(&[unsupported, INTEGRITY]);
+    let report = analyze(&sample_record(), &model, &once()).await.unwrap();
+
+    assert_eq!(model.calls("integrity"), 2);
+    let integrity = report.integrity.expect("重写之后应该有诚信评估");
+    assert_eq!(integrity.risk_level, RiskLevel::Low);
+    assert_eq!(integrity.signals.len(), 1);
+}
+
+#[tokio::test]
+async fn signals_with_no_risk_level_are_sent_back_to_the_model() {
+    let unrated = INTEGRITY.replace(r#""risk_level": "low""#, r#""risk_level": "none""#);
+    assert_ne!(unrated, INTEGRITY);
+    let model = full_model_with_integrity(&[&unrated, INTEGRITY]);
+    let report = analyze(&sample_record(), &model, &once()).await.unwrap();
+
+    assert_eq!(model.calls("integrity"), 2);
+    assert_eq!(report.integrity.unwrap().risk_level, RiskLevel::Low);
+}
+
+#[tokio::test]
+async fn an_integrity_result_that_stays_inconsistent_counts_as_failed() {
+    let unsupported = r#"{"risk_level": "medium", "summary": "有些可疑。", "signals": []}"#;
+    let options = once();
+    let replies = vec![unsupported; options.attempts as usize];
+    let model = full_model_with_integrity(&replies);
+    let report = analyze(&sample_record(), &model, &options).await.unwrap();
+
+    // 对不上的结论不交给 HR：这一栏为空，并提示报告不完整
+    assert_eq!(report.integrity, None);
+    assert!(
+        report
+            .meta
+            .failed_stages
+            .iter()
+            .any(|failure| failure.stage == "integrity")
+    );
+    assert!(
+        report
+            .review_flags
+            .iter()
+            .all(|flag| flag.code != ReviewFlagCode::IntegrityRisk)
+    );
+}
+
 #[tokio::test]
 async fn a_question_without_a_quote_is_sent_back_to_the_model() {
     let unquoted = r#"{"questions": [{"question": "什么时候能入职？", "handling": "noted",

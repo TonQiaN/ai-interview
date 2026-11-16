@@ -175,11 +175,17 @@ fn report_reply(request: &ChatRequest) -> Result<ChatResponse, LlmError> {
         ),
         (
             "# 任务：找出作弊和诚信方面的迹象",
-            r#"{"risk_level": "low", "summary": "没有发现异常。", "signals": []}"#,
+            // 没有迹象时风险只能是 none：别的等级不带迹象，报告会当成模型写错了，让它重写
+            r#"{"risk_level": "none", "summary": "没有发现异常。", "signals": []}"#,
         ),
         (
             "# 任务：评价沟通表达",
             r#"{"summary": "表达清楚。", "aspects": [], "reliability_note": "只看了文字。"}"#,
+        ),
+        (
+            // 候选人没有向公司提问
+            "# 任务：整理候选人向公司提的问题",
+            r#"{"questions": []}"#,
         ),
         (
             "# 任务：给出综合建议",
@@ -197,7 +203,17 @@ fn report_reply(request: &ChatRequest) -> Result<ChatResponse, LlmError> {
     Ok(scripted(content))
 }
 
-/// 写报告最多会调用模型多少次：每道问到的题一次（含追问），另外五步各一次，留些余量。
+/// 报告的每一步都做完了。哪一步失败报告照样生成，只是那一部分留空、多一条「报告不完整」的提示，
+/// 所以光看报告生成了不够：分析报告加了新的步骤而上面的回答没跟上，就只有这里看得出来。
+fn assert_report_is_complete(report: &Value) {
+    assert_eq!(
+        report["content"]["meta"]["failed_stages"],
+        json!([]),
+        "测试里的假模型没跟上报告的步骤"
+    );
+}
+
+/// 写报告最多会调用模型多少次：每道问到的题一次（含追问），另外六步各一次，留些余量。
 const REPORT_CALLS: usize = 24;
 /// 检查录像画面最多会调用模型多少次：两分钟的录像抽二十几帧，八张一批，不正常的帧各复核两次。
 const FRAME_CALLS: usize = 16;
@@ -595,6 +611,7 @@ async fn a_whole_interview_from_login_to_wrap_up(pool: PgPool) {
     assert_eq!(reports[0]["status"], "done", "{reports:?}");
     let report = w.hr_get(&format!("{uri}/report")).await;
     assert_eq!(report["content"]["recommendation"]["decision"], "advance");
+    assert_report_is_complete(&report);
     let questions = report["content"]["questions"].as_array().unwrap();
     assert!(
         questions
@@ -802,6 +819,7 @@ async fn a_realtime_interview_from_start_to_report(pool: PgPool) {
     let reports = w.hr_get(&format!("{uri}/reports")).await;
     assert_eq!(reports["items"][0]["status"], "done", "{reports}");
     let report = w.hr_get(&format!("{uri}/report")).await;
+    assert_report_is_complete(&report);
     let questions = report["content"]["questions"].as_array().unwrap();
     let ids: Vec<&str> = questions
         .iter()

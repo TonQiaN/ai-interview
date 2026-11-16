@@ -516,17 +516,19 @@ fn review_flags(
     if let Some(integrity) = integrity
         && integrity.risk_level >= RiskLevel::Medium
     {
+        let level = if integrity.risk_level == RiskLevel::High {
+            "高"
+        } else {
+            "中"
+        };
+        // 模型的输出过了检查，风险等级不低就一定列了迹象。这里兜个底，不写「发现 0 条」
+        let found = match integrity.signals.len() {
+            0 => "诚信评估没有列出具体迹象".to_owned(),
+            count => format!("发现 {count} 条诚信方面的迹象"),
+        };
         flag(
             ReviewFlagCode::IntegrityRisk,
-            format!(
-                "发现 {} 条诚信方面的迹象，风险等级为{}，请回看录像核实后再做决定。",
-                integrity.signals.len(),
-                if integrity.risk_level == RiskLevel::High {
-                    "高"
-                } else {
-                    "中"
-                }
-            ),
+            format!("{found}，风险等级为{level}，请回看录像核实后再做决定。"),
         );
     }
     if let Some(requirement_match) = requirement_match {
@@ -803,7 +805,36 @@ impl Checked for ResumeVerification {
 fn is_resume_quote(evidence: &Evidence) -> bool {
     evidence.source == EvidenceSource::Resume && !evidence.quote.trim().is_empty()
 }
-impl Checked for IntegrityAssessment {}
+impl Checked for IntegrityAssessment {
+    fn check(&self) -> Result<(), String> {
+        // 风险等级是从列出的迹象来的，两边对不上的结论 HR 没法核实
+        match (self.risk_level, self.signals.is_empty()) {
+            (RiskLevel::None, true) => Ok(()),
+            (RiskLevel::None, false) => Err(format!(
+                "signals 里列了 {} 条迹象，risk_level 却是 none。\
+                 列出了迹象，risk_level 至少是 low；这些如果不算迹象，就从 signals 里去掉，\
+                 需要提醒 HR 的写在 summary 里",
+                self.signals.len()
+            )),
+            (level, true) => Err(format!(
+                "risk_level 是 {}，signals 却是空的。\
+                 风险等级要有迹象支撑：把依据的每一条迹象列进 signals，带上 evidence；\
+                 确实没有迹象，risk_level 填 none",
+                risk_level_name(level)
+            )),
+            (_, false) => Ok(()),
+        }
+    }
+}
+
+fn risk_level_name(level: RiskLevel) -> &'static str {
+    match level {
+        RiskLevel::None => "none",
+        RiskLevel::Low => "low",
+        RiskLevel::Medium => "medium",
+        RiskLevel::High => "high",
+    }
+}
 impl Checked for CommunicationAssessment {
     fn check(&self) -> Result<(), String> {
         self.aspects

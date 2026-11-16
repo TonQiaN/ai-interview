@@ -49,6 +49,7 @@ impl ReportModel {
             .on("resume", RESUME)
             .on("integrity", INTEGRITY)
             .on("communication", COMMUNICATION)
+            .on("candidate_questions", CANDIDATE_QUESTIONS)
             .on("synthesis", SYNTHESIS)
     }
 
@@ -109,6 +110,7 @@ fn stage_of(prompt: &str) -> String {
         ("# 任务：核验简历内容", "resume"),
         ("# 任务：找出作弊和诚信方面的迹象", "integrity"),
         ("# 任务：评价沟通表达", "communication"),
+        ("# 任务：整理候选人向公司提的问题", "candidate_questions"),
         ("# 任务：给出综合建议", "synthesis"),
         ("# 任务：比较这", "comparison"),
     ];
@@ -187,9 +189,12 @@ const QUESTION_WITH_QUOTE: &str = r#"{
 
 const REQUIREMENTS: &str = r#"{"match_level": "medium", "summary": "基本满足。", "items": []}"#;
 const RESUME: &str = r#"{"credibility": "medium", "summary": "讲出了做法。", "claims": []}"#;
-const INTEGRITY: &str = r#"{"risk_level": "low", "summary": "没有发现异常。", "signals": []}"#;
+// 没有迹象时风险只能是 none：别的等级不带迹象，报告会当成模型写错了，让它重写
+const INTEGRITY: &str = r#"{"risk_level": "none", "summary": "没有发现异常。", "signals": []}"#;
 const COMMUNICATION: &str =
     r#"{"summary": "表达清楚。", "aspects": [], "reliability_note": "只看了文字。"}"#;
+/// 候选人没有向公司提问。
+const CANDIDATE_QUESTIONS: &str = r#"{"questions": []}"#;
 const SYNTHESIS: &str = r#"{
   "recommendation": "advance", "confidence": "medium",
   "headline": "有实际经验", "overview": "重构经历讲得具体。",
@@ -474,6 +479,12 @@ async fn finalize_retranscribes_answers_and_writes_the_report(pool: PgPool) {
     assert_eq!(response.status, StatusCode::OK, "{}", response.text());
     let report = response.json();
     assert_eq!(report["version"], 1);
+    // 每一步都做完了。哪一步失败报告照样生成，只是那一部分留空，所以要单独看
+    assert_eq!(
+        report["content"]["meta"]["failed_stages"],
+        json!([]),
+        "测试里的假模型没跟上报告的步骤"
+    );
     let content = &report["content"];
     assert_eq!(content["interview_id"], id.as_str());
     assert_eq!(content["recommendation"]["decision"], "advance");

@@ -7,8 +7,8 @@ use interview_report::calibration::{
     StagedBehaviour, calibrate, form_html, parse_report,
 };
 use interview_report::report::{
-    Credibility, Decision, Evidence, EvidenceSource, IntegritySignal, Level, QuoteMatch,
-    ReviewFlag, ReviewFlagCode, RiskLevel, SignalKind,
+    CandidateQuestion, CandidateQuestionReply, Credibility, Decision, Evidence, EvidenceSource,
+    IntegritySignal, Level, QuoteMatch, ReviewFlag, ReviewFlagCode, RiskLevel, SignalKind,
 };
 
 /// 一份报告：建议、诚信风险、简历可信度按给的来，每道题都是 3 分，没有迹象，没有复核提示。
@@ -267,7 +267,7 @@ fn decisions_and_ratings_are_compared_with_blind_annotations_only() {
         ],
         usefulness: Some(4),
         would_change_decision: Some(false),
-        note: String::new(),
+        ..ReportReview::default()
     });
     // 找不到报告的评分表，以及被后一份盖掉的评分表
     let orphan = annotation(&first, "hr-1", Decision::Advance, 0.0);
@@ -589,7 +589,7 @@ fn the_copy_saved_last_is_the_one_that_counts() {
         missed: Vec::new(),
         usefulness: Some(5),
         would_change_decision: Some(false),
-        note: String::new(),
+        ..ReportReview::default()
     });
 
     let result = calibrate(&[report], &[second_step, first_step], &[]);
@@ -598,4 +598,74 @@ fn the_copy_saved_last_is_the_one_that_counts() {
     assert_eq!(result.review.reviews, 1);
     assert_eq!(result.review.evidence_correct, rate(10, 10));
     assert!(result.warnings.iter().any(|w| w.contains("重复")));
+}
+
+/// 报告列了几条「候选人提的问题」。内容不重要，只数条数。
+fn listed_questions(count: usize) -> Vec<CandidateQuestion> {
+    (0..count)
+        .map(|index| CandidateQuestion {
+            question: format!("第 {} 个问题", index + 1),
+            handling: CandidateQuestionReply::Noted,
+            reply: None,
+            evidence: Vec::new(),
+        })
+        .collect()
+}
+
+fn question_check(asked: Option<u32>, missed: u32, wrong: u32) -> ReportReview {
+    ReportReview {
+        questions_asked: asked,
+        questions_missed: missed,
+        questions_wrong: wrong,
+        ..ReportReview::default()
+    }
+}
+
+#[test]
+fn candidate_questions_are_counted_as_listed_and_correct() {
+    let report_for = |id: &str, listed: Option<usize>| {
+        let mut report = report(id, Decision::Advance, RiskLevel::None, Credibility::High);
+        report.candidate_questions = listed.map(listed_questions);
+        report
+    };
+    let reviewed = |report: &InterviewReport, review: ReportReview| {
+        let mut annotation = annotation(report, "hr-1", Decision::Advance, 0.0);
+        annotation.review = Some(review);
+        annotation
+    };
+
+    // 问了 3 个，报告列了 3 条：漏 1 个，列的里面有 1 条不对
+    let a = report_for("interview-a", Some(3));
+    // 没提问，报告却列了 1 条
+    let b = report_for("interview-b", Some(1));
+    // 问了 2 个，报告这一栏是空的（那一步失败了）：评审没填漏了几个，也按全漏算
+    let c = report_for("interview-c", None);
+    // 评审没数：不算进来
+    let d = report_for("interview-d", Some(2));
+    // 填的数比实际的还多：按上限算，不让比例变成负的
+    let e = report_for("interview-e", Some(1));
+
+    let annotations = [
+        reviewed(&a, question_check(Some(3), 1, 1)),
+        reviewed(&b, question_check(Some(0), 0, 1)),
+        reviewed(&c, question_check(Some(2), 0, 0)),
+        reviewed(&d, question_check(None, 0, 0)),
+        reviewed(&e, question_check(Some(1), 5, 5)),
+    ];
+    let result = calibrate(&[a, b, c, d, e], &annotations, &[]);
+
+    assert_eq!(result.review.reviews, 5);
+    // 提了 3 + 0 + 2 + 1 = 6 个，列出来 2 + 0 + 0 + 0 = 2 个
+    assert_eq!(result.review.questions_listed, rate(2, 6));
+    // 报告列了 3 + 1 + 0 + 1 = 5 条，对的 2 + 0 + 0 + 0 = 2 条
+    assert_eq!(result.review.questions_correct, rate(2, 5));
+}
+
+#[test]
+fn review_files_saved_before_the_question_counts_still_load() {
+    let saved = r#"{"evidence_checked": 4, "evidence_wrong": 0, "wrong_findings": [], "missed": [],
+        "usefulness": 3, "would_change_decision": false, "note": ""}"#;
+    let review: ReportReview = serde_json::from_str(saved).expect("读得出来");
+    assert_eq!(review.questions_asked, None);
+    assert_eq!((review.questions_missed, review.questions_wrong), (0, 0));
 }

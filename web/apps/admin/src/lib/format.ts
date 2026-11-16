@@ -1,6 +1,7 @@
 /** 把数据变成界面上的文字。时间都按浏览器的本地时区显示。 */
 import type { Tone } from "@ai-interview/ui";
 import type {
+  CandidateQuestionReply,
   ClaimVerdict,
   CommunicationAspect,
   ComponentState,
@@ -225,6 +226,18 @@ export const riskTone: Record<RiskLevel, Tone> = {
   high: "danger",
 };
 /** 严重程度、可靠程度用同一套颜色：越高越醒目 */
+/** 候选人向公司提的问题，面试官当场是怎么回应的 */
+export const askReplyLabel: Record<CandidateQuestionReply, string> = {
+  answered: "面试官当场答了",
+  noted: "面试官说会转告，等你回复",
+  unaddressed: "面试官没有回应，等你回复",
+};
+export const askReplyTone: Record<CandidateQuestionReply, Tone> = {
+  answered: "neutral",
+  noted: "warning",
+  unaddressed: "warning",
+};
+
 export const levelTone: Record<Level, Tone> = { low: "neutral", medium: "warning", high: "danger" };
 
 export const focusVerdictLabel: Record<FocusVerdict, string> = {
@@ -334,6 +347,7 @@ const stageLabel: Record<string, string> = {
   integrity: "诚信观察",
   communication: "表达和状态",
   synthesis: "综合结论",
+  candidate_questions: "候选人的提问",
 };
 
 /** 报告是分几步生成的，这是每一步的名字。question:q3 这样的是某一道题的点评 */
