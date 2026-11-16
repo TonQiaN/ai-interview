@@ -267,6 +267,10 @@ describe("录像上传和屏幕常亮的事件", () => {
     expect(text("upload_finished", { uploaded_bytes: 2048, wait_ms: 300 })).toBe(
       "录像传完了（共 2 KB）",
     );
+    // 一个字节都没传的那一次不说「传完了」
+    expect(text("upload_finished", { uploaded_bytes: 0, wait_ms: null })).toBe(
+      "这一次打开页面没有再传录像",
+    );
   });
 
   it("一次停顿在时间轴上只有一个点，停了多久记在传不上去那条上", () => {
