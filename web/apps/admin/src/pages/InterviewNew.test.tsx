@@ -287,6 +287,33 @@ describe("安排面试", () => {
       expect(screen.getByRole("button", { name: "下一步" })).toHaveProperty("disabled", false);
     });
 
+    it("超过 50 个时只列前 50 个：写着一共多少，搜到的不满 50 个就不写了", async () => {
+      await addMany("/candidates", 60);
+      await addMany("/positions", 60);
+      const total = async (path: string) =>
+        ((await (await server.fetch(`/api/v1${path}`)).json()) as Page<unknown>).total;
+      const candidates = await total("/candidates?page_size=1");
+      const positions = await total("/positions?status=open&page_size=1");
+      open();
+
+      expect(
+        await screen.findByText(
+          `这里只列了最新的 50 位，一共 ${candidates} 位。搜姓名、公司或职位能找到其他人。`,
+        ),
+      ).toBeTruthy();
+      expect(
+        await screen.findByText(
+          `这里只列了最新的 50 个，一共 ${positions} 个在招的岗位。搜岗位或部门能找到其他的。`,
+        ),
+      ).toBeTruthy();
+
+      fireEvent.change(screen.getByLabelText("搜姓名、公司或职位"), {
+        target: { value: "合成候选人59" },
+      });
+      await waitFor(() => expect(screen.queryByText(/这里只列了最新的 50 位/)).toBeNull());
+      expect(screen.getByText(/这里只列了最新的 50 个/)).toBeTruthy();
+    });
+
     it("归档的候选人、不在招的岗位不替人选", async () => {
       const candidate = server.db.candidates[0];
       const position = server.db.positions.find((p) => p.status === "open");

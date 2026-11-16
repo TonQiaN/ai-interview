@@ -92,32 +92,39 @@ function PickCandidates({
           </ul>
         )}
         <QueryView query={candidates}>
-          {({ items }) =>
+          {({ items, total }) =>
             items.length === 0 ? (
               <p className="oil-muted">没有找到候选人。</p>
             ) : (
-              <div className="adm-wizard-pick">
-                {items.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className="adm-pick"
-                    aria-pressed={isSelected(c)}
-                    onClick={() => onToggle(c)}
-                  >
-                    <Avatar name={c.name} />
-                    <span className="oil-grow">
-                      <strong>{c.name}</strong>
-                      <span className="adm-person__sub" style={{ display: "block" }}>
-                        {[c.current_title, c.current_company, resumeNote(c)]
-                          .filter(Boolean)
-                          .join(" · ")}
+              <>
+                <div className="adm-wizard-pick">
+                  {items.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="adm-pick"
+                      aria-pressed={isSelected(c)}
+                      onClick={() => onToggle(c)}
+                    >
+                      <Avatar name={c.name} />
+                      <span className="oil-grow">
+                        <strong>{c.name}</strong>
+                        <span className="adm-person__sub" style={{ display: "block" }}>
+                          {[c.current_title, c.current_company, resumeNote(c)]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
                       </span>
-                    </span>
-                    {isSelected(c) && <Check aria-hidden="true" size={18} />}
-                  </button>
-                ))}
-              </div>
+                      {isSelected(c) && <Check aria-hidden="true" size={18} />}
+                    </button>
+                  ))}
+                </div>
+                {total > items.length && (
+                  <p className="oil-muted adm-note adm-note--after">
+                    {`这里只列了最新的 ${items.length} 位，一共 ${total} 位。搜姓名、公司或职位能找到其他人。`}
+                  </p>
+                )}
+              </>
             )
           }
         </QueryView>
@@ -160,29 +167,36 @@ function PickPosition({
           <p className="oil-muted adm-picked">选一个在招的岗位。</p>
         )}
         <QueryView query={positions}>
-          {({ items }) =>
+          {({ items, total }) =>
             items.length === 0 ? (
               <p className="oil-muted">没有在招的岗位。</p>
             ) : (
-              <div className="adm-wizard-pick">
-                {items.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className="adm-pick"
-                    aria-pressed={selected?.id === p.id}
-                    onClick={() => onSelect(p)}
-                  >
-                    <span className="oil-grow">
-                      <strong>{p.title}</strong>
-                      <span className="adm-person__sub" style={{ display: "block" }}>
-                        {[p.department, p.location].filter(Boolean).join(" · ")}
+              <>
+                <div className="adm-wizard-pick">
+                  {items.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="adm-pick"
+                      aria-pressed={selected?.id === p.id}
+                      onClick={() => onSelect(p)}
+                    >
+                      <span className="oil-grow">
+                        <strong>{p.title}</strong>
+                        <span className="adm-person__sub" style={{ display: "block" }}>
+                          {[p.department, p.location].filter(Boolean).join(" · ")}
+                        </span>
                       </span>
-                    </span>
-                    {selected?.id === p.id && <Check aria-hidden="true" size={18} />}
-                  </button>
-                ))}
-              </div>
+                      {selected?.id === p.id && <Check aria-hidden="true" size={18} />}
+                    </button>
+                  ))}
+                </div>
+                {total > items.length && (
+                  <p className="oil-muted adm-note adm-note--after">
+                    {`这里只列了最新的 ${items.length} 个，一共 ${total} 个在招的岗位。搜岗位或部门能找到其他的。`}
+                  </p>
+                )}
+              </>
             )
           }
         </QueryView>
