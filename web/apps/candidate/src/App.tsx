@@ -1,5 +1,5 @@
-import { Spinner, Stage } from "@ai-interview/ui";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { Spinner, Stage, UiTextProvider, uiTextEn, uiTextZh } from "@ai-interview/ui";
+import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ConsentPage } from "./pages/ConsentPage";
 import { DevicePage } from "./pages/DevicePage";
 import { DonePage, FinishingPage } from "./pages/FinishPages";
@@ -8,12 +8,35 @@ import { ProblemPage } from "./pages/ProblemPage";
 import { ReadyPage } from "./pages/ReadyPage";
 import { WelcomePage } from "./pages/WelcomePage";
 import { InterviewSession, type SessionSnapshot } from "./session/interview-session";
+import {
+  browserLanguage,
+  type Language,
+  pageLanguage,
+  TextContext,
+  textsFor,
+  useText,
+} from "./text";
+
+/** 里面的页面和组件都用这种语言的文字。 */
+function InLanguage({ language, children }: { language: Language; children: ReactNode }) {
+  const text = textsFor(language);
+  useEffect(() => {
+    document.documentElement.lang = text.htmlLang;
+    document.title = text.pageTitle;
+  }, [text]);
+  return (
+    <TextContext value={text}>
+      <UiTextProvider value={language === "en" ? uiTextEn : uiTextZh}>{children}</UiTextProvider>
+    </TextContext>
+  );
+}
 
 function Loading() {
+  const t = useText();
   return (
     <Stage>
       <div className="app-center">
-        <Spinner label="正在打开面试" />
+        <Spinner label={t.loading} />
       </div>
     </Stage>
   );
@@ -29,12 +52,42 @@ export function App() {
     return () => created.dispose();
   }, []);
 
-  if (!session) return <Loading />;
-  return <SessionView session={session} />;
+  // 还不知道是哪场面试时，按浏览器的语言
+  const fallback = useMemo(() => browserLanguage(), []);
+  if (!session) {
+    return (
+      <InLanguage language={fallback}>
+        <Loading />
+      </InLanguage>
+    );
+  }
+  return <LocalizedSession session={session} fallback={fallback} />;
 }
 
-function SessionView({ session }: { session: InterviewSession }) {
+/** 面试是什么语言，页面就用什么语言。 */
+function LocalizedSession({
+  session,
+  fallback,
+}: {
+  session: InterviewSession;
+  fallback: Language;
+}) {
   const snapshot: SessionSnapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const { room } = snapshot;
+  return (
+    <InLanguage language={room ? pageLanguage(room.language) : fallback}>
+      <SessionView session={session} snapshot={snapshot} />
+    </InLanguage>
+  );
+}
+
+function SessionView({
+  session,
+  snapshot,
+}: {
+  session: InterviewSession;
+  snapshot: SessionSnapshot;
+}) {
   const { stage, room } = snapshot;
 
   // 换页时回到顶部
