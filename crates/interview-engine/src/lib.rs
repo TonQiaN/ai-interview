@@ -21,8 +21,8 @@ pub use live::{
     LiveState, LiveTiming, Speaker, TurnContext, openers,
 };
 pub use plan::{
-    FollowUp, GenerationInfo, InterviewBrief, InterviewPlan, PLAN_SCHEMA_VERSION, Phrases,
-    PlanIssue, PlannedQuestion, QuestionCategory, QuestionOrigin, ScoringGuide, Utterance,
+    FollowUp, GenerationInfo, HR_NOTICE, InterviewBrief, InterviewPlan, PLAN_SCHEMA_VERSION,
+    Phrases, PlanIssue, PlannedQuestion, QuestionCategory, QuestionOrigin, ScoringGuide, Utterance,
     UtteranceKind,
 };
 pub use planner::{
