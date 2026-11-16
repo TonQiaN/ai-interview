@@ -502,6 +502,28 @@ describe("假后端", () => {
     expect(candidates.data.items.some((c) => c.id === candidate.id)).toBe(false);
   });
 
+  it("归档的面试不出现在列表里，带上 include_archived 才有，详情照常能取", async () => {
+    await login(server);
+    const interview = server.db.interviews.find((i) => i.status === "completed");
+    if (!interview) throw new Error("演示数据里没有面完的面试");
+    expect((await call(server, "DELETE", `/interviews/${interview.id}`)).status).toBe(204);
+    const usual = await call<Page<InterviewSummary>>(server, "GET", "/interviews?page_size=100");
+    expect(usual.data.items.some((i) => i.id === interview.id)).toBe(false);
+    const all = await call<Page<InterviewSummary>>(
+      server,
+      "GET",
+      "/interviews?page_size=100&include_archived=true",
+    );
+    expect(all.data.items.find((i) => i.id === interview.id)?.archived_at).toBeTruthy();
+    expect(all.data.items.filter((i) => i.archived_at)).toHaveLength(1);
+    const detail = await call<Interview>(server, "GET", `/interviews/${interview.id}`);
+    expect(detail.data.archived_at).toBeTruthy();
+    // 归档了就不能再生成链接
+    expect((await call(server, "POST", `/interviews/${interview.id}/invites`, {})).status).toBe(
+      409,
+    );
+  });
+
   it("粘贴岗位描述能整理出草稿，但不保存", async () => {
     await login(server);
     const before = server.db.positions.length;

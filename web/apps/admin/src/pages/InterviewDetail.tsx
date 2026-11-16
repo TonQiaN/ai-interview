@@ -94,10 +94,12 @@ import { updateOutcome } from "../lib/replan";
 
 type Tab = "overview" | "questions" | "invites" | "replay" | "report";
 
+// 归档了的面试只能看：不改设置和题目、不准备、不发链接、不用再取消
+const archived = (i: Interview) => Boolean(i.archived_at);
 const editable = (i: Interview) =>
-  i.status === "draft" || i.status === "prepare_failed" || i.status === "ready";
+  !archived(i) && (i.status === "draft" || i.status === "prepare_failed" || i.status === "ready");
 const cancellable = (i: Interview) =>
-  !["completed", "abandoned", "expired", "cancelled"].includes(i.status);
+  !archived(i) && !["completed", "abandoned", "expired", "cancelled"].includes(i.status);
 const ended = (i: Interview) => i.status === "completed" || i.status === "abandoned";
 const reportBusy = (i: Interview) =>
   i.report?.status === "running" || i.report?.status === "pending";
@@ -552,7 +554,8 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
 
   return (
     <div className="oil-stack" style={gap(5)}>
-      <NextStep interview={interview} goTo={goTo} />
+      {/* 归档了又没面完的，下一步那些事（准备、发链接）都做不了，上面已经说明了 */}
+      {(!archived(interview) || ended(interview)) && <NextStep interview={interview} goTo={goTo} />}
       <div className="adm-split">
         <Card>
           <CardHeader
@@ -624,14 +627,16 @@ function OverviewTab({ interview, goTo }: { interview: Interview; goTo: (tab: Ta
             )}
             {interview.status !== "in_progress" && interview.status !== "preparing" && (
               <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={<Archive aria-hidden="true" />}
-                  onClick={() => setConfirming("delete")}
-                >
-                  归档
-                </Button>
+                {!archived(interview) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<Archive aria-hidden="true" />}
+                    onClick={() => setConfirming("delete")}
+                  >
+                    归档
+                  </Button>
+                )}
                 {me.data?.role === "admin" && (
                   <Button
                     variant="ghost"
@@ -1167,7 +1172,8 @@ function InvitesTab({ interview }: { interview: Interview }) {
   // 完整链接只在生成时返回一次，离开这一页就看不到了
   const [fresh, setFresh] = useState<CreatedInvite | null>(null);
   const [revoking, setRevoking] = useState<Invite | null>(null);
-  const canCreate = interview.status === "ready" || interview.status === "invited";
+  const canCreate =
+    !archived(interview) && (interview.status === "ready" || interview.status === "invited");
   const hasActive = invites.data?.items.some((invite) => invite.status === "active") ?? false;
 
   return (
@@ -1503,6 +1509,19 @@ function Verdict({ interview }: { interview: Interview }) {
   );
 }
 
+/** 归档了的面试打开时，说清楚它现在是什么情况 */
+function ArchivedNote() {
+  const me = useMe();
+  return (
+    <Banner tone="info" title="这场面试已经归档" className="adm-gap-below">
+      归档的面试不在列表里显示，发出去的链接已经失效，也不能再改设置、改题目或者生成链接。录像、逐字稿和报告都还在，这里照常能看；在面试列表勾上「带上已归档的」能找到它。
+      {me.data?.role === "admin"
+        ? "要把录像和报告真的删掉，用概览里的「彻底删除」。"
+        : "候选人要求删除录像时，请找管理员彻底删除。"}
+    </Banner>
+  );
+}
+
 export function InterviewDetailPage() {
   const { id = "" } = useParams();
   const [params, setParams] = useSearchParams();
@@ -1536,12 +1555,14 @@ export function InterviewDetailPage() {
             description={
               <span className="oil-row oil-row--wrap">
                 <StatusBadge status={i.status} />
+                {archived(i) && <Badge plain>已归档</Badge>}
                 <Verdict interview={i} />
                 <DecisionBadge value={i.decision} />
                 <span>{relativeTime(i.updated_at)}更新</span>
               </span>
             }
           />
+          {archived(i) && <ArchivedNote />}
           <Tabs
             aria-label="面试的各部分"
             value={tab}
