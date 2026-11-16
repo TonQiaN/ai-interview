@@ -129,3 +129,25 @@ describe("用到一半登录失效了", () => {
     expect(screen.queryByRole("dialog", { name: "登录已失效" })).toBeNull();
   });
 });
+
+describe("侧栏上的数字", () => {
+  it("等你做决定的面试超过 100 场也数得对", async () => {
+    const waiting = server.db.interviews.find(
+      (i) => i.status === "completed" && i.report?.status === "done" && i.decision === "pending",
+    );
+    if (!waiting) throw new Error("演示数据里没有报告好了、还没做决定的面试");
+    for (let n = 0; n < 120; n += 1) server.db.interviews.push({ ...waiting, id: `more-${n}` });
+    const all = server.db.interviews.filter(
+      (i) =>
+        !i.archived_at &&
+        (i.status === "completed" || i.status === "abandoned") &&
+        i.report?.status === "done" &&
+        i.decision === "pending",
+    ).length;
+    expect(all).toBeGreaterThan(120);
+    open("/positions");
+
+    const link = await screen.findByRole("link", { name: new RegExp(`^面试\\s*${all}$`) });
+    expect(link.getAttribute("href")).toBe("/interviews");
+  });
+});
