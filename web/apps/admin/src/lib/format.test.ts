@@ -152,6 +152,22 @@ describe("报告里引用的过程记录", () => {
     ).toBe("抽查录像画面（抽了 26 帧，3 帧有情况，1 帧看不清）");
   });
 
+  it("画面里看得到手机、画面看不清，都有中文说法", () => {
+    expect(eventEvidenceText('phone_visible：{"frames":2,"note":"桌上立着一部手机"}')).toBe(
+      "画面里看得到手机（共 2 帧，桌上立着一部手机）",
+    );
+    expect(
+      eventEvidenceText(
+        'face_count_changed：{"frames":3,"note":"镜头被挡住","people":null,"unclear":true}',
+      ),
+    ).toBe("画面看不清（共 3 帧，镜头被挡住）");
+    expect(eventSeverity("phone_visible")).toBe("warning");
+  });
+
+  it("样例里只写了人数的画面事件，也说得出是几个人", () => {
+    expect(eventEvidenceText("face_count_changed：2")).toBe("画面里的人数变了（变成 2 个人）");
+  });
+
   it("设备检测结果里带上浏览器，不把整串 UA 摆出来", () => {
     const ua =
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36";
