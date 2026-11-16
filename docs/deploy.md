@@ -26,7 +26,7 @@
 
    不要把 `.env.example` 整个复制过来不改：里面语音识别和语音合成写的是 `fake`。
 
-2. 备好语音合成的上游代码和权重（`vendor/`、`models/`），步骤在 [tts/README.md](../tts/README.md) 的「在新机器上重建环境」。没备好也能启动，面试官的声音是一段测试音。
+2. 备好语音合成的上游代码和权重（`vendor/`、`models/`），步骤在 [tts/README.md](../tts/README.md) 的「在新机器上重建环境」。没备好也能启动，面试官的声音是一段测试音。`vendor/` 和 `models/` 不在这个仓库下面时，在 `.env` 里用 `AI_INTERVIEW_TTS_HOME` 指过去。
 
 3. 检查一遍，它会说清楚还缺什么：
 
@@ -118,5 +118,5 @@ scripts/serve.sh
 
 - 后台「系统」页：各个部件的状态和不正常的原因。
 - 服务的日志直接打在终端里。级别用 `AI_INTERVIEW_LOG` 调（比如 `debug`）。日志里不带候选人的简历和回答内容。
-- 语音合成 worker 的日志在 `.runtime/tts-workers/`。单独管 worker：`scripts/tts-workers.sh start|stop|status`。
+- 语音合成 worker 的日志在 `.runtime/tts-worker/`。单独管 worker：`tts/worker/run.sh start|stop|status`，见 [tts/worker/README.md](../tts/worker/README.md)。
 - 接口文档：`/api/docs`。

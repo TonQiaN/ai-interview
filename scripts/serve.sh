@@ -131,14 +131,26 @@ else
   warn "语音识别是假的（AI_INTERVIEW_STT_BACKEND=$stt_backend）：听不到候选人说了什么，报告没有内容可写"
 fi
 
-# ── 语音合成：配了就用配的；没配，在 Mac 上备好了上游代码就自己起 worker ──
+# ── 语音合成：配了就用配的；没配，在 Mac 上备好了上游代码就用 tts/worker/run.sh 起 worker ──
 tts_backend="$(setting AI_INTERVIEW_TTS_BACKEND)"
-start_workers=false
+tts_home="$(setting AI_INTERVIEW_TTS_HOME)"
+tts_home="${tts_home:-$PWD}"
+# 要起哪些 worker：空的是不起，index 是只起 IndexTTS，all 是连 BreezeTTS2 一起
+start_workers=""
+if [ -z "$tts_backend" ]; then
+  if [ -n "${AI_INTERVIEW_TTS_WORKER_FAKE:-}" ]; then
+    start_workers="all"
+  elif [ -x "$tts_home/vendor/mlx-indextts2/.venv/bin/python" ]; then
+    start_workers="index"
+    [ ! -x "$tts_home/vendor/breeze-tts-mlx/.venv/bin/python" ] || start_workers="all"
+  fi
+fi
 if [ "$tts_backend" = "worker" ]; then
   ok "语音合成用配置里的 worker（$(setting AI_INTERVIEW_TTS_WORKER_URLS)）"
-elif [ -z "$tts_backend" ] && { [ -n "${AI_INTERVIEW_TTS_WORKER_FAKE:-}" ] || [ -x vendor/mlx-indextts2/.venv/bin/python ]; }; then
-  start_workers=true
+elif [ "$start_workers" = "all" ]; then
   ok "语音合成用这台机器上的真引擎（启动时会起两个 worker，头一次加载模型要等一会儿）"
+elif [ "$start_workers" = "index" ]; then
+  warn "语音合成只备好了 IndexTTS，没找到 BreezeTTS2（vendor/breeze-tts-mlx）：用不了设计出来的音色，没设默认音色的面试合成语音会失败。怎么备好见 tts/README.md"
 else
   warn "语音合成是假的：面试官的声音是一段测试音。真引擎只能在 Apple Silicon 的 Mac 上跑，怎么备好见 tts/README.md"
 fi
@@ -207,14 +219,18 @@ if [ ! -f web/dist/admin/index.html ]; then
   exit 1
 fi
 
-if [ "$start_workers" = true ]; then
+if [ -n "$start_workers" ]; then
   echo "起语音合成的 worker…" >&2
-  worker_env="$(scripts/tts-workers.sh start)"
-  while IFS= read -r line; do
-    export "${line?}"
-  done <<<"$worker_env"
+  # worker 的令牌和模型目录写在 .env 里的话，带给 run.sh
+  for name in AI_INTERVIEW_TTS_HOME AI_INTERVIEW_TTS_WORKER_TOKEN; do
+    if is_set "$name"; then
+      export "$name=$(setting "$name")"
+    fi
+  done
   # 服务停了，worker 也一起停，不留在后台占着十几 GB 内存
-  trap 'scripts/tts-workers.sh stop' EXIT
+  trap 'tts/worker/run.sh stop >&2' EXIT
+  tts/worker/run.sh start "$start_workers" >&2
+  eval "$(tts/worker/run.sh env)"
 fi
 
 bind="$(setting AI_INTERVIEW_BIND)"
