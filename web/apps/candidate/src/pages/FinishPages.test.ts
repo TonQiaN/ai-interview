@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { endingFor } from "./FinishPages";
+import { en, zh } from "../text";
+import { endingFor as endingIn } from "./FinishPages";
+
+const endingFor = (reason: string | null, problem: Parameters<typeof endingIn>[1]) =>
+  endingIn(reason, problem, zh.done);
 
 describe("结束页对候选人怎么说", () => {
   it("正常问完、到时间、因为回答不理想提前结束，看到的是同一页", () => {
@@ -27,5 +31,10 @@ describe("结束页对候选人怎么说", () => {
 
   it("不知道原因时只说结束了，不说「完成」", () => {
     expect(endingFor(null, null).title).toBe("面试已结束");
+  });
+
+  it("英文面试看到的是英文", () => {
+    expect(endingIn("completed", null, en.done).title).toBe("Interview complete. Thank you");
+    expect(endingIn("connection_lost", null, en.done).description).toContain("recruiter");
   });
 });

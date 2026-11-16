@@ -2,6 +2,7 @@ import { clsx } from "clsx";
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 import type { CSSProperties, HTMLAttributes, ReactNode } from "react";
 import type { PaintingName } from "../paintings";
+import { useUiText } from "../text";
 import type { Tone } from "./Data";
 import { Painting } from "./Surface";
 
@@ -140,8 +141,9 @@ export function Ring({
   );
 }
 
-export function Spinner({ label = "加载中" }: { label?: string }) {
-  return <span className="oil-spinner" role="status" aria-label={label} />;
+export function Spinner({ label }: { label?: string }) {
+  const text = useUiText();
+  return <span className="oil-spinner" role="status" aria-label={label ?? text.loading} />;
 }
 
 export function Skeleton({

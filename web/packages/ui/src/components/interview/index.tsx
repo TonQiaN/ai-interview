@@ -3,6 +3,7 @@ import { clsx } from "clsx";
 import { CheckCircle2, ChevronDown, Clock, XCircle } from "lucide-react";
 import { type CSSProperties, type HTMLAttributes, type ReactNode, useId, useState } from "react";
 import { type PaintingName, paintings } from "../../paintings";
+import { useUiText } from "../../text";
 import { Frame, type FrameProps, Painting } from "../Surface";
 
 export interface StageProps extends HTMLAttributes<HTMLDivElement> {
@@ -39,13 +40,6 @@ export interface DeviceCheckCardProps {
   className?: string;
 }
 
-const deviceStateLabel: Record<DeviceCheckState, string> = {
-  idle: "待检测",
-  checking: "检测中",
-  passed: "通过",
-  failed: "未通过",
-};
-
 export function DeviceCheckCard({
   state,
   icon,
@@ -54,13 +48,14 @@ export function DeviceCheckCard({
   children,
   className,
 }: DeviceCheckCardProps) {
+  const text = useUiText();
   return (
     <section className={clsx("oil-device", className)} data-state={state}>
       <span className="oil-device__icon" aria-hidden="true">
         {icon}
       </span>
       <div className="oil-device__title">{title}</div>
-      <span className="oil-device__state" role="status" aria-label={deviceStateLabel[state]}>
+      <span className="oil-device__state" role="status" aria-label={text.deviceState[state]}>
         {state === "checking" && <span className="oil-spinner" aria-hidden="true" />}
         {state === "passed" && <CheckCircle2 aria-hidden="true" />}
         {state === "failed" && <XCircle aria-hidden="true" />}
@@ -89,6 +84,7 @@ export interface ConsentListProps {
 /** 同意事项清单。是否全部勾选用 allConsented() 判断，据此决定主按钮能不能点。 */
 export function ConsentList({ items, checked, onChange, className }: ConsentListProps) {
   const [open, setOpen] = useState<string | null>(null);
+  const text = useUiText();
   const base = useId();
   return (
     <ul className={clsx("oil-consent", className)}>
@@ -116,7 +112,7 @@ export function ConsentList({ items, checked, onChange, className }: ConsentList
                   className="oil-consent__more"
                   aria-expanded={open === item.id}
                   aria-controls={detailId}
-                  aria-label="查看详情"
+                  aria-label={text.consentDetail}
                   onClick={() => setOpen(open === item.id ? null : item.id)}
                 >
                   <ChevronDown aria-hidden="true" />
@@ -187,13 +183,6 @@ export function VideoFrame({
 
 export type PresenceState = "idle" | "speaking" | "listening" | "thinking";
 
-const presenceLabel: Record<PresenceState, string> = {
-  idle: "",
-  speaking: "正在提问",
-  listening: "正在听",
-  thinking: "思考中",
-};
-
 export interface InterviewerPresenceProps {
   state: PresenceState;
   painting?: PaintingName;
@@ -212,7 +201,8 @@ export function InterviewerPresence({
   size,
   className,
 }: InterviewerPresenceProps) {
-  const text = label ?? presenceLabel[state];
+  const ui = useUiText();
+  const text = label ?? ui.presence[state];
   const sized =
     size == null
       ? undefined
@@ -223,7 +213,7 @@ export function InterviewerPresence({
       <span className="oil-presence__halo" />
       <span className="oil-presence__halo" />
       <div className="oil-presence__portrait">
-        <img src={paintings[painting]} alt="AI 面试官" />
+        <img src={paintings[painting]} alt={ui.interviewer} />
       </div>
       {text && (
         <span className="oil-presence__label" role="status">
@@ -269,6 +259,7 @@ export interface QuestionProgressProps {
 }
 
 export function QuestionProgress({ total, current, paper, className }: QuestionProgressProps) {
+  const text = useUiText();
   return (
     <div
       className={clsx("oil-qprogress", paper && "oil-qprogress--paper", className)}
@@ -276,7 +267,7 @@ export function QuestionProgress({ total, current, paper, className }: QuestionP
       aria-valuemin={1}
       aria-valuemax={total}
       aria-valuenow={Math.min(total, current + 1)}
-      aria-label={`第 ${Math.min(total, current + 1)} 题，共 ${total} 题`}
+      aria-label={text.questionProgress(Math.min(total, current + 1), total)}
     >
       {Array.from({ length: total }, (_, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: 固定长度的格子
@@ -297,29 +288,27 @@ export function formatClock(totalSeconds: number): string {
 
 export function Timer({
   seconds,
-  label = "已用时",
+  label,
   className,
 }: {
   seconds: number;
   label?: string;
   className?: string;
 }) {
+  const text = useUiText();
   return (
-    <span className={clsx("oil-timer", className)} role="timer" aria-label={label}>
+    <span className={clsx("oil-timer", className)} role="timer" aria-label={label ?? text.elapsed}>
       <Clock aria-hidden="true" />
       {formatClock(seconds)}
     </span>
   );
 }
 
-export function RecordingIndicator({
-  paper,
-  children = "录制中",
-}: {
-  paper?: boolean;
-  children?: ReactNode;
-}) {
-  return <span className={clsx("oil-rec", paper && "oil-rec--paper")}>{children}</span>;
+export function RecordingIndicator({ paper, children }: { paper?: boolean; children?: ReactNode }) {
+  const text = useUiText();
+  return (
+    <span className={clsx("oil-rec", paper && "oil-rec--paper")}>{children ?? text.recording}</span>
+  );
 }
 
 export interface SilenceRingProps {
@@ -337,12 +326,13 @@ export function SilenceRing({ remaining, total, size = 72, className }: SilenceR
   const r = (size - thickness) / 2;
   const c = 2 * Math.PI * r;
   const ratio = total > 0 ? Math.max(0, Math.min(1, remaining / total)) : 0;
+  const text = useUiText();
   return (
     <div
       className={clsx("oil-silence", className)}
       style={{ width: size, height: size }}
       role="timer"
-      aria-label={`${Math.ceil(remaining)} 秒后进入下一题`}
+      aria-label={text.nextQuestionIn(Math.ceil(remaining))}
     >
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
         <circle
@@ -364,7 +354,7 @@ export function SilenceRing({ remaining, total, size = 72, className }: SilenceR
       </svg>
       <span className="oil-silence__label">
         <span className="oil-silence__num">{Math.ceil(remaining)}</span>
-        <span className="oil-silence__unit">秒</span>
+        <span className="oil-silence__unit">{text.secondsUnit}</span>
       </span>
     </div>
   );

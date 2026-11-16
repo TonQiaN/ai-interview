@@ -40,6 +40,9 @@ docs: 补充首包延迟的测法
 | job | 做什么 |
 | --- | --- |
 | `rust` | `cargo fmt --check`、`cargo clippy -D warnings`、`cargo test --workspace` |
+| `web` | 前端的 lint、类型检查、单元测试、构建 |
+| `candidate-e2e` | 候选人面试页的浏览器测试：真的 Chromium 对着真的后端走完整场面试（`pnpm -C web/apps/candidate e2e`）。PR 没动后端、迁移、候选人页和前端公共包时跳过，算通过 |
+| `stt-sherpa` | 带 `sherpa` 特性的 clippy，用真的语音识别模型跑测试 |
 | `hygiene` | `scripts/verify-repo-hygiene.sh`：音频、权重、密钥、个人信息不进 Git |
 | `all-checks-passed` | 总闸，上面都过了它才过 |
 

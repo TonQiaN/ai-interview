@@ -75,6 +75,8 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${WEB_PORT}`,
     viewport: { width: 390, height: 844 },
+    // 还不知道是哪场面试的页面（链接无效、过期）按浏览器语言显示，这里固定成中文
+    locale: "zh-CN",
     screenshot: "only-on-failure",
     trace: "off",
   },
