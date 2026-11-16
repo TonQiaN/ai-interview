@@ -547,14 +547,18 @@ export class InterviewSession {
 
   /** 面试中不让屏幕自己熄灭。要在按钮点击里调用；申请不到不影响面试。 */
   private async keepScreenOn(): Promise<void> {
+    const lock = this.screenLock();
+    const held = await lock.acquire();
+    // 记下来：屏幕中途熄灭导致录像断掉时，HR 能看出是不是因为这个
+    this.collector?.record("screen_wake_lock", { supported: lock.supported, held });
+  }
+
+  private screenLock(): ScreenWakeLock {
     this.wakeLock ??= new ScreenWakeLock(
       "wakeLock" in navigator ? navigator.wakeLock : undefined,
       document,
     );
-    const lock = this.wakeLock;
-    const held = await lock.acquire();
-    // 记下来：屏幕中途熄灭导致录像断掉时，HR 能看出是不是因为这个
-    this.collector?.record("screen_wake_lock", { supported: lock.supported, held });
+    return this.wakeLock;
   }
 
   private async startRecording(): Promise<void> {
@@ -745,7 +749,6 @@ export class InterviewSession {
     const recorder = this.recorder;
     this.recorder = null;
     await recorder?.stop().catch(() => {});
-    void this.wakeLock?.release();
     for (const off of this.trackCleanups) off();
     this.trackCleanups = [];
     stopStream(this.stream);
@@ -778,6 +781,18 @@ export class InterviewSession {
   }
 
   private async drainUploads(): Promise<void> {
+    // 录像传完之前接着拦住屏幕熄灭：候选人这时候放下手机等着，手机自己锁屏的话页面被挂起，
+    // 上传就停了。刷新后回来接着传的也申请一次，申请不到不影响上传
+    const lock = this.screenLock();
+    void lock.acquire();
+    try {
+      await this.drainLocalQueue();
+    } finally {
+      void lock.release();
+    }
+  }
+
+  private async drainLocalQueue(): Promise<void> {
     try {
       await this.closeOrphans();
       await this.uploader?.drain();
