@@ -15,6 +15,8 @@ pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin
 
 后台默认请求真实后端。所有请求都走 `@ai-interview/api-client` 的客户端（`src/api/http.ts` 里的 `api`），路径、参数和返回的类型由后端的 OpenAPI 文档生成，后端改了接口这里编译就会报错。
 
+登录用到一半失效了（会话过期、密码改过），请求会返回 401「请先登录」。这时不回登录页，`src/api/session.ts` 记下来，`ReLoginDialog` 在当前页面上让人再输一次密码，页面上填了一半的内容不丢。本来就没登录的照常去登录页。
+
 ## 演示数据
 
 `dev:demo` 和 `build:demo`（也就是 `--mode demo`，或者设 `VITE_API_MOCK=1`）会把请求交给浏览器里的一套假后端（`src/api/mock/`），右上角显示「演示数据」。这时邮箱和密码随便填都能进（密码填 `wrong` 可以看登录失败的样子），所有改动只存在内存里，刷新就没了。正常构建的产物里不带假后端。
@@ -27,7 +29,7 @@ pnpm -C web --filter @ai-interview/admin build        # 产物在 web/dist/admin
 
 ## 目录
 
-- `src/api/`：接口类型（`types.ts`）、请求（`http.ts`、`queries.ts`）、假后端（`mock/`）。
+- `src/api/`：接口类型（`types.ts`）、请求（`http.ts`、`queries.ts`）、登录用到一半失效时怎么办（`session.ts`）、假后端（`mock/`）。
 - `src/pages/`：一个页面一个文件。
 - `src/components/`：页面之间共用的部件，比如面试设置表单（`ConfigForm`）、回看播放器（`ReplayPlayer`）、报告（`ReportView`）。
 - `src/lib/`：枚举到中文文案的对照表、时间和时长的格式化、按设置估算题目数量（`budget.ts`，算法和后端一致）、回看的时钟（`clock.ts`）。
