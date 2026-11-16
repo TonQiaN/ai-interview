@@ -178,6 +178,29 @@
     color: var(--oil-ink-3);
     font-size: var(--oil-text-sm);
   }
+  /* 右边标签多的行：放不下就整组换到下一行，靠右 */
+  .adm-item--wrap {
+    flex-wrap: wrap;
+  }
+  .adm-item__tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--oil-space-2);
+    margin-left: auto;
+  }
+  /* 列表里报告的结论和综合分 */
+  .adm-verdict-brief {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--oil-space-2);
+  }
+  .adm-verdict-brief__score {
+    font-weight: 600;
+    white-space: nowrap;
+  }
   .adm-item__sub--warn {
     display: flex;
     align-items: center;

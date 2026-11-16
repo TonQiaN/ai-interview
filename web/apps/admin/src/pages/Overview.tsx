@@ -3,7 +3,8 @@ import { ArrowRight, Plus } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { useInterviews, useMe, useSystemStatus } from "../api/queries";
 import type { InterviewSummary } from "../api/types";
-import { DecisionBadge, Empty, Person, QueryView, StatusBadge } from "../components/common";
+import { Empty, Person, QueryView } from "../components/common";
+import { hasVerdict, InterviewTags, ReportVerdict } from "../components/ReportVerdict";
 import { SystemStatusList } from "../components/SystemStatusList";
 import { relativeTime } from "../lib/format";
 
@@ -87,6 +88,7 @@ export function OverviewPage() {
                                 to={`/interviews/${i.id}`}
                               />
                             </div>
+                            {hasVerdict(i) && <ReportVerdict interview={i} />}
                             <span className="adm-item__sub">{todoOf(i)}</span>
                             <Button
                               size="sm"
@@ -140,7 +142,7 @@ export function OverviewPage() {
                     <CardBody>
                       <ul className="adm-list">
                         {items.slice(0, 6).map((i) => (
-                          <li key={i.id} className="adm-item">
+                          <li key={i.id} className="adm-item adm-item--wrap">
                             <div className="adm-item__main">
                               <Person
                                 name={i.candidate_name}
@@ -148,8 +150,7 @@ export function OverviewPage() {
                                 to={`/interviews/${i.id}`}
                               />
                             </div>
-                            <DecisionBadge value={i.decision} />
-                            <StatusBadge status={i.status} />
+                            <InterviewTags interview={i} />
                           </li>
                         ))}
                       </ul>

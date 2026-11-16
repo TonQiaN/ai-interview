@@ -95,6 +95,44 @@ describe("假后端", () => {
     expect(firstPage.data.total).toBe(all.data.total);
   });
 
+  it("面试列表带着最新一份报告的结论和综合分，能按分数排，没有分数的排最后", async () => {
+    await login(server);
+    type Row = InterviewSummary;
+    const all = await call<Page<Row>>(server, "GET", "/interviews?page_size=100");
+    const scored = all.data.items.filter((i) => typeof i.overall_score === "number");
+    expect(scored.length).toBeGreaterThan(1);
+    for (const i of scored) {
+      expect(i.report_status).toBe("done");
+      expect(i.recommendation).toBeTruthy();
+      const report = await call<ReportEnvelope>(server, "GET", `/interviews/${i.id}/report`);
+      expect(i.overall_score).toBe(report.data.content.overall_score);
+      expect(i.recommendation).toBe(report.data.content.recommendation.decision);
+    }
+    // 还没面的没有报告，三项都是 null
+    const draft = all.data.items.find((i) => i.status === "draft");
+    expect([draft?.overall_score, draft?.score_range, draft?.recommendation]).toEqual([
+      null,
+      null,
+      null,
+    ]);
+
+    const scores = (rows: Row[]) => rows.map((i) => i.overall_score ?? null);
+    const high = scores(
+      (await call<Page<Row>>(server, "GET", "/interviews?page_size=100&sort=-score")).data.items,
+    );
+    const low = scores(
+      (await call<Page<Row>>(server, "GET", "/interviews?page_size=100&sort=score")).data.items,
+    );
+    const numbers = (list: (number | null)[]) => list.filter((x): x is number => x !== null);
+    expect(numbers(high)).toEqual([...numbers(high)].sort((a, b) => b - a));
+    expect(numbers(low)).toEqual([...numbers(low)].sort((a, b) => a - b));
+    for (const list of [high, low]) {
+      const firstMissing = list.indexOf(null);
+      expect(firstMissing).toBe(numbers(list).length);
+      expect(list.slice(firstMissing).every((x) => x === null)).toBe(true);
+    }
+  });
+
   it("安排面试：草稿，准备，生成链接，链接只在生成时给一次", async () => {
     await login(server);
     const candidate = server.db.candidates[0];

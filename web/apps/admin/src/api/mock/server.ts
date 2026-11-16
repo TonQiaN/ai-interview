@@ -176,8 +176,12 @@ function byNewest<T extends { created_at: string }>(a: T, b: T): number {
   return b.created_at.localeCompare(a.created_at);
 }
 
-function summary(i: Interview): InterviewSummary {
+/** 列表里的一行。结论和分数取自最新一份生成好的报告，和后端一样 */
+function summary(i: Interview, report: ReportVersion["content"]): InterviewSummary {
   return {
+    overall_score: report?.overall_score ?? null,
+    score_range: report?.score_range ?? null,
+    recommendation: report?.recommendation.decision ?? null,
     id: i.id,
     candidate_id: i.candidate.id,
     candidate_name: i.candidate.name,
@@ -1124,7 +1128,23 @@ export function createMockServer(options: MockOptions = {}) {
       .filter((i) => !query.get("position_id") || i.position.id === query.get("position_id"))
       .filter((i) => matches(query.get("q"), i.candidate.name, i.position.title))
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-      .map(summary);
+      .map((i) =>
+        summary(
+          i,
+          (db.reports.get(i.id) ?? []).find((v) => v.brief.status === "done" && v.content)
+            ?.content ?? null,
+        ),
+      );
+    // 按分数排：没有分数的排在最后，正序倒序都是
+    const sort = query.get("sort");
+    if (sort === "score" || sort === "-score") {
+      const direction = sort === "score" ? 1 : -1;
+      list.sort((a, b) => {
+        const [x, y] = [a.overall_score ?? null, b.overall_score ?? null];
+        if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+        return (x - y) * direction;
+      });
+    }
     return paginate(list, query);
   });
   on("POST", "/interviews", ({ body }) => {
