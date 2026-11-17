@@ -927,6 +927,8 @@ export class InterviewSession {
     });
     void this.collector?.flush();
     this.hold("page");
+    // 这一页就是让候选人刷新的：刷新时浏览器不用再问一句「要离开吗，更改可能不会保存」
+    window.removeEventListener("beforeunload", this.warnBeforeUnload);
     // 候选人面前只剩「请刷新」，没有什么要录的了：已经录下的收好传上去，摄像头和麦克风关掉
     void this.stopCapture();
   };
