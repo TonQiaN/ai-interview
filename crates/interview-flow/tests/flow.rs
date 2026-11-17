@@ -7,6 +7,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::http::StatusCode;
 use interview_audio::Ffmpeg;
+use interview_core::task_kind;
 use interview_flow::Deps;
 use interview_llm::ChatModel;
 use interview_llm::testing::ScriptedModel;
@@ -179,6 +180,31 @@ impl Harness {
             .run_until_idle()
             .await
             .unwrap()
+    }
+
+    /// 执行器每隔一阵做的事：把执行它的进程已经死掉的任务收回来。返回收回了几条。
+    async fn recover_stale_tasks(&self) -> u64 {
+        let mut registry = TaskRegistry::new();
+        interview_flow::register_tasks(&mut registry, self.deps.clone());
+        TaskRunner::new(self.ctx.db.clone(), registry)
+            .recover_stale()
+            .await
+            .unwrap()
+    }
+
+    /// 排着的 `kind` 任务被领走后，执行它的进程死了，而且这已经是最后一次尝试：
+    /// 任务停在「执行中」，很久没有心跳。
+    async fn kill_last_attempt(&self, kind: &str) {
+        let killed = sqlx::query(
+            "UPDATE tasks SET status = 'running', attempts = max_attempts, locked_by = 'dead', \
+                 locked_at = now() - interval '1 hour' \
+             WHERE kind = $1 AND status = 'queued'",
+        )
+        .bind(kind)
+        .execute(&self.ctx.db)
+        .await
+        .unwrap();
+        assert_eq!(killed.rows_affected(), 1, "要有一条排着的 {kind}");
     }
 
     /// 点「开始准备」并把后台任务跑完。
@@ -1045,6 +1071,28 @@ async fn preparing_again_while_the_last_task_is_wrapping_up_still_runs(pool: PgP
 
     assert_eq!(h.run_tasks().await, 1, "第二次准备要有自己的任务");
     assert_eq!(h.detail(&id).await["status"], "ready");
+}
+
+/// 出题、合成的进程中断了，重试次数也用完了（或者那段代码崩溃了）：面试不能一直停在
+/// 「正在准备」。那个状态下 HR 改不了、重试不了，只能取消。要标成准备失败、说清原因，点「重试」能接着准备。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_preparation_whose_task_died_can_be_retried(pool: PgPool) {
+    let h = Harness::new(pool, Some(planner()), FakeBackend::new()).await;
+    let id = h.create(config()).await;
+    let response = TestRequest::post(format!("/api/v1/interviews/{id}/prepare"))
+        .send(&h.app)
+        .await;
+    assert_eq!(response.status, StatusCode::ACCEPTED, "{}", response.text());
+    h.kill_last_attempt(task_kind::INTERVIEW_PREPARE).await;
+
+    assert_eq!(h.recover_stale_tasks().await, 1);
+    let detail = h.detail(&id).await;
+    assert_eq!(detail["status"], "prepare_failed", "{detail}");
+    let error = detail["prepare_error"].as_str().unwrap();
+    assert!(error.contains("中断"), "{error}");
+    assert_eq!(h.tts.calls(), 0);
+
+    assert_eq!(h.prepare(&id).await["status"], "ready");
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]

@@ -305,6 +305,59 @@ async fn skip_backoff(pool: &PgPool) {
         .expect("改得了");
 }
 
+/// 假装最后一次执行解析任务的进程中断了，让任务队列回收它。
+async fn kill_last_parse_attempt(app: &TestApp, model: Arc<ScriptedModel>) {
+    let killed = sqlx::query(
+        "UPDATE tasks SET status = 'running', attempts = max_attempts, locked_by = 'dead', \
+         locked_at = now() - interval '1 hour' WHERE kind = 'resume.parse' AND status = 'queued'",
+    )
+    .execute(&app.ctx.db)
+    .await
+    .expect("改得了");
+    assert_eq!(killed.rows_affected(), 1);
+    let mut registry = interview_platform::tasks::TaskRegistry::new();
+    interview_talent::register_tasks(&mut registry, Deps::new(app.ctx.clone(), Some(model)));
+    let recovered = interview_platform::tasks::TaskRunner::new(app.ctx.db.clone(), registry)
+        .recover_stale()
+        .await
+        .expect("回收得了");
+    assert_eq!(recovered, 1);
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_parse_whose_task_died_is_failed_and_can_be_retried(pool: PgPool) {
+    let model = Arc::new(ScriptedModel::new().reply(EXTRACTION).reply(PROFILE));
+    let app = app_with_model(pool.clone(), model.clone()).await;
+    let candidate_id = new_candidate(&app).await;
+    let (_, uploaded) = upload(&app, &candidate_id, "简历.txt", RESUME_TEXT.as_bytes()).await;
+    let id = uploaded["id"].as_str().expect("有 id");
+
+    // 读到一半，执行它的进程中断了，次数也用完了
+    sqlx::query("UPDATE resumes SET parse_status = 'running' WHERE id = $1::uuid")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .expect("改得了");
+    kill_last_parse_attempt(&app, model.clone()).await;
+
+    // 不会再停在「解析中」
+    let failed = resume(&app, id).await;
+    assert_eq!(failed["parse_status"], "failed");
+    assert!(
+        failed["parse_error"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("重新解析")),
+        "{failed}"
+    );
+
+    // HR 点「重新解析」就能接着解析
+    let uri = format!("/api/v1/resumes/{id}/parse");
+    let retried = TestRequest::post(&uri).send(&app.router).await;
+    assert_eq!(retried.status, StatusCode::ACCEPTED, "{}", retried.text());
+    assert_eq!(run_tasks(&app.ctx, Some(model)).await, 1);
+    assert_eq!(resume(&app, id).await["parse_status"], "done");
+}
+
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn transient_model_errors_are_retried_then_reported(pool: PgPool) {
     let model = Arc::new(

@@ -463,6 +463,19 @@ async fn generate(deps: &Deps, task: &Task, id: Uuid) -> Result<Value, Stop> {
     Ok(summary)
 }
 
+/// 任务没能自己收尾就结束了（处理函数崩溃，或者执行它的进程中断、次数也用完了）。
+/// 对比还停在「正在对比」的话标成失败，HR 才能再点「开始对比」：有一份在对比时不让开始新的。
+pub(crate) async fn abandon(deps: &Deps, task: &Task) -> anyhow::Result<()> {
+    let payload: ComparePayload = serde_json::from_value(task.payload.clone())?;
+    fail(
+        &deps.ctx.db,
+        payload.comparison_id,
+        "对比的过程中断了，没有做完。",
+    )
+    .await?;
+    Ok(())
+}
+
 /// 标成失败。上一份生成好的留着，更早的失败记录不留。
 async fn fail(db: &PgPool, id: Uuid, error: &str) -> Result<(), sqlx::Error> {
     let mut tx = db.begin().await?;

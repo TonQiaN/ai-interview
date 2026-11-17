@@ -15,6 +15,7 @@ use common::{TestApp, app, app_on, error_code, invited, run_tasks, started};
 use interview_platform::AppContext;
 use interview_platform::blob::{BlobError, BlobMeta, BlobStore, LocalBlobStore, MemoryBlobStore};
 use interview_platform::config::PlatformConfig;
+use interview_platform::tasks::{TaskRegistry, TaskRunner};
 use interview_platform::testing::{TestRequest, TestResponse};
 use interview_room::RoomConfig;
 use interview_room::recording::MAX_CHUNK_BYTES;
@@ -637,6 +638,58 @@ async fn assemble_gives_up_after_retries_and_keeps_the_chunks(pool: PgPool) {
     assert_eq!(list[0]["status"], "failed");
     assert_eq!(list[0]["media_url"], Value::Null);
     // 剩下的那一片还在，可以人工处理
+    assert_eq!(
+        app.ctx
+            .blobs
+            .list("interviews")
+            .await
+            .expect("列文件失败")
+            .len(),
+        1
+    );
+}
+
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_recording_whose_assemble_task_died_is_marked_failed(pool: PgPool) {
+    let app = app(pool).await;
+    let (interview_id, token) = started(&app).await;
+    let segment = interview_core::new_id();
+    assert_eq!(
+        open_segment(&app, &token, "camera", segment).await.status,
+        204
+    );
+    assert_eq!(
+        put_chunk(&app, &token, "camera", segment, 0, b"data")
+            .await
+            .status,
+        204
+    );
+    assert_eq!(
+        complete(&app, &token, "camera", segment, 1).await.status,
+        204
+    );
+
+    // 合并到最后一次时，执行它的进程中断了
+    let killed = sqlx::query(
+        "UPDATE tasks SET status = 'running', attempts = max_attempts, locked_by = 'dead', \
+         locked_at = now() - interval '1 hour' \
+         WHERE kind = 'recording.assemble' AND status = 'queued'",
+    )
+    .execute(&app.ctx.db)
+    .await
+    .expect("改任务失败");
+    assert_eq!(killed.rows_affected(), 1);
+    let mut registry = TaskRegistry::new();
+    interview_room::register_tasks(&mut registry, app.deps.clone());
+    let recovered = TaskRunner::new(app.ctx.db.clone(), registry)
+        .recover_stale()
+        .await
+        .expect("回收任务失败");
+    assert_eq!(recovered, 1);
+
+    // 不会一直停在「合并中」，分片留着
+    let list = recordings(&app, interview_id).await;
+    assert_eq!(list[0]["status"], "failed");
     assert_eq!(
         app.ctx
             .blobs

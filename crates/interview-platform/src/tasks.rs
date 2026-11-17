@@ -9,6 +9,9 @@
 //!
 //! 处理函数要能重复执行：进程崩溃、超时都会让同一个任务再跑一次。
 //! 失败会按 30 秒、2 分钟、8 分钟……的间隔重试，直到用完 `max_attempts`。
+//!
+//! 处理函数没能自己收尾就结束了的任务（它 panic 了，或者执行它的进程中断、次数也用完了），
+//! 执行器会交给 [`TaskRegistry::on_abandon`] 登记的收尾函数，把业务上的「正在生成」之类的状态改成失败。
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -58,6 +61,12 @@ impl Task {
 
 /// 入队时撞上同 key 的任务、它又正好结束，最多重来几次。
 const ENQUEUE_ATTEMPTS: usize = 5;
+
+/// 执行任务的进程中断了（很久没有心跳）时记在任务上的原因。
+const PROCESS_LOST: &str = "执行任务的进程中断了";
+
+/// 收尾函数最多等这么久。它只是改一下业务上的状态，正常一眨眼就好。
+const ABANDON_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// 「这条任务还归这次执行」的条件：在执行中、是这个执行器领的、还是这一次尝试。
 /// 执行器卡住太久，任务会被回收并重新领走；之后旧的那次执行不能再碰它。
@@ -240,10 +249,17 @@ where
     }
 }
 
+type AbandonFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
+
+/// 收尾函数：拿到任务和失败原因。
+type AbandonFn = dyn Fn(Task, String) -> AbandonFuture + Send + Sync;
+
 /// kind → 处理函数。
 #[derive(Default)]
 pub struct TaskRegistry {
     handlers: HashMap<String, Arc<dyn TaskHandler>>,
+    /// kind → 处理函数没能自己收尾时由谁收尾
+    abandons: HashMap<String, Arc<AbandonFn>>,
 }
 
 impl TaskRegistry {
@@ -268,6 +284,25 @@ impl TaskRegistry {
             kind,
             FnHandler(move |task| Box::pin(handler(task)) as BoxedFuture),
         );
+    }
+
+    /// 登记一个收尾函数，在这类任务的处理函数没能自己收尾就结束了的时候调用。只有两种情况：
+    /// 处理函数崩溃（panic），或者执行它的进程中断了（服务重启、进程崩溃）而重试次数也用完了。
+    /// 处理函数自己返回失败的不调用，那时候的收尾和失败原因都是它自己的事。
+    ///
+    /// 收尾函数拿到任务和失败原因，用来把业务上的状态（「正在生成」「正在准备」）改成失败：
+    /// 不然那些状态会一直停在那里，HR 也没法重来。任务已经标记成失败之后才调用，
+    /// 它出错、卡住、崩溃都只记日志。同一个 kind 登记两次是写错了，直接 panic。
+    pub fn on_abandon<F, Fut>(&mut self, kind: impl Into<String>, cleanup: F)
+    where
+        F: Fn(Task, String) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        let kind = kind.into();
+        let cleanup: Arc<AbandonFn> =
+            Arc::new(move |task, error| Box::pin(cleanup(task, error)) as AbandonFuture);
+        let previous = self.abandons.insert(kind.clone(), cleanup);
+        assert!(previous.is_none(), "任务 {kind} 登记了两个收尾函数");
     }
 
     pub fn kinds(&self) -> Vec<String> {
@@ -406,6 +441,8 @@ impl TaskRunner {
         let started = std::time::Instant::now();
         tracing::info!(task_id = %id, %kind, attempts, "开始执行任务");
 
+        // 处理函数崩溃时要把任务交给收尾函数，先留一份
+        let snapshot = task.clone();
         // 处理函数放在单独的 task 里跑：它 panic 了也不会带垮执行器
         let mut job = tokio::spawn(async move { handler.run(task).await });
         let mut heartbeat = tokio::time::interval(self.heartbeat_interval);
@@ -455,8 +492,12 @@ impl TaskRunner {
             }
             Err(join_error) => {
                 tracing::error!(task_id = %id, %kind, error = %join_error, "任务处理函数崩溃");
-                self.mark_failed(id, attempts, &format!("处理函数崩溃：{join_error}"))
-                    .await
+                let error = format!("处理函数崩溃：{join_error}");
+                let marked = self.mark_failed(id, attempts, &error).await;
+                if matches!(marked, Ok(true)) {
+                    self.abandon(snapshot, error).await;
+                }
+                marked
             }
         };
         match finish {
@@ -528,23 +569,65 @@ impl TaskRunner {
         Ok(done.rows_affected() == 1)
     }
 
-    /// 执行它的进程死掉的任务（很久没有心跳）：还有次数就放回队列，没有就标记失败。
-    async fn recover_stale(&self) -> Result<u64, sqlx::Error> {
-        let done = sqlx::query(
+    /// 执行它的进程死掉的任务（很久没有心跳）：还有次数就放回队列；没有就标记失败，交给收尾函数。
+    /// 返回处理了几条。执行器每隔一阵会自己调用；也给测试用。
+    pub async fn recover_stale(&self) -> Result<u64, sqlx::Error> {
+        let stale_secs = self.stale_after.as_secs_f64();
+        let requeued = sqlx::query(
             "UPDATE tasks
-             SET status = CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END,
-                 finished_at = CASE WHEN attempts < max_attempts THEN NULL ELSE now() END,
-                 last_error = '执行任务的进程中断了',
-                 locked_by = NULL, locked_at = NULL
-             WHERE status = 'running' AND locked_at < now() - make_interval(secs => $1)",
+             SET status = 'queued', last_error = $2, locked_by = NULL, locked_at = NULL
+             WHERE status = 'running' AND locked_at < now() - make_interval(secs => $1)
+               AND attempts < max_attempts",
         )
-        .bind(self.stale_after.as_secs_f64())
+        .bind(stale_secs)
+        .bind(PROCESS_LOST)
         .execute(&self.db)
+        .await?
+        .rows_affected();
+        let abandoned: Vec<Task> = sqlx::query_as(&format!(
+            "UPDATE tasks
+             SET status = 'failed', finished_at = now(), last_error = $2,
+                 locked_by = NULL, locked_at = NULL
+             WHERE status = 'running' AND locked_at < now() - make_interval(secs => $1)
+               AND attempts >= max_attempts
+             RETURNING {TASK_COLUMNS}"
+        ))
+        .bind(stale_secs)
+        .bind(PROCESS_LOST)
+        .fetch_all(&self.db)
         .await?;
-        if done.rows_affected() > 0 {
-            tracing::warn!(count = done.rows_affected(), "回收了执行中断的任务");
+        let failed = abandoned.len() as u64;
+        if requeued + failed > 0 {
+            tracing::warn!(requeued, failed, "回收了执行中断的任务");
         }
-        Ok(done.rows_affected())
+        for task in abandoned {
+            self.abandon(task, PROCESS_LOST.to_owned()).await;
+        }
+        Ok(requeued + failed)
+    }
+
+    /// 把处理函数没能收尾的任务交给登记的收尾函数。收尾函数单独跑：它出错、卡住、崩溃都只记日志，
+    /// 不影响执行器。
+    async fn abandon(&self, task: Task, error: String) {
+        let Some(cleanup) = self.registry.abandons.get(&task.kind).cloned() else {
+            return;
+        };
+        let (id, kind) = (task.id, task.kind.clone());
+        let job = tokio::spawn(async move { cleanup(task, error).await });
+        match tokio::time::timeout(ABANDON_TIMEOUT, job).await {
+            Ok(Ok(Ok(()))) => {
+                tracing::info!(task_id = %id, %kind, "处理函数没能收尾的任务，已经替它收尾");
+            }
+            Ok(Ok(Err(e))) => {
+                tracing::error!(task_id = %id, %kind, error = %format!("{e:#}"), "替任务收尾时出错");
+            }
+            Ok(Err(join_error)) => {
+                tracing::error!(task_id = %id, %kind, error = %join_error, "收尾函数崩溃");
+            }
+            Err(_) => {
+                tracing::error!(task_id = %id, %kind, "收尾函数太久没有返回，不等了");
+            }
+        }
     }
 }
 
@@ -684,6 +767,189 @@ mod tests {
         );
         assert_eq!(
             queue.get(good).await.unwrap().unwrap().status,
+            TaskStatus::Succeeded
+        );
+    }
+
+    type Abandoned = Arc<std::sync::Mutex<Vec<(Uuid, Value, String)>>>;
+
+    /// 登记一个收尾函数，把它被调用时拿到的任务 id、payload 和原因记下来。
+    fn record_abandons(registry: &mut TaskRegistry, kind: &str) -> Abandoned {
+        let seen: Abandoned = Arc::default();
+        let record = seen.clone();
+        registry.on_abandon(kind, move |task, error| {
+            let record = record.clone();
+            async move {
+                record.lock().unwrap().push((task.id, task.payload, error));
+                Ok(())
+            }
+        });
+        seen
+    }
+
+    /// 处理函数崩溃时它没机会把业务上的状态（「正在生成」「正在准备」）改掉，执行器替它调用收尾函数，
+    /// 不然那些状态会一直停在那里。
+    #[sqlx::test(migrator = "MIGRATOR")]
+    async fn a_panicking_handler_runs_the_abandon_cleanup(pool: PgPool) {
+        let queue = TaskQueue::new(pool.clone());
+        let id = queue
+            .enqueue(NewTask::new("demo.panic", json!({ "n": 7 })))
+            .await
+            .unwrap();
+        let mut registry = TaskRegistry::new();
+        registry.register_fn("demo.panic", |_task| async move {
+            if true {
+                panic!("处理函数里的 bug");
+            }
+            Ok(None)
+        });
+        let seen = record_abandons(&mut registry, "demo.panic");
+        runner(&pool, registry).run_until_idle().await.unwrap();
+
+        assert_eq!(
+            queue.get(id).await.unwrap().unwrap().status,
+            TaskStatus::Failed
+        );
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, id);
+        assert_eq!(seen[0].1, json!({ "n": 7 }));
+        assert!(seen[0].2.contains("崩溃"), "{}", seen[0].2);
+    }
+
+    /// 处理函数自己返回失败的，业务上的状态由它自己收拾（它知道失败原因），不再调用收尾函数。
+    #[sqlx::test(migrator = "MIGRATOR")]
+    async fn a_handler_that_returns_a_failure_is_not_abandoned(pool: PgPool) {
+        let queue = TaskQueue::new(pool.clone());
+        let fatal = queue
+            .enqueue(NewTask::new("demo.fatal", json!({})))
+            .await
+            .unwrap();
+        let spent = queue
+            .enqueue(NewTask::new("demo.flaky", json!({})).max_attempts(1))
+            .await
+            .unwrap();
+        let mut registry = TaskRegistry::new();
+        registry.register_fn("demo.fatal", |_task| async move {
+            Err(TaskError::fatal(anyhow::anyhow!("数据不对")))
+        });
+        registry.register_fn("demo.flaky", |_task| async move {
+            Err(TaskError::retry(anyhow::anyhow!("外部服务没开")))
+        });
+        let fatal_seen = record_abandons(&mut registry, "demo.fatal");
+        let flaky_seen = record_abandons(&mut registry, "demo.flaky");
+        runner(&pool, registry).run_until_idle().await.unwrap();
+
+        for id in [fatal, spent] {
+            assert_eq!(
+                queue.get(id).await.unwrap().unwrap().status,
+                TaskStatus::Failed
+            );
+        }
+        assert!(fatal_seen.lock().unwrap().is_empty());
+        assert!(flaky_seen.lock().unwrap().is_empty());
+    }
+
+    /// 执行它的进程中断了（服务重启、崩溃）：还有次数的放回队列；次数用完的标记失败，并调用收尾函数。
+    #[sqlx::test(migrator = "MIGRATOR")]
+    async fn stale_tasks_out_of_attempts_run_the_abandon_cleanup(pool: PgPool) {
+        let queue = TaskQueue::new(pool.clone());
+        let left = queue
+            .enqueue(NewTask::new("demo.ok", json!({ "which": "left" })))
+            .await
+            .unwrap();
+        let spent = queue
+            .enqueue(NewTask::new("demo.ok", json!({ "which": "spent" })))
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE tasks SET status = 'running', locked_by = 'dead',
+                    locked_at = now() - interval '1 hour',
+                    attempts = CASE WHEN id = $1 THEN 1 ELSE max_attempts END
+              WHERE id = ANY($2)",
+        )
+        .bind(left)
+        .bind(vec![left, spent])
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut registry = TaskRegistry::new();
+        registry.register_fn("demo.ok", |_task| async move { Ok(None) });
+        let seen = record_abandons(&mut registry, "demo.ok");
+        let runner = runner(&pool, registry);
+        assert_eq!(runner.recover_stale().await.unwrap(), 2);
+
+        assert_eq!(
+            queue.get(left).await.unwrap().unwrap().status,
+            TaskStatus::Queued
+        );
+        let task = queue.get(spent).await.unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Failed);
+        assert!(task.finished_at.is_some());
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, spent);
+        assert_eq!(seen[0].1, json!({ "which": "spent" }));
+        assert!(seen[0].2.contains("中断"), "{}", seen[0].2);
+    }
+
+    /// 收尾函数自己出错、甚至崩溃，任务照样标记失败，执行器照常干活。
+    #[sqlx::test(migrator = "MIGRATOR")]
+    async fn a_broken_abandon_cleanup_does_not_stop_the_runner(pool: PgPool) {
+        let queue = TaskQueue::new(pool.clone());
+        let stale = queue
+            .enqueue(NewTask::new("demo.ok", json!({})).max_attempts(1))
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE tasks SET status = 'running', attempts = 1, locked_by = 'dead',
+                    locked_at = now() - interval '1 hour' WHERE id = $1",
+        )
+        .bind(stale)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let panics = queue
+            .enqueue(NewTask::new("demo.panic", json!({})))
+            .await
+            .unwrap();
+        let mut registry = TaskRegistry::new();
+        registry.register_fn("demo.ok", |_task| async move { Ok(None) });
+        registry.register_fn("demo.panic", |_task| async move {
+            if true {
+                panic!("处理函数里的 bug");
+            }
+            Ok(None)
+        });
+        registry.on_abandon("demo.ok", |_task, _error| async move {
+            if true {
+                panic!("收尾函数里的 bug");
+            }
+            Ok(())
+        });
+        registry.on_abandon("demo.panic", |_task, _error| async move {
+            Err(anyhow::anyhow!("数据库连不上"))
+        });
+        let runner = runner(&pool, registry);
+        assert_eq!(runner.recover_stale().await.unwrap(), 1);
+        assert_eq!(
+            queue.get(stale).await.unwrap().unwrap().status,
+            TaskStatus::Failed
+        );
+        assert_eq!(runner.run_until_idle().await.unwrap(), 1);
+        assert_eq!(
+            queue.get(panics).await.unwrap().unwrap().status,
+            TaskStatus::Failed
+        );
+
+        // 之后的任务照样能跑
+        let next = queue
+            .enqueue(NewTask::new("demo.ok", json!({})))
+            .await
+            .unwrap();
+        assert_eq!(runner.run_until_idle().await.unwrap(), 1);
+        assert_eq!(
+            queue.get(next).await.unwrap().unwrap().status,
             TaskStatus::Succeeded
         );
     }

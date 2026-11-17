@@ -118,6 +118,29 @@ pub async fn run(deps: &Deps, task: &Task) -> TaskResult {
     }
 }
 
+/// 给 HR 看的：任务没能自己收尾。
+const ABANDONED: &str = "准备过程中断了，没有做完。请点「重试」再准备一次";
+
+/// 任务没能自己收尾就结束了（处理函数崩溃，或者执行它的进程中断、次数也用完了）。
+/// 面试还停在「准备中」的话改成准备失败，HR 才能点「重试」。没出完的题、没合成的语音都留着，
+/// 重试时接着做。
+///
+/// 面试在「准备中」时改不了配置、也排不了第二条准备任务，所以这时停在「准备中」的就是这一条，
+/// 不会误伤别的。
+pub(crate) async fn abandon(deps: &Deps, task: &Task) -> anyhow::Result<()> {
+    let payload: PreparePayload = serde_json::from_value(task.payload.clone())?;
+    let mut conn = deps.ctx.db.acquire().await?;
+    store::set_status(
+        &mut conn,
+        payload.interview_id,
+        &[InterviewStatus::Preparing],
+        InterviewStatus::PrepareFailed,
+        Some(ABANDONED),
+    )
+    .await?;
+    Ok(())
+}
+
 async fn prepare(deps: &Deps, task: &Task, row: &InterviewRow) -> Result<serde_json::Value, Stop> {
     let config = row
         .config()
