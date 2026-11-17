@@ -822,6 +822,50 @@ async fn a_failing_model_is_retried_and_then_reported(pool: PgPool) {
     assert_eq!(detail["report"]["version"], 2);
 }
 
+/// 生成报告的进程中断了、重试次数也用完了（或者生成报告的代码崩溃了）：报告不能一直停在
+/// 「正在生成」，那样 HR 连「重新生成」都点不了。要标成失败、说清原因，重新生成能出新的一版。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_report_whose_task_died_is_failed_and_can_be_regenerated(pool: PgPool) {
+    let h = harness(pool).await;
+    let id = h.finished_interview("completed").await;
+    // 面试中实时转写出来的回答，不用等收尾重新转写
+    sqlx::query(
+        "UPDATE interview_turns SET text = CASE seq WHEN 2 THEN $2 ELSE $3 END \
+         WHERE interview_id = $1::uuid AND speaker = 'candidate'",
+    )
+    .bind(&id)
+    .bind(ANSWER_1)
+    .bind(ANSWER_2)
+    .execute(&h.ctx.db)
+    .await
+    .unwrap();
+    let h = h.with_review(Some(Arc::new(ReportModel::complete())), None);
+    let detail = h.regenerate(&id).await;
+    assert_eq!(detail["report"]["version"], 1);
+    assert_eq!(detail["report"]["status"], "pending");
+    sqlx::query("UPDATE interview_reports SET status = 'running' WHERE interview_id = $1::uuid")
+        .bind(&id)
+        .execute(&h.ctx.db)
+        .await
+        .unwrap();
+    h.kill_last_attempt(task_kind::REPORT_GENERATE).await;
+
+    assert_eq!(h.recover_stale_tasks().await, 1);
+    let detail = h.detail(&id).await;
+    assert_eq!(detail["report"]["status"], "failed", "{detail}");
+    let error = detail["report"]["error"].as_str().unwrap();
+    assert!(error.contains("中断"), "{error}");
+
+    let detail = h.regenerate(&id).await;
+    assert_eq!(detail["report"]["version"], 2);
+    assert_eq!(detail["report"]["status"], "pending");
+    // 收尾和新的一版
+    assert_eq!(h.run_tasks().await, 2);
+    let detail = h.detail(&id).await;
+    assert_eq!(detail["report"]["status"], "done", "{detail}");
+    assert_eq!(detail["report"]["version"], 2);
+}
+
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
 async fn finalize_waits_for_recordings_to_be_assembled(pool: PgPool) {
     let h = harness(pool).await;

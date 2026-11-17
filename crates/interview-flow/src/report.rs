@@ -22,6 +22,8 @@ const NO_ANSWERS: &str = "候选人没有作答，没有可以分析的内容";
 const NO_MODEL: &str =
     "大模型还没配置（环境变量 DEEPSEEK_API_KEY），写不了报告。配置好之后点「重新生成」";
 
+const ABANDONED: &str = "生成报告的过程中断了，没有做完。请点「重新生成」再试一次";
+
 /// `report.generate` 的 payload。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReportPayload {
@@ -102,6 +104,14 @@ pub async fn run(deps: &Deps, task: &Task) -> TaskResult {
         }
         Err(Stop::Retry(err)) => Err(TaskError::Retry(err)),
     }
+}
+
+/// 任务没能自己收尾就结束了（处理函数崩溃，或者执行它的进程中断、次数也用完了）。
+/// 报告还停在「生成中」的话标成失败，HR 才能点「重新生成」：报告在生成中时不让再生成一版。
+pub(crate) async fn abandon(deps: &Deps, task: &Task) -> anyhow::Result<()> {
+    let payload: ReportPayload = serde_json::from_value(task.payload.clone())?;
+    store::fail_report(&deps.ctx.db, payload.report_id, ABANDONED).await?;
+    Ok(())
 }
 
 async fn generate(deps: &Deps, task: &Task, payload: &ReportPayload) -> Result<Value, Stop> {

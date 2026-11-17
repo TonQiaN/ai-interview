@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use axum::Router;
 use axum::http::StatusCode;
+use interview_core::task_kind;
 use interview_llm::{ChatModel, ChatRequest, ChatStream, DeepSeekClient, LlmError};
 use interview_platform::testing::{TestRequest, TestResponse};
 use serde_json::{Value, json};
@@ -168,6 +169,32 @@ async fn hr_compares_candidates_of_a_position(pool: PgPool) {
     assert_eq!(done["status"], "done");
     assert_eq!(done["result"]["people"][1]["interview_id"], c);
     assert_eq!(h.comparison_rows().await, 1);
+}
+
+/// 生成对比的进程中断了、重试次数也用完了（或者那段代码崩溃了）：对比不能一直停在「正在对比」，
+/// 那样这个岗位再也比不了别的人。要标成失败、说清原因，再点一次「开始对比」能接着比。
+#[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]
+async fn a_comparison_whose_task_died_is_failed_and_can_be_started_again(pool: PgPool) {
+    let h = harness(pool).await;
+    let ids = interviews_with_reports(&h, 2).await;
+    let (a, b, c) = (ids[0].as_str(), ids[1].as_str(), ids[2].as_str());
+    let h = h.with_review(Some(model()), None);
+    let response = h.compare(&[a, b]).await;
+    assert_eq!(response.status, StatusCode::ACCEPTED, "{}", response.text());
+    h.kill_last_attempt(task_kind::POSITION_COMPARE).await;
+
+    assert_eq!(h.recover_stale_tasks().await, 1);
+    let failed = h.comparison().await;
+    assert_eq!(failed["status"], "failed", "{failed}");
+    let error = failed["error"].as_str().unwrap();
+    assert!(error.contains("中断"), "{error}");
+
+    let response = h.compare(&[a, c]).await;
+    assert_eq!(response.status, StatusCode::ACCEPTED, "{}", response.text());
+    assert_eq!(h.run_tasks().await, 1);
+    let done = h.comparison().await;
+    assert_eq!(done["status"], "done", "{done}");
+    assert_eq!(done["interview_ids"], json!([a, c]));
 }
 
 #[sqlx::test(migrator = "interview_platform::db::MIGRATOR")]

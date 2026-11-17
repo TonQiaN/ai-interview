@@ -64,7 +64,8 @@ pub fn router(deps: Deps) -> OpenApiRouter {
         .with_state(deps)
 }
 
-/// 登记后台任务：出题加预合成、只重新合成、面试后的收尾、生成报告。
+/// 登记后台任务：出题加预合成、只重新合成、面试后的收尾、生成报告、候选人对比，
+/// 以及它们没能自己收尾时替它们收尾的函数。
 pub fn register_tasks(registry: &mut TaskRegistry, deps: Deps) {
     let task_deps = deps.clone();
     registry.register_fn(task_kind::INTERVIEW_PREPARE, move |task| {
@@ -86,8 +87,32 @@ pub fn register_tasks(registry: &mut TaskRegistry, deps: Deps) {
         let deps = task_deps.clone();
         async move { report::run(&deps, &task).await }
     });
+    let task_deps = deps.clone();
     registry.register_fn(task_kind::POSITION_COMPARE, move |task| {
-        let deps = deps.clone();
+        let deps = task_deps.clone();
         async move { comparison::run(&deps, &task).await }
+    });
+
+    // 处理函数没能自己收尾的（崩溃了，或者进程中断、次数也用完了），替它把「正在做」改成失败，
+    // 不然 HR 那边会一直等着、也没法重来。收尾的面试后整理（finalize）不用：它没有「正在做」的状态，
+    // 没做完 HR 照样能点「生成报告」
+    for kind in [
+        task_kind::INTERVIEW_PREPARE,
+        task_kind::INTERVIEW_SYNTHESIZE,
+    ] {
+        let task_deps = deps.clone();
+        registry.on_abandon(kind, move |task, _error| {
+            let deps = task_deps.clone();
+            async move { prepare::abandon(&deps, &task).await }
+        });
+    }
+    let task_deps = deps.clone();
+    registry.on_abandon(task_kind::REPORT_GENERATE, move |task, _error| {
+        let deps = task_deps.clone();
+        async move { report::abandon(&deps, &task).await }
+    });
+    registry.on_abandon(task_kind::POSITION_COMPARE, move |task, _error| {
+        let deps = deps.clone();
+        async move { comparison::abandon(&deps, &task).await }
     });
 }

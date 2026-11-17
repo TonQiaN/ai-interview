@@ -48,9 +48,20 @@ pub(crate) fn parse_task(resume_id: Uuid, adopt_name: bool) -> NewTask {
 
 /// 登记这条线的后台任务。
 pub fn register_tasks(registry: &mut TaskRegistry, deps: Deps) {
+    let task_deps = deps.clone();
     registry.register_fn(task_kind::RESUME_PARSE, move |task| {
-        let deps = deps.clone();
+        let deps = task_deps.clone();
         async move { run_parse(&deps, &task).await }
+    });
+    // 处理函数没能自己收尾的（崩溃了，或者进程中断、次数也用完了），替它把简历标成解析失败，
+    // 不然简历会一直停在「解析中」
+    registry.on_abandon(task_kind::RESUME_PARSE, move |task, _error| {
+        let deps = deps.clone();
+        async move {
+            let payload: ParsePayload = serde_json::from_value(task.payload)?;
+            resumes::fail_if_unfinished(&deps.ctx.db, payload.resume_id, UNFINISHED).await?;
+            Ok(())
+        }
     });
 }
 

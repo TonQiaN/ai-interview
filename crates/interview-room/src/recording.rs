@@ -73,9 +73,20 @@ pub(crate) fn register_tasks(registry: &mut TaskRegistry, deps: Deps) {
         let deps = deps.clone();
         async move { assemble_task(&deps, task).await }
     });
+    let abandon_deps = salvage_deps.clone();
     registry.register_fn(SALVAGE_TASK, move |task| {
         let deps = salvage_deps.clone();
         async move { salvage_task(&deps, task).await }
+    });
+    // 处理函数没能自己收尾的（崩溃了，或者进程中断、次数也用完了），和重试用完一样标成失败，
+    // 不然这一段会一直停在「合并中」
+    registry.on_abandon(task_kind::RECORDING_ASSEMBLE, move |task, _error| {
+        let deps = abandon_deps.clone();
+        async move {
+            let payload: AssemblePayload = serde_json::from_value(task.payload)?;
+            mark_assemble_failed(&deps, payload.recording_id).await?;
+            Ok(())
+        }
     });
 }
 
@@ -580,19 +591,25 @@ async fn assemble_task(deps: &Deps, task: Task) -> TaskResult {
         Err(err) => {
             if task.attempts >= task.max_attempts {
                 // 不会再重试了：标成失败，HR 能看到原因；分片留着，可以人工处理
-                let _ = sqlx::query(
-                    "UPDATE interview_recordings SET status = 'failed', error = $2
-                      WHERE id = $1 AND status = 'assembling'",
-                )
-                .bind(payload.recording_id)
-                .bind("合并录像失败")
-                .execute(&deps.ctx.db)
-                .await;
+                let _ = mark_assemble_failed(deps, payload.recording_id).await;
             }
             tracing::warn!(recording_id = %payload.recording_id, error = %err, "合并录像失败");
             Err(TaskError::retry(err))
         }
     }
+}
+
+/// 不再合并这一段了：标成失败。分片留着，可以人工处理。
+async fn mark_assemble_failed(deps: &Deps, recording_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE interview_recordings SET status = 'failed', error = $2
+          WHERE id = $1 AND status = 'assembling'",
+    )
+    .bind(recording_id)
+    .bind("合并录像失败")
+    .execute(&deps.ctx.db)
+    .await?;
+    Ok(())
 }
 
 async fn assemble(deps: &Deps, recording_id: Uuid) -> anyhow::Result<()> {

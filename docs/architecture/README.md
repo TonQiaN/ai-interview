@@ -137,6 +137,7 @@ pub fn register_tasks(registry: &mut interview_platform::tasks::TaskRegistry, de
 | 生成和校验令牌 | `auth::generate_token()`、`auth::hash_token()`，库里只存哈希 |
 | 入队后台任务 | `ctx.tasks.enqueue(NewTask::new(task_kind::RESUME_PARSE, json!({...})).dedupe(...))`；要和业务数据同一个事务用 `TaskQueue::enqueue_in(&mut tx, ...)` |
 | 处理后台任务 | `registry.register_fn(kind, move \|task\| { let deps = deps.clone(); async move { let p: Payload = task.payload_as()?; ...; Ok(None) } })`。`?` 抛出的错误默认会重试，不该重试的用 `TaskError::fatal(...)`。处理函数要能重复执行 |
+| 任务没能自己收尾时 | 业务上有「正在做」的状态（生成中、准备中、合并中）的任务，用 `registry.on_abandon(kind, move \|task, error\| async move { ...; Ok(()) })` 把它改成失败。处理函数崩溃（panic），或者执行它的进程中断、重试次数也用完了，执行器会调它；处理函数自己返回失败时不调。不登记的话，那个状态会一直停在那里，HR 也没法重来 |
 | 记大模型用量 | `usage::record(&ctx.db, LlmUsage { purpose, model, prompt_tokens, ... }).await` |
 | 报告依赖是否就绪 | 实现 `status::StatusProbe`，在 `compose.rs` 里登记，`GET /api/v1/system/status` 会列出来 |
 | 读写全局设置 | `routes::read_setting(&ctx, key)`、`routes::write_setting(...)` |
