@@ -68,10 +68,10 @@ jobs:
         run: |
           cargo run --quiet -p interview-server -- openapi > "$RUNNER_TEMP/openapi.json"
           echo "OPENAPI_JSON=$RUNNER_TEMP/openapi.json" >> "$GITHUB_ENV"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -124,11 +124,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg
           ls /usr/lib/postgresql/*/bin/pg_ctl >/dev/null 2>&1 || sudo apt-get install -y --no-install-recommends postgresql
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.scope.outputs.run == 'true'
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.scope.outputs.run == 'true'
         with:
           node-version: 22
@@ -145,7 +145,7 @@ jobs:
         run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
       - name: 浏览器缓存
         if: steps.scope.outputs.run == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
@@ -164,7 +164,7 @@ jobs:
         run: pnpm e2e
       - name: 留下失败时的截图
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: candidate-e2e-results
           path: web/apps/candidate/e2e-results
@@ -193,7 +193,7 @@ jobs:
       - name: clippy
         run: cargo clippy -p interview-stt --all-targets --features sherpa -- -D warnings
       - name: 模型缓存
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .stt-models
           key: stt-models-${{ hashFiles('crates/interview-stt/scripts/download-models.sh') }}
