@@ -26,17 +26,17 @@ interview-tts = { path = "crates/interview-tts" }
 
 # 第三方（按字母序）。加之前确认许可和 AGPL-3.0 兼容。
 anyhow = "1"
-argon2 = "0.5"
+argon2 = "0.6"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["macros", "multipart", "ws"] }
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4", features = ["derive", "env"] }
 dotenvy = "0.15"
 flate2 = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-getrandom = "0.3"
+getrandom = "0.4"
 hound = "3.5"
 http-body-util = "0.1"
 quick-xml = "0.42"
@@ -61,12 +61,12 @@ thiserror = "2"
 tokio = { version = "1", features = ["time"] }
 tokio-util = "0.7"
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["compression-gzip", "fs", "limit", "trace"] }
+tower-http = { version = "0.7", features = ["compression-gzip", "fs", "limit", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
-utoipa-axum = "0.2"
-utoipa-scalar = { version = "0.3", features = ["axum"] }
+utoipa = { version = "6", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-axum = "0.3"
+utoipa-scalar = { version = "0.4", features = ["axum"] }
 uuid = { version = "1", features = ["serde", "v7"] }
 wiremock = "0.6"
 # 只用来读 .docx（ZIP 里的 XML），所以只开 deflate
